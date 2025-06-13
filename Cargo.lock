@@ -51,6 +51,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum",
+ "lazy_static",
+ "once_cell",
  "serde",
  "serde_json",
  "shared",
