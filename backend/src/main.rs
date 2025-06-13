@@ -13,8 +13,9 @@ use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::ServeDir;
 use tracing::{info, Level};
 
-// Import our database module
+// Import our modules
 mod db;
+mod domain;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -24,8 +25,12 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     info!("Setting up database");
-    // Initialize the database using our db module's method
+    // Initialize the database
     let db_conn = db::DbConnection::init().await?;
+    
+    // Create our domain model
+    info!("Setting up domain model");
+    let value_store = domain::ValueStore::new(db_conn);
 
     // CORS setup to allow frontend to make requests
     let cors = CorsLayer::new()
@@ -43,7 +48,7 @@ async fn main() -> anyhow::Result<()> {
         .nest("/api", api_routes)
         .fallback_service(ServeDir::new(PathBuf::from("../frontend/dist")))
         .layer(cors)
-        .with_state(AppState { db_conn });
+        .with_state(AppState { value_store });
 
     // Start the server
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
@@ -57,10 +62,10 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-// We'll use this to store our database connection in request extensions
+// We'll use this to store our value store in request extensions
 #[derive(Clone)]
 struct AppState {
-    db_conn: db::DbConnection,
+    value_store: domain::ValueStore,
 }
 
 // API handlers
@@ -68,11 +73,11 @@ async fn get_value(
     State(state): State<AppState>,
     Path(key): Path<String>,
 ) -> impl IntoResponse {
-    // Use DbConnection's method to get the value
-    match state.db_conn.get_value(&key).await {
+    // Use the domain model to retrieve the value
+    match state.value_store.retrieve_value(&key).await {
         Ok(Some(kv)) => (StatusCode::OK, Json(kv)).into_response(),
         Ok(None) => (StatusCode::NOT_FOUND, "Key not found").into_response(),
-        Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response(),
+        Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Error retrieving value").into_response(),
     }
 }
 
@@ -80,9 +85,9 @@ async fn put_value(
     State(state): State<AppState>,
     Json(kv): Json<KeyValue>,
 ) -> impl IntoResponse {
-    // Use DbConnection's method to store the value
-    match state.db_conn.put_value(&kv).await {
-        Ok(_) => (StatusCode::CREATED, Json(kv)).into_response(),
+    // Use the domain model to store the value
+    match state.value_store.store_value(&kv.key, &kv.value).await {
+        Ok(stored_kv) => (StatusCode::CREATED, Json(stored_kv)).into_response(),
         Err(e) => {
             println!("Error: {:?}", e);
             (StatusCode::INTERNAL_SERVER_ERROR, "Failed to store value").into_response()
