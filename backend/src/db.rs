@@ -1,5 +1,4 @@
 use anyhow::Result;
-use shared::KeyValue;
 use sqlx::{migrate::MigrateDatabase, Row, Sqlite, SqlitePool};
 use std::sync::Arc;
 
@@ -68,33 +67,29 @@ impl DbConnection {
 
     /// Store a key-value pair in the database.
     /// This will overwrite any existing value for the same key.
-    pub async fn put_value(&self, kv: &KeyValue) -> Result<()> {
-        sqlx::query(
-            "INSERT OR REPLACE INTO key_values (key, value) VALUES (?, ?)",
-        )
-        .bind(&kv.key)
-        .bind(&kv.value)
-        .execute(&*self.pool)
-        .await?;
-
+    pub async fn put_value(&self, key: &str, value: &str) -> Result<()> {
+        sqlx::query("INSERT OR REPLACE INTO key_values (key, value) VALUES (?, ?)")
+            .bind(key)
+            .bind(value)
+            .execute(&*self.pool)
+            .await?;
         Ok(())
     }
 
     /// Retrieve a value by its key
-    pub async fn get_value(&self, key: &str) -> Result<Option<KeyValue>> {
-        let result = sqlx::query("SELECT value FROM key_values WHERE key = ?")
+    pub async fn get_value(&self, key: &str) -> Result<Option<String>> {
+        let row = sqlx::query("SELECT value FROM key_values WHERE key = ?")
             .bind(key)
-            .map(|row: sqlx::sqlite::SqliteRow| {
-                row.get::<String, _>("value")
-            })
             .fetch_optional(&*self.pool)
             .await?;
 
-        // Convert the result to a KeyValue if found
-        Ok(result.map(|value| KeyValue {
-            key: key.to_string(),
-            value,
-        }))
+        match row {
+            Some(r) => {
+                let value: String = r.get("value");
+                Ok(Some(value))
+            }
+            None => Ok(None),
+        }
     }
 
     /// Delete a value by its key
@@ -103,21 +98,16 @@ impl DbConnection {
             .bind(key)
             .execute(&*self.pool)
             .await?;
-        
-        // Return whether any row was affected (i.e., key existed)
         Ok(result.rows_affected() > 0)
     }
 
     /// List all keys in the database
     pub async fn list_keys(&self) -> Result<Vec<String>> {
-        let rows = sqlx::query("SELECT key FROM key_values ORDER BY key")
-            .map(|row: sqlx::sqlite::SqliteRow| {
-                row.get::<String, _>("key")
-            })
+        let rows = sqlx::query("SELECT key FROM key_values")
             .fetch_all(&*self.pool)
             .await?;
-        
-        Ok(rows)
+        let keys = rows.iter().map(|row| row.get("key")).collect();
+        Ok(keys)
     }
 }
 
@@ -137,21 +127,18 @@ mod tests {
         let db = setup_test().await;
         
         // Create a key-value pair
-        let test_kv = KeyValue {
-            key: "test_key".to_string(),
-            value: "test_value".to_string(),
-        };
+        let test_key = "test_key";
+        let test_value = "test_value";
         
         // Put the value in the database
-        db.put_value(&test_kv).await.expect("Failed to put value");
+        db.put_value(test_key, test_value).await.expect("Failed to put value");
         
         // Retrieve the value
-        let result = db.get_value(&test_kv.key).await.expect("Failed to get value");
+        let result = db.get_value(test_key).await.expect("Failed to get value");
         
         assert!(result.is_some());
-        let retrieved_kv = result.unwrap();
-        assert_eq!(retrieved_kv.key, test_kv.key);
-        assert_eq!(retrieved_kv.value, test_kv.value);
+        let retrieved_value = result.unwrap();
+        assert_eq!(retrieved_value, test_value);
     }
     
     #[tokio::test]
@@ -170,33 +157,27 @@ mod tests {
         let db = setup_test().await;
         
         // Create initial key-value pair
-        let initial_kv = KeyValue {
-            key: "same_key".to_string(),
-            value: "initial_value".to_string(),
-        };
+        let initial_key = "same_key";
+        let initial_value = "initial_value";
         
         // Put the value in the database
-        db.put_value(&initial_kv).await.expect("Failed to put initial value");
+        db.put_value(initial_key, initial_value).await.expect("Failed to put initial value");
         
         // Create updated key-value pair with same key
-        let updated_kv = KeyValue {
-            key: "same_key".to_string(),
-            value: "updated_value".to_string(),
-        };
+        let updated_value = "updated_value";
         
         // Replace the value
-        db.put_value(&updated_kv).await.expect("Failed to update value");
+        db.put_value(initial_key, updated_value).await.expect("Failed to update value");
         
         // Retrieve the value
-        let result = db.get_value(&updated_kv.key).await.expect("Failed to get value");
+        let result = db.get_value(initial_key).await.expect("Failed to get value");
         
         assert!(result.is_some());
-        let retrieved_kv = result.unwrap();
+        let retrieved_value = result.unwrap();
         
         // Should have the updated value
-        assert_eq!(retrieved_kv.key, updated_kv.key);
-        assert_eq!(retrieved_kv.value, updated_kv.value);
-        assert_ne!(retrieved_kv.value, initial_kv.value);
+        assert_eq!(retrieved_value, updated_value);
+        assert_ne!(retrieved_value, initial_value);
     }
     
     #[tokio::test]
@@ -204,28 +185,26 @@ mod tests {
         let db = setup_test().await;
         
         // Create a key-value pair
-        let test_kv = KeyValue {
-            key: "key_to_delete".to_string(),
-            value: "value_to_delete".to_string(),
-        };
+        let test_key = "key_to_delete";
+        let test_value = "value_to_delete";
         
         // Put the value in the database
-        db.put_value(&test_kv).await.expect("Failed to put value");
+        db.put_value(test_key, test_value).await.expect("Failed to put value");
         
         // Verify it exists
-        let exists_before = db.get_value(&test_kv.key).await.expect("Failed to get value");
+        let exists_before = db.get_value(test_key).await.expect("Failed to get value");
         assert!(exists_before.is_some());
         
         // Delete the value
-        let deleted = db.delete_value(&test_kv.key).await.expect("Failed to delete value");
+        let deleted = db.delete_value(test_key).await.expect("Failed to delete value");
         assert!(deleted, "Value should have been deleted");
         
         // Verify it's gone
-        let exists_after = db.get_value(&test_kv.key).await.expect("Failed to check after deletion");
+        let exists_after = db.get_value(test_key).await.expect("Failed to check after deletion");
         assert!(exists_after.is_none());
         
         // Try to delete again (should return false - not found)
-        let deleted_again = db.delete_value(&test_kv.key).await.expect("Failed to re-delete value");
+        let deleted_again = db.delete_value(test_key).await.expect("Failed to re-delete value");
         assert!(!deleted_again, "Value should not exist to be deleted");
     }
     
@@ -245,11 +224,7 @@ mod tests {
         ];
         
         for (k, v) in &test_pairs {
-            let kv = KeyValue {
-                key: k.to_string(),
-                value: v.to_string(),
-            };
-            db.put_value(&kv).await.expect("Failed to put value");
+            db.put_value(k, v).await.expect("Failed to put value");
         }
         
         // Get all keys

@@ -30,9 +30,9 @@ async fn main() -> anyhow::Result<()> {
     info!("Setting up domain model");
     let value_store = domain::ValueStore::new(db_conn);
 
-    // Create REST handlers
-    info!("Setting up REST handlers");
-    let rest_handlers = rest::RestHandlers::new(value_store);
+    // Create application state
+    info!("Setting up application state");
+    let app_state = rest::AppState::new(value_store);
 
     // CORS setup to allow frontend to make requests
     let cors = CorsLayer::new()
@@ -50,7 +50,7 @@ async fn main() -> anyhow::Result<()> {
         .nest("/api", api_routes)
         .fallback_service(ServeDir::new(PathBuf::from("frontend/dist")))
         .layer(cors)
-        .with_state(rest_handlers);
+        .with_state(app_state);
 
     // Start the server
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
