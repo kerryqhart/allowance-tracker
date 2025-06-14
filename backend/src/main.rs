@@ -43,7 +43,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Set up our application routes
     let api_routes = Router::new()
-        .route("/transactions", get(rest::list_transactions))
+        .route("/transactions", get(rest::list_transactions).post(rest::create_transaction))
         .route("/values/:key", get(rest::get_value))
         .route("/values", post(rest::put_value));
 

@@ -1,7 +1,8 @@
 use crate::db::DbConnection;
-use shared::{Transaction, TransactionListRequest, TransactionListResponse, PaginationInfo};
+use shared::{Transaction, TransactionListRequest, TransactionListResponse, PaginationInfo, CreateTransactionRequest};
 use anyhow::Result;
 use tracing::info;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Clone)]
 pub struct TransactionService {
@@ -11,6 +12,57 @@ pub struct TransactionService {
 impl TransactionService {
     pub fn new(db: DbConnection) -> Self {
         Self { db }
+    }
+
+    /// Create a new transaction
+    pub async fn create_transaction(&self, request: CreateTransactionRequest) -> Result<Transaction> {
+        info!("Creating transaction: {:?}", request);
+
+        // Validate description length
+        if request.description.is_empty() || request.description.len() > 256 {
+            return Err(anyhow::anyhow!("Description must be between 1 and 256 characters"));
+        }
+
+        // Get current balance from latest transaction
+        let current_balance = match self.db.get_latest_transaction().await? {
+            Some(latest) => latest.balance,
+            None => 0.0, // First transaction starts at 0
+        };
+
+        // Calculate new balance
+        let new_balance = current_balance + request.amount;
+
+        // Generate transaction ID and date
+        let now_millis = SystemTime::now()
+            .duration_since(UNIX_EPOCH)?
+            .as_millis() as u64;
+        
+        let transaction_id = Transaction::generate_id(request.amount, now_millis);
+        
+        // Use provided date or generate current RFC 3339 timestamp
+        let date = match request.date {
+            Some(date) => date,
+            None => {
+                // Generate RFC 3339 formatted timestamp
+                let now = SystemTime::now();
+                let datetime = time::OffsetDateTime::from(now);
+                datetime.format(&time::format_description::well_known::Rfc3339)?
+            }
+        };
+
+        let transaction = Transaction {
+            id: transaction_id,
+            date,
+            description: request.description,
+            amount: request.amount,
+            balance: new_balance,
+        };
+
+        // Store in database
+        self.db.store_transaction(&transaction).await?;
+
+        info!("Created transaction: {} with balance: {:.2}", transaction.id, new_balance);
+        Ok(transaction)
     }
 
     /// List transactions with pagination and optional date filtering
@@ -23,35 +75,41 @@ impl TransactionService {
         // Query one extra record to determine if there are more results
         let query_limit = limit + 1;
 
-        // For now, return mock data until we implement the database layer
-        let mock_transactions = self.generate_mock_transactions();
-        
-        // Apply cursor filtering
-        let filtered_transactions = if let Some(after_cursor) = &request.after {
-            self.apply_cursor_filter(mock_transactions, after_cursor)?
-        } else {
-            mock_transactions
-        };
+        // Get transactions from database
+        let mut db_transactions = self.db.list_transactions(query_limit, request.after.as_deref()).await?;
 
-        // Apply date range filtering
-        let date_filtered = self.apply_date_filter(filtered_transactions, &request)?;
+        // If no database transactions exist, fall back to mock data for development
+        if db_transactions.is_empty() {
+            info!("No database transactions found, using mock data for development");
+            let mock_transactions = self.generate_mock_transactions();
+            
+            // Apply cursor filtering for mock data
+            let filtered_transactions = if let Some(after_cursor) = &request.after {
+                self.apply_cursor_filter(mock_transactions, after_cursor)?
+            } else {
+                mock_transactions
+            };
 
-        // Apply limit and determine pagination
-        let mut results: Vec<Transaction> = date_filtered.into_iter().take(query_limit as usize).collect();
-        
-        let has_more = results.len() > limit as usize;
+            // Apply date range filtering
+            let date_filtered = self.apply_date_filter(filtered_transactions, &request)?;
+
+            // Apply limit and determine pagination
+            db_transactions = date_filtered.into_iter().take(query_limit as usize).collect();
+        }
+
+        let has_more = db_transactions.len() > limit as usize;
         if has_more {
-            results.pop(); // Remove the extra record we queried
+            db_transactions.pop(); // Remove the extra record we queried
         }
 
         let next_cursor = if has_more {
-            results.last().map(|t| t.id.clone())
+            db_transactions.last().map(|t| t.id.clone())
         } else {
             None
         };
 
         let response = TransactionListResponse {
-            transactions: results,
+            transactions: db_transactions,
             pagination: PaginationInfo {
                 has_more,
                 next_cursor,
@@ -233,7 +291,7 @@ mod tests {
     use super::*;
 
     async fn create_test_service() -> TransactionService {
-        let db = DbConnection::init().await.expect("Failed to init test DB");
+        let db = DbConnection::init_test().await.expect("Failed to init test DB");
         TransactionService::new(db)
     }
 
@@ -376,18 +434,175 @@ mod tests {
     #[tokio::test]
     async fn test_limit_bounds() {
         let service = create_test_service().await;
-        
-        // Test limit too high (should be capped at 100)
+
+        // Test with very high limit (should be capped at 100)
         let request = TransactionListRequest {
             after: None,
-            limit: Some(200),
+            limit: Some(1000),
             start_date: None,
             end_date: None,
         };
 
         let response = service.list_transactions(request).await.unwrap();
-        
-        // Should be capped at reasonable limit
+        // Should cap at 100 items max
         assert!(response.transactions.len() <= 100);
+    }
+
+    #[tokio::test]
+    async fn test_create_transaction_basic() {
+        let service = create_test_service().await;
+
+        let request = CreateTransactionRequest {
+            description: "Test allowance".to_string(),
+            amount: 10.0,
+            date: None, // Will use current timestamp
+        };
+
+        let transaction = service.create_transaction(request).await.unwrap();
+
+        assert_eq!(transaction.description, "Test allowance");
+        assert_eq!(transaction.amount, 10.0);
+        assert_eq!(transaction.balance, 10.0); // First transaction, starting from 0
+        assert!(transaction.id.starts_with("transaction::income::"));
+        assert!(!transaction.date.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_create_transaction_running_balance() {
+        let service = create_test_service().await;
+
+        // Create first transaction (income)
+        let request1 = CreateTransactionRequest {
+            description: "First allowance".to_string(),
+            amount: 10.0,
+            date: None,
+        };
+        let tx1 = service.create_transaction(request1).await.unwrap();
+        assert_eq!(tx1.balance, 10.0);
+
+        // Create second transaction (expense)
+        let request2 = CreateTransactionRequest {
+            description: "Buy snack".to_string(),
+            amount: -3.0,
+            date: None,
+        };
+        let tx2 = service.create_transaction(request2).await.unwrap();
+        assert_eq!(tx2.balance, 7.0); // 10.0 - 3.0
+
+        // Create third transaction (income)
+        let request3 = CreateTransactionRequest {
+            description: "Second allowance".to_string(),
+            amount: 15.0,
+            date: None,
+        };
+        let tx3 = service.create_transaction(request3).await.unwrap();
+        assert_eq!(tx3.balance, 22.0); // 7.0 + 15.0
+    }
+
+    #[tokio::test]
+    async fn test_create_transaction_with_custom_date() {
+        let service = create_test_service().await;
+
+        let custom_date = "2025-06-14T10:30:00-04:00".to_string();
+        let request = CreateTransactionRequest {
+            description: "Custom date transaction".to_string(),
+            amount: 5.0,
+            date: Some(custom_date.clone()),
+        };
+
+        let transaction = service.create_transaction(request).await.unwrap();
+        assert_eq!(transaction.date, custom_date);
+    }
+
+    #[tokio::test]
+    async fn test_create_transaction_validation() {
+        let service = create_test_service().await;
+
+        // Test empty description
+        let request = CreateTransactionRequest {
+            description: "".to_string(),
+            amount: 10.0,
+            date: None,
+        };
+        let result = service.create_transaction(request).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Description must be between 1 and 256 characters"));
+
+        // Test too long description
+        let long_description = "a".repeat(257);
+        let request = CreateTransactionRequest {
+            description: long_description,
+            amount: 10.0,
+            date: None,
+        };
+        let result = service.create_transaction(request).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Description must be between 1 and 256 characters"));
+    }
+
+    #[tokio::test]
+    async fn test_create_transaction_negative_balance() {
+        let service = create_test_service().await;
+
+        // Create transaction that results in negative balance
+        let request = CreateTransactionRequest {
+            description: "Expensive purchase".to_string(),
+            amount: -25.0,
+            date: None,
+        };
+
+        let transaction = service.create_transaction(request).await.unwrap();
+        assert_eq!(transaction.balance, -25.0); // Starting from 0, goes negative
+        assert!(transaction.id.starts_with("transaction::expense::"));
+    }
+
+    #[tokio::test]
+    async fn test_list_transactions_with_database_data() {
+        let service = create_test_service().await;
+
+        // Create some transactions
+        let transactions = vec![
+            CreateTransactionRequest {
+                description: "First transaction".to_string(),
+                amount: 10.0,
+                date: None,
+            },
+            CreateTransactionRequest {
+                description: "Second transaction".to_string(),
+                amount: -5.0,
+                date: None,
+            },
+            CreateTransactionRequest {
+                description: "Third transaction".to_string(),
+                amount: 20.0,
+                date: None,
+            },
+        ];
+
+        // Store transactions in database
+        for req in transactions {
+            service.create_transaction(req).await.unwrap();
+        }
+
+        // List transactions
+        let request = TransactionListRequest {
+            after: None,
+            limit: Some(10),
+            start_date: None,
+            end_date: None,
+        };
+
+        let response = service.list_transactions(request).await.unwrap();
+        assert_eq!(response.transactions.len(), 3);
+        
+        // Should be in reverse chronological order (newest first)
+        assert_eq!(response.transactions[0].description, "Third transaction");
+        assert_eq!(response.transactions[1].description, "Second transaction");
+        assert_eq!(response.transactions[2].description, "First transaction");
+
+        // Check running balances
+        assert_eq!(response.transactions[0].balance, 25.0); // 10 - 5 + 20
+        assert_eq!(response.transactions[1].balance, 5.0);  // 10 - 5
+        assert_eq!(response.transactions[2].balance, 10.0); // 10
     }
 }

@@ -47,6 +47,16 @@ pub struct TransactionListResponse {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CreateTransactionRequest {
+    /// Description of the transaction (max 256 characters)
+    pub description: String,
+    /// Transaction amount (positive for income, negative for expense)
+    pub amount: f64,
+    /// Optional date override (RFC 3339) - uses current time if not provided
+    pub date: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PaginationInfo {
     pub has_more: bool,
     pub next_cursor: Option<String>,
