@@ -1,13 +1,8 @@
 use yew::prelude::*;
 use std::collections::HashMap;
-
-#[derive(Clone, PartialEq)]
-struct Transaction {
-    date: String,
-    description: String,
-    amount: f64,
-    balance: f64,
-}
+use gloo::net::http::Request;
+use shared::{Transaction, TransactionListResponse};
+use wasm_bindgen_futures::spawn_local;
 
 // Helper function to parse month name to number
 fn month_name_to_number(month: &str) -> u32 {
@@ -57,54 +52,74 @@ fn first_day_of_month(month: u32, year: u32) -> u32 {
 fn app() -> Html {
     let current_month = use_state(|| 6u32); // June
     let current_year = use_state(|| 2025u32);
-    
-    // Sample data - 4 weeks of allowances, 2 spending transactions, 1 gift
-    let transactions = vec![
-        Transaction {
-            date: "June 13, 2025".to_string(),
-            description: "Weekly allowance".to_string(),
-            amount: 10.00,
-            balance: 40.00,
-        },
-        Transaction {
-            date: "June 10, 2025".to_string(),
-            description: "Gift from Grandma".to_string(),
-            amount: 15.00,
-            balance: 30.00,
-        },
-        Transaction {
-            date: "June 8, 2025".to_string(),
-            description: "Bought new toy".to_string(),
-            amount: -12.00,
-            balance: 15.00,
-        },
-        Transaction {
-            date: "June 6, 2025".to_string(),
-            description: "Weekly allowance".to_string(),
-            amount: 10.00,
-            balance: 27.00,
-        },
-        Transaction {
-            date: "May 30, 2025".to_string(),
-            description: "Weekly allowance".to_string(),
-            amount: 10.00,
-            balance: 17.00,
-        },
-        Transaction {
-            date: "May 28, 2025".to_string(),
-            description: "Ice cream treat".to_string(),
-            amount: -3.00,
-            balance: 7.00,
-        },
-        Transaction {
-            date: "May 23, 2025".to_string(),
-            description: "Weekly allowance".to_string(),
-            amount: 10.00,
-            balance: 10.00,
-        },
-    ];
+    let transactions = use_state(|| Vec::<Transaction>::new());
+    let all_transactions = use_state(|| Vec::<Transaction>::new()); // For calendar view
+    let loading = use_state(|| true);
+    let current_balance = use_state(|| 0.0f64);
 
-    let current_balance = transactions.first().map(|t| t.balance).unwrap_or(0.0);
+    // Load recent transactions for table view
+    use_effect_with((), {
+        let transactions = transactions.clone();
+        let loading = loading.clone();
+        let current_balance = current_balance.clone();
+        
+        move |_| {
+            spawn_local(async move {
+                loading.set(true);
+                
+                match Request::get("/api/transactions?limit=10").send().await {
+                    Ok(response) => {
+                        match response.json::<TransactionListResponse>().await {
+                            Ok(data) => {
+                                // Set current balance from most recent transaction
+                                if let Some(first_tx) = data.transactions.first() {
+                                    current_balance.set(first_tx.balance);
+                                }
+                                transactions.set(data.transactions);
+                            },
+                            Err(e) => {
+                                gloo::console::error!("Failed to parse transactions:", e.to_string());
+                            }
+                        }
+                    },
+                    Err(e) => {
+                        gloo::console::error!("Failed to fetch transactions:", e.to_string());
+                    }
+                }
+                
+                loading.set(false);
+            });
+            
+            || ()
+        }
+    });
+
+    // Load all transactions for calendar view
+    use_effect_with((), {
+        let all_transactions = all_transactions.clone();
+        
+        move |_| {
+            spawn_local(async move {
+                match Request::get("/api/transactions?limit=100").send().await {
+                    Ok(response) => {
+                        match response.json::<TransactionListResponse>().await {
+                            Ok(data) => {
+                                all_transactions.set(data.transactions);
+                            },
+                            Err(e) => {
+                                gloo::console::error!("Failed to parse all transactions:", e.to_string());
+                            }
+                        }
+                    },
+                    Err(e) => {
+                        gloo::console::error!("Failed to fetch all transactions:", e.to_string());
+                    }
+                }
+            });
+            
+            || ()
+        }
+    });
 
     // Navigation callbacks
     let prev_month = {
@@ -140,7 +155,7 @@ fn app() -> Html {
                     <h1>{"My Allowance Tracker"}</h1>
                     <div class="balance-display">
                         <span class="balance-label">{"Current Balance:"}</span>
-                        <span class="balance-amount">{format!("${:.2}", current_balance)}</span>
+                        <span class="balance-amount">{format!("${:.2}", *current_balance)}</span>
                     </div>
                 </div>
             </header>
@@ -148,44 +163,53 @@ fn app() -> Html {
             <main class="main">
                 <div class="container">
                     <section class="transactions-section">
-                        <h2>{"Transaction History"}</h2>
+                        <h2>{"Recent Transactions"}</h2>
                         
-                        <div class="table-container">
-                            <table class="transactions-table">
-                                <thead>
-                                    <tr>
-                                        <th>{"Date"}</th>
-                                        <th>{"Description"}</th>
-                                        <th>{"Amount"}</th>
-                                        <th>{"Balance"}</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {for transactions.iter().map(|transaction| {
-                                        let amount_class = if transaction.amount >= 0.0 {
-                                            "amount positive"
-                                        } else {
-                                            "amount negative"
-                                        };
-                                        
-                                        html! {
+                        {if *loading {
+                            html! { <div class="loading">{"Loading transactions..."}</div> }
+                        } else {
+                            html! {
+                                <div class="table-container">
+                                    <table class="transactions-table">
+                                        <thead>
                                             <tr>
-                                                <td class="date">{&transaction.date}</td>
-                                                <td class="description">{&transaction.description}</td>
-                                                <td class={amount_class}>
-                                                    {if transaction.amount >= 0.0 {
-                                                        format!("+${:.2}", transaction.amount)
-                                                    } else {
-                                                        format!("-${:.2}", transaction.amount.abs())
-                                                    }}
-                                                </td>
-                                                <td class="balance">{format!("${:.2}", transaction.balance)}</td>
+                                                <th>{"Date"}</th>
+                                                <th>{"Description"}</th>
+                                                <th>{"Amount"}</th>
+                                                <th>{"Balance"}</th>
                                             </tr>
-                                        }
-                                    })}
-                                </tbody>
-                            </table>
-                        </div>
+                                        </thead>
+                                        <tbody>
+                                            {for transactions.iter().take(10).map(|transaction| {
+                                                let amount_class = if transaction.amount >= 0.0 {
+                                                    "amount positive"
+                                                } else {
+                                                    "amount negative"
+                                                };
+                                                
+                                                // Format date nicely
+                                                let formatted_date = format_date(&transaction.date);
+                                                
+                                                html! {
+                                                    <tr>
+                                                        <td class="date">{formatted_date}</td>
+                                                        <td class="description">{&transaction.description}</td>
+                                                        <td class={amount_class}>
+                                                            {if transaction.amount >= 0.0 {
+                                                                format!("+${:.2}", transaction.amount)
+                                                            } else {
+                                                                format!("-${:.2}", transaction.amount.abs())
+                                                            }}
+                                                        </td>
+                                                        <td class="balance">{format!("${:.2}", transaction.balance)}</td>
+                                                    </tr>
+                                                }
+                                            })}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            }
+                        }}
                     </section>
 
                     <section class="calendar-section">
@@ -200,7 +224,7 @@ fn app() -> Html {
                         <Calendar 
                             month={*current_month}
                             year={*current_year}
-                            transactions={transactions.clone()}
+                            transactions={(*all_transactions).clone()}
                         />
                     </section>
 
@@ -216,6 +240,22 @@ fn app() -> Html {
             </main>
         </>
     }
+}
+
+// Helper function to format RFC 3339 date to human readable format
+fn format_date(rfc3339_date: &str) -> String {
+    // Parse the RFC 3339 date and format it nicely
+    // For now, simple extraction - in a real app would use a proper date library
+    if let Some(date_part) = rfc3339_date.split('T').next() {
+        if let Ok(parts) = date_part.split('-').collect::<Vec<_>>().try_into() {
+            let [year, month, day]: [&str; 3] = parts;
+            if let (Ok(y), Ok(m), Ok(d)) = (year.parse::<u32>(), month.parse::<u32>(), day.parse::<u32>()) {
+                return format!("{} {}, {}", number_to_month_name(m), d, y);
+            }
+        }
+    }
+    // Fallback to original string
+    rfc3339_date.to_string()
 }
 
 #[derive(Properties, PartialEq)]
@@ -234,17 +274,18 @@ fn calendar(props: &CalendarProps) -> Html {
     let mut transactions_by_day: HashMap<u32, Vec<&Transaction>> = HashMap::new();
     
     for transaction in &props.transactions {
-        // Parse date (e.g., "June 13, 2025")
-        let parts: Vec<&str> = transaction.date.split(", ").collect();
-        if parts.len() == 2 {
-            let year_part = parts[1].parse::<u32>().unwrap_or(0);
-            let month_day_parts: Vec<&str> = parts[0].split(' ').collect();
-            if month_day_parts.len() == 2 {
-                let month_part = month_name_to_number(month_day_parts[0]);
-                let day_part = month_day_parts[1].parse::<u32>().unwrap_or(0);
-                
-                if month_part == month && year_part == year {
-                    transactions_by_day.entry(day_part).or_insert_with(Vec::new).push(transaction);
+        // Parse RFC 3339 date (e.g., "2025-06-13T09:00:00-04:00")
+        if let Some(date_part) = transaction.date.split('T').next() {
+            let parts: Vec<&str> = date_part.split('-').collect();
+            if parts.len() == 3 {
+                if let (Ok(year_part), Ok(month_part), Ok(day_part)) = (
+                    parts[0].parse::<u32>(),
+                    parts[1].parse::<u32>(),
+                    parts[2].parse::<u32>()
+                ) {
+                    if month_part == month && year_part == year {
+                        transactions_by_day.entry(day_part).or_insert_with(Vec::new).push(transaction);
+                    }
                 }
             }
         }
@@ -257,16 +298,18 @@ fn calendar(props: &CalendarProps) -> Html {
     // Sort all transactions by date to get proper chronological order
     let mut sorted_transactions = props.transactions.clone();
     sorted_transactions.sort_by(|a, b| {
-        // Parse dates and compare (reverse chronological, so newer first)
+        // Parse RFC 3339 dates and compare (reverse chronological, so newer first)
         let parse_date = |date_str: &str| -> (u32, u32, u32) {
-            let parts: Vec<&str> = date_str.split(", ").collect();
-            if parts.len() == 2 {
-                let year = parts[1].parse::<u32>().unwrap_or(0);
-                let month_day_parts: Vec<&str> = parts[0].split(' ').collect();
-                if month_day_parts.len() == 2 {
-                    let month = month_name_to_number(month_day_parts[0]);
-                    let day = month_day_parts[1].parse::<u32>().unwrap_or(0);
-                    return (year, month, day);
+            if let Some(date_part) = date_str.split('T').next() {
+                let parts: Vec<&str> = date_part.split('-').collect();
+                if parts.len() == 3 {
+                    if let (Ok(year), Ok(month), Ok(day)) = (
+                        parts[0].parse::<u32>(),
+                        parts[1].parse::<u32>(),
+                        parts[2].parse::<u32>()
+                    ) {
+                        return (year, month, day);
+                    }
                 }
             }
             (0, 0, 0)

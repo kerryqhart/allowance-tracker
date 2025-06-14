@@ -3,6 +3,7 @@ use shared::{Transaction, TransactionListRequest, TransactionListResponse, Pagin
 use anyhow::Result;
 use tracing::info;
 
+#[derive(Clone)]
 pub struct TransactionService {
     db: DbConnection,
 }
@@ -102,33 +103,104 @@ impl TransactionService {
             .as_millis() as u64;
 
         vec![
+            // June 2025 transactions (most recent first)
             Transaction {
-                id: Transaction::generate_id(10.0, base_time - 86400000), // 1 day ago
-                date: "2025-06-12T23:08:42-04:00".to_string(),
+                id: Transaction::generate_id(10.0, base_time - 86400000), // June 13, 2025
+                date: "2025-06-13T09:00:00-04:00".to_string(),
                 description: "Weekly allowance".to_string(),
                 amount: 10.0,
-                balance: 40.0,
+                balance: 55.0,
             },
             Transaction {
-                id: Transaction::generate_id(15.0, base_time - 259200000), // 3 days ago
+                id: Transaction::generate_id(15.0, base_time - 259200000), // June 10, 2025  
                 date: "2025-06-10T15:30:00-04:00".to_string(),
                 description: "Gift from Grandma".to_string(),
                 amount: 15.0,
-                balance: 30.0,
+                balance: 45.0,
             },
             Transaction {
-                id: Transaction::generate_id(-12.0, base_time - 432000000), // 5 days ago
+                id: Transaction::generate_id(-12.0, base_time - 432000000), // June 8, 2025
                 date: "2025-06-08T14:20:15-04:00".to_string(),
                 description: "Bought new toy".to_string(),
                 amount: -12.0,
-                balance: 15.0,
+                balance: 30.0,
             },
             Transaction {
-                id: Transaction::generate_id(10.0, base_time - 604800000), // 1 week ago
-                date: "2025-06-06T23:08:42-04:00".to_string(),
+                id: Transaction::generate_id(10.0, base_time - 604800000), // June 6, 2025
+                date: "2025-06-06T09:00:00-04:00".to_string(),
                 description: "Weekly allowance".to_string(),
                 amount: 10.0,
+                balance: 42.0,
+            },
+            Transaction {
+                id: Transaction::generate_id(-5.0, base_time - 777600000), // June 4, 2025
+                date: "2025-06-04T16:45:30-04:00".to_string(),
+                description: "Movie ticket".to_string(),
+                amount: -5.0,
+                balance: 32.0,
+            },
+            Transaction {
+                id: Transaction::generate_id(10.0, base_time - 1209600000), // May 30, 2025
+                date: "2025-05-30T09:00:00-04:00".to_string(),
+                description: "Weekly allowance".to_string(),
+                amount: 10.0,
+                balance: 37.0,
+            },
+            Transaction {
+                id: Transaction::generate_id(-3.0, base_time - 1382400000), // May 28, 2025
+                date: "2025-05-28T13:15:22-04:00".to_string(),
+                description: "Ice cream treat".to_string(),
+                amount: -3.0,
                 balance: 27.0,
+            },
+            Transaction {
+                id: Transaction::generate_id(10.0, base_time - 1814400000), // May 23, 2025
+                date: "2025-05-23T09:00:00-04:00".to_string(),
+                description: "Weekly allowance".to_string(),
+                amount: 10.0,
+                balance: 30.0,
+            },
+            Transaction {
+                id: Transaction::generate_id(-8.0, base_time - 2073600000), // May 20, 2025
+                date: "2025-05-20T11:30:45-04:00".to_string(),
+                description: "Comic book".to_string(),
+                amount: -8.0,
+                balance: 20.0,
+            },
+            Transaction {
+                id: Transaction::generate_id(10.0, base_time - 2419200000), // May 16, 2025
+                date: "2025-05-16T09:00:00-04:00".to_string(),
+                description: "Weekly allowance".to_string(),
+                amount: 10.0,
+                balance: 28.0,
+            },
+            Transaction {
+                id: Transaction::generate_id(20.0, base_time - 2592000000), // May 14, 2025
+                date: "2025-05-14T10:00:00-04:00".to_string(),
+                description: "Birthday money from Uncle Bob".to_string(),
+                amount: 20.0,
+                balance: 18.0,
+            },
+            Transaction {
+                id: Transaction::generate_id(10.0, base_time - 3024000000), // May 9, 2025
+                date: "2025-05-09T09:00:00-04:00".to_string(),
+                description: "Weekly allowance".to_string(),
+                amount: 10.0,
+                balance: -2.0, // Negative balance from previous spending
+            },
+            Transaction {
+                id: Transaction::generate_id(-15.0, base_time - 3196800000), // May 7, 2025
+                date: "2025-05-07T14:22:10-04:00".to_string(),
+                description: "Art supplies".to_string(),
+                amount: -15.0,
+                balance: -12.0,
+            },
+            Transaction {
+                id: Transaction::generate_id(10.0, base_time - 3628800000), // May 2, 2025
+                date: "2025-05-02T09:00:00-04:00".to_string(),
+                description: "Weekly allowance".to_string(),
+                amount: 10.0,
+                balance: 3.0,
             },
         ]
     }

@@ -1,23 +1,59 @@
 use axum::{
-    extract::{Path, State},
+    extract::{Path, State, Query},
     http::StatusCode,
     response::IntoResponse,
     Json,
 };
-use shared::KeyValue;
-use crate::domain::ValueStore;
+use shared::{KeyValue, TransactionListRequest, TransactionListResponse};
+use crate::domain::{ValueStore, TransactionService};
+use serde::Deserialize;
+use tracing::info;
 
-/// Application state containing the ValueStore
+/// Application state containing the ValueStore and TransactionService
 #[derive(Clone)]
 pub struct AppState {
     pub value_store: ValueStore,
+    pub transaction_service: TransactionService,
 }
 
 impl AppState {
-    /// Create new application state with the given ValueStore
-    pub fn new(value_store: ValueStore) -> Self {
+    /// Create new application state with the given ValueStore and TransactionService
+    pub fn new(value_store: ValueStore, transaction_service: TransactionService) -> Self {
         Self {
             value_store,
+            transaction_service,
+        }
+    }
+}
+
+/// Query parameters for transaction list endpoint
+#[derive(Deserialize, Debug)]
+pub struct TransactionListQuery {
+    pub after: Option<String>,
+    pub limit: Option<u32>,
+    pub start_date: Option<String>,
+    pub end_date: Option<String>,
+}
+
+/// Axum handler function for GET /api/transactions
+pub async fn list_transactions(
+    State(state): State<AppState>,
+    Query(query): Query<TransactionListQuery>,
+) -> impl IntoResponse {
+    info!("GET /api/transactions - query: {:?}", query);
+
+    let request = TransactionListRequest {
+        after: query.after,
+        limit: query.limit,
+        start_date: query.start_date,
+        end_date: query.end_date,
+    };
+
+    match state.transaction_service.list_transactions(request).await {
+        Ok(response) => (StatusCode::OK, Json(response)).into_response(),
+        Err(e) => {
+            tracing::error!("Error listing transactions: {:?}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, "Error listing transactions").into_response()
         }
     }
 }
@@ -27,10 +63,15 @@ pub async fn get_value(
     State(state): State<AppState>,
     Path(key): Path<String>,
 ) -> impl IntoResponse {
+    info!("GET /api/values/{}", key);
+
     match state.value_store.get_value(&key).await {
         Ok(Some(value)) => (StatusCode::OK, Json(value)).into_response(),
         Ok(None) => (StatusCode::NOT_FOUND, "Key not found").into_response(),
-        Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Error retrieving value").into_response(),
+        Err(e) => {
+            tracing::error!("Error retrieving value: {:?}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, "Error retrieving value").into_response()
+        }
     }
 }
 
@@ -39,6 +80,8 @@ pub async fn put_value(
     State(state): State<AppState>,
     Json(kv): Json<KeyValue>,
 ) -> impl IntoResponse {
+    info!("POST /api/values - key: {}", kv.key);
+
     match state.value_store.put_value(&kv.key, &kv.value).await {
         Ok(()) => (StatusCode::CREATED, Json(kv)).into_response(),
         Err(e) => {
@@ -57,7 +100,8 @@ mod tests {
     async fn setup_test_handlers() -> AppState {
         let db = DbConnection::init_test().await.expect("Failed to create test database");
         let value_store = ValueStore::new(db);
-        AppState::new(value_store)
+        let transaction_service = TransactionService::new(db);
+        AppState::new(value_store, transaction_service)
     }
 
     #[tokio::test]

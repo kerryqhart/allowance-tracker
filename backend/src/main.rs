@@ -28,11 +28,12 @@ async fn main() -> anyhow::Result<()> {
     
     // Create our domain model
     info!("Setting up domain model");
-    let value_store = domain::ValueStore::new(db_conn);
+    let value_store = domain::ValueStore::new(db_conn.clone());
+    let transaction_service = domain::TransactionService::new(db_conn);
 
     // Create application state
     info!("Setting up application state");
-    let app_state = rest::AppState::new(value_store);
+    let app_state = rest::AppState::new(value_store, transaction_service);
 
     // CORS setup to allow frontend to make requests
     let cors = CorsLayer::new()
@@ -42,6 +43,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Set up our application routes
     let api_routes = Router::new()
+        .route("/transactions", get(rest::list_transactions))
         .route("/values/:key", get(rest::get_value))
         .route("/values", post(rest::put_value));
 
