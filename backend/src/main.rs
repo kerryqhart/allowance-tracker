@@ -2,13 +2,10 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use axum::{
-    extract::{Path, State},
-    http::{HeaderValue, Method, StatusCode},
-    response::IntoResponse,
+    http::{HeaderValue, Method},
     routing::{get, post},
-    Json, Router,
+    Router,
 };
-use shared::KeyValue;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::ServeDir;
 use tracing::{info, Level};
@@ -16,6 +13,7 @@ use tracing::{info, Level};
 // Import our modules
 mod db;
 mod domain;
+mod rest;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -32,6 +30,10 @@ async fn main() -> anyhow::Result<()> {
     info!("Setting up domain model");
     let value_store = domain::ValueStore::new(db_conn);
 
+    // Create REST handlers
+    info!("Setting up REST handlers");
+    let rest_handlers = rest::RestHandlers::new(value_store);
+
     // CORS setup to allow frontend to make requests
     let cors = CorsLayer::new()
         .allow_origin("http://localhost:8080".parse::<HeaderValue>().unwrap())
@@ -40,15 +42,15 @@ async fn main() -> anyhow::Result<()> {
 
     // Set up our application routes
     let api_routes = Router::new()
-        .route("/values/:key", get(get_value))
-        .route("/values", post(put_value));
+        .route("/values/:key", get(rest::get_value))
+        .route("/values", post(rest::put_value));
 
     // Define our main application router
     let app = Router::new()
         .nest("/api", api_routes)
-        .fallback_service(ServeDir::new(PathBuf::from("../frontend/dist")))
+        .fallback_service(ServeDir::new(PathBuf::from("frontend/dist")))
         .layer(cors)
-        .with_state(AppState { value_store });
+        .with_state(rest_handlers);
 
     // Start the server
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
@@ -60,37 +62,4 @@ async fn main() -> anyhow::Result<()> {
     axum::serve(listener, app).await?;
 
     Ok(())
-}
-
-// We'll use this to store our value store in request extensions
-#[derive(Clone)]
-struct AppState {
-    value_store: domain::ValueStore,
-}
-
-// API handlers
-async fn get_value(
-    State(state): State<AppState>,
-    Path(key): Path<String>,
-) -> impl IntoResponse {
-    // Use the domain model to retrieve the value
-    match state.value_store.retrieve_value(&key).await {
-        Ok(Some(kv)) => (StatusCode::OK, Json(kv)).into_response(),
-        Ok(None) => (StatusCode::NOT_FOUND, "Key not found").into_response(),
-        Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Error retrieving value").into_response(),
-    }
-}
-
-async fn put_value(
-    State(state): State<AppState>,
-    Json(kv): Json<KeyValue>,
-) -> impl IntoResponse {
-    // Use the domain model to store the value
-    match state.value_store.store_value(&kv.key, &kv.value).await {
-        Ok(stored_kv) => (StatusCode::CREATED, Json(stored_kv)).into_response(),
-        Err(e) => {
-            println!("Error: {:?}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, "Failed to store value").into_response()
-        },
-    }
 }
