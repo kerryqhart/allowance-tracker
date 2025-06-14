@@ -1,8 +1,9 @@
 use yew::prelude::*;
 use std::collections::HashMap;
 use gloo::net::http::Request;
-use shared::{Transaction, TransactionListResponse};
+use shared::{Transaction, TransactionListResponse, CreateTransactionRequest};
 use wasm_bindgen_futures::spawn_local;
+use web_sys::HtmlInputElement;
 
 // Helper function to parse month name to number
 fn month_name_to_number(month: &str) -> u32 {
@@ -56,19 +57,198 @@ fn app() -> Html {
     let all_transactions = use_state(|| Vec::<Transaction>::new()); // For calendar view
     let loading = use_state(|| true);
     let current_balance = use_state(|| 0.0f64);
+    
+    // Form state for transaction creation
+    let description = use_state(|| String::new());
+    let amount = use_state(|| String::new());
+    let creating_transaction = use_state(|| false);
+    let form_error = use_state(|| Option::<String>::None);
+    let form_success = use_state(|| false);
+    
+    // Connection status for parent info
+    let backend_connected = use_state(|| false);
+    let backend_endpoint = use_state(|| String::from("Checking..."));
+
+    // Function to refresh transaction data
+    let refresh_transactions = {
+        let transactions = transactions.clone();
+        let all_transactions = all_transactions.clone();
+        let current_balance = current_balance.clone();
+        let loading = loading.clone();
+        
+        Callback::from(move |_| {
+            let transactions = transactions.clone();
+            let all_transactions = all_transactions.clone();
+            let current_balance = current_balance.clone();
+            let loading = loading.clone();
+            
+            spawn_local(async move {
+                loading.set(true);
+                
+                // Refresh recent transactions
+                if let Ok(response) = Request::get("http://localhost:3000/api/transactions?limit=10").send().await {
+                    if let Ok(data) = response.json::<TransactionListResponse>().await {
+                        if let Some(first_tx) = data.transactions.first() {
+                            current_balance.set(first_tx.balance);
+                        }
+                        transactions.set(data.transactions);
+                    } else {
+                        gloo::console::error!("Failed to parse transactions:", response.text().await.unwrap_or_default());
+                    }
+                } else {
+                    gloo::console::error!("Failed to fetch transactions");
+                }
+                
+                // Refresh all transactions for calendar
+                if let Ok(response) = Request::get("http://localhost:3000/api/transactions?limit=100").send().await {
+                    if let Ok(data) = response.json::<TransactionListResponse>().await {
+                        all_transactions.set(data.transactions);
+                    } else {
+                        gloo::console::error!("Failed to parse all transactions:", response.text().await.unwrap_or_default());
+                    }
+                } else {
+                    gloo::console::error!("Failed to fetch all transactions");
+                }
+                
+                loading.set(false);
+            });
+        })
+    };
+
+    // Create transaction callback
+    let create_transaction = {
+        let description = description.clone();
+        let amount = amount.clone();
+        let creating_transaction = creating_transaction.clone();
+        let form_error = form_error.clone();
+        let form_success = form_success.clone();
+        let refresh_transactions = refresh_transactions.clone();
+        
+        Callback::from(move |_| {
+            let description = description.clone();
+            let amount = amount.clone();
+            let creating_transaction = creating_transaction.clone();
+            let form_error = form_error.clone();
+            let form_success = form_success.clone();
+            let refresh_transactions = refresh_transactions.clone();
+            
+            spawn_local(async move {
+                // Clear previous messages
+                form_error.set(None);
+                form_success.set(false);
+                
+                // Validate form
+                if description.is_empty() {
+                    form_error.set(Some("Please enter a description".to_string()));
+                    return;
+                }
+                
+                // Clean and parse amount - remove dollar signs, spaces, etc.
+                let cleaned_amount = (*amount)
+                    .trim()
+                    .replace("$", "")
+                    .replace(",", "")
+                    .replace(" ", "");
+                
+                // Debug logging
+                gloo::console::log!("Original amount:", &*amount);
+                gloo::console::log!("Cleaned amount:", &cleaned_amount);
+                
+                let amount_value = match cleaned_amount.parse::<f64>() {
+                    Ok(val) if val > 0.0 => {
+                        gloo::console::log!("Parsed amount:", val);
+                        val
+                    },
+                    Ok(val) => {
+                        gloo::console::log!("Amount not greater than 0:", val);
+                        form_error.set(Some("Amount must be greater than 0".to_string()));
+                        return;
+                    }
+                    Err(e) => {
+                        gloo::console::log!("Parse error:", format!("{:?}", e));
+                        form_error.set(Some("Please enter a valid amount (like 5 or 5.00)".to_string()));
+                        return;
+                    }
+                };
+                
+                creating_transaction.set(true);
+                
+                let request = CreateTransactionRequest {
+                    description: (*description).clone(),
+                    amount: amount_value,
+                    date: None, // Use current time
+                };
+                
+                match Request::post("http://localhost:3000/api/transactions")
+                    .json(&request)
+                    .unwrap()
+                    .send()
+                    .await
+                {
+                    Ok(response) => {
+                        if response.ok() {
+                            // Success! Clear form and refresh data
+                            description.set(String::new());
+                            amount.set(String::new());
+                            form_success.set(true);
+                            refresh_transactions.emit(());
+                            
+                            // Clear success message after 3 seconds
+                            let form_success_clear = form_success.clone();
+                            spawn_local(async move {
+                                gloo::timers::future::TimeoutFuture::new(3000).await;
+                                form_success_clear.set(false);
+                            });
+                        } else {
+                            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+                            form_error.set(Some(format!("Failed to create transaction: {}", error_text)));
+                        }
+                    }
+                    Err(e) => {
+                        form_error.set(Some(format!("Network error: {}", e)));
+                    }
+                }
+                
+                creating_transaction.set(false);
+            });
+        })
+    };
+
+    // Form input handlers
+    let on_description_change = {
+        let description = description.clone();
+        Callback::from(move |e: Event| {
+            let input: HtmlInputElement = e.target_unchecked_into();
+            description.set(input.value());
+        })
+    };
+
+    let on_amount_change = {
+        let amount = amount.clone();
+        Callback::from(move |e: Event| {
+            let input: HtmlInputElement = e.target_unchecked_into();
+            amount.set(input.value());
+        })
+    };
 
     // Load recent transactions for table view
     use_effect_with((), {
         let transactions = transactions.clone();
         let loading = loading.clone();
         let current_balance = current_balance.clone();
+        let backend_connected = backend_connected.clone();
+        let backend_endpoint = backend_endpoint.clone();
         
         move |_| {
             spawn_local(async move {
                 loading.set(true);
                 
-                match Request::get("/api/transactions?limit=10").send().await {
+                match Request::get("http://localhost:3000/api/transactions?limit=10").send().await {
                     Ok(response) => {
+                        // Successfully connected to backend
+                        backend_connected.set(true);
+                        backend_endpoint.set("localhost:3000".to_string());
+                        
                         match response.json::<TransactionListResponse>().await {
                             Ok(data) => {
                                 // Set current balance from most recent transaction
@@ -83,6 +263,9 @@ fn app() -> Html {
                         }
                     },
                     Err(e) => {
+                        // Failed to connect to backend
+                        backend_connected.set(false);
+                        backend_endpoint.set("Connection failed".to_string());
                         gloo::console::error!("Failed to fetch transactions:", e.to_string());
                     }
                 }
@@ -100,7 +283,7 @@ fn app() -> Html {
         
         move |_| {
             spawn_local(async move {
-                match Request::get("/api/transactions?limit=100").send().await {
+                match Request::get("http://localhost:3000/api/transactions?limit=100").send().await {
                     Ok(response) => {
                         match response.json::<TransactionListResponse>().await {
                             Ok(data) => {
@@ -228,16 +411,81 @@ fn app() -> Html {
                         />
                     </section>
 
-                    <section class="actions-section">
-                        <h2>{"Add New Transaction"}</h2>
-                        <div class="action-buttons">
-                            <button class="btn btn-primary">{"Record Allowance"}</button>
-                            <button class="btn btn-secondary">{"Record Spending"}</button>
-                            <button class="btn btn-accent">{"Record Gift/Income"}</button>
-                        </div>
+                    <section class="add-money-section">
+                        <h2>{"✨ Add Extra Money"}</h2>
+                        
+                        {if let Some(error) = (*form_error).as_ref() {
+                            html! {
+                                <div class="form-message error">
+                                    {error}
+                                </div>
+                            }
+                        } else { html! {} }}
+                        
+                        {if *form_success {
+                            html! {
+                                <div class="form-message success">
+                                    {"🎉 Money added successfully!"}
+                                </div>
+                            }
+                        } else { html! {} }}
+                        
+                        <form class="add-money-form" onsubmit={
+                            let create_transaction = create_transaction.clone();
+                            Callback::from(move |e: SubmitEvent| {
+                                e.prevent_default();
+                                create_transaction.emit(());
+                            })
+                        }>
+                            <div class="form-group">
+                                <label for="description">{"What did you get money for?"}</label>
+                                <input 
+                                    type="text" 
+                                    id="description"
+                                    placeholder="Birthday gift, chores, found money..."
+                                    value={(*description).clone()}
+                                    onchange={on_description_change}
+                                    disabled={*creating_transaction}
+                                />
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="amount">{"How much money? (dollars)"}</label>
+                                <input 
+                                    type="number" 
+                                    id="amount"
+                                    placeholder="5.00"
+                                    step="0.01"
+                                    min="0.01"
+                                    value={(*amount).clone()}
+                                    onchange={on_amount_change}
+                                    disabled={*creating_transaction}
+                                />
+                            </div>
+                            
+                            <button 
+                                type="submit" 
+                                class="btn btn-primary add-money-btn"
+                                disabled={*creating_transaction}
+                            >
+                                {if *creating_transaction {
+                                    "Adding Money..."
+                                } else {
+                                    "✨ Add Extra Money"
+                                }}
+                            </button>
+                        </form>
                     </section>
                 </div>
             </main>
+            
+            <div class="connection-status">
+                {if *backend_connected {
+                    format!("Connected to {}", *backend_endpoint)
+                } else {
+                    (*backend_endpoint).clone()
+                }}
+            </div>
         </>
     }
 }
