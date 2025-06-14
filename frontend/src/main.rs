@@ -1,449 +1,311 @@
 use gloo::net::http::Request;
-use shared::{Child, Transaction, TransactionType};
+use shared::KeyValue;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::HtmlInputElement;
 use yew::prelude::*;
 
-const API_BASE_URL: &str = "http://localhost:3000/api";
+const API_BASE_URL: &str = "/api";
 
 #[function_component(App)]
 fn app() -> Html {
-    let children = use_state(|| Vec::<Child>::new());
-    let selected_child = use_state(|| None::<Child>);
-    let transactions = use_state(|| Vec::<Transaction>::new());
+    let keys = use_state(|| Vec::<String>::new());
+    let current_value = use_state(|| String::new());
     let error_message = use_state(String::new);
+    let success_message = use_state(String::new);
     
-    // Fetch all children when the app loads
-    {
-        let children = children.clone();
+    // Clear messages after a delay
+    let clear_messages = {
         let error_message = error_message.clone();
-
-        use_effect(move || {
+        let success_message = success_message.clone();
+        Callback::from(move |_| {
+            let error_msg = error_message.clone();
+            let success_msg = success_message.clone();
             spawn_local(async move {
-                match Request::get(&format!("{}/children", API_BASE_URL))
-                    .send()
-                    .await
-                {
-                    Ok(resp) => {
-                        if resp.status() == 200 {
-                            match resp.json::<Vec<Child>>().await {
-                                Ok(data) => children.set(data),
-                                Err(_) => error_message.set("Failed to parse children data".to_string()),
-                            }
-                        } else {
-                            error_message.set(format!("Error: {}", resp.status()))
-                        }
-                    }
-                    Err(_) => error_message.set("Failed to fetch children".to_string()),
-                }
+                gloo::timers::future::TimeoutFuture::new(3000).await;
+                error_msg.set(String::new());
+                success_msg.set(String::new());
             });
-            || ()
-        });
-    }
-
-    // Fetch transactions when a child is selected
-    let selected_child_for_effect = selected_child.clone();
-    {
-        let transactions = transactions.clone();
-        let error_message = error_message.clone();
-        
-        use_effect_with(
-            move |selected: &UseStateHandle<Option<Child>>| {
-                if let Some(child) = selected.as_ref() {
-                    let child_id = child.id.to_string();
-                    spawn_local(async move {
-                        match Request::get(&format!("{}/children/{}/transactions", API_BASE_URL, child_id))
-                            .send()
-                            .await
-                        {
-                            Ok(resp) => {
-                                if resp.status() == 200 {
-                                    match resp.json::<Vec<Transaction>>().await {
-                                        Ok(data) => transactions.set(data),
-                                        Err(_) => error_message.set("Failed to parse transactions".to_string()),
-                                    }
-                                } else {
-                                    error_message.set(format!("Error: {}", resp.status()))
-                                }
-                            }
-                            Err(_) => error_message.set("Failed to fetch transactions".to_string()),
-                        }
-                    });
-                }
-                || ()
-            },
-            selected_child_for_effect,
-        );
-    }
-
-    let on_child_select = {
-        let selected_child = selected_child.clone();
-        let children = children.clone();
-        
-        Callback::from(move |child_id: String| {
-            if let Ok(uuid) = uuid::Uuid::parse_str(&child_id) {
-                for child in children.iter() {
-                    if child.id == uuid {
-                        selected_child.set(Some(child.clone()));
-                        return;
-                    }
-                }
-            }
-            selected_child.set(None);
         })
     };
 
-    let on_new_child = {
-        let children = children.clone();
+    // For simplicity, we'll maintain our own list of keys since the backend
+    // doesn't have a list keys endpoint exposed via REST yet
+    let refresh_keys = {
+        let keys = keys.clone();
         let error_message = error_message.clone();
-        
-        Callback::from(move |new_child: Child| {
-            let children = children.clone();
-            let error_message = error_message.clone();
-            
-            spawn_local(async move {
-                match Request::post(&format!("{}/children", API_BASE_URL))
-                    .json(&new_child)
-                    .expect("Failed to serialize")
-                    .send()
-                    .await
-                {
-                    Ok(resp) => {
-                        if resp.status() == 201 {
-                            match resp.json::<Child>().await {
-                                Ok(created_child) => {
-                                    let mut updated_children = (*children).clone();
-                                    updated_children.push(created_child);
-                                    children.set(updated_children);
-                                },
-                                Err(_) => error_message.set("Failed to parse created child".to_string()),
-                            }
-                        } else {
-                            error_message.set(format!("Error creating child: {}", resp.status()))
-                        }
-                    }
-                    Err(_) => error_message.set("Failed to create child".to_string()),
-                }
-            });
+        Callback::from(move |_| {
+            // For now, we'll just clear the keys list
+            // In a real implementation, we'd call a backend endpoint
+            keys.set(Vec::new());
+            error_message.set("Key list refresh not yet implemented".to_string());
         })
     };
 
     html! {
         <div class="container">
-            <nav class="navbar is-primary" role="navigation">
-                <div class="navbar-brand">
-                    <a class="navbar-item" href="#">
-                        <i class="fas fa-piggy-bank mr-2"></i>
-                        <span class="has-text-weight-bold">{"Allowance Tracker"}</span>
-                    </a>
-                </div>
-            </nav>
-            
-            if !error_message.is_empty() {
-                <div class="notification is-danger">
-                    <button class="delete" onclick={let error = error_message.clone(); Callback::from(move |_| error.set(String::new()))}></button>
-                    {error_message.as_str()}
-                </div>
-            }
+            <header>
+                <h1>{"Key-Value Store"}</h1>
+                <p>{"Simple key-value database interface"}</p>
+            </header>
 
-            <div class="columns">
-                <div class="column is-3">
-                    <ChildrenList 
-                        children={(*children).clone()} 
-                        on_select={on_child_select} 
-                        selected_child_id={selected_child.as_ref().map(|c| c.id)}
-                    />
-                    <NewChildForm on_add={on_new_child} />
-                </div>
-                <div class="column">
-                    {
-                        if let Some(child) = (*selected_child).clone() {
-                            html! {
-                                <ChildDetail 
-                                    child={child.clone()} 
-                                    transactions={(*transactions).clone()} 
-                                />
-                            }
-                        } else {
-                            html! {
-                                <div class="notification is-info">
-                                    {"Select a child from the list to view or add transactions"}
-                                </div>
-                            }
-                        }
-                    }
-                </div>
-            </div>
-        </div>
-    }
-}
-
-#[derive(Properties, PartialEq)]
-struct ChildrenListProps {
-    children: Vec<Child>,
-    on_select: Callback<String>,
-    selected_child_id: Option<uuid::Uuid>,
-}
-
-#[function_component(ChildrenList)]
-fn children_list(props: &ChildrenListProps) -> Html {
-    html! {
-        <div class="panel">
-            <p class="panel-heading">
-                {"Children"}
-            </p>
-            {
-                if props.children.is_empty() {
-                    html! {
-                        <div class="panel-block">
-                            {"No children added yet. Add a new child below."}
+            <main>
+                // Messages
+                <div class="messages">
+                    if !error_message.is_empty() {
+                        <div class="error-message">
+                            { &*error_message }
                         </div>
                     }
-                } else {
-                    html! {
-                        for props.children.iter().map(|child| {
-                            let is_active = props.selected_child_id
-                                .map(|id| id == child.id)
-                                .unwrap_or(false);
-                            let child_id = child.id.to_string();
-                            let on_click = {
-                                let on_select = props.on_select.clone();
-                                let id = child_id.clone();
-                                Callback::from(move |_| on_select.emit(id.clone()))
-                            };
-                            
-                            html! {
-                                <a class={classes!("panel-block", is_active.then(|| "is-active"))}
-                                   onclick={on_click}>
-                                    <span class="panel-icon">
-                                        <i class="fas fa-user"></i>
-                                    </span>
-                                    <div class="is-flex is-justify-content-space-between is-flex-grow-1">
-                                        <span>{&child.name}</span>
-                                        <span class="has-text-weight-bold">
-                                            {format!("${:.2}", child.balance)}
-                                        </span>
-                                    </div>
-                                </a>
-                            }
-                        })
+                    if !success_message.is_empty() {
+                        <div class="success-message">
+                            { &*success_message }
+                        </div>
                     }
+                </div>
+
+                // Add new key-value pair
+                <section class="add-section">
+                    <h2>{"Add New Key-Value Pair"}</h2>
+                    <AddValueForm 
+                        on_success={
+                            let success_message = success_message.clone();
+                            let clear_messages = clear_messages.clone();
+                            Callback::from(move |msg: String| {
+                                success_message.set(msg);
+                                clear_messages.emit(());
+                            })
+                        }
+                        on_error={
+                            let error_message = error_message.clone();
+                            let clear_messages = clear_messages.clone();
+                            Callback::from(move |msg: String| {
+                                error_message.set(msg);
+                                clear_messages.emit(());
+                            })
+                        }
+                    />
+                </section>
+
+                // Retrieve value by key
+                <section class="retrieve-section">
+                    <h2>{"Retrieve Value by Key"}</h2>
+                    <RetrieveValueForm 
+                        current_value={(*current_value).clone()}
+                        on_value_retrieved={
+                            let current_value = current_value.clone();
+                            Callback::from(move |value: String| {
+                                current_value.set(value);
+                            })
+                        }
+                        on_error={
+                            let error_message = error_message.clone();
+                            let clear_messages = clear_messages.clone();
+                            Callback::from(move |msg: String| {
+                                error_message.set(msg);
+                                clear_messages.emit(());
+                            })
+                        }
+                    />
+                </section>
+
+                // Display current value
+                if !current_value.is_empty() {
+                    <section class="current-value">
+                        <h3>{"Retrieved Value:"}</h3>
+                        <div class="value-display">
+                            { &*current_value }
+                        </div>
+                    </section>
                 }
-            }
+
+                // Keys list (placeholder for future implementation)
+                <section class="keys-section">
+                    <h2>{"Stored Keys"}</h2>
+                    <button onclick={refresh_keys} class="refresh-btn">
+                        {"Refresh Keys (Not Yet Implemented)"}
+                    </button>
+                    <div class="keys-list">
+                        if keys.is_empty() {
+                            <p class="no-keys">{"No keys available or not yet loaded"}</p>
+                        } else {
+                            <ul>
+                                { for keys.iter().map(|key| html! {
+                                    <li>{ key }</li>
+                                }) }
+                            </ul>
+                        }
+                    </div>
+                </section>
+            </main>
         </div>
     }
 }
 
 #[derive(Properties, PartialEq)]
-struct NewChildFormProps {
-    on_add: Callback<Child>,
+struct AddValueFormProps {
+    pub on_success: Callback<String>,
+    pub on_error: Callback<String>,
 }
 
-#[function_component(NewChildForm)]
-fn new_child_form(props: &NewChildFormProps) -> Html {
-    let name = use_state(String::new);
-    let weekly_allowance = use_state(|| "0.00".to_string());
-    let is_expanded = use_state(|| false);
-
-    let toggle_form = {
-        let is_expanded = is_expanded.clone();
-        Callback::from(move |_| {
-            is_expanded.set(!*is_expanded);
-        })
-    };
+#[function_component(AddValueForm)]
+fn add_value_form(props: &AddValueFormProps) -> Html {
+    let key_input = use_node_ref();
+    let value_input = use_node_ref();
 
     let on_submit = {
-        let on_add = props.on_add.clone();
-        let name = name.clone();
-        let weekly_allowance = weekly_allowance.clone();
-        let is_expanded = is_expanded.clone();
+        let key_input = key_input.clone();
+        let value_input = value_input.clone();
+        let on_success = props.on_success.clone();
+        let on_error = props.on_error.clone();
         
         Callback::from(move |e: SubmitEvent| {
             e.prevent_default();
             
-            if !name.is_empty() {
-                if let Ok(amount) = weekly_allowance.parse::<f64>() {
-                    on_add.emit(Child {
-                        id: uuid::Uuid::new_v4(),
-                        name: (*name).clone(),
-                        balance: 0.0,
-                        weekly_allowance: amount,
-                    });
-                    name.set(String::new());
-                    weekly_allowance.set("0.00".to_string());
-                    is_expanded.set(false);
-                }
+            let key_element = key_input.cast::<HtmlInputElement>().unwrap();
+            let value_element = value_input.cast::<HtmlInputElement>().unwrap();
+            
+            let key = key_element.value().trim().to_string();
+            let value = value_element.value().trim().to_string();
+            
+            if key.is_empty() || value.is_empty() {
+                on_error.emit("Both key and value are required".to_string());
+                return;
             }
+
+            let kv = KeyValue { key, value };
+            let on_success = on_success.clone();
+            let on_error = on_error.clone();
+            let key_elem = key_element.clone();
+            let value_elem = value_element.clone();
+
+            spawn_local(async move {
+                match Request::post(&format!("{}/values", API_BASE_URL))
+                    .json(&kv)
+                    .unwrap()
+                    .send()
+                    .await
+                {
+                    Ok(resp) => {
+                        if resp.status() == 201 {
+                            on_success.emit(format!("Successfully added key '{}'", kv.key));
+                            key_elem.set_value("");
+                            value_elem.set_value("");
+                        } else {
+                            on_error.emit(format!("Error adding value: {}", resp.status()));
+                        }
+                    }
+                    Err(_) => {
+                        on_error.emit("Failed to connect to server".to_string());
+                    }
+                }
+            });
         })
     };
 
     html! {
-        <div class="card">
-            <header class="card-header">
-                <p class="card-header-title">
-                    {"Add New Child"}
-                </p>
-                <button class="card-header-icon" aria-label="toggle form" onclick={toggle_form}>
-                    <span class="icon">
-                        <i class={classes!("fas", if *is_expanded {"fa-angle-down"} else {"fa-angle-up"})}></i>
-                    </span>
-                </button>
-            </header>
-            
-            if *is_expanded {
-                <div class="card-content">
-                    <form onsubmit={on_submit}>
-                        <div class="field">
-                            <label class="label">{"Name"}</label>
-                            <div class="control">
-                                <input 
-                                    class="input" 
-                                    type="text" 
-                                    placeholder="Child's name"
-                                    value={(*name).clone()}
-                                    onchange={{
-                                        let name = name.clone();
-                                        Callback::from(move |e: Event| {
-                                            let input: HtmlInputElement = e.target_unchecked_into();
-                                            name.set(input.value());
-                                        })
-                                    }}
-                                />
-                            </div>
-                        </div>
-
-                        <div class="field">
-                            <label class="label">{"Weekly Allowance"}</label>
-                            <div class="control has-icons-left">
-                                <input 
-                                    class="input" 
-                                    type="number" 
-                                    step="0.01"
-                                    min="0"
-                                    placeholder="0.00"
-                                    value={(*weekly_allowance).clone()}
-                                    onchange={{
-                                        let weekly_allowance = weekly_allowance.clone();
-                                        Callback::from(move |e: Event| {
-                                            let input: HtmlInputElement = e.target_unchecked_into();
-                                            weekly_allowance.set(input.value());
-                                        })
-                                    }}
-                                />
-                                <span class="icon is-small is-left">
-                                    <i class="fas fa-dollar-sign"></i>
-                                </span>
-                            </div>
-                        </div>
-
-                        <div class="field">
-                            <div class="control">
-                                <button class="button is-primary" type="submit">
-                                    {"Add Child"}
-                                </button>
-                            </div>
-                        </div>
-                    </form>
-                </div>
-            }
-        </div>
+        <form onsubmit={on_submit} class="add-form">
+            <div class="form-group">
+                <label for="key-input">{"Key:"}</label>
+                <input 
+                    ref={key_input}
+                    id="key-input"
+                    type="text" 
+                    placeholder="Enter key"
+                    class="form-input"
+                />
+            </div>
+            <div class="form-group">
+                <label for="value-input">{"Value:"}</label>
+                <input 
+                    ref={value_input}
+                    id="value-input"
+                    type="text" 
+                    placeholder="Enter value"
+                    class="form-input"
+                />
+            </div>
+            <button type="submit" class="submit-btn">
+                {"Add Key-Value Pair"}
+            </button>
+        </form>
     }
 }
 
 #[derive(Properties, PartialEq)]
-struct ChildDetailProps {
-    child: Child,
-    transactions: Vec<Transaction>,
+struct RetrieveValueFormProps {
+    pub current_value: String,
+    pub on_value_retrieved: Callback<String>,
+    pub on_error: Callback<String>,
 }
 
-#[function_component(ChildDetail)]
-fn child_detail(props: &ChildDetailProps) -> Html {
-    html! {
-        <>
-            <div class="card">
-                <div class="card-content">
-                    <div class="media">
-                        <div class="media-left">
-                            <figure class="image is-48x48">
-                                <div class="is-flex is-justify-content-center is-align-items-center has-background-money" style="width: 48px; height: 48px; border-radius: 50%;">
-                                    <i class="fas fa-child fa-2x"></i>
-                                </div>
-                            </figure>
-                        </div>
-                        <div class="media-content">
-                            <p class="title is-4">{&props.child.name}</p>
-                            <p class="subtitle is-6">
-                                {format!("Weekly Allowance: ${:.2}", props.child.weekly_allowance)}
-                            </p>
-                        </div>
-                        <div class="media-right">
-                            <div class="box has-text-centered p-3">
-                                <p class="heading">{"Current Balance"}</p>
-                                <p class="title">{format!("${:.2}", props.child.balance)}</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
+#[function_component(RetrieveValueForm)]
+fn retrieve_value_form(props: &RetrieveValueFormProps) -> Html {
+    let key_input = use_node_ref();
 
-            <div class="card">
-                <div class="card-header">
-                    <p class="card-header-title">
-                        {"Transactions"}
-                    </p>
-                </div>
-                <div class="card-content">
-                    {
-                        if props.transactions.is_empty() {
-                            html! {
-                                <div class="notification">
-                                    {"No transactions yet for this child."}
-                                </div>
+    let on_submit = {
+        let key_input = key_input.clone();
+        let on_value_retrieved = props.on_value_retrieved.clone();
+        let on_error = props.on_error.clone();
+        
+        Callback::from(move |e: SubmitEvent| {
+            e.prevent_default();
+            
+            let key_element = key_input.cast::<HtmlInputElement>().unwrap();
+            let key = key_element.value().trim().to_string();
+            
+            if key.is_empty() {
+                on_error.emit("Key is required".to_string());
+                return;
+            }
+
+            let on_value_retrieved = on_value_retrieved.clone();
+            let on_error = on_error.clone();
+
+            spawn_local(async move {
+                match Request::get(&format!("{}/values/{}", API_BASE_URL, key))
+                    .send()
+                    .await
+                {
+                    Ok(resp) => {
+                        if resp.status() == 200 {
+                            match resp.json::<KeyValue>().await {
+                                Ok(kv) => {
+                                    on_value_retrieved.emit(format!("Key: '{}' = Value: '{}'", kv.key, kv.value));
+                                }
+                                Err(_) => {
+                                    on_error.emit("Failed to parse response".to_string());
+                                }
                             }
+                        } else if resp.status() == 404 {
+                            on_error.emit(format!("Key '{}' not found", key));
                         } else {
-                            html! {
-                                <div class="table-container">
-                                    <table class="table is-fullwidth">
-                                        <thead>
-                                            <tr>
-                                                <th>{"Date"}</th>
-                                                <th>{"Description"}</th>
-                                                <th>{"Type"}</th>
-                                                <th class="has-text-right">{"Amount"}</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {
-                                                for props.transactions.iter().map(|transaction| {
-                                                    let amount_class = match transaction.transaction_type {
-                                                        TransactionType::Allowance | TransactionType::Bonus => "has-text-success",
-                                                        TransactionType::Purchase => "has-text-danger",
-                                                        TransactionType::Savings => "has-text-info",
-                                                    };
-                                                    
-                                                    html! {
-                                                        <tr>
-                                                            <td>{transaction.date.to_string()}</td>
-                                                            <td>{&transaction.description}</td>
-                                                            <td>{format!("{:?}", transaction.transaction_type)}</td>
-                                                            <td class={classes!("has-text-right", amount_class)}>
-                                                                {format!("${:.2}", transaction.amount)}
-                                                            </td>
-                                                        </tr>
-                                                    }
-                                                })
-                                            }
-                                        </tbody>
-                                    </table>
-                                </div>
-                            }
+                            on_error.emit(format!("Error retrieving value: {}", resp.status()));
                         }
                     }
-                </div>
+                    Err(_) => {
+                        on_error.emit("Failed to connect to server".to_string());
+                    }
+                }
+            });
+        })
+    };
+
+    html! {
+        <form onsubmit={on_submit} class="retrieve-form">
+            <div class="form-group">
+                <label for="retrieve-key-input">{"Key to retrieve:"}</label>
+                <input 
+                    ref={key_input}
+                    id="retrieve-key-input"
+                    type="text" 
+                    placeholder="Enter key to retrieve"
+                    class="form-input"
+                />
             </div>
-            
-            // Transaction form would go here
-        </>
+            <button type="submit" class="submit-btn">
+                {"Get Value"}
+            </button>
+        </form>
     }
 }
 
