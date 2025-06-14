@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use axum::{
     http::{HeaderValue, Method},
-    routing::{get, post},
+    routing::get,
     Router,
 };
 use tower_http::cors::{Any, CorsLayer};
@@ -28,12 +28,11 @@ async fn main() -> anyhow::Result<()> {
     
     // Create our domain model
     info!("Setting up domain model");
-    let value_store = domain::ValueStore::new(db_conn.clone());
     let transaction_service = domain::TransactionService::new(db_conn);
 
     // Create application state
     info!("Setting up application state");
-    let app_state = rest::AppState::new(value_store, transaction_service);
+    let app_state = rest::AppState::new(transaction_service);
 
     // CORS setup to allow frontend to make requests
     let cors = CorsLayer::new()
@@ -43,9 +42,7 @@ async fn main() -> anyhow::Result<()> {
 
     // Set up our application routes
     let api_routes = Router::new()
-        .route("/transactions", get(rest::list_transactions).post(rest::create_transaction))
-        .route("/values/:key", get(rest::get_value))
-        .route("/values", post(rest::put_value));
+        .route("/transactions", get(rest::list_transactions).post(rest::create_transaction));
 
     // Define our main application router
     let app = Router::new()

@@ -264,28 +264,6 @@ impl TransactionService {
     }
 }
 
-// Keep the old ValueStore for backwards compatibility during transition
-#[derive(Clone)]
-pub struct ValueStore {
-    db: DbConnection,
-}
-
-impl ValueStore {
-    pub fn new(db: DbConnection) -> Self {
-        Self { db }
-    }
-
-    pub async fn get_value(&self, key: &str) -> Result<Option<String>> {
-        info!("Getting value for key: {}", key);
-        self.db.get_value(key).await
-    }
-
-    pub async fn put_value(&self, key: &str, value: &str) -> Result<()> {
-        info!("Putting value for key: {}", key);
-        self.db.put_value(key, value).await
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
