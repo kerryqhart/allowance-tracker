@@ -1,6 +1,6 @@
 mod backend;
 
-use backend::create_app_state;
+use backend::initialize_backend;
 use tokio::runtime::Runtime;
 use std::thread;
 
@@ -30,7 +30,7 @@ fn start_embedded_server() {
         let rt = Runtime::new().unwrap();
         rt.block_on(async {
             // Initialize the app state
-            let app_state = create_app_state().await.unwrap();
+            let app_state = initialize_backend().await.unwrap();
             
             // Create the Axum app
             let app = backend::create_router(app_state);

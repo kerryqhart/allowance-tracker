@@ -14,6 +14,7 @@
 //! - **Data Validation**: Validating input data according to business requirements
 //! - **Service Layer**: Providing high-level operations for the application
 //! - **Calendar Operations**: Managing calendar views and date-based transaction organization
+//! - **Transaction Display**: Formatting and validating transaction table data
 //!
 //! ## Core Concepts
 //!
@@ -21,6 +22,7 @@
 //! - **Balance**: The current amount available in the allowance account
 //! - **Transaction Service**: The main service that orchestrates transaction operations
 //! - **Calendar Service**: Handles calendar views, date calculations, and transaction organization
+//! - **Transaction Table Service**: Manages transaction display formatting and validation
 //!
 //! ## Business Rules
 //!
@@ -29,6 +31,7 @@
 //! - Each transaction is timestamped for proper chronological ordering
 //! - Balance calculations consider all historical transactions
 //! - Calendar views organize transactions by date with proper balance calculations
+//! - Transaction table displays format data consistently for user consumption
 //!
 //! ## Design Principles
 //!
@@ -37,9 +40,12 @@
 //! - **Testability**: Pure functions and clear interfaces for easy testing
 //! - **Storage Agnostic**: Works with any storage implementation
 //! - **UI Agnostic**: Business logic separate from presentation concerns
+//! - **Configuration Driven**: Flexible formatting and display options
 
 pub mod domain;
 pub mod calendar;
+pub mod transactions;
 
 pub use domain::*;
-pub use calendar::*; 
+pub use calendar::*;
+pub use transactions::*; 

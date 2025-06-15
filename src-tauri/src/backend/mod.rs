@@ -37,27 +37,44 @@ pub mod io;
 
 use axum::{
     http::{HeaderValue, Method},
-    routing::get,
+    routing::{get, post},
     Router,
 };
 use tower_http::cors::{Any, CorsLayer};
 use anyhow::Result;
+use crate::backend::domain::{TransactionService, CalendarService, TransactionTableService};
+use crate::backend::storage::DbConnection;
+use log::info;
 
 pub use storage::*;
 pub use domain::*;
 pub use io::*;
 
-/// Create application state with initialized services
-pub async fn create_app_state() -> Result<AppState> {
-    tracing::info!("Setting up database");
-    let db_conn = DbConnection::init().await?;
-    
-    tracing::info!("Setting up domain model");
-    let transaction_service = TransactionService::new(db_conn);
+/// Main application state that holds all services
+#[derive(Clone)]
+pub struct AppState {
+    pub transaction_service: TransactionService,
+    pub calendar_service: CalendarService,
+    pub transaction_table_service: TransactionTableService,
+}
 
-    tracing::info!("Setting up application state");
-    let app_state = AppState::new(transaction_service);
-    
+/// Initialize the backend with all required services
+pub async fn initialize_backend() -> Result<AppState> {
+    info!("Setting up database");
+    let db_conn = DbConnection::init().await?;
+
+    info!("Setting up domain model");
+    let transaction_service = TransactionService::new(db_conn);
+    let calendar_service = CalendarService::new();
+    let transaction_table_service = TransactionTableService::new();
+
+    info!("Setting up application state");
+    let app_state = AppState {
+        transaction_service,
+        calendar_service,
+        transaction_table_service,
+    };
+
     Ok(app_state)
 }
 
@@ -71,8 +88,10 @@ pub fn create_router(app_state: AppState) -> Router {
 
     // Set up our application routes
     let api_routes = Router::new()
-        .route("/transactions", get(list_transactions).post(create_transaction))
-        .route("/calendar/month", get(get_calendar_month));
+        .route("/transactions", get(io::list_transactions).post(io::create_transaction))
+        .route("/transactions/table", get(io::get_transaction_table))
+        .route("/transactions/validate", post(io::validate_transaction))
+        .route("/calendar/month", get(io::get_calendar_month));
 
     // Define our main application router
     Router::new()

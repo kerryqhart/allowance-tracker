@@ -1,34 +1,45 @@
+//! # REST API Interface Layer
+//!
+//! Provides HTTP REST endpoints for the allowance tracker application.
+//! This layer handles:
+//! - HTTP request/response serialization and deserialization  
+//! - Input validation and sanitization
+//! - Error translation from domain to HTTP status codes
+//! - CORS configuration for frontend integration
+//! - Request logging and monitoring
+//!
+//! ## Key Responsibilities
+//!
+//! - **API Endpoints**: RESTful HTTP interfaces for all operations
+//! - **Error Handling**: Converting domain errors to proper HTTP responses  
+//! - **Serialization**: JSON request/response handling
+//! - **Input Validation**: Basic input checking before domain layer processing
+//! - **Logging**: Request/response logging for debugging and monitoring
+//!
+//! ## Design Principles
+//!
+//! - **REST Compliance**: Following RESTful design patterns
+//! - **Error Transparency**: Clear error messages for debugging
+//! - **Request Logging**: Comprehensive logging for troubleshooting
+//! - **Domain Separation**: Pure translation layer without business logic
+
 use axum::{
-    extract::{State, Query},
+    extract::{Query, State},
     http::StatusCode,
-    response::IntoResponse,
-    Json,
+    response::{IntoResponse, Json},
 };
-use shared::{TransactionListRequest, CreateTransactionRequest};
-use crate::backend::domain::{TransactionService, CalendarService};
 use serde::Deserialize;
-use tracing::info;
+use log::{info, error};
 
+use crate::backend::AppState;
+use shared::{
+    TransactionListRequest, CreateTransactionRequest,
+    CalendarMonthRequest, TransactionTableResponse,
+    ValidationResult,
+};
 
-/// Application state containing the services
-#[derive(Clone)]
-pub struct AppState {
-    pub transaction_service: TransactionService,
-    pub calendar_service: CalendarService,
-}
-
-impl AppState {
-    /// Create new application state with the given services
-    pub fn new(transaction_service: TransactionService) -> Self {
-        Self { 
-            transaction_service,
-            calendar_service: CalendarService::new(),
-        }
-    }
-}
-
-/// Query parameters for transaction list endpoint
-#[derive(Deserialize, Debug)]
+// Query parameters for transaction listing API
+#[derive(Debug, Deserialize)]
 pub struct TransactionListQuery {
     pub after: Option<String>,
     pub limit: Option<u32>,
@@ -36,7 +47,28 @@ pub struct TransactionListQuery {
     pub end_date: Option<String>,
 }
 
-/// Axum handler function for GET /api/transactions
+// Query parameters for calendar month API
+#[derive(Debug, Deserialize)]
+pub struct CalendarMonthQuery {
+    pub month: u32,
+    pub year: u32,
+}
+
+// Query parameters for transaction table API
+#[derive(Debug, Deserialize)]
+pub struct TransactionTableQuery {
+    pub limit: Option<u32>,
+    pub after: Option<String>,
+}
+
+// Request body for transaction validation API
+#[derive(Debug, Deserialize)]
+pub struct ValidateTransactionRequest {
+    pub description: String,
+    pub amount: String,
+}
+
+/// List transactions with optional filtering and pagination
 pub async fn list_transactions(
     State(state): State<AppState>,
     Query(query): Query<TransactionListQuery>,
@@ -53,13 +85,13 @@ pub async fn list_transactions(
     match state.transaction_service.list_transactions(request).await {
         Ok(response) => (StatusCode::OK, Json(response)).into_response(),
         Err(e) => {
-            tracing::error!("Error listing transactions: {:?}", e);
+            error!("Failed to list transactions: {}", e);
             (StatusCode::INTERNAL_SERVER_ERROR, "Error listing transactions").into_response()
         }
     }
 }
 
-/// Axum handler function for POST /api/transactions
+/// Create a new transaction
 pub async fn create_transaction(
     State(state): State<AppState>,
     Json(request): Json<CreateTransactionRequest>,
@@ -69,48 +101,89 @@ pub async fn create_transaction(
     match state.transaction_service.create_transaction(request).await {
         Ok(transaction) => (StatusCode::CREATED, Json(transaction)).into_response(),
         Err(e) => {
-            tracing::error!("Error creating transaction: {:?}", e);
+            error!("Failed to create transaction: {}", e);
             (StatusCode::BAD_REQUEST, e.to_string()).into_response()
         }
     }
 }
 
-/// Axum handler function for GET /api/calendar/month
+/// Get calendar month data with transactions
 pub async fn get_calendar_month(
     State(state): State<AppState>,
     Query(query): Query<CalendarMonthQuery>,
 ) -> impl IntoResponse {
     info!("GET /api/calendar/month - query: {:?}", query);
 
-    // Get all transactions for the calendar calculation
-    let transaction_request = TransactionListRequest {
-        after: None,
-        limit: Some(1000), // Get enough transactions for accurate balance calculations
-        start_date: None,
-        end_date: None,
+    let request = CalendarMonthRequest {
+        month: query.month,
+        year: query.year,
     };
 
-    match state.transaction_service.list_transactions(transaction_request).await {
-        Ok(response) => {
+    match state.transaction_service.list_transactions(TransactionListRequest {
+        after: None,
+        limit: Some(1000), // Get enough transactions for calendar calculations
+        start_date: None,
+        end_date: None,
+    }).await {
+        Ok(transactions_response) => {
             let calendar_month = state.calendar_service.generate_calendar_month(
-                query.month,
-                query.year,
-                response.transactions,
+                request.month,
+                request.year,
+                transactions_response.transactions,
             );
             (StatusCode::OK, Json(calendar_month)).into_response()
         }
         Err(e) => {
-            tracing::error!("Error fetching transactions for calendar: {:?}", e);
+            error!("Failed to fetch transactions for calendar: {}", e);
             (StatusCode::INTERNAL_SERVER_ERROR, "Error generating calendar").into_response()
         }
     }
 }
 
-/// Query parameters for calendar month endpoint
-#[derive(Deserialize, Debug)]
-pub struct CalendarMonthQuery {
-    pub month: u32,
-    pub year: u32,
+/// Get formatted transaction table data
+pub async fn get_transaction_table(
+    State(state): State<AppState>,
+    Query(query): Query<TransactionTableQuery>,
+) -> impl IntoResponse {
+    info!("GET /api/transactions/table - query: {:?}", query);
+
+    let request = TransactionListRequest {
+        after: query.after.clone(),
+        limit: query.limit,
+        start_date: None,
+        end_date: None,
+    };
+
+    match state.transaction_service.list_transactions(request).await {
+        Ok(transactions_response) => {
+            let formatted_transactions = state.transaction_table_service
+                .format_transactions_for_table(&transactions_response.transactions);
+            
+            let table_response = TransactionTableResponse {
+                formatted_transactions,
+                pagination: transactions_response.pagination,
+            };
+            
+            (StatusCode::OK, Json(table_response)).into_response()
+        }
+        Err(e) => {
+            error!("Failed to get transaction table data: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, "Error getting transaction table").into_response()
+        }
+    }
+}
+
+/// Validate transaction input without creating the transaction
+pub async fn validate_transaction(
+    State(state): State<AppState>,
+    Json(request): Json<ValidateTransactionRequest>,
+) -> impl IntoResponse {
+    info!("POST /api/transactions/validate - request: {:?}", request);
+
+    let validation_result = state.transaction_table_service
+        .validate_transaction_input(&request.description, &request.amount);
+
+    (StatusCode::OK, Json(validation_result)).into_response()
 }
 
 #[cfg(test)]
@@ -118,12 +191,20 @@ mod tests {
     use super::*;
     use crate::backend::storage::DbConnection;
     use crate::backend::domain::TransactionService;
+    use crate::backend::AppState;
 
     /// Helper to create test handlers
     async fn setup_test_handlers() -> AppState {
         let db = DbConnection::init_test().await.expect("Failed to create test database");
         let transaction_service = TransactionService::new(db);
-        AppState::new(transaction_service)
+        let calendar_service = crate::backend::domain::CalendarService::new();
+        let transaction_table_service = crate::backend::domain::TransactionTableService::new();
+        
+        AppState {
+            transaction_service,
+            calendar_service,
+            transaction_table_service,
+        }
     }
 
     #[tokio::test]
@@ -136,7 +217,7 @@ mod tests {
             date: None,
         };
         
-        let response = create_transaction(State(state), Json(request)).await;
+        let _response = create_transaction(State(state), Json(request)).await;
         
         // Should return 201 CREATED status
         // Note: In a real integration test framework, we'd verify the response status and body
@@ -154,7 +235,7 @@ mod tests {
             date: None,
         };
         
-        let response = create_transaction(State(state), Json(request)).await;
+        let _response = create_transaction(State(state), Json(request)).await;
         
         // Should return 400 BAD REQUEST status
         // Note: In a real integration test framework, we'd verify the response status and error message
@@ -170,7 +251,7 @@ mod tests {
             date: Some("2025-06-14T10:30:00-04:00".to_string()),
         };
         
-        let response = create_transaction(State(state), Json(request)).await;
+        let _response = create_transaction(State(state), Json(request)).await;
         
         // Should successfully create transaction with custom date
     }
@@ -195,9 +276,37 @@ mod tests {
             end_date: None,
         };
         
-        let list_response = list_transactions(State(state), Query(list_query)).await;
+        let _list_response = list_transactions(State(state), Query(list_query)).await;
         
         // Should return 200 OK with transaction list
         // The created transaction should appear in the list
+    }
+
+    #[tokio::test]
+    async fn test_validate_transaction_handler() {
+        let state = setup_test_handlers().await;
+        
+        let request = ValidateTransactionRequest {
+            description: "Valid transaction".to_string(),
+            amount: "10.50".to_string(),
+        };
+        
+        let _response = validate_transaction(State(state), Json(request)).await;
+        
+        // Should return validation result
+    }
+
+    #[tokio::test]
+    async fn test_get_transaction_table_handler() {
+        let state = setup_test_handlers().await;
+        
+        let query = TransactionTableQuery {
+            limit: Some(10),
+            after: None,
+        };
+        
+        let _response = get_transaction_table(State(state), Query(query)).await;
+        
+        // Should return formatted transaction table data
     }
 }

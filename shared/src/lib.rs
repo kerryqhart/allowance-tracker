@@ -74,6 +74,60 @@ pub struct CalendarMonthRequest {
     pub year: u32,
 }
 
+/// Represents a formatted transaction for display purposes
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FormattedTransaction {
+    pub id: String,
+    pub formatted_date: String,
+    pub description: String,
+    pub formatted_amount: String,
+    pub amount_type: AmountType,
+    pub formatted_balance: String,
+    pub raw_amount: f64,
+    pub raw_balance: f64,
+}
+
+/// Type of transaction amount for styling and display
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum AmountType {
+    Positive,
+    Negative,
+    Zero,
+}
+
+/// Validation result for transaction form input
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ValidationResult {
+    pub is_valid: bool,
+    pub errors: Vec<ValidationError>,
+    pub cleaned_amount: Option<f64>,
+}
+
+/// Specific validation errors
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum ValidationError {
+    EmptyDescription,
+    DescriptionTooLong(usize),
+    InvalidAmount(String),
+    AmountNotPositive,
+    AmountTooLarge,
+    AmountTooSmall,
+}
+
+/// Request for formatted transaction table data
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TransactionTableRequest {
+    pub limit: Option<u32>,
+    pub after: Option<String>,
+}
+
+/// Response containing formatted transaction table data
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TransactionTableResponse {
+    pub formatted_transactions: Vec<FormattedTransaction>,
+    pub pagination: PaginationInfo,
+}
+
 impl Transaction {
     /// Generate transaction ID from amount and timestamp
     pub fn generate_id(amount: f64, epoch_millis: u64) -> String {
