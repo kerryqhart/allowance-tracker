@@ -1,9 +1,32 @@
 //! Transaction table domain logic for the allowance tracker.
 //!
-//! This module contains all business logic related to transaction display,
-//! formatting, validation, and table operations. The UI should only handle
-//! presentation concerns, while all transaction computations and business
-//! rules are handled here.
+//! This module contains all business logic related to transaction table display,
+//! formatting, validation, and presentation. It handles the transformation of
+//! raw transaction data into formatted, user-friendly table representations.
+//!
+//! ## Key Responsibilities
+//!
+//! - **Table Formatting**: Converting raw transactions into formatted display data
+//! - **Amount Formatting**: Configurable currency and sign display options
+//! - **Date Formatting**: Multiple date format options (ISO, short, long)
+//! - **Input Validation**: Validating transaction form inputs before submission
+//! - **CSS Classification**: Providing styling hints for positive/negative amounts
+//! - **Configuration Management**: Flexible display configuration options
+//!
+//! ## Core Components
+//!
+//! - **TransactionTableService**: Main service for table operations
+//! - **TransactionTableConfig**: Configuration for display preferences
+//! - **FormattedTransaction**: Structured data for table display
+//! - **ValidationResult**: Input validation results with error details
+//!
+//! ## Design Principles
+//!
+//! - **Presentation Logic**: Focused specifically on table display concerns
+//! - **Configuration Driven**: Flexible formatting options for different use cases
+//! - **Type Safety**: Strong typing for all formatting operations
+//! - **Validation First**: Comprehensive input validation with detailed error messages
+//! - **UI Agnostic**: Pure formatting logic independent of specific UI frameworks
 
 use shared::{Transaction, FormattedTransaction, AmountType, ValidationResult, ValidationError};
 use anyhow::Result;

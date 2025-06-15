@@ -42,7 +42,7 @@ use axum::{
 };
 use tower_http::cors::{Any, CorsLayer};
 use anyhow::Result;
-use crate::backend::domain::{TransactionService, CalendarService, TransactionTableService};
+use crate::backend::domain::{TransactionService, CalendarService, TransactionTableService, MoneyManagementService};
 use crate::backend::storage::DbConnection;
 use log::info;
 
@@ -56,6 +56,7 @@ pub struct AppState {
     pub transaction_service: TransactionService,
     pub calendar_service: CalendarService,
     pub transaction_table_service: TransactionTableService,
+    pub money_management_service: MoneyManagementService,
 }
 
 /// Initialize the backend with all required services
@@ -67,12 +68,14 @@ pub async fn initialize_backend() -> Result<AppState> {
     let transaction_service = TransactionService::new(db_conn);
     let calendar_service = CalendarService::new();
     let transaction_table_service = TransactionTableService::new();
+    let money_management_service = MoneyManagementService::new();
 
     info!("Setting up application state");
     let app_state = AppState {
         transaction_service,
         calendar_service,
         transaction_table_service,
+        money_management_service,
     };
 
     Ok(app_state)
@@ -91,7 +94,9 @@ pub fn create_router(app_state: AppState) -> Router {
         .route("/transactions", get(io::list_transactions).post(io::create_transaction))
         .route("/transactions/table", get(io::get_transaction_table))
         .route("/transactions/validate", post(io::validate_transaction))
-        .route("/calendar/month", get(io::get_calendar_month));
+        .route("/calendar/month", get(io::get_calendar_month))
+        .route("/money/validate", post(io::validate_add_money_form))
+        .route("/money/add", post(io::add_money));
 
     // Define our main application router
     Router::new()

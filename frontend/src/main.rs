@@ -1,14 +1,11 @@
 use yew::prelude::*;
-use std::collections::HashMap;
 use gloo::net::http::Request;
-use shared::{Transaction, TransactionListResponse, CreateTransactionRequest};
+use shared::{AddMoneyRequest, AddMoneyResponse, MoneyFormValidation, CalendarMonth, TransactionTableResponse, FormattedTransaction, AmountType};
 use wasm_bindgen_futures::spawn_local;
 use web_sys::HtmlInputElement;
 
-
-
 // Helper function to get month name from number
-fn number_to_month_name(month: u32) -> &'static str {
+fn month_name(month: u32) -> &'static str {
     match month {
         1 => "January", 2 => "February", 3 => "March", 4 => "April",
         5 => "May", 6 => "June", 7 => "July", 8 => "August",
@@ -17,36 +14,29 @@ fn number_to_month_name(month: u32) -> &'static str {
     }
 }
 
-// Helper function to get days in month
-fn days_in_month(month: u32, year: u32) -> u32 {
-    match month {
-        2 => if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) { 29 } else { 28 },
-        4 | 6 | 9 | 11 => 30,
-        _ => 31,
+// Simple helper function for calendar tooltips (calendar uses raw transactions)
+fn format_calendar_date(rfc3339_date: &str) -> String {
+    if let Some(date_part) = rfc3339_date.split('T').next() {
+        if let Ok(parts) = date_part.split('-').collect::<Vec<_>>().try_into() {
+            let [year, month, day]: [&str; 3] = parts;
+            if let (Ok(y), Ok(m), Ok(d)) = (year.parse::<u32>(), month.parse::<u32>(), day.parse::<u32>()) {
+                return format!("{} {}, {}", month_name(m), d, y);
+            }
+        }
     }
+    rfc3339_date.to_string()
 }
 
-// Helper function to get first day of month (0 = Sunday, 1 = Monday, etc.)
-fn first_day_of_month(month: u32, year: u32) -> u32 {
-    // Simple calculation for demo - in real app would use proper date library
-    let days_since_epoch = (year - 1970) * 365 + (year - 1969) / 4 - (year - 1901) / 100 + (year - 1601) / 400;
-    let days_in_months = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334];
-    let mut total_days = days_since_epoch + days_in_months[(month - 1) as usize];
-    
-    // Add leap day if current year is leap and month > February
-    if month > 2 && year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) {
-        total_days += 1;
-    }
-    
-    (total_days + 4) % 7 // January 1, 1970 was a Thursday (4)
-}
+
+
+
 
 #[function_component(App)]
 fn app() -> Html {
     let current_month = use_state(|| 6u32); // June
     let current_year = use_state(|| 2025u32);
-    let transactions = use_state(|| Vec::<Transaction>::new());
-    let all_transactions = use_state(|| Vec::<Transaction>::new()); // For calendar view
+    let formatted_transactions = use_state(|| Vec::<FormattedTransaction>::new()); // Backend-formatted transactions
+    let calendar_data = use_state(|| Option::<CalendarMonth>::None); // Backend-provided calendar
     let loading = use_state(|| true);
     let current_balance = use_state(|| 0.0f64);
     
@@ -56,6 +46,7 @@ fn app() -> Html {
     let creating_transaction = use_state(|| false);
     let form_error = use_state(|| Option::<String>::None);
     let form_success = use_state(|| false);
+    let validation_suggestions = use_state(|| Vec::<String>::new());
     
     // Connection status for parent info
     let backend_connected = use_state(|| false);
@@ -63,43 +54,49 @@ fn app() -> Html {
 
     // Function to refresh transaction data
     let refresh_transactions = {
-        let transactions = transactions.clone();
-        let all_transactions = all_transactions.clone();
+        let formatted_transactions = formatted_transactions.clone();
+        let calendar_data = calendar_data.clone();
         let current_balance = current_balance.clone();
         let loading = loading.clone();
+        let current_month = current_month.clone();
+        let current_year = current_year.clone();
         
         Callback::from(move |_| {
-            let transactions = transactions.clone();
-            let all_transactions = all_transactions.clone();
+            let formatted_transactions = formatted_transactions.clone();
+            let calendar_data = calendar_data.clone();
             let current_balance = current_balance.clone();
             let loading = loading.clone();
+            let current_month = current_month.clone();
+            let current_year = current_year.clone();
             
             spawn_local(async move {
                 loading.set(true);
                 
-                // Refresh recent transactions
-                if let Ok(response) = Request::get("http://localhost:3000/api/transactions?limit=10").send().await {
-                    if let Ok(data) = response.json::<TransactionListResponse>().await {
-                        if let Some(first_tx) = data.transactions.first() {
-                            current_balance.set(first_tx.balance);
+                // Refresh formatted transaction table using backend API
+                if let Ok(response) = Request::get("http://localhost:3000/api/transactions/table?limit=10").send().await {
+                    if let Ok(data) = response.json::<TransactionTableResponse>().await {
+                        // Set current balance from most recent transaction
+                        if let Some(first_tx) = data.formatted_transactions.first() {
+                            current_balance.set(first_tx.raw_balance);
                         }
-                        transactions.set(data.transactions);
+                        formatted_transactions.set(data.formatted_transactions);
                     } else {
-                        gloo::console::error!("Failed to parse transactions:", response.text().await.unwrap_or_default());
+                        gloo::console::error!("Failed to parse formatted transactions:", response.text().await.unwrap_or_default());
                     }
                 } else {
-                    gloo::console::error!("Failed to fetch transactions");
+                    gloo::console::error!("Failed to fetch formatted transactions");
                 }
                 
-                // Refresh all transactions for calendar
-                if let Ok(response) = Request::get("http://localhost:3000/api/transactions?limit=100").send().await {
-                    if let Ok(data) = response.json::<TransactionListResponse>().await {
-                        all_transactions.set(data.transactions);
+                // Refresh calendar data using backend API
+                let calendar_url = format!("http://localhost:3000/api/calendar/month?month={}&year={}", *current_month, *current_year);
+                if let Ok(response) = Request::get(&calendar_url).send().await {
+                    if let Ok(data) = response.json::<CalendarMonth>().await {
+                        calendar_data.set(Some(data));
                     } else {
-                        gloo::console::error!("Failed to parse all transactions:", response.text().await.unwrap_or_default());
+                        gloo::console::error!("Failed to parse calendar data:", response.text().await.unwrap_or_default());
                     }
                 } else {
-                    gloo::console::error!("Failed to fetch all transactions");
+                    gloo::console::error!("Failed to fetch calendar data");
                 }
                 
                 loading.set(false);
@@ -107,8 +104,8 @@ fn app() -> Html {
         })
     };
 
-    // Create transaction callback
-    let create_transaction = {
+    // Add money callback - simplified to use backend validation and processing
+    let add_money = {
         let description = description.clone();
         let amount = amount.clone();
         let creating_transaction = creating_transaction.clone();
@@ -128,50 +125,24 @@ fn app() -> Html {
                 // Clear previous messages
                 form_error.set(None);
                 form_success.set(false);
+                creating_transaction.set(true);
                 
-                // Validate form
-                if description.is_empty() {
-                    form_error.set(Some("Please enter a description".to_string()));
-                    return;
-                }
-                
-                // Clean and parse amount - remove dollar signs, spaces, etc.
-                let cleaned_amount = (*amount)
-                    .trim()
-                    .replace("$", "")
-                    .replace(",", "")
-                    .replace(" ", "");
-                
-                // Debug logging
-                gloo::console::log!("Original amount:", &*amount);
-                gloo::console::log!("Cleaned amount:", &cleaned_amount);
-                
-                let amount_value = match cleaned_amount.parse::<f64>() {
-                    Ok(val) if val > 0.0 => {
-                        gloo::console::log!("Parsed amount:", val);
-                        val
-                    },
-                    Ok(val) => {
-                        gloo::console::log!("Amount not greater than 0:", val);
-                        form_error.set(Some("Amount must be greater than 0".to_string()));
-                        return;
-                    }
-                    Err(e) => {
-                        gloo::console::log!("Parse error:", format!("{:?}", e));
-                        form_error.set(Some("Please enter a valid amount (like 5 or 5.00)".to_string()));
-                        return;
+                // Parse amount for the API (let backend handle validation)
+                let amount_value = match (*amount).trim().parse::<f64>() {
+                    Ok(val) => val,
+                    Err(_) => {
+                        // If we can't parse, let backend handle the validation error
+                        0.0
                     }
                 };
                 
-                creating_transaction.set(true);
-                
-                let request = CreateTransactionRequest {
+                let request = AddMoneyRequest {
                     description: (*description).clone(),
                     amount: amount_value,
                     date: None, // Use current time
                 };
                 
-                match Request::post("http://localhost:3000/api/transactions")
+                match Request::post("http://localhost:3000/api/money/add")
                     .json(&request)
                     .unwrap()
                     .send()
@@ -179,21 +150,30 @@ fn app() -> Html {
                 {
                     Ok(response) => {
                         if response.ok() {
-                            // Success! Clear form and refresh data
-                            description.set(String::new());
-                            amount.set(String::new());
-                            form_success.set(true);
-                            refresh_transactions.emit(());
-                            
-                            // Clear success message after 3 seconds
-                            let form_success_clear = form_success.clone();
-                            spawn_local(async move {
-                                gloo::timers::future::TimeoutFuture::new(3000).await;
-                                form_success_clear.set(false);
-                            });
+                            // Success! Parse response and use backend success message
+                            match response.json::<AddMoneyResponse>().await {
+                                Ok(add_response) => {
+                                    // Clear form and show success
+                                    description.set(String::new());
+                                    amount.set(String::new());
+                                    form_success.set(true);
+                                    refresh_transactions.emit(());
+                                    
+                                    // Clear success message after 3 seconds
+                                    let form_success_clear = form_success.clone();
+                                    spawn_local(async move {
+                                        gloo::timers::future::TimeoutFuture::new(3000).await;
+                                        form_success_clear.set(false);
+                                    });
+                                }
+                                Err(e) => {
+                                    form_error.set(Some(format!("Failed to parse response: {}", e)));
+                                }
+                            }
                         } else {
+                            // Use backend error message
                             let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
-                            form_error.set(Some(format!("Failed to create transaction: {}", error_text)));
+                            form_error.set(Some(error_text));
                         }
                     }
                     Err(e) => {
@@ -206,89 +186,144 @@ fn app() -> Html {
         })
     };
 
-    // Form input handlers
+    // Validation function using backend API
+    let validate_form = {
+        let description = description.clone();
+        let amount = amount.clone();
+        let form_error = form_error.clone();
+        let validation_suggestions = validation_suggestions.clone();
+        
+        Callback::from(move |_| {
+            let description = description.clone();
+            let amount = amount.clone();
+            let form_error = form_error.clone();
+            let validation_suggestions = validation_suggestions.clone();
+            
+            spawn_local(async move {
+                #[derive(serde::Serialize)]
+                struct ValidateRequest {
+                    description: String,
+                    amount_input: String,
+                }
+                
+                let request = ValidateRequest {
+                    description: (*description).clone(),
+                    amount_input: (*amount).clone(),
+                };
+                
+                match Request::post("http://localhost:3000/api/money/validate")
+                    .json(&request)
+                    .unwrap()
+                    .send()
+                    .await
+                {
+                    Ok(response) => {
+                        if let Ok(validation) = response.json::<MoneyFormValidation>().await {
+                            if validation.is_valid {
+                                form_error.set(None);
+                                validation_suggestions.set(Vec::new());
+                            } else {
+                                // Use first error message from backend
+                                if let Some(first_error) = validation.errors.first() {
+                                    // Map backend error to frontend message (temporary, backend should provide messages)
+                                    let error_message = match first_error {
+                                        _ => format!("Validation error: {:?}", first_error),
+                                    };
+                                    form_error.set(Some(error_message));
+                                }
+                                validation_suggestions.set(validation.suggestions);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        gloo::console::warn!("Validation request failed:", e.to_string());
+                    }
+                }
+            });
+        })
+    };
+
+    // Form input handlers with validation
     let on_description_change = {
         let description = description.clone();
+        let validate_form = validate_form.clone();
         Callback::from(move |e: Event| {
             let input: HtmlInputElement = e.target_unchecked_into();
             description.set(input.value());
+            // Trigger validation after short delay
+            let validate_form = validate_form.clone();
+            spawn_local(async move {
+                gloo::timers::future::TimeoutFuture::new(500).await;
+                validate_form.emit(());
+            });
         })
     };
 
     let on_amount_change = {
         let amount = amount.clone();
+        let validate_form = validate_form.clone();
         Callback::from(move |e: Event| {
             let input: HtmlInputElement = e.target_unchecked_into();
             amount.set(input.value());
+            // Trigger validation after short delay
+            let validate_form = validate_form.clone();
+            spawn_local(async move {
+                gloo::timers::future::TimeoutFuture::new(500).await;
+                validate_form.emit(());
+            });
         })
     };
 
-    // Load recent transactions for table view
+    // Load initial data
     use_effect_with((), {
-        let transactions = transactions.clone();
-        let loading = loading.clone();
-        let current_balance = current_balance.clone();
+        let refresh_transactions = refresh_transactions.clone();
         let backend_connected = backend_connected.clone();
         let backend_endpoint = backend_endpoint.clone();
         
         move |_| {
             spawn_local(async move {
-                loading.set(true);
-                
-                match Request::get("http://localhost:3000/api/transactions?limit=10").send().await {
-                    Ok(response) => {
+                // Test backend connection
+                match Request::get("http://localhost:3000/api/transactions/table?limit=1").send().await {
+                    Ok(_) => {
                         // Successfully connected to backend
                         backend_connected.set(true);
                         backend_endpoint.set("localhost:3000".to_string());
                         
-                        match response.json::<TransactionListResponse>().await {
-                            Ok(data) => {
-                                // Set current balance from most recent transaction
-                                if let Some(first_tx) = data.transactions.first() {
-                                    current_balance.set(first_tx.balance);
-                                }
-                                transactions.set(data.transactions);
-                            },
-                            Err(e) => {
-                                gloo::console::error!("Failed to parse transactions:", e.to_string());
-                            }
-                        }
+                        // Load all data
+                        refresh_transactions.emit(());
                     },
                     Err(e) => {
                         // Failed to connect to backend
                         backend_connected.set(false);
                         backend_endpoint.set("Connection failed".to_string());
-                        gloo::console::error!("Failed to fetch transactions:", e.to_string());
+                        gloo::console::error!("Failed to connect to backend:", e.to_string());
                     }
                 }
-                
-                loading.set(false);
             });
             
             || ()
         }
     });
 
-    // Load all transactions for calendar view
-    use_effect_with((), {
-        let all_transactions = all_transactions.clone();
+    // Reload calendar when month/year changes
+    use_effect_with((current_month.clone(), current_year.clone()), {
+        let calendar_data = calendar_data.clone();
         
-        move |_| {
+        move |(month, year)| {
+            let calendar_data = calendar_data.clone();
+            let month = **month;
+            let year = **year;
+            
             spawn_local(async move {
-                match Request::get("http://localhost:3000/api/transactions?limit=100").send().await {
-                    Ok(response) => {
-                        match response.json::<TransactionListResponse>().await {
-                            Ok(data) => {
-                                all_transactions.set(data.transactions);
-                            },
-                            Err(e) => {
-                                gloo::console::error!("Failed to parse all transactions:", e.to_string());
-                            }
-                        }
-                    },
-                    Err(e) => {
-                        gloo::console::error!("Failed to fetch all transactions:", e.to_string());
+                let calendar_url = format!("http://localhost:3000/api/calendar/month?month={}&year={}", month, year);
+                if let Ok(response) = Request::get(&calendar_url).send().await {
+                    if let Ok(data) = response.json::<CalendarMonth>().await {
+                        calendar_data.set(Some(data));
+                    } else {
+                        gloo::console::error!("Failed to parse calendar data:", response.text().await.unwrap_or_default());
                     }
+                } else {
+                    gloo::console::error!("Failed to fetch calendar data");
                 }
             });
             
@@ -341,16 +376,20 @@ fn app() -> Html {
                         <div class="calendar-header">
                             <button class="calendar-nav-btn" onclick={prev_month}>{"‹"}</button>
                             <h2 class="calendar-title">
-                                {format!("{} {}", number_to_month_name(*current_month), *current_year)}
+                                {if let Some(cal_data) = calendar_data.as_ref() {
+                                    format!("{} {}", month_name(cal_data.month), cal_data.year)
+                                } else {
+                                    format!("Loading...")
+                                }}
                             </h2>
                             <button class="calendar-nav-btn" onclick={next_month}>{"›"}</button>
                         </div>
                         
-                        <Calendar 
-                            month={*current_month}
-                            year={*current_year}
-                            transactions={(*all_transactions).clone()}
-                        />
+                        {if let Some(cal_data) = calendar_data.as_ref() {
+                            html! { <Calendar calendar_data={cal_data.clone()} /> }
+                        } else {
+                            html! { <div class="loading">{"Loading calendar..."}</div> }
+                        }}
                     </section>
 
                     <section class="transactions-section">
@@ -371,28 +410,22 @@ fn app() -> Html {
                                             </tr>
                                         </thead>
                                         <tbody>
-                                            {for transactions.iter().take(10).map(|transaction| {
-                                                let amount_class = if transaction.amount >= 0.0 {
-                                                    "amount positive"
-                                                } else {
-                                                    "amount negative"
+                                            {for formatted_transactions.iter().map(|transaction| {
+                                                // Use backend-provided CSS class based on amount type
+                                                let amount_class = match transaction.amount_type {
+                                                    AmountType::Positive => "amount positive",
+                                                    AmountType::Negative => "amount negative",
+                                                    AmountType::Zero => "amount zero",
                                                 };
-                                                
-                                                // Format date nicely
-                                                let formatted_date = format_date(&transaction.date);
                                                 
                                                 html! {
                                                     <tr>
-                                                        <td class="date">{formatted_date}</td>
+                                                        <td class="date">{&transaction.formatted_date}</td>
                                                         <td class="description">{&transaction.description}</td>
                                                         <td class={amount_class}>
-                                                            {if transaction.amount >= 0.0 {
-                                                                format!("+${:.2}", transaction.amount)
-                                                            } else {
-                                                                format!("-${:.2}", transaction.amount.abs())
-                                                            }}
+                                                            {&transaction.formatted_amount}
                                                         </td>
-                                                        <td class="balance">{format!("${:.2}", transaction.balance)}</td>
+                                                        <td class="balance">{&transaction.formatted_balance}</td>
                                                     </tr>
                                                 }
                                             })}
@@ -414,6 +447,19 @@ fn app() -> Html {
                             }
                         } else { html! {} }}
                         
+                        {if !validation_suggestions.is_empty() {
+                            html! {
+                                <div class="form-message info">
+                                    <strong>{"💡 Suggestions:"}</strong>
+                                    <ul>
+                                        {for validation_suggestions.iter().map(|suggestion| {
+                                            html! { <li>{suggestion}</li> }
+                                        })}
+                                    </ul>
+                                </div>
+                            }
+                        } else { html! {} }}
+                        
                         {if *form_success {
                             html! {
                                 <div class="form-message success">
@@ -423,10 +469,10 @@ fn app() -> Html {
                         } else { html! {} }}
                         
                         <form class="add-money-form" onsubmit={
-                            let create_transaction = create_transaction.clone();
+                            let add_money = add_money.clone();
                             Callback::from(move |e: SubmitEvent| {
                                 e.prevent_default();
-                                create_transaction.emit(());
+                                add_money.emit(());
                             })
                         }>
                             <div class="form-group">
@@ -482,150 +528,40 @@ fn app() -> Html {
     }
 }
 
-// Helper function to format RFC 3339 date to human readable format
-fn format_date(rfc3339_date: &str) -> String {
-    // Parse the RFC 3339 date and format it nicely
-    // For now, simple extraction - in a real app would use a proper date library
-    if let Some(date_part) = rfc3339_date.split('T').next() {
-        if let Ok(parts) = date_part.split('-').collect::<Vec<_>>().try_into() {
-            let [year, month, day]: [&str; 3] = parts;
-            if let (Ok(y), Ok(m), Ok(d)) = (year.parse::<u32>(), month.parse::<u32>(), day.parse::<u32>()) {
-                return format!("{} {}, {}", number_to_month_name(m), d, y);
-            }
-        }
-    }
-    // Fallback to original string
-    rfc3339_date.to_string()
-}
+
 
 #[derive(Properties, PartialEq)]
 struct CalendarProps {
-    month: u32,
-    year: u32,
-    transactions: Vec<Transaction>,
+    calendar_data: CalendarMonth,
 }
 
 #[function_component(Calendar)]
 fn calendar(props: &CalendarProps) -> Html {
-    let month = props.month;
-    let year = props.year;
+    let calendar_data = &props.calendar_data;
     
-    // Group transactions by day for the current month
-    let mut transactions_by_day: HashMap<u32, Vec<&Transaction>> = HashMap::new();
-    
-    for transaction in &props.transactions {
-        // Parse RFC 3339 date (e.g., "2025-06-13T09:00:00-04:00")
-        if let Some(date_part) = transaction.date.split('T').next() {
-            let parts: Vec<&str> = date_part.split('-').collect();
-            if parts.len() == 3 {
-                if let (Ok(year_part), Ok(month_part), Ok(day_part)) = (
-                    parts[0].parse::<u32>(),
-                    parts[1].parse::<u32>(),
-                    parts[2].parse::<u32>()
-                ) {
-                    if month_part == month && year_part == year {
-                        transactions_by_day.entry(day_part).or_insert_with(Vec::new).push(transaction);
-                    }
-                }
-            }
-        }
-    }
-    
-    // Calculate running balance for every day in the month
-    let days_in_current_month = days_in_month(month, year);
-    let mut daily_balances: HashMap<u32, f64> = HashMap::new();
-    
-    // Sort all transactions by date to get proper chronological order
-    let mut sorted_transactions = props.transactions.clone();
-    sorted_transactions.sort_by(|a, b| {
-        // Parse RFC 3339 dates and compare (reverse chronological, so newer first)
-        let parse_date = |date_str: &str| -> (u32, u32, u32) {
-            if let Some(date_part) = date_str.split('T').next() {
-                let parts: Vec<&str> = date_part.split('-').collect();
-                if parts.len() == 3 {
-                    if let (Ok(year), Ok(month), Ok(day)) = (
-                        parts[0].parse::<u32>(),
-                        parts[1].parse::<u32>(),
-                        parts[2].parse::<u32>()
-                    ) {
-                        return (year, month, day);
-                    }
-                }
-            }
-            (0, 0, 0)
-        };
-        
-        let (year_a, month_a, day_a) = parse_date(&a.date);
-        let (year_b, month_b, day_b) = parse_date(&b.date);
-        
-        // Compare in reverse chronological order (newest first)
-        (year_b, month_b, day_b).cmp(&(year_a, month_a, day_a))
-    });
-    
-    // Find the balance at the end of the previous month (or start of this month)
-    let mut current_balance = 0.0;
-    
-    // Find first transaction of current month to calculate starting balance
-    for transaction in &sorted_transactions {
-        // Parse RFC 3339 date format
-        if let Some(date_part) = transaction.date.split('T').next() {
-            let parts: Vec<&str> = date_part.split('-').collect();
-            if parts.len() == 3 {
-                if let (Ok(year_part), Ok(month_part), Ok(_day_part)) = (
-                    parts[0].parse::<u32>(),
-                    parts[1].parse::<u32>(),
-                    parts[2].parse::<u32>()
-                ) {
-                    if year_part == year && month_part == month {
-                        // This is a transaction in our target month
-                        // Work backwards to get starting balance
-                        current_balance = transaction.balance - transaction.amount;
-                        break;
-                    }
-                }
-            }
-        }
-    }
-    
-    // Now calculate balance for each day
-    for day in 1..=days_in_current_month {
-        // Check if there are transactions on this day
-        if let Some(day_transactions) = transactions_by_day.get(&day) {
-            // Add up all transactions for this day
-            let daily_change: f64 = day_transactions.iter().map(|t| t.amount).sum();
-            current_balance += daily_change;
-        }
-        daily_balances.insert(day, current_balance);
-    }
-    
-    let first_day = first_day_of_month(month, year);
-    
-    // Create calendar grid
+    // Create calendar grid using backend-provided data
     let mut calendar_days = Vec::new();
     
     // Add empty cells for days before the first day of month
-    for _ in 0..first_day {
+    for _ in 0..calendar_data.first_day_of_week {
         calendar_days.push(html! {
             <div class="calendar-day empty"></div>
         });
     }
     
-    // Add days of the month
-    for day in 1..=days_in_current_month {
-        let day_transactions = transactions_by_day.get(&day).cloned().unwrap_or_default();
-        let day_balance = daily_balances.get(&day).copied().unwrap_or(0.0);
-        
+    // Add days of the month using backend-provided day data
+    for day_data in &calendar_data.days {
         calendar_days.push(html! {
             <div class="calendar-day">
                 <div class="day-header">
-                    <div class="day-number">{day}</div>
+                    <div class="day-number">{day_data.day}</div>
                     <div class="day-balance-subtle">
-                        {format!("${:.0}", day_balance)}
+                        {format!("${:.0}", day_data.balance)}
                     </div>
                 </div>
                 
                 <div class="day-transactions">
-                    {for day_transactions.iter().map(|transaction| {
+                    {for day_data.transactions.iter().map(|transaction| {
                         let chip_class = if transaction.amount >= 0.0 {
                             "transaction-chip positive"
                         } else {
@@ -637,7 +573,7 @@ fn calendar(props: &CalendarProps) -> Html {
                             "💰 {}\n💵 Amount: ${:.2}\n📅 Date: {}\n💳 Balance: ${:.2}",
                             transaction.description,
                             transaction.amount,
-                            format_date(&transaction.date),
+                            format_calendar_date(&transaction.date),
                             transaction.balance
                         );
                         
@@ -646,7 +582,7 @@ fn calendar(props: &CalendarProps) -> Html {
                                  title={tooltip_content}
                                  data-description={transaction.description.clone()}
                                  data-amount={format!("{:.2}", transaction.amount)}
-                                 data-date={format_date(&transaction.date)}
+                                 data-date={format_calendar_date(&transaction.date)}
                                  data-balance={format!("{:.2}", transaction.balance)}>
                                 {if transaction.amount >= 0.0 {
                                     format!("+${:.0}", transaction.amount)
@@ -668,7 +604,7 @@ fn calendar(props: &CalendarProps) -> Html {
                                         </div>
                                         <div class="tooltip-row">
                                             <span class="tooltip-label">{"📅 Date:"}</span>
-                                            <span class="tooltip-value">{format_date(&transaction.date)}</span>
+                                            <span class="tooltip-value">{format_calendar_date(&transaction.date)}</span>
                                         </div>
                                         <div class="tooltip-row">
                                             <span class="tooltip-label">{"💳 Balance:"}</span>

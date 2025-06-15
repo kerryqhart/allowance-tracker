@@ -128,6 +128,80 @@ pub struct TransactionTableResponse {
     pub pagination: PaginationInfo,
 }
 
+/// Request for adding money (creating a positive transaction)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AddMoneyRequest {
+    pub description: String,
+    pub amount: f64,
+    pub date: Option<String>,
+}
+
+/// Response after adding money
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AddMoneyResponse {
+    pub transaction_id: String,
+    pub success_message: String,
+    pub new_balance: f64,
+    pub formatted_amount: String,
+}
+
+/// Form validation result specific to money management
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MoneyFormValidation {
+    pub is_valid: bool,
+    pub errors: Vec<MoneyValidationError>,
+    pub cleaned_amount: Option<f64>,
+    pub suggestions: Vec<String>,
+}
+
+/// Specific validation errors for money forms
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum MoneyValidationError {
+    EmptyDescription,
+    DescriptionTooLong(usize),
+    EmptyAmount,
+    InvalidAmountFormat(String),
+    AmountNotPositive,
+    AmountTooSmall(f64),
+    AmountTooLarge(f64),
+    AmountPrecisionTooHigh,
+}
+
+/// State for managing money input forms
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MoneyFormState {
+    pub description: String,
+    pub amount_input: String,
+    pub is_submitting: bool,
+    pub error_message: Option<String>,
+    pub success_message: Option<String>,
+    pub show_success: bool,
+}
+
+/// Configuration for money management forms
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MoneyManagementConfig {
+    pub max_description_length: usize,
+    pub min_amount: f64,
+    pub max_amount: f64,
+    pub success_message_duration_ms: u64,
+    pub currency_symbol: String,
+    pub enable_debug_logging: bool,
+}
+
+impl Default for MoneyManagementConfig {
+    fn default() -> Self {
+        Self {
+            max_description_length: 256,
+            min_amount: 0.01,
+            max_amount: 1_000_000.0,
+            success_message_duration_ms: 3000,
+            currency_symbol: "$".to_string(),
+            enable_debug_logging: false,
+        }
+    }
+}
+
 impl Transaction {
     /// Generate transaction ID from amount and timestamp
     pub fn generate_id(amount: f64, epoch_millis: u64) -> String {

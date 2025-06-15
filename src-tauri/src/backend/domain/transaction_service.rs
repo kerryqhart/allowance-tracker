@@ -1,3 +1,45 @@
+//! Transaction service domain logic for the allowance tracker.
+//!
+//! This module contains the core business logic for transaction management,
+//! including CRUD operations, balance calculations, pagination, and data persistence.
+//! It serves as the primary service layer for all transaction-related operations.
+//!
+//! ## Key Responsibilities
+//!
+//! - **Transaction CRUD**: Creating, reading, updating, and deleting transactions
+//! - **Balance Management**: Calculating running balances from transaction history
+//! - **Data Persistence**: Interfacing with storage layer for transaction data
+//! - **Pagination**: Cursor-based pagination for efficient data retrieval
+//! - **Business Rules**: Enforcing transaction validation and business constraints
+//! - **Mock Data**: Providing development data when database is not available
+//! - **Date Filtering**: Supporting date range queries for transaction lists
+//!
+//! ## Core Components
+//!
+//! - **TransactionService**: Main service orchestrating all transaction operations
+//! - **Transaction**: Core domain entity representing allowance transactions
+//! - **TransactionListRequest**: Query parameters for transaction retrieval
+//! - **TransactionListResponse**: Paginated response with transaction data
+//! - **CreateTransactionRequest**: Input data for creating new transactions
+//!
+//! ## Business Rules
+//!
+//! - Transactions must have non-empty descriptions (1-256 characters)
+//! - Each transaction updates the running balance automatically
+//! - Transactions are ordered chronologically (newest first)
+//! - Unique transaction IDs are generated based on amount and timestamp
+//! - Balance calculations consider all historical transactions
+//! - Pagination uses cursor-based approach for consistent results
+//!
+//! ## Design Principles
+//!
+//! - **Domain-Driven Design**: Models real-world allowance transaction concepts
+//! - **Storage Agnostic**: Works with any storage implementation via DbConnection
+//! - **Async First**: All operations are asynchronous for better performance
+//! - **Error Handling**: Comprehensive error handling with detailed messages
+//! - **Testability**: Pure business logic with comprehensive test coverage
+//! - **Mock Support**: Development-friendly with fallback mock data
+
 use crate::backend::storage::DbConnection;
 use shared::{Transaction, TransactionListRequest, TransactionListResponse, PaginationInfo, CreateTransactionRequest};
 use anyhow::Result;
