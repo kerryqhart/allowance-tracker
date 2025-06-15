@@ -1,0 +1,128 @@
+# Allowance Tracker - Cursor AI Rules
+
+## Project Overview
+This is a desktop allowance tracking application built with Tauri, featuring a Rust backend and Yew (WebAssembly) frontend. The app helps parents and children track allowance transactions with a visual calendar interface.
+
+## Architecture
+- **Frontend**: Yew (Rust → WebAssembly) on port 8080 via Trunk
+- **Backend**: Embedded Axum REST API server on port 3000 within Tauri app
+- **Desktop**: Tauri native window wrapper
+- **Database**: SQLite with SQLx (currently using mock data for development)
+- **Development**: `cargo tauri dev` for hot-reload development
+
+## Project Structure
+```
+allowance-tracker/
+├── frontend/           # Yew frontend (WebAssembly)
+├── shared/            # Shared types and utilities
+├── src-tauri/         # Tauri app with embedded backend
+│   └── src/backend/   # Axum REST API server
+└── Cargo.toml         # Workspace configuration
+```
+
+## Key Technologies
+- **Tauri 2.x**: Desktop app framework
+- **Yew**: Rust frontend framework
+- **Axum**: Async web framework for REST API
+- **SQLx**: Async SQL toolkit
+- **Trunk**: Yew build tool and dev server
+- **Tokio**: Async runtime
+
+## Development Guidelines
+
+### Code Style
+- Use Rust idioms and best practices
+- Prefer `Result<T, E>` for error handling
+- Use `async/await` for asynchronous operations
+- Follow standard Rust naming conventions (snake_case, PascalCase)
+- Add comprehensive error handling and logging
+
+### Frontend (Yew)
+- Components should be functional when possible
+- Use hooks for state management (`use_state`, `use_effect`)
+- Handle loading states and errors gracefully
+- Maintain responsive design for different screen sizes
+- Use semantic HTML and accessibility best practices
+
+### Backend (Axum)
+- RESTful API design with proper HTTP status codes
+- Use structured logging with the `log` crate
+- Implement proper error handling with custom error types
+- Use SQLx for database operations with compile-time checked queries
+- Follow async/await patterns consistently
+
+### Database
+- Currently using mock data for development
+- SQLite database with SQLx migrations
+- Use transactions for data consistency
+- Implement proper indexing for performance
+
+### UI/UX Guidelines
+- Modern, clean design with gradient backgrounds
+- Responsive layout that works on different screen sizes
+- Visual calendar with transaction chips and hover tooltips
+- Color coding: green for positive amounts, red/orange for negative
+- Smooth animations and transitions
+- Proper z-index management for overlays and tooltips
+
+### Testing
+- Unit tests for business logic
+- Integration tests for API endpoints
+- Frontend component testing when applicable
+- Mock external dependencies in tests
+
+### Performance
+- Minimize bundle size for WebAssembly frontend
+- Use efficient data structures and algorithms
+- Implement proper caching strategies
+- Optimize database queries
+
+## Current Features
+- Transaction listing with pagination
+- Visual calendar view with transaction chips
+- Hover tooltips showing transaction details
+- Current balance display
+- Add money form (UI ready, backend integration pending)
+- Responsive design for desktop and mobile
+
+## Development Commands
+- `cargo tauri dev` - Start development server with hot reload
+- `cargo check --workspace` - Check all workspace members
+- `cargo test --workspace` - Run all tests
+- `cargo tauri build` - Build production app
+
+## Known Issues & TODOs
+- Database integration (currently using mock data)
+- Add money form backend integration
+- Transaction editing and deletion
+- Data persistence and backup
+- User authentication (future feature)
+
+## File Naming & Organization
+- Use kebab-case for file names
+- Group related functionality in modules
+- Keep components focused and single-purpose
+- Separate business logic from UI components
+
+## Error Handling Patterns
+- Use `anyhow` for application errors
+- Implement custom error types for domain-specific errors
+- Log errors appropriately (info, warn, error levels)
+- Provide user-friendly error messages in the UI
+
+## When Making Changes
+- Test changes with `cargo tauri dev`
+- Ensure responsive design works on different screen sizes
+- Check that tooltips and overlays have proper z-index stacking
+- Verify API endpoints work correctly
+- Update documentation if adding new features
+- Follow existing code patterns and conventions
+
+## Dependencies Management
+- Keep dependencies up to date but stable
+- Prefer well-maintained crates with good documentation
+- Minimize dependency tree size for faster builds
+- Use workspace dependencies for shared crates 
+
+## Git
+- "When running a `git commit`, write the provided commit message to a temporary file on disk (so you can use the full range of characters, including newlines). Then invoke the commit command using `git commit --file=<temp-file>`. After the commit succeeds, delete the temporary file."
