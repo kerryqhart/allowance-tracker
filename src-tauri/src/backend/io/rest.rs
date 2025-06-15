@@ -74,6 +74,8 @@ pub async fn create_transaction(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backend::storage::DbConnection;
+    use crate::backend::domain::TransactionService;
 
     /// Helper to create test handlers
     async fn setup_test_handlers() -> AppState {

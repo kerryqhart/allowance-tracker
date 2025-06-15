@@ -1,6 +1,38 @@
-pub mod db;
+//! # Backend Module
+//!
+//! Contains all non-UI logic for the allowance tracker application.
+//! 
+//! This module serves as the orchestration layer that brings together:
+//! - **Domain**: Business logic and rules for allowance management
+//! - **Storage**: Data persistence mechanisms (database, file system, etc.)
+//! - **IO**: Interface layer that exposes functionality to the UI
+//!
+//! The backend is designed to be UI-agnostic, meaning it could theoretically
+//! support different frontend frameworks or even CLI interfaces without modification.
+//! 
+//! ## Architecture
+//! 
+//! The backend follows a layered architecture:
+//! ```
+//! UI Layer (Yew frontend)
+//!     ↓
+//! IO Layer (REST API, handlers)
+//!     ↓
+//! Domain Layer (Business logic, services)
+//!     ↓
+//! Storage Layer (Database, persistence)
+//! ```
+//!
+//! ## Key Responsibilities
+//! 
+//! - Initialize and configure the application state
+//! - Set up the REST API router with proper CORS configuration
+//! - Coordinate between domain logic and data persistence
+//! - Provide a clean separation of concerns for maintainability
+
+pub mod storage;
 pub mod domain;
-pub mod rest;
+pub mod io;
 
 
 use axum::{
@@ -11,9 +43,9 @@ use axum::{
 use tower_http::cors::{Any, CorsLayer};
 use anyhow::Result;
 
-pub use db::*;
+pub use storage::*;
 pub use domain::*;
-pub use rest::*;
+pub use io::*;
 
 /// Create application state with initialized services
 pub async fn create_app_state() -> Result<AppState> {
@@ -39,11 +71,11 @@ pub fn create_router(app_state: AppState) -> Router {
 
     // Set up our application routes
     let api_routes = Router::new()
-        .route("/transactions", get(rest::list_transactions).post(rest::create_transaction));
+        .route("/transactions", get(list_transactions).post(create_transaction));
 
     // Define our main application router
     Router::new()
         .nest("/api", api_routes)
         .layer(cors)
         .with_state(app_state)
-} 
+}

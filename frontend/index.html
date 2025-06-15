@@ -442,21 +442,24 @@
             border-radius: 8px;
             text-align: center;
             cursor: pointer;
-            transition: transform 0.2s ease;
+            transition: all 0.2s ease;
+            background: white;
+            border: 1.5px solid;
         }
 
         .transaction-chip:hover {
             transform: scale(1.05);
+            background: rgba(0, 0, 0, 0.02);
         }
 
         .transaction-chip.positive {
-            background: rgba(76, 175, 80, 0.9);
-            color: white;
+            border-color: #4CAF50;
+            color: #4CAF50;
         }
 
         .transaction-chip.negative {
-            background: rgba(255, 107, 53, 0.9);
-            color: white;
+            border-color: #718096;
+            color: #718096;
         }
 
         /* Custom Tooltip Styles */

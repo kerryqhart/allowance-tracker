@@ -1,4 +1,4 @@
-use crate::backend::db::DbConnection;
+use crate::backend::storage::DbConnection;
 use shared::{Transaction, TransactionListRequest, TransactionListResponse, PaginationInfo, CreateTransactionRequest};
 use anyhow::Result;
 use tracing::info;
