@@ -49,6 +49,31 @@ pub struct PaginationInfo {
     pub next_cursor: Option<String>,
 }
 
+/// Represents a calendar month with its associated transaction data
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CalendarMonth {
+    pub month: u32,
+    pub year: u32,
+    pub days: Vec<CalendarDay>,
+    pub first_day_of_week: u32, // 0 = Sunday, 1 = Monday, etc.
+}
+
+/// Represents a single day in the calendar
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CalendarDay {
+    pub day: u32,
+    pub balance: f64,
+    pub transactions: Vec<Transaction>,
+    pub is_empty: bool, // For padding days before/after month
+}
+
+/// Request for calendar month data
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CalendarMonthRequest {
+    pub month: u32,
+    pub year: u32,
+}
+
 impl Transaction {
     /// Generate transaction ID from amount and timestamp
     pub fn generate_id(amount: f64, epoch_millis: u64) -> String {

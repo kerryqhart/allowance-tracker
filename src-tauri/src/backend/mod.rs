@@ -71,7 +71,8 @@ pub fn create_router(app_state: AppState) -> Router {
 
     // Set up our application routes
     let api_routes = Router::new()
-        .route("/transactions", get(list_transactions).post(create_transaction));
+        .route("/transactions", get(list_transactions).post(create_transaction))
+        .route("/calendar/month", get(get_calendar_month));
 
     // Define our main application router
     Router::new()

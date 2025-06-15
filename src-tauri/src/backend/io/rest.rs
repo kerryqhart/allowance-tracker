@@ -5,21 +5,25 @@ use axum::{
     Json,
 };
 use shared::{TransactionListRequest, CreateTransactionRequest};
-use crate::backend::domain::TransactionService;
+use crate::backend::domain::{TransactionService, CalendarService};
 use serde::Deserialize;
 use tracing::info;
 
 
-/// Application state containing the TransactionService
+/// Application state containing the services
 #[derive(Clone)]
 pub struct AppState {
     pub transaction_service: TransactionService,
+    pub calendar_service: CalendarService,
 }
 
 impl AppState {
-    /// Create new application state with the given TransactionService
+    /// Create new application state with the given services
     pub fn new(transaction_service: TransactionService) -> Self {
-        Self { transaction_service }
+        Self { 
+            transaction_service,
+            calendar_service: CalendarService::new(),
+        }
     }
 }
 
@@ -69,6 +73,44 @@ pub async fn create_transaction(
             (StatusCode::BAD_REQUEST, e.to_string()).into_response()
         }
     }
+}
+
+/// Axum handler function for GET /api/calendar/month
+pub async fn get_calendar_month(
+    State(state): State<AppState>,
+    Query(query): Query<CalendarMonthQuery>,
+) -> impl IntoResponse {
+    info!("GET /api/calendar/month - query: {:?}", query);
+
+    // Get all transactions for the calendar calculation
+    let transaction_request = TransactionListRequest {
+        after: None,
+        limit: Some(1000), // Get enough transactions for accurate balance calculations
+        start_date: None,
+        end_date: None,
+    };
+
+    match state.transaction_service.list_transactions(transaction_request).await {
+        Ok(response) => {
+            let calendar_month = state.calendar_service.generate_calendar_month(
+                query.month,
+                query.year,
+                response.transactions,
+            );
+            (StatusCode::OK, Json(calendar_month)).into_response()
+        }
+        Err(e) => {
+            tracing::error!("Error fetching transactions for calendar: {:?}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, "Error generating calendar").into_response()
+        }
+    }
+}
+
+/// Query parameters for calendar month endpoint
+#[derive(Deserialize, Debug)]
+pub struct CalendarMonthQuery {
+    pub month: u32,
+    pub year: u32,
 }
 
 #[cfg(test)]
