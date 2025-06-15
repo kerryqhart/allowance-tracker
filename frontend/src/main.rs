@@ -632,13 +632,50 @@ fn calendar(props: &CalendarProps) -> Html {
                             "transaction-chip negative"
                         };
                         
+                        // Create detailed tooltip content
+                        let tooltip_content = format!(
+                            "💰 {}\n💵 Amount: ${:.2}\n📅 Date: {}\n💳 Balance: ${:.2}",
+                            transaction.description,
+                            transaction.amount,
+                            format_date(&transaction.date),
+                            transaction.balance
+                        );
+                        
                         html! {
-                            <div class={chip_class} title={transaction.description.clone()}>
+                            <div class={format!("{} transaction-tooltip", chip_class)} 
+                                 title={tooltip_content}
+                                 data-description={transaction.description.clone()}
+                                 data-amount={format!("{:.2}", transaction.amount)}
+                                 data-date={format_date(&transaction.date)}
+                                 data-balance={format!("{:.2}", transaction.balance)}>
                                 {if transaction.amount >= 0.0 {
                                     format!("+${:.0}", transaction.amount)
                                 } else {
                                     format!("-${:.0}", transaction.amount.abs())
                                 }}
+                                
+                                // Custom tooltip div that will be shown on hover
+                                <div class="custom-tooltip">
+                                    <div class="tooltip-header">
+                                        <strong>{&transaction.description}</strong>
+                                    </div>
+                                    <div class="tooltip-body">
+                                        <div class="tooltip-row">
+                                            <span class="tooltip-label">{"💵 Amount:"}</span>
+                                            <span class={if transaction.amount >= 0.0 { "tooltip-value positive" } else { "tooltip-value negative" }}>
+                                                {format!("${:.2}", transaction.amount)}
+                                            </span>
+                                        </div>
+                                        <div class="tooltip-row">
+                                            <span class="tooltip-label">{"📅 Date:"}</span>
+                                            <span class="tooltip-value">{format_date(&transaction.date)}</span>
+                                        </div>
+                                        <div class="tooltip-row">
+                                            <span class="tooltip-label">{"💳 Balance:"}</span>
+                                            <span class="tooltip-value">{format!("${:.2}", transaction.balance)}</span>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         }
                     })}
