@@ -2,7 +2,7 @@ pub mod db;
 pub mod domain;
 pub mod rest;
 
-use std::sync::Arc;
+
 use axum::{
     http::{HeaderValue, Method},
     routing::get,

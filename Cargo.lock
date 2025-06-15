@@ -72,28 +72,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
 
 [[package]]
-name = "allowance-tracker-backend"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "axum",
- "lazy_static",
- "once_cell",
- "serde",
- "serde_json",
- "shared",
- "sqlx",
- "thiserror 1.0.69",
- "time",
- "tokio",
- "tower 0.4.13",
- "tower-http 0.5.2",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
 name = "allowance-tracker-frontend"
 version = "0.1.0"
 dependencies = [

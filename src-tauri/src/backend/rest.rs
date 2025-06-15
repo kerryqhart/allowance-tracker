@@ -4,11 +4,11 @@ use axum::{
     response::IntoResponse,
     Json,
 };
-use shared::{TransactionListRequest, TransactionListResponse, CreateTransactionRequest, Transaction};
+use shared::{TransactionListRequest, CreateTransactionRequest};
 use crate::backend::domain::TransactionService;
 use serde::Deserialize;
 use tracing::info;
-use crate::backend::db::DbConnection;
+
 
 /// Application state containing the TransactionService
 #[derive(Clone)]

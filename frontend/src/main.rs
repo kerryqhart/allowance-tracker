@@ -5,15 +5,7 @@ use shared::{Transaction, TransactionListResponse, CreateTransactionRequest};
 use wasm_bindgen_futures::spawn_local;
 use web_sys::HtmlInputElement;
 
-// Helper function to parse month name to number
-fn month_name_to_number(month: &str) -> u32 {
-    match month {
-        "January" => 1, "February" => 2, "March" => 3, "April" => 4,
-        "May" => 5, "June" => 6, "July" => 7, "August" => 8,
-        "September" => 9, "October" => 10, "November" => 11, "December" => 12,
-        _ => 1,
-    }
-}
+
 
 // Helper function to get month name from number
 fn number_to_month_name(month: u32) -> &'static str {
@@ -572,25 +564,24 @@ fn calendar(props: &CalendarProps) -> Html {
     
     // Find the balance at the end of the previous month (or start of this month)
     let mut current_balance = 0.0;
-    let mut found_starting_balance = false;
     
+    // Find first transaction of current month to calculate starting balance
     for transaction in &sorted_transactions {
-        let parts: Vec<&str> = transaction.date.split(", ").collect();
-        if parts.len() == 2 {
-            let year_part = parts[1].parse::<u32>().unwrap_or(0);
-            let month_day_parts: Vec<&str> = parts[0].split(' ').collect();
-            if month_day_parts.len() == 2 {
-                let month_part = month_name_to_number(month_day_parts[0]);
-                let day_part = month_day_parts[1].parse::<u32>().unwrap_or(0);
-                
-                if year_part == year && month_part == month {
-                    // This is a transaction in our target month
-                    if !found_starting_balance {
-                        // First transaction of the month - work backwards to get starting balance
+        // Parse RFC 3339 date format
+        if let Some(date_part) = transaction.date.split('T').next() {
+            let parts: Vec<&str> = date_part.split('-').collect();
+            if parts.len() == 3 {
+                if let (Ok(year_part), Ok(month_part), Ok(_day_part)) = (
+                    parts[0].parse::<u32>(),
+                    parts[1].parse::<u32>(),
+                    parts[2].parse::<u32>()
+                ) {
+                    if year_part == year && month_part == month {
+                        // This is a transaction in our target month
+                        // Work backwards to get starting balance
                         current_balance = transaction.balance - transaction.amount;
-                        found_starting_balance = true;
+                        break;
                     }
-                    break;
                 }
             }
         }
