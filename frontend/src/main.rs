@@ -337,6 +337,22 @@ fn app() -> Html {
 
             <main class="main">
                 <div class="container">
+                    <section class="calendar-section">
+                        <div class="calendar-header">
+                            <button class="calendar-nav-btn" onclick={prev_month}>{"‹"}</button>
+                            <h2 class="calendar-title">
+                                {format!("{} {}", number_to_month_name(*current_month), *current_year)}
+                            </h2>
+                            <button class="calendar-nav-btn" onclick={next_month}>{"›"}</button>
+                        </div>
+                        
+                        <Calendar 
+                            month={*current_month}
+                            year={*current_year}
+                            transactions={(*all_transactions).clone()}
+                        />
+                    </section>
+
                     <section class="transactions-section">
                         <h2>{"Recent Transactions"}</h2>
                         
@@ -385,22 +401,6 @@ fn app() -> Html {
                                 </div>
                             }
                         }}
-                    </section>
-
-                    <section class="calendar-section">
-                        <div class="calendar-header">
-                            <button class="calendar-nav-btn" onclick={prev_month}>{"‹"}</button>
-                            <h2 class="calendar-title">
-                                {format!("{} {}", number_to_month_name(*current_month), *current_year)}
-                            </h2>
-                            <button class="calendar-nav-btn" onclick={next_month}>{"›"}</button>
-                        </div>
-                        
-                        <Calendar 
-                            month={*current_month}
-                            year={*current_year}
-                            transactions={(*all_transactions).clone()}
-                        />
                     </section>
 
                     <section class="add-money-section">
