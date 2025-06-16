@@ -14,7 +14,6 @@
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
             color: #333;
             line-height: 1.6;
         }
@@ -65,7 +64,7 @@
         }
 
         .main {
-            padding-bottom: 2rem;
+            padding-bottom: 1rem;
         }
 
         .transactions-section {
@@ -159,20 +158,22 @@
             background: rgba(255, 255, 255, 0.95);
             backdrop-filter: blur(10px);
             border-radius: 15px;
-            padding: 2rem;
+            padding: 2rem 2rem 1rem 2rem;
             box-shadow: 0 8px 32px rgba(102, 126, 234, 0.2);
+            display: flex;
+            flex-direction: column;
             flex: 1;
-            margin-right: 1rem;
         }
 
         .spend-money-section {
             background: rgba(255, 255, 255, 0.95);
             backdrop-filter: blur(10px);
             border-radius: 15px;
-            padding: 2rem;
+            padding: 2rem 2rem 1rem 2rem;
             box-shadow: 0 8px 32px rgba(255, 87, 51, 0.2);
+            display: flex;
+            flex-direction: column;
             flex: 1;
-            margin-left: 1rem;
         }
 
         .spend-money-section h2 {
@@ -183,15 +184,17 @@
         }
 
         .spend-money-form {
-            max-width: 400px;
-            margin: 0 auto;
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            justify-content: space-between;
         }
 
         .spend-money-btn {
             width: 100%;
-            padding: 1.25rem;
-            font-size: 1.2rem;
-            margin-top: 1rem;
+            padding: 1rem;
+            font-size: 1.1rem;
+            margin-top: 0.75rem;
             background: linear-gradient(135deg, #ff5733, #ff7043);
             color: white;
             border: none;
@@ -216,18 +219,14 @@
         .money-management-container {
             display: flex;
             gap: 2rem;
-            margin-bottom: 3rem;
+            margin-bottom: 1rem;
+            align-items: stretch;
         }
 
         @media (max-width: 768px) {
             .money-management-container {
                 flex-direction: column;
                 gap: 1.5rem;
-            }
-            
-            .add-money-section,
-            .spend-money-section {
-                margin: 0;
             }
         }
 
@@ -239,12 +238,25 @@
         }
 
         .add-money-form {
-            max-width: 400px;
-            margin: 0 auto;
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            justify-content: space-between;
         }
 
         .form-group {
-            margin-bottom: 1.5rem;
+            margin-bottom: 0;
+        }
+
+        .form-fields-group {
+            display: flex;
+            flex-direction: column;
+            gap: 1.25rem;
+        }
+
+        .form-button-group {
+            margin-top: auto;
+            padding-top: 1rem;
         }
 
         .form-group label {
@@ -257,7 +269,7 @@
 
         .form-group input {
             width: 100%;
-            padding: 1rem;
+            padding: 0.75rem;
             border: 2px solid #e9ecef;
             border-radius: 10px;
             font-size: 1rem;
@@ -288,11 +300,76 @@
             -moz-appearance: textfield;
         }
 
+        /* Dollar sign prefix for amount inputs */
+        .amount-input-wrapper {
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+
+        .amount-input-wrapper::before {
+            content: "$";
+            position: absolute;
+            left: 0.75rem;
+            color: #666;
+            font-weight: 600;
+            font-size: 1rem;
+            z-index: 1;
+            pointer-events: none;
+        }
+
+        .amount-input-wrapper input {
+            padding-left: 2rem !important;
+        }
+
+        /* Description textarea styling */
+        .form-group textarea {
+            width: 100%;
+            padding: 0.75rem;
+            border: 2px solid #e9ecef;
+            border-radius: 10px;
+            font-size: 1rem;
+            transition: all 0.3s ease;
+            background: white;
+            resize: none;
+            height: 5rem;
+            font-family: inherit;
+            line-height: 1.4;
+        }
+
+        .form-group textarea:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .form-group textarea:disabled {
+            background-color: #f8f9fa;
+            opacity: 0.7;
+            cursor: not-allowed;
+        }
+
+        /* Character counter */
+        .char-counter {
+            font-size: 0.8rem;
+            color: #666;
+            text-align: right;
+            margin-top: 0.25rem;
+        }
+
+        .char-counter.warning {
+            color: #ff6b35;
+        }
+
+        .char-counter.error {
+            color: #dc3545;
+        }
+
         .add-money-btn {
             width: 100%;
-            padding: 1.25rem;
-            font-size: 1.2rem;
-            margin-top: 1rem;
+            padding: 1rem;
+            font-size: 1.1rem;
+            margin-top: 0.75rem;
         }
 
         .add-money-btn:disabled {
@@ -302,9 +379,9 @@
         }
 
         .form-message {
-            padding: 1rem;
+            padding: 0.75rem;
             border-radius: 10px;
-            margin-bottom: 1.5rem;
+            margin-bottom: 1.25rem;
             text-align: center;
             font-weight: 500;
         }
@@ -665,7 +742,12 @@
             
             .transactions-section,
             .actions-section {
-                padding: 1.5rem;
+                padding: 1.25rem;
+            }
+            
+            .add-money-section,
+            .spend-money-section {
+                padding: 1.25rem;
             }
 
             .transactions-table th,
