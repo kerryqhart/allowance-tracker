@@ -62,11 +62,7 @@ pub struct TransactionTableQuery {
 }
 
 // Request body for transaction validation API
-#[derive(Debug, Deserialize)]
-pub struct ValidateTransactionRequest {
-    pub description: String,
-    pub amount: String,
-}
+
 
 /// List transactions with optional filtering and pagination
 pub async fn list_transactions(
@@ -173,18 +169,7 @@ pub async fn get_transaction_table(
     }
 }
 
-/// Validate transaction input without creating the transaction
-pub async fn validate_transaction(
-    State(state): State<AppState>,
-    Json(request): Json<ValidateTransactionRequest>,
-) -> impl IntoResponse {
-    info!("POST /api/transactions/validate - request: {:?}", request);
 
-    let validation_result = state.transaction_table_service
-        .validate_transaction_input(&request.description, &request.amount);
-
-    (StatusCode::OK, Json(validation_result)).into_response()
-}
 
 
 
@@ -299,11 +284,13 @@ mod tests {
         let transaction_service = TransactionService::new(db);
         let calendar_service = crate::backend::domain::CalendarService::new();
         let transaction_table_service = crate::backend::domain::TransactionTableService::new();
+        let money_management_service = crate::backend::domain::MoneyManagementService::new();
         
         AppState {
             transaction_service,
             calendar_service,
             transaction_table_service,
+            money_management_service,
         }
     }
 
@@ -382,19 +369,7 @@ mod tests {
         // The created transaction should appear in the list
     }
 
-    #[tokio::test]
-    async fn test_validate_transaction_handler() {
-        let state = setup_test_handlers().await;
-        
-        let request = ValidateTransactionRequest {
-            description: "Valid transaction".to_string(),
-            amount: "10.50".to_string(),
-        };
-        
-        let _response = validate_transaction(State(state), Json(request)).await;
-        
-        // Should return validation result
-    }
+
 
     #[tokio::test]
     async fn test_get_transaction_table_handler() {

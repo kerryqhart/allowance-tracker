@@ -91,7 +91,6 @@ pub fn create_router(app_state: AppState) -> Router {
     let api_routes = Router::new()
         .route("/transactions", get(io::list_transactions).post(io::create_transaction))
         .route("/transactions/table", get(io::get_transaction_table))
-        .route("/transactions/validate", post(io::validate_transaction))
         .route("/calendar/month", get(io::get_calendar_month))
         .route("/money/add", post(io::add_money))
         .route("/money/spend", post(io::spend_money));
