@@ -106,32 +106,32 @@ fn app() -> Html {
                         transactions={transactions.state.formatted_transactions.clone()} 
                         loading={transactions.state.loading}
                     />
-                </div>
 
-                <div class="money-management-container">
-                    <AddMoneyForm 
-                        description={transactions.state.description.clone()}
-                        amount={transactions.state.amount.clone()}
-                        creating_transaction={transactions.state.creating_transaction}
-                        form_error={transactions.state.form_error.clone()}
-                        form_success={transactions.state.form_success}
-                        validation_suggestions={transactions.state.validation_suggestions.clone()}
-                        on_description_change={transactions.actions.on_description_change}
-                        on_amount_change={transactions.actions.on_amount_change}
-                        on_submit={transactions.actions.add_money}
-                    />
+                    <div class="money-management-container">
+                        <AddMoneyForm 
+                            description={transactions.state.description.clone()}
+                            amount={transactions.state.amount.clone()}
+                            creating_transaction={transactions.state.creating_transaction}
+                            form_error={transactions.state.form_error.clone()}
+                            form_success={transactions.state.form_success}
+                            validation_suggestions={transactions.state.validation_suggestions.clone()}
+                            on_description_change={transactions.actions.on_description_change}
+                            on_amount_change={transactions.actions.on_amount_change}
+                            on_submit={transactions.actions.add_money}
+                        />
 
-                    <SpendMoneyForm 
-                        description={transactions.state.spend_description.clone()}
-                        amount={transactions.state.spend_amount.clone()}
-                        creating_transaction={transactions.state.creating_spend_transaction}
-                        form_error={transactions.state.spend_form_error.clone()}
-                        form_success={transactions.state.spend_form_success}
-                        validation_suggestions={transactions.state.spend_validation_suggestions.clone()}
-                        on_description_change={transactions.actions.on_spend_description_change}
-                        on_amount_change={transactions.actions.on_spend_amount_change}
-                        on_submit={transactions.actions.spend_money}
-                    />
+                        <SpendMoneyForm 
+                            description={transactions.state.spend_description.clone()}
+                            amount={transactions.state.spend_amount.clone()}
+                            creating_transaction={transactions.state.creating_spend_transaction}
+                            form_error={transactions.state.spend_form_error.clone()}
+                            form_success={transactions.state.spend_form_success}
+                            validation_suggestions={transactions.state.spend_validation_suggestions.clone()}
+                            on_description_change={transactions.actions.on_spend_description_change}
+                            on_amount_change={transactions.actions.on_spend_amount_change}
+                            on_submit={transactions.actions.spend_money}
+                        />
+                    </div>
                 </div>
             </main>
             
