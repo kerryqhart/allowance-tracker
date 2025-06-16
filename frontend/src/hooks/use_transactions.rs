@@ -109,6 +109,9 @@ pub fn use_transactions(api_client: &ApiClient) -> UseTransactionsResult {
         let refresh_transactions = refresh_transactions.clone();
         
         use_callback((), move |_, _| {
+            // IMMEDIATE DEBUG - This should show if callback is called at all
+            gloo::console::log!("🚨 ADD_MONEY CALLBACK TRIGGERED! 🚨");
+            
             let api_client = api_client.clone();
             let description = description.clone();
             let amount = amount.clone();
@@ -118,20 +121,39 @@ pub fn use_transactions(api_client: &ApiClient) -> UseTransactionsResult {
             let refresh_transactions = refresh_transactions.clone();
             
             spawn_local(async move {
+                // Debug logging - show current state values
+                let desc_value = (*description).clone();
+                let amount_str = (*amount).clone();
+                
+                gloo::console::log!("=== ADD MONEY CALLBACK START ===");
+                gloo::console::log!("Raw description state:", &desc_value);
+                gloo::console::log!("Raw amount state:", &amount_str);
+                
                 form_error.set(None);
                 form_success.set(false);
                 creating_transaction.set(true);
                 
-                let amount_value = match (*amount).trim().parse::<f64>() {
-                    Ok(val) => val,
-                    Err(_) => 0.0,
+                let amount_value = match amount_str.trim().parse::<f64>() {
+                    Ok(val) => {
+                        gloo::console::log!("Parsed amount successfully:", val.to_string());
+                        val
+                    },
+                    Err(e) => {
+                        gloo::console::log!("Failed to parse amount:", format!("{:?}", e));
+                        0.0
+                    },
                 };
                 
                 let request = AddMoneyRequest {
-                    description: (*description).clone(),
+                    description: desc_value.clone(),
                     amount: amount_value,
                     date: None,
                 };
+                
+                gloo::console::log!("=== FINAL REQUEST BEING SENT ===");
+                gloo::console::log!("Request description:", &request.description);
+                gloo::console::log!("Request amount:", request.amount.to_string());
+                gloo::console::log!("Full request:", format!("{:?}", request));
                 
                 match api_client.add_money(request).await {
                     Ok(_response) => {
@@ -167,6 +189,9 @@ pub fn use_transactions(api_client: &ApiClient) -> UseTransactionsResult {
         let refresh_transactions = refresh_transactions.clone();
         
         use_callback((), move |_, _| {
+            // IMMEDIATE DEBUG - This should show if callback is called at all
+            gloo::console::log!("🚨 SPEND_MONEY CALLBACK TRIGGERED! 🚨");
+            
             let api_client = api_client.clone();
             let spend_description = spend_description.clone();
             let spend_amount = spend_amount.clone();
@@ -176,20 +201,39 @@ pub fn use_transactions(api_client: &ApiClient) -> UseTransactionsResult {
             let refresh_transactions = refresh_transactions.clone();
             
             spawn_local(async move {
+                // Debug logging - show current state values
+                let desc_value = (*spend_description).clone();
+                let amount_str = (*spend_amount).clone();
+                
+                gloo::console::log!("=== SPEND MONEY CALLBACK START ===");
+                gloo::console::log!("Raw spend_description state:", &desc_value);
+                gloo::console::log!("Raw spend_amount state:", &amount_str);
+                
                 spend_form_error.set(None);
                 spend_form_success.set(false);
                 creating_spend_transaction.set(true);
                 
-                let amount_value = match (*spend_amount).trim().parse::<f64>() {
-                    Ok(val) => val,
-                    Err(_) => 0.0,
+                let amount_value = match amount_str.trim().parse::<f64>() {
+                    Ok(val) => {
+                        gloo::console::log!("Parsed amount successfully:", val.to_string());
+                        val
+                    },
+                    Err(e) => {
+                        gloo::console::log!("Failed to parse amount:", format!("{:?}", e));
+                        0.0
+                    },
                 };
                 
                 let request = SpendMoneyRequest {
-                    description: (*spend_description).clone(),
+                    description: desc_value.clone(),
                     amount: amount_value,
                     date: None,
                 };
+                
+                gloo::console::log!("=== FINAL REQUEST BEING SENT ===");
+                gloo::console::log!("Request description:", &request.description);
+                gloo::console::log!("Request amount:", request.amount.to_string());
+                gloo::console::log!("Full request:", format!("{:?}", request));
                 
                 match api_client.spend_money(request).await {
                     Ok(_response) => {
@@ -254,6 +298,8 @@ pub fn use_transactions(api_client: &ApiClient) -> UseTransactionsResult {
             spend_form_error.set(None);
         })
     };
+
+
 
     let state = TransactionState {
         formatted_transactions: (*formatted_transactions).clone(),

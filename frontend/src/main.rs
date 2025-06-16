@@ -1,5 +1,6 @@
 use yew::prelude::*;
 use wasm_bindgen_futures::spawn_local;
+
 use hooks::{
     use_transactions::use_transactions,
     use_calendar::use_calendar,
@@ -36,6 +37,8 @@ fn app() -> Html {
     // Connection status for parent info
     let backend_connected = use_state(|| false);
     let backend_endpoint = use_state(|| String::from("Checking..."));
+    
+
 
 
 
@@ -80,6 +83,8 @@ fn app() -> Html {
         <>
             <Header current_balance={transactions.state.current_balance} />
 
+
+
             <main class="main">
                 <div class="container">
                     <section class="calendar-section">
@@ -115,22 +120,28 @@ fn app() -> Html {
                             form_error={transactions.state.form_error.clone()}
                             form_success={transactions.state.form_success}
                             validation_suggestions={transactions.state.validation_suggestions.clone()}
-                            on_description_change={transactions.actions.on_description_change}
-                            on_amount_change={transactions.actions.on_amount_change}
-                            on_submit={transactions.actions.add_money}
+                            on_description_change={transactions.actions.on_description_change.clone()}
+                            on_amount_change={transactions.actions.on_amount_change.clone()}
+                            on_submit={Callback::from(|_| {})} // Dummy callback - using FormData instead
+                            on_debug={Callback::from(|_: String| {})} // Dummy callback
+                            on_refresh={transactions.actions.refresh_transactions.clone()}
                         />
 
                         <SpendMoneyForm 
-                            description={transactions.state.spend_description.clone()}
-                            amount={transactions.state.spend_amount.clone()}
-                            creating_transaction={transactions.state.creating_spend_transaction}
+                            spend_description={transactions.state.spend_description.clone()}
+                            spend_amount={transactions.state.spend_amount.clone()}
+                            recording_spending={transactions.state.creating_spend_transaction}
                             form_error={transactions.state.spend_form_error.clone()}
                             form_success={transactions.state.spend_form_success}
                             validation_suggestions={transactions.state.spend_validation_suggestions.clone()}
-                            on_description_change={transactions.actions.on_spend_description_change}
-                            on_amount_change={transactions.actions.on_spend_amount_change}
-                            on_submit={transactions.actions.spend_money}
+                            on_spend_description_change={transactions.actions.on_spend_description_change.clone()}
+                            on_spend_amount_change={transactions.actions.on_spend_amount_change.clone()}
+                            on_spend_submit={Callback::from(|_| {})} // Dummy callback - using FormData instead
+                            on_debug={Callback::from(|_: String| {})} // Dummy callback
+                            on_refresh={transactions.actions.refresh_transactions.clone()}
                         />
+
+
                     </div>
                 </div>
             </main>
