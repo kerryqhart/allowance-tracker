@@ -46,9 +46,7 @@ use crate::backend::domain::{TransactionService, CalendarService, TransactionTab
 use crate::backend::storage::DbConnection;
 use log::info;
 
-pub use storage::*;
-pub use domain::*;
-pub use io::*;
+// Re-exports removed to avoid unused import warnings
 
 /// Main application state that holds all services
 #[derive(Clone)]
@@ -95,8 +93,8 @@ pub fn create_router(app_state: AppState) -> Router {
         .route("/transactions/table", get(io::get_transaction_table))
         .route("/transactions/validate", post(io::validate_transaction))
         .route("/calendar/month", get(io::get_calendar_month))
-        .route("/money/validate", post(io::validate_add_money_form))
-        .route("/money/add", post(io::add_money));
+        .route("/money/add", post(io::add_money))
+        .route("/money/spend", post(io::spend_money));
 
     // Define our main application router
     Router::new()

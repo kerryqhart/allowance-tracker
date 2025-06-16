@@ -1,8 +1,8 @@
 use yew::prelude::*;
 use gloo::net::http::Request;
-use shared::{AddMoneyRequest, AddMoneyResponse, MoneyFormValidation, CalendarMonth, TransactionTableResponse, FormattedTransaction, AmountType};
+use shared::{AddMoneyRequest, AddMoneyResponse, SpendMoneyRequest, SpendMoneyResponse, CalendarMonth, TransactionTableResponse, FormattedTransaction, AmountType};
 use wasm_bindgen_futures::spawn_local;
-use web_sys::HtmlInputElement;
+use web_sys::{HtmlInputElement, MouseEvent};
 
 // Helper function to get month name from number
 fn month_name(month: u32) -> &'static str {
@@ -47,6 +47,14 @@ fn app() -> Html {
     let form_error = use_state(|| Option::<String>::None);
     let form_success = use_state(|| false);
     let validation_suggestions = use_state(|| Vec::<String>::new());
+    
+    // Spend money form states
+    let spend_description = use_state(String::new);
+    let spend_amount = use_state(String::new);
+    let creating_spend_transaction = use_state(|| false);
+    let spend_form_error = use_state(|| None::<String>);
+    let spend_form_success = use_state(|| false);
+    let spend_validation_suggestions = use_state(Vec::<String>::new);
     
     // Connection status for parent info
     let backend_connected = use_state(|| false);
@@ -152,7 +160,7 @@ fn app() -> Html {
                         if response.ok() {
                             // Success! Parse response and use backend success message
                             match response.json::<AddMoneyResponse>().await {
-                                Ok(add_response) => {
+                                Ok(_add_response) => {
                                     // Clear form and show success
                                     description.set(String::new());
                                     amount.set(String::new());
@@ -186,91 +194,134 @@ fn app() -> Html {
         })
     };
 
-    // Validation function using backend API
-    let validate_form = {
-        let description = description.clone();
-        let amount = amount.clone();
-        let form_error = form_error.clone();
-        let validation_suggestions = validation_suggestions.clone();
+    // Spend money callback 
+    let spend_money = {
+        let spend_description = spend_description.clone();
+        let spend_amount = spend_amount.clone();
+        let creating_spend_transaction = creating_spend_transaction.clone();
+        let spend_form_error = spend_form_error.clone();
+        let spend_form_success = spend_form_success.clone();
+        let refresh_transactions = refresh_transactions.clone();
         
         Callback::from(move |_| {
-            let description = description.clone();
-            let amount = amount.clone();
-            let form_error = form_error.clone();
-            let validation_suggestions = validation_suggestions.clone();
+            let spend_description = spend_description.clone();
+            let spend_amount = spend_amount.clone();
+            let creating_spend_transaction = creating_spend_transaction.clone();
+            let spend_form_error = spend_form_error.clone();
+            let spend_form_success = spend_form_success.clone();
+            let refresh_transactions = refresh_transactions.clone();
             
             spawn_local(async move {
-                #[derive(serde::Serialize)]
-                struct ValidateRequest {
-                    description: String,
-                    amount_input: String,
-                }
+                // Clear previous messages
+                spend_form_error.set(None);
+                spend_form_success.set(false);
+                creating_spend_transaction.set(true);
                 
-                let request = ValidateRequest {
-                    description: (*description).clone(),
-                    amount_input: (*amount).clone(),
+                // Parse amount for the API (let backend handle validation)
+                let amount_value = match (*spend_amount).trim().parse::<f64>() {
+                    Ok(val) => val,
+                    Err(_) => {
+                        // If we can't parse, let backend handle the validation error
+                        0.0
+                    }
                 };
                 
-                match Request::post("http://localhost:3000/api/money/validate")
+                let request = SpendMoneyRequest {
+                    description: (*spend_description).clone(),
+                    amount: amount_value,
+                    date: None, // Use current time
+                };
+                
+                match Request::post("http://localhost:3000/api/money/spend")
                     .json(&request)
                     .unwrap()
                     .send()
                     .await
                 {
                     Ok(response) => {
-                        if let Ok(validation) = response.json::<MoneyFormValidation>().await {
-                            if validation.is_valid {
-                                form_error.set(None);
-                                validation_suggestions.set(Vec::new());
-                            } else {
-                                // Use first error message from backend
-                                if let Some(first_error) = validation.errors.first() {
-                                    // Map backend error to frontend message (temporary, backend should provide messages)
-                                    let error_message = match first_error {
-                                        _ => format!("Validation error: {:?}", first_error),
-                                    };
-                                    form_error.set(Some(error_message));
+                        if response.ok() {
+                            // Success! Parse response and use backend success message
+                            match response.json::<SpendMoneyResponse>().await {
+                                Ok(_spend_response) => {
+                                    // Clear form and show success
+                                    spend_description.set(String::new());
+                                    spend_amount.set(String::new());
+                                    spend_form_success.set(true);
+                                    refresh_transactions.emit(());
+                                    
+                                    // Clear success message after 3 seconds
+                                    let spend_form_success_clear = spend_form_success.clone();
+                                    spawn_local(async move {
+                                        gloo::timers::future::TimeoutFuture::new(3000).await;
+                                        spend_form_success_clear.set(false);
+                                    });
                                 }
-                                validation_suggestions.set(validation.suggestions);
+                                Err(e) => {
+                                    spend_form_error.set(Some(format!("Failed to parse response: {}", e)));
+                                }
                             }
+                        } else {
+                            // Use backend error message
+                            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+                            spend_form_error.set(Some(error_text));
                         }
                     }
                     Err(e) => {
-                        gloo::console::warn!("Validation request failed:", e.to_string());
+                        spend_form_error.set(Some(format!("Network error: {}", e)));
                     }
                 }
+                
+                creating_spend_transaction.set(false);
             });
         })
     };
 
-    // Form input handlers with validation
+    // Validation function using backend API
+
+
+    // Form input handlers without premature validation
     let on_description_change = {
         let description = description.clone();
-        let validate_form = validate_form.clone();
+        let form_error = form_error.clone();
         Callback::from(move |e: Event| {
             let input: HtmlInputElement = e.target_unchecked_into();
             description.set(input.value());
-            // Trigger validation after short delay
-            let validate_form = validate_form.clone();
-            spawn_local(async move {
-                gloo::timers::future::TimeoutFuture::new(500).await;
-                validate_form.emit(());
-            });
+            // Clear any existing error when user starts typing
+            form_error.set(None);
         })
     };
 
     let on_amount_change = {
         let amount = amount.clone();
-        let validate_form = validate_form.clone();
+        let form_error = form_error.clone();
         Callback::from(move |e: Event| {
             let input: HtmlInputElement = e.target_unchecked_into();
             amount.set(input.value());
-            // Trigger validation after short delay
-            let validate_form = validate_form.clone();
-            spawn_local(async move {
-                gloo::timers::future::TimeoutFuture::new(500).await;
-                validate_form.emit(());
-            });
+            // Clear any existing error when user starts typing
+            form_error.set(None);
+        })
+    };
+
+    // Spend form input handlers without premature validation
+    let on_spend_description_change = {
+        let spend_description = spend_description.clone();
+        let spend_form_error = spend_form_error.clone();
+        Callback::from(move |e: Event| {
+            let input: HtmlInputElement = e.target_unchecked_into();
+            spend_description.set(input.value());
+            // Clear any existing error when user starts typing
+            spend_form_error.set(None);
+        })
+    };
+
+    let on_spend_amount_change = {
+        let spend_amount = spend_amount.clone();
+        let spend_form_error = spend_form_error.clone();
+        Callback::from(move |e: Event| {
+            let input: HtmlInputElement = e.target_unchecked_into();
+            spend_amount.set(input.value());
+            // Clear any existing error when user starts typing
+            spend_form_error.set(None);
         })
     };
 
@@ -335,7 +386,7 @@ fn app() -> Html {
     let prev_month = {
         let current_month = current_month.clone();
         let current_year = current_year.clone();
-        Callback::from(move |_| {
+        Callback::from(move |_: MouseEvent| {
             if *current_month == 1 {
                 current_month.set(12);
                 current_year.set(*current_year - 1);
@@ -348,7 +399,7 @@ fn app() -> Html {
     let next_month = {
         let current_month = current_month.clone();
         let current_year = current_year.clone();
-        Callback::from(move |_| {
+        Callback::from(move |_: MouseEvent| {
             if *current_month == 12 {
                 current_month.set(1);
                 current_year.set(*current_year + 1);
@@ -435,7 +486,9 @@ fn app() -> Html {
                             }
                         }}
                     </section>
+                </div>
 
+                <div class="money-management-container">
                     <section class="add-money-section">
                         <h2>{"✨ Add Extra Money"}</h2>
                         
@@ -478,7 +531,7 @@ fn app() -> Html {
                             <div class="form-group">
                                 <label for="description">{"What did you get money for?"}</label>
                                 <input 
-                                    type="text" 
+                                    type="text"
                                     id="description"
                                     placeholder="Birthday gift, chores, found money..."
                                     value={(*description).clone()}
@@ -510,6 +563,85 @@ fn app() -> Html {
                                     "Adding Money..."
                                 } else {
                                     "✨ Add Extra Money"
+                                }}
+                            </button>
+                        </form>
+                    </section>
+
+                    <section class="spend-money-section">
+                        <h2>{"💸 Spend Money"}</h2>
+                        
+                        {if let Some(error) = (*spend_form_error).as_ref() {
+                            html! {
+                                <div class="form-message error">
+                                    {error}
+                                </div>
+                            }
+                        } else { html! {} }}
+                        
+                        {if !spend_validation_suggestions.is_empty() {
+                            html! {
+                                <div class="form-message info">
+                                    <strong>{"💡 Suggestions:"}</strong>
+                                    <ul>
+                                        {for spend_validation_suggestions.iter().map(|suggestion| {
+                                            html! { <li>{suggestion}</li> }
+                                        })}
+                                    </ul>
+                                </div>
+                            }
+                        } else { html! {} }}
+                        
+                        {if *spend_form_success {
+                            html! {
+                                <div class="form-message success">
+                                    {"💸 Money spent successfully!"}
+                                </div>
+                            }
+                        } else { html! {} }}
+                        
+                        <form class="spend-money-form" onsubmit={
+                            let spend_money = spend_money.clone();
+                            Callback::from(move |e: SubmitEvent| {
+                                e.prevent_default();
+                                spend_money.emit(());
+                            })
+                        }>
+                            <div class="form-group">
+                                <label for="spend-description">{"What did you spend money on?"}</label>
+                                <input 
+                                    type="text"
+                                    id="spend-description"
+                                    placeholder="Toy, candy, book, game..."
+                                    value={(*spend_description).clone()}
+                                    onchange={on_spend_description_change}
+                                    disabled={*creating_spend_transaction}
+                                />
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="spend-amount">{"How much did you spend? (dollars)"}</label>
+                                <input 
+                                    type="number" 
+                                    id="spend-amount"
+                                    placeholder="2.50"
+                                    step="0.01"
+                                    min="0.01"
+                                    value={(*spend_amount).clone()}
+                                    onchange={on_spend_amount_change}
+                                    disabled={*creating_spend_transaction}
+                                />
+                            </div>
+                            
+                            <button 
+                                type="submit" 
+                                class="btn btn-secondary spend-money-btn"
+                                disabled={*creating_spend_transaction}
+                            >
+                                {if *creating_spend_transaction {
+                                    "Recording Spending..."
+                                } else {
+                                    "💸 Record Spending"
                                 }}
                             </button>
                         </form>

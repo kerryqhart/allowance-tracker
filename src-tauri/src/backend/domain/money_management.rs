@@ -1,11 +1,11 @@
 //! Money management domain logic for the allowance tracker.
 //!
-//! This module contains all business logic related to adding money transactions,
+//! This module contains all business logic related to adding and spending money transactions,
 //! form validation, amount parsing, and form state management. The UI should only
 //! handle presentation concerns, while all money management business rules are
 //! handled here.
 
-use shared::{CreateTransactionRequest, AddMoneyRequest, MoneyFormValidation, MoneyValidationError, MoneyFormState, MoneyManagementConfig};
+use shared::{CreateTransactionRequest, AddMoneyRequest, SpendMoneyRequest, MoneyFormValidation, MoneyValidationError, MoneyFormState, MoneyManagementConfig};
 
 
 
@@ -269,6 +269,108 @@ impl MoneyManagementService {
     pub fn get_config(&self) -> &MoneyManagementConfig {
         &self.config
     }
+
+    /// Validate the spend money form input
+    pub fn validate_spend_money_form(&self, description: &str, amount_input: &str) -> MoneyFormValidation {
+        let mut errors = Vec::new();
+        let mut suggestions = Vec::new();
+
+        // Validate description
+        let description_trimmed = description.trim();
+        if description_trimmed.is_empty() {
+            errors.push(MoneyValidationError::EmptyDescription);
+            suggestions.push("Try: Toy, Candy, Book, Game, etc.".to_string());
+        } else if description_trimmed.len() > self.config.max_description_length {
+            errors.push(MoneyValidationError::DescriptionTooLong(description_trimmed.len()));
+        }
+
+        // Validate and parse amount (user enters positive, we'll convert to negative later)
+        let cleaned_amount = if amount_input.trim().is_empty() {
+            errors.push(MoneyValidationError::EmptyAmount);
+            suggestions.push("Enter how much you spent, like 2.50 or 5".to_string());
+            None
+        } else {
+            match self.clean_and_parse_amount(amount_input) {
+                Ok(amount) => {
+                    if amount <= 0.0 {
+                        errors.push(MoneyValidationError::AmountNotPositive);
+                        suggestions.push("Amount must be greater than 0".to_string());
+                        None
+                    } else if amount < self.config.min_amount {
+                        errors.push(MoneyValidationError::AmountTooSmall(self.config.min_amount));
+                        suggestions.push(format!("Minimum amount is {}{:.2}", self.config.currency_symbol, self.config.min_amount));
+                        None
+                    } else if amount > self.config.max_amount {
+                        errors.push(MoneyValidationError::AmountTooLarge(self.config.max_amount));
+                        suggestions.push(format!("Maximum amount is {}{:.2}", self.config.currency_symbol, self.config.max_amount));
+                        None
+                    } else if self.has_too_many_decimal_places(amount) {
+                        errors.push(MoneyValidationError::AmountPrecisionTooHigh);
+                        suggestions.push("Use at most 2 decimal places (like 5.25)".to_string());
+                        None
+                    } else {
+                        Some(amount)
+                    }
+                }
+                Err(parse_error) => {
+                    errors.push(MoneyValidationError::InvalidAmountFormat(parse_error));
+                    suggestions.push("Enter a valid number like 2.50 or 5".to_string());
+                    None
+                }
+            }
+        };
+
+        MoneyFormValidation {
+            is_valid: errors.is_empty(),
+            errors,
+            cleaned_amount,
+            suggestions,
+        }
+    }
+
+    /// Format amount for negative display (with - sign)
+    pub fn format_negative_amount(&self, amount: f64) -> String {
+        format!("-{}{:.2}", self.config.currency_symbol, amount.abs())
+    }
+
+    /// Create a spend money request from validated form data
+    pub fn create_spend_money_request(&self, description: String, amount: f64, date: Option<String>) -> SpendMoneyRequest {
+        SpendMoneyRequest {
+            description: description.trim().to_string(),
+            amount,  // Keep positive, backend will convert to negative
+            date,
+        }
+    }
+
+    /// Convert SpendMoneyRequest to CreateTransactionRequest (converting amount to negative)
+    pub fn spend_to_create_transaction_request(&self, spend_money_request: SpendMoneyRequest) -> CreateTransactionRequest {
+        CreateTransactionRequest {
+            description: spend_money_request.description,
+            amount: -spend_money_request.amount.abs(),  // Ensure negative amount
+            date: spend_money_request.date,
+        }
+    }
+
+    /// Generate success message for successful money spending
+    pub fn generate_spend_success_message(&self, amount: f64) -> String {
+        format!("💸 {} spent successfully!", self.format_amount(amount.abs()))
+    }
+
+    /// Generate common spending descriptions as suggestions
+    pub fn get_spending_suggestions(&self) -> Vec<String> {
+        vec![
+            "Toy".to_string(),
+            "Candy".to_string(),
+            "Book".to_string(),
+            "Game".to_string(),
+            "Snack".to_string(),
+            "Art supplies".to_string(),
+            "Small gift".to_string(),
+            "Trading cards".to_string(),
+            "App purchase".to_string(),
+            "Movie ticket".to_string(),
+        ]
+    }
 }
 
 impl Default for MoneyManagementService {
@@ -445,9 +547,114 @@ mod tests {
     fn test_realtime_validation() {
         let service = create_test_service();
         
+        // Valid amount
         assert!(service.validate_amount_realtime("10.50").is_ok());
+        
+        // Empty amount
         assert!(service.validate_amount_realtime("").is_err());
+        
+        // Invalid format
         assert!(service.validate_amount_realtime("abc").is_err());
+        
+        // Zero amount
+        assert!(service.validate_amount_realtime("0").is_err());
+        
+        // Negative amount
         assert!(service.validate_amount_realtime("-5").is_err());
+    }
+
+    #[test]
+    fn test_validate_spend_money_form_success() {
+        let service = create_test_service();
+        
+        let validation = service.validate_spend_money_form("Toy", "3.25");
+        
+        assert!(validation.is_valid);
+        assert!(validation.errors.is_empty());
+        assert_eq!(validation.cleaned_amount, Some(3.25));
+        assert!(validation.suggestions.is_empty());
+    }
+
+    #[test]
+    fn test_validate_spend_money_form_empty_description() {
+        let service = create_test_service();
+        
+        let validation = service.validate_spend_money_form("", "5.00");
+        
+        assert!(!validation.is_valid);
+        assert!(matches!(validation.errors[0], MoneyValidationError::EmptyDescription));
+        assert!(!validation.suggestions.is_empty());
+        assert!(validation.suggestions[0].contains("Toy"));
+    }
+
+    #[test]
+    fn test_validate_spend_money_form_invalid_amount() {
+        let service = create_test_service();
+        
+        let validation = service.validate_spend_money_form("Valid description", "invalid");
+        
+        assert!(!validation.is_valid);
+        assert!(matches!(validation.errors[0], MoneyValidationError::InvalidAmountFormat(_)));
+        assert!(!validation.suggestions.is_empty());
+    }
+
+    #[test]
+    fn test_create_spend_money_request() {
+        let service = create_test_service();
+        
+        let request = service.create_spend_money_request("Candy".to_string(), 2.50, None);
+        
+        assert_eq!(request.description, "Candy");
+        assert_eq!(request.amount, 2.50);
+        assert!(request.date.is_none());
+    }
+
+    #[test]
+    fn test_spend_to_create_transaction_request() {
+        let service = create_test_service();
+        
+        let spend_request = SpendMoneyRequest {
+            description: "Game".to_string(),
+            amount: 15.00,
+            date: None,
+        };
+        
+        let transaction_request = service.spend_to_create_transaction_request(spend_request);
+        
+        assert_eq!(transaction_request.description, "Game");
+        assert_eq!(transaction_request.amount, -15.00); // Should be negative
+        assert!(transaction_request.date.is_none());
+    }
+
+    #[test]
+    fn test_generate_spend_success_message() {
+        let service = create_test_service();
+        
+        let message = service.generate_spend_success_message(7.50);
+        
+        assert!(message.contains("💸"));
+        assert!(message.contains("$7.50"));
+        assert!(message.contains("spent successfully"));
+    }
+
+    #[test]
+    fn test_format_negative_amount() {
+        let service = create_test_service();
+        
+        let formatted = service.format_negative_amount(5.25);
+        
+        assert_eq!(formatted, "-$5.25");
+    }
+
+    #[test]
+    fn test_get_spending_suggestions() {
+        let service = create_test_service();
+        
+        let suggestions = service.get_spending_suggestions();
+        
+        assert!(!suggestions.is_empty());
+        assert!(suggestions.contains(&"Toy".to_string()));
+        assert!(suggestions.contains(&"Candy".to_string()));
+        assert!(suggestions.contains(&"Book".to_string()));
     }
 } 

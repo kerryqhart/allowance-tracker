@@ -161,6 +161,74 @@
             border-radius: 15px;
             padding: 2rem;
             box-shadow: 0 8px 32px rgba(102, 126, 234, 0.2);
+            flex: 1;
+            margin-right: 1rem;
+        }
+
+        .spend-money-section {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 2rem;
+            box-shadow: 0 8px 32px rgba(255, 87, 51, 0.2);
+            flex: 1;
+            margin-left: 1rem;
+        }
+
+        .spend-money-section h2 {
+            color: #ff5733;
+            font-size: 1.8rem;
+            margin-bottom: 1.5rem;
+            text-align: center;
+        }
+
+        .spend-money-form {
+            max-width: 400px;
+            margin: 0 auto;
+        }
+
+        .spend-money-btn {
+            width: 100%;
+            padding: 1.25rem;
+            font-size: 1.2rem;
+            margin-top: 1rem;
+            background: linear-gradient(135deg, #ff5733, #ff7043);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-weight: 600;
+        }
+
+        .spend-money-btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(255, 87, 51, 0.3);
+        }
+
+        .spend-money-btn:disabled {
+            opacity: 0.7;
+            cursor: not-allowed;
+            transform: none !important;
+        }
+
+        /* Layout for money management sections */
+        .money-management-container {
+            display: flex;
+            gap: 2rem;
+            margin-bottom: 3rem;
+        }
+
+        @media (max-width: 768px) {
+            .money-management-container {
+                flex-direction: column;
+                gap: 1.5rem;
+            }
+            
+            .add-money-section,
+            .spend-money-section {
+                margin: 0;
+            }
         }
 
         .add-money-section h2 {
@@ -207,6 +275,17 @@
             background-color: #f8f9fa;
             opacity: 0.7;
             cursor: not-allowed;
+        }
+
+        /* Hide number input spinners */
+        .form-group input[type="number"]::-webkit-outer-spin-button,
+        .form-group input[type="number"]::-webkit-inner-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+
+        .form-group input[type="number"] {
+            -moz-appearance: textfield;
         }
 
         .add-money-btn {

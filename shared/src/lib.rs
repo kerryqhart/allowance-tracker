@@ -128,6 +128,23 @@ pub struct TransactionTableResponse {
     pub pagination: PaginationInfo,
 }
 
+/// Request for spending money (creating a negative transaction)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SpendMoneyRequest {
+    pub description: String,
+    pub amount: f64,  // User provides positive amount, backend converts to negative
+    pub date: Option<String>,
+}
+
+/// Response after spending money
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SpendMoneyResponse {
+    pub transaction_id: String,
+    pub success_message: String,
+    pub new_balance: f64,
+    pub formatted_amount: String,
+}
+
 /// Request for adding money (creating a positive transaction)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AddMoneyRequest {

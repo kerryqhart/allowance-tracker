@@ -33,9 +33,9 @@ use log::{info, error};
 
 use crate::backend::AppState;
 use shared::{
-    TransactionListRequest, CreateTransactionRequest,
-    CalendarMonthRequest, TransactionTableResponse,
-    ValidationResult, AddMoneyRequest, AddMoneyResponse,
+    TransactionTableResponse, CreateTransactionRequest,
+    AddMoneyRequest, AddMoneyResponse, SpendMoneyRequest, SpendMoneyResponse,
+    TransactionListRequest, CalendarMonthRequest,
 };
 
 // Query parameters for transaction listing API
@@ -186,18 +186,7 @@ pub async fn validate_transaction(
     (StatusCode::OK, Json(validation_result)).into_response()
 }
 
-/// Validate add money form input
-pub async fn validate_add_money_form(
-    State(state): State<AppState>,
-    Json(request): Json<ValidateAddMoneyRequest>,
-) -> impl IntoResponse {
-    info!("POST /api/money/validate - request: {:?}", request);
 
-    let validation_result = state.money_management_service
-        .validate_add_money_form(&request.description, &request.amount_input);
-
-    (StatusCode::OK, Json(validation_result)).into_response()
-}
 
 /// Add money (create a positive transaction)
 pub async fn add_money(
@@ -246,12 +235,56 @@ pub async fn add_money(
     }
 }
 
-// Request body for add money form validation API
-#[derive(Debug, Deserialize)]
-pub struct ValidateAddMoneyRequest {
-    pub description: String,
-    pub amount_input: String,
+
+
+/// Spend money (create a negative transaction)
+pub async fn spend_money(
+    State(state): State<AppState>,
+    Json(request): Json<SpendMoneyRequest>,
+) -> impl IntoResponse {
+    info!("POST /api/money/spend - request: {:?}", request);
+
+    // First validate the request
+    let validation = state.money_management_service
+        .validate_spend_money_form(&request.description, &request.amount.to_string());
+
+    if !validation.is_valid {
+        let error_message = state.money_management_service
+            .get_first_error_message(&validation.errors)
+            .unwrap_or_else(|| "Invalid input".to_string());
+        return (StatusCode::BAD_REQUEST, error_message).into_response();
+    }
+
+    // Convert to CreateTransactionRequest (this will make the amount negative)
+    let create_request = state.money_management_service
+        .spend_to_create_transaction_request(request.clone());
+
+    // Create the transaction
+    match state.transaction_service.create_transaction(create_request).await {
+        Ok(transaction) => {
+            let success_message = state.money_management_service
+                .generate_spend_success_message(request.amount);
+            
+            let formatted_amount = state.money_management_service
+                .format_negative_amount(request.amount);
+
+            let response = SpendMoneyResponse {
+                transaction_id: transaction.id,
+                success_message,
+                new_balance: transaction.balance,
+                formatted_amount,
+            };
+
+            (StatusCode::CREATED, Json(response)).into_response()
+        }
+        Err(e) => {
+            error!("Failed to spend money: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, "Failed to record spending").into_response()
+        }
+    }
 }
+
+
 
 #[cfg(test)]
 mod tests {

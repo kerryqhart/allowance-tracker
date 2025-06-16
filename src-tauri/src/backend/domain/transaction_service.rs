@@ -81,14 +81,20 @@ impl TransactionService {
         
         let transaction_id = Transaction::generate_id(request.amount, now_millis);
         
-        // Use provided date or generate current RFC 3339 timestamp
+        // Use provided date or generate current RFC 3339 timestamp in Eastern Time
         let date = match request.date {
             Some(date) => date,
             None => {
-                // Generate RFC 3339 formatted timestamp
+                // Generate RFC 3339 formatted timestamp in Eastern Time (UTC-4 for EDT, UTC-5 for EST)
                 let now = SystemTime::now();
-                let datetime = time::OffsetDateTime::from(now);
-                datetime.format(&time::format_description::well_known::Rfc3339)?
+                let utc_datetime = time::OffsetDateTime::from(now);
+                
+                // Convert to Eastern Time (assuming EDT for now, UTC-4)
+                // In a production app, you'd want to detect the actual timezone or let the user configure it
+                let eastern_offset = time::UtcOffset::from_hms(-4, 0, 0)?;
+                let eastern_datetime = utc_datetime.to_offset(eastern_offset);
+                
+                eastern_datetime.format(&time::format_description::well_known::Rfc3339)?
             }
         };
 
