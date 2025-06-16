@@ -92,13 +92,13 @@ pub fn create_router(app_state: AppState) -> Router {
 
     // Set up our application routes
     let api_routes = Router::new()
-        .route("/transactions", get(io::list_transactions).post(io::create_transaction))
-        .route("/transactions/table", get(io::get_transaction_table))
-        .route("/calendar/month", get(io::get_calendar_month))
-        .route("/money/add", post(io::add_money))
-        .route("/money/spend", post(io::spend_money))
-        .route("/children", get(io::list_children).post(io::create_child))
-        .route("/children/:id", get(io::get_child).put(io::update_child).delete(io::delete_child));
+        .route("/transactions", get(io::transaction_apis::list_transactions).post(io::transaction_apis::create_transaction))
+        .nest("/calendar", io::calendar_apis::router())
+        .nest("/transactions", io::transaction_table_apis::router())
+        .route("/money/add", post(io::money_management_apis::add_money))
+        .route("/money/spend", post(io::money_management_apis::spend_money))
+        .route("/children", get(io::child_apis::list_children).post(io::child_apis::create_child))
+        .route("/children/:id", get(io::child_apis::get_child).put(io::child_apis::update_child).delete(io::child_apis::delete_child));
 
     // Define our main application router
     Router::new()
