@@ -1,7 +1,7 @@
 use anyhow::Result;
 use sqlx::{migrate::MigrateDatabase, Row, Sqlite, SqlitePool};
 use std::sync::Arc;
-use shared::Transaction;
+use shared::{Transaction, Child};
 
 // The database URL for the production database
 const DATABASE_URL: &str = "sqlite:keyvalue.db";
@@ -67,6 +67,31 @@ impl DbConnection {
             r#"
             CREATE INDEX IF NOT EXISTS idx_transactions_created_at 
             ON transactions(created_at DESC);
+            "#,
+        )
+        .execute(pool)
+        .await?;
+
+        // Create children table
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS children (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                birthdate TEXT NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+            "#,
+        )
+        .execute(pool)
+        .await?;
+
+        // Create index for ordering children by name
+        sqlx::query(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_children_name 
+            ON children(name);
             "#,
         )
         .execute(pool)
@@ -166,6 +191,106 @@ impl DbConnection {
             .collect();
 
         Ok(transactions)
+    }
+
+    /// Store a child in the database
+    pub async fn store_child(&self, child: &Child) -> Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO children (id, name, birthdate, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            "#,
+        )
+        .bind(&child.id)
+        .bind(&child.name)
+        .bind(&child.birthdate)
+        .bind(&child.created_at)
+        .bind(&child.updated_at)
+        .execute(&*self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Get a child by ID
+    pub async fn get_child(&self, child_id: &str) -> Result<Option<Child>> {
+        let row = sqlx::query(
+            r#"
+            SELECT id, name, birthdate, created_at, updated_at
+            FROM children
+            WHERE id = ?
+            "#,
+        )
+        .bind(child_id)
+        .fetch_optional(&*self.pool)
+        .await?;
+
+        match row {
+            Some(r) => Ok(Some(Child {
+                id: r.get("id"),
+                name: r.get("name"),
+                birthdate: r.get("birthdate"),
+                created_at: r.get("created_at"),
+                updated_at: r.get("updated_at"),
+            })),
+            None => Ok(None),
+        }
+    }
+
+    /// List all children ordered by name
+    pub async fn list_children(&self) -> Result<Vec<Child>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id, name, birthdate, created_at, updated_at
+            FROM children
+            ORDER BY name ASC
+            "#,
+        )
+        .fetch_all(&*self.pool)
+        .await?;
+
+        let children = rows
+            .iter()
+            .map(|row| Child {
+                id: row.get("id"),
+                name: row.get("name"),
+                birthdate: row.get("birthdate"),
+                created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
+            })
+            .collect();
+
+        Ok(children)
+    }
+
+    /// Update a child in the database
+    pub async fn update_child(&self, child: &Child) -> Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE children 
+            SET name = ?, birthdate = ?, updated_at = ?
+            WHERE id = ?
+            "#,
+        )
+        .bind(&child.name)
+        .bind(&child.birthdate)
+        .bind(&child.updated_at)
+        .bind(&child.id)
+        .execute(&*self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Delete a child from the database
+    pub async fn delete_child(&self, child_id: &str) -> Result<()> {
+        sqlx::query(
+            r#"
+            DELETE FROM children WHERE id = ?
+            "#,
+        )
+        .bind(child_id)
+        .execute(&*self.pool)
+        .await?;
+        Ok(())
     }
 }
 
@@ -338,5 +463,137 @@ mod tests {
         let transactions = db.list_transactions(10, Some("invalid_cursor_id")).await.expect("Failed to list transactions");
         // Should return empty when cursor is invalid (no transaction with that ID found)
         assert_eq!(transactions.len(), 0, "Should return empty for invalid cursor");
+    }
+
+    #[tokio::test]
+    async fn test_store_and_get_child() {
+        let db = setup_test().await;
+
+        // Create a test child
+        let child = Child {
+            id: "child::1702516122000".to_string(),
+            name: "Alice Smith".to_string(),
+            birthdate: "2015-06-15".to_string(),
+            created_at: "2023-12-14T01:02:02.000Z".to_string(),
+            updated_at: "2023-12-14T01:02:02.000Z".to_string(),
+        };
+
+        // Store the child
+        db.store_child(&child).await.expect("Failed to store child");
+
+        // Retrieve the child
+        let retrieved_child = db.get_child(&child.id).await.expect("Failed to get child");
+        assert!(retrieved_child.is_some(), "Child should exist");
+        
+        let retrieved_child = retrieved_child.unwrap();
+        assert_eq!(retrieved_child.id, child.id);
+        assert_eq!(retrieved_child.name, child.name);
+        assert_eq!(retrieved_child.birthdate, child.birthdate);
+        assert_eq!(retrieved_child.created_at, child.created_at);
+        assert_eq!(retrieved_child.updated_at, child.updated_at);
+    }
+
+    #[tokio::test]
+    async fn test_get_nonexistent_child() {
+        let db = setup_test().await;
+
+        // Try to get a child that doesn't exist
+        let child = db.get_child("child::nonexistent").await.expect("Failed to query child");
+        assert!(child.is_none(), "Should return None for nonexistent child");
+    }
+
+    #[tokio::test]
+    async fn test_list_children() {
+        let db = setup_test().await;
+
+        // Initially should have no children
+        let children = db.list_children().await.expect("Failed to list children");
+        assert_eq!(children.len(), 0, "Should have no children initially");
+
+        // Create test children
+        let child1 = Child {
+            id: "child::1702516122000".to_string(),
+            name: "Bob Johnson".to_string(),
+            birthdate: "2012-03-20".to_string(),
+            created_at: "2023-12-14T01:02:02.000Z".to_string(),
+            updated_at: "2023-12-14T01:02:02.000Z".to_string(),
+        };
+
+        let child2 = Child {
+            id: "child::1702516125000".to_string(),
+            name: "Alice Smith".to_string(),
+            birthdate: "2015-06-15".to_string(),
+            created_at: "2023-12-14T01:02:05.000Z".to_string(),
+            updated_at: "2023-12-14T01:02:05.000Z".to_string(),
+        };
+
+        // Store both children
+        db.store_child(&child1).await.expect("Failed to store child1");
+        db.store_child(&child2).await.expect("Failed to store child2");
+
+        // List children (should be ordered by name)
+        let children = db.list_children().await.expect("Failed to list children");
+        assert_eq!(children.len(), 2, "Should have 2 children");
+        
+        // Should be ordered by name: Alice, Bob
+        assert_eq!(children[0].name, "Alice Smith");
+        assert_eq!(children[1].name, "Bob Johnson");
+    }
+
+    #[tokio::test]
+    async fn test_update_child() {
+        let db = setup_test().await;
+
+        // Create and store a child
+        let mut child = Child {
+            id: "child::1702516122000".to_string(),
+            name: "Original Name".to_string(),
+            birthdate: "2015-06-15".to_string(),
+            created_at: "2023-12-14T01:02:02.000Z".to_string(),
+            updated_at: "2023-12-14T01:02:02.000Z".to_string(),
+        };
+
+        db.store_child(&child).await.expect("Failed to store child");
+
+        // Update the child
+        child.name = "Updated Name".to_string();
+        child.birthdate = "2015-07-20".to_string();
+        child.updated_at = "2023-12-14T02:00:00.000Z".to_string();
+
+        db.update_child(&child).await.expect("Failed to update child");
+
+        // Retrieve and verify the update
+        let updated_child = db.get_child(&child.id).await.expect("Failed to get child").unwrap();
+        assert_eq!(updated_child.name, "Updated Name");
+        assert_eq!(updated_child.birthdate, "2015-07-20");
+        assert_eq!(updated_child.updated_at, "2023-12-14T02:00:00.000Z");
+        assert_eq!(updated_child.created_at, child.created_at); // Should remain unchanged
+    }
+
+    #[tokio::test]
+    async fn test_delete_child() {
+        let db = setup_test().await;
+
+        // Create and store a child
+        let child = Child {
+            id: "child::1702516122000".to_string(),
+            name: "Test Child".to_string(),
+            birthdate: "2015-06-15".to_string(),
+            created_at: "2023-12-14T01:02:02.000Z".to_string(),
+            updated_at: "2023-12-14T01:02:02.000Z".to_string(),
+        };
+
+        db.store_child(&child).await.expect("Failed to store child");
+
+        // Verify child exists
+        let retrieved_child = db.get_child(&child.id).await.expect("Failed to get child");
+        assert!(retrieved_child.is_some(), "Child should exist before deletion");
+
+        // Delete the child
+        db.delete_child(&child.id).await.expect("Failed to delete child");
+
+        // Verify child no longer exists
+        let deleted_child = db.get_child(&child.id).await.expect("Failed to query child");
+        assert!(deleted_child.is_none(), "Child should not exist after deletion");
     }
 }

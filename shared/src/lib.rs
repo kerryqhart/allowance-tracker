@@ -195,6 +195,43 @@ pub struct MoneyFormState {
     pub show_success: bool,
 }
 
+/// Represents a child in the allowance tracking system
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Child {
+    pub id: String,
+    pub name: String,
+    pub birthdate: String, // ISO 8601 date format (YYYY-MM-DD)
+    pub created_at: String, // RFC 3339 timestamp
+    pub updated_at: String, // RFC 3339 timestamp
+}
+
+/// Request for creating a new child
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CreateChildRequest {
+    pub name: String,
+    pub birthdate: String, // ISO 8601 date format (YYYY-MM-DD)
+}
+
+/// Request for updating an existing child
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct UpdateChildRequest {
+    pub name: Option<String>,
+    pub birthdate: Option<String>, // ISO 8601 date format (YYYY-MM-DD)
+}
+
+/// Response after creating or updating a child
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ChildResponse {
+    pub child: Child,
+    pub success_message: String,
+}
+
+/// Response containing a list of children
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ChildListResponse {
+    pub children: Vec<Child>,
+}
+
 /// Configuration for money management forms
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MoneyManagementConfig {
@@ -270,6 +307,45 @@ impl fmt::Display for TransactionIdError {
 
 impl std::error::Error for TransactionIdError {}
 
+impl Child {
+    /// Generate a child ID based on timestamp
+    pub fn generate_id(epoch_millis: u64) -> String {
+        format!("child::{}", epoch_millis)
+    }
+    
+    /// Parse a child ID to extract the timestamp
+    pub fn parse_id(id: &str) -> Result<u64, ChildIdError> {
+        let parts: Vec<&str> = id.split("::").collect();
+        if parts.len() != 2 || parts[0] != "child" {
+            return Err(ChildIdError::InvalidFormat);
+        }
+        
+        parts[1].parse::<u64>().map_err(|_| ChildIdError::InvalidTimestamp)
+    }
+    
+    /// Extract timestamp from child ID
+    pub fn extract_timestamp(&self) -> Result<u64, ChildIdError> {
+        Self::parse_id(&self.id)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ChildIdError {
+    InvalidFormat,
+    InvalidTimestamp,
+}
+
+impl fmt::Display for ChildIdError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ChildIdError::InvalidFormat => write!(f, "Invalid child ID format"),
+            ChildIdError::InvalidTimestamp => write!(f, "Invalid timestamp in child ID"),
+        }
+    }
+}
+
+impl std::error::Error for ChildIdError {}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -324,5 +400,39 @@ mod tests {
         };
 
         assert_eq!(transaction.extract_timestamp().unwrap(), 1702516122000);
+    }
+
+    #[test]
+    fn test_generate_child_id() {
+        let child_id = Child::generate_id(1702516122000);
+        assert_eq!(child_id, "child::1702516122000");
+    }
+
+    #[test]
+    fn test_parse_child_id() {
+        // Test valid child ID
+        let timestamp = Child::parse_id("child::1702516122000").unwrap();
+        assert_eq!(timestamp, 1702516122000);
+
+        // Test invalid format
+        assert!(Child::parse_id("invalid::format").is_err());
+        assert!(Child::parse_id("child").is_err());
+        assert!(Child::parse_id("not_child::123").is_err());
+
+        // Test invalid timestamp
+        assert!(Child::parse_id("child::not_a_number").is_err());
+    }
+
+    #[test]
+    fn test_child_extract_timestamp() {
+        let child = Child {
+            id: "child::1702516122000".to_string(),
+            name: "Test Child".to_string(),
+            birthdate: "2015-06-15".to_string(),
+            created_at: "2023-12-14T01:02:02.000Z".to_string(),
+            updated_at: "2023-12-14T01:02:02.000Z".to_string(),
+        };
+
+        assert_eq!(child.extract_timestamp().unwrap(), 1702516122000);
     }
 }

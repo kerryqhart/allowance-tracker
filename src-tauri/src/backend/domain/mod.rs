@@ -56,6 +56,7 @@ pub mod transaction_service;
 pub mod transaction_table;
 pub mod calendar;
 pub mod money_management;
+pub mod child_service;
 
 pub use transaction_service::*;
 pub use transaction_table::*;

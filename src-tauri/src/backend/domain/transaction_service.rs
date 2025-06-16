@@ -44,15 +44,16 @@ use crate::backend::storage::DbConnection;
 use shared::{Transaction, TransactionListRequest, TransactionListResponse, PaginationInfo, CreateTransactionRequest};
 use anyhow::Result;
 use tracing::info;
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Clone)]
 pub struct TransactionService {
-    db: DbConnection,
+    db: Arc<DbConnection>,
 }
 
 impl TransactionService {
-    pub fn new(db: DbConnection) -> Self {
+    pub fn new(db: Arc<DbConnection>) -> Self {
         Self { db }
     }
 
@@ -317,7 +318,7 @@ mod tests {
     use super::*;
 
     async fn create_test_service() -> TransactionService {
-        let db = DbConnection::init_test().await.expect("Failed to init test DB");
+        let db = Arc::new(DbConnection::init_test().await.expect("Failed to init test DB"));
         TransactionService::new(db)
     }
 

@@ -42,7 +42,7 @@ use axum::{
 };
 use tower_http::cors::{Any, CorsLayer};
 use anyhow::Result;
-use crate::backend::domain::{TransactionService, CalendarService, TransactionTableService, MoneyManagementService};
+use crate::backend::domain::{TransactionService, CalendarService, TransactionTableService, MoneyManagementService, child_service::ChildService};
 use crate::backend::storage::DbConnection;
 use log::info;
 
@@ -55,18 +55,20 @@ pub struct AppState {
     pub calendar_service: CalendarService,
     pub transaction_table_service: TransactionTableService,
     pub money_management_service: MoneyManagementService,
+    pub child_service: ChildService,
 }
 
 /// Initialize the backend with all required services
 pub async fn initialize_backend() -> Result<AppState> {
     info!("Setting up database");
-    let db_conn = DbConnection::init().await?;
+    let db_conn = std::sync::Arc::new(DbConnection::init().await?);
 
     info!("Setting up domain model");
-    let transaction_service = TransactionService::new(db_conn);
+    let transaction_service = TransactionService::new(db_conn.clone());
     let calendar_service = CalendarService::new();
     let transaction_table_service = TransactionTableService::new();
     let money_management_service = MoneyManagementService::new();
+    let child_service = ChildService::new(db_conn);
 
     info!("Setting up application state");
     let app_state = AppState {
@@ -74,6 +76,7 @@ pub async fn initialize_backend() -> Result<AppState> {
         calendar_service,
         transaction_table_service,
         money_management_service,
+        child_service,
     };
 
     Ok(app_state)
@@ -93,7 +96,9 @@ pub fn create_router(app_state: AppState) -> Router {
         .route("/transactions/table", get(io::get_transaction_table))
         .route("/calendar/month", get(io::get_calendar_month))
         .route("/money/add", post(io::add_money))
-        .route("/money/spend", post(io::spend_money));
+        .route("/money/spend", post(io::spend_money))
+        .route("/children", get(io::list_children).post(io::create_child))
+        .route("/children/:id", get(io::get_child).put(io::update_child).delete(io::delete_child));
 
     // Define our main application router
     Router::new()
