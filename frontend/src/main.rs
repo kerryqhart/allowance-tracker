@@ -38,6 +38,47 @@ fn app() -> Html {
     let backend_connected = use_state(|| false);
     let backend_endpoint = use_state(|| String::from("Checking..."));
     
+    // Delete mode state
+    let delete_mode = use_state(|| false);
+    let selected_transactions = use_state(|| Vec::<String>::new());
+    
+    // Delete mode callbacks
+    let toggle_delete_mode = {
+        let delete_mode = delete_mode.clone();
+        let selected_transactions = selected_transactions.clone();
+        Callback::from(move |_| {
+            let new_mode = !*delete_mode;
+            delete_mode.set(new_mode);
+            if !new_mode {
+                selected_transactions.set(Vec::new()); // Clear selections when exiting delete mode
+            }
+        })
+    };
+    
+    let toggle_transaction_selection = {
+        let selected_transactions = selected_transactions.clone();
+        Callback::from(move |transaction_id: String| {
+            let mut current_selections = (*selected_transactions).clone();
+            if let Some(index) = current_selections.iter().position(|id| id == &transaction_id) {
+                current_selections.remove(index);
+            } else {
+                current_selections.push(transaction_id);
+            }
+            selected_transactions.set(current_selections);
+        })
+    };
+    
+    let delete_selected_transactions = {
+        let selected_transactions = selected_transactions.clone();
+        let delete_mode = delete_mode.clone();
+        Callback::from(move |_| {
+            // TODO: Implement actual deletion logic
+            gloo::console::log!("Would delete transactions:", format!("{:?}", *selected_transactions));
+            selected_transactions.set(Vec::new());
+            delete_mode.set(false);
+        })
+    };
+    
 
 
 
@@ -81,7 +122,10 @@ fn app() -> Html {
 
     html! {
         <>
-            <Header current_balance={transactions.state.current_balance} />
+            <Header 
+                current_balance={transactions.state.current_balance} 
+                on_toggle_delete_mode={toggle_delete_mode.clone()}
+            />
 
 
 
@@ -92,7 +136,11 @@ fn app() -> Html {
                             <button class="calendar-nav-btn" onclick={calendar.actions.prev_month}>{"‹"}</button>
                             <h2 class="calendar-title">
                                 {if let Some(cal_data) = calendar.state.calendar_data.as_ref() {
-                                    format!("{} {}", month_name(cal_data.month), cal_data.year)
+                                    if *delete_mode {
+                                        format!("🗑️ Delete Mode - {} {}", month_name(cal_data.month), cal_data.year)
+                                    } else {
+                                        format!("{} {}", month_name(cal_data.month), cal_data.year)
+                                    }
                                 } else {
                                     format!("Loading...")
                                 }}
@@ -101,7 +149,15 @@ fn app() -> Html {
                         </div>
                         
                         {if let Some(cal_data) = calendar.state.calendar_data.as_ref() {
-                            html! { <Calendar calendar_data={cal_data.clone()} /> }
+                            html! { 
+                                <Calendar 
+                                    calendar_data={cal_data.clone()} 
+                                    delete_mode={*delete_mode}
+                                    selected_transactions={(*selected_transactions).clone()}
+                                    on_toggle_transaction_selection={toggle_transaction_selection.clone()}
+                                    on_delete_selected={delete_selected_transactions.clone()}
+                                /> 
+                            }
                         } else {
                             html! { <div class="loading">{"Loading calendar..."}</div> }
                         }}

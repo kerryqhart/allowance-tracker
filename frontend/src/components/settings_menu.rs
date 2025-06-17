@@ -1,8 +1,13 @@
 use yew::prelude::*;
 use web_sys::MouseEvent;
 
+#[derive(Properties, PartialEq)]
+pub struct SettingsMenuProps {
+    pub on_toggle_delete_mode: Callback<()>,
+}
+
 #[function_component(SettingsMenu)]
-pub fn settings_menu() -> Html {
+pub fn settings_menu(props: &SettingsMenuProps) -> Html {
     let is_open = use_state(|| false);
     
     let toggle_menu = {
@@ -63,7 +68,14 @@ pub fn settings_menu() -> Html {
                             <span>{"Profile"}</span>
                         </div>
                         
-                        <div class="settings-item" onclick={close_menu.clone()}>
+                        <div class="settings-item" onclick={{
+                            let close_menu = close_menu.clone();
+                            let on_toggle_delete_mode = props.on_toggle_delete_mode.clone();
+                            Callback::from(move |_: MouseEvent| {
+                                close_menu.emit(MouseEvent::new("click").unwrap());
+                                on_toggle_delete_mode.emit(());
+                            })
+                        }}>
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                                 <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z" fill="currentColor"/>
                             </svg>
