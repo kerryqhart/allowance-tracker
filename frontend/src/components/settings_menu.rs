@@ -1,6 +1,7 @@
 use yew::prelude::*;
 use web_sys::MouseEvent;
 use super::challenge_modal::ChallengeModal;
+use super::create_child_modal::CreateChildModal;
 
 #[derive(Properties, PartialEq)]
 pub struct SettingsMenuProps {
@@ -12,6 +13,7 @@ pub fn settings_menu(props: &SettingsMenuProps) -> Html {
     let is_open = use_state(|| false);
     let is_authenticated = use_state(|| false);
     let show_challenge = use_state(|| false);
+    let show_create_child = use_state(|| false);
     
     let toggle_menu = {
         let is_open = is_open.clone();
@@ -67,6 +69,31 @@ pub fn settings_menu(props: &SettingsMenuProps) -> Html {
         })
     };
 
+    // Create child modal callbacks
+    let on_create_child_click = {
+        let close_menu = close_menu.clone();
+        let show_create_child = show_create_child.clone();
+        Callback::from(move |_: MouseEvent| {
+            close_menu.emit(MouseEvent::new("click").unwrap());
+            show_create_child.set(true);
+        })
+    };
+
+    let on_create_child_success = {
+        let show_create_child = show_create_child.clone();
+        Callback::from(move |_| {
+            show_create_child.set(false);
+            // TODO: Show success message or refresh children list
+        })
+    };
+
+    let on_create_child_close = {
+        let show_create_child = show_create_child.clone();
+        Callback::from(move |_| {
+            show_create_child.set(false);
+        })
+    };
+
     html! {
         <div class="settings-menu">
             <button 
@@ -98,6 +125,15 @@ pub fn settings_menu(props: &SettingsMenuProps) -> Html {
                             <span>{"Profile"}</span>
                         </div>
                         
+                        <div class="settings-item" onclick={on_create_child_click}>
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" fill="currentColor"/>
+                                <circle cx="19" cy="5" r="4" fill="currentColor"/>
+                                <path d="M17 5h4M19 3v4" stroke="white" stroke-width="1.5"/>
+                            </svg>
+                            <span>{"Create child"}</span>
+                        </div>
+                        
                         <div class="settings-item" onclick={{
                             let close_menu = close_menu.clone();
                             let on_toggle_delete_mode = props.on_toggle_delete_mode.clone();
@@ -126,6 +162,12 @@ pub fn settings_menu(props: &SettingsMenuProps) -> Html {
                 is_open={*show_challenge}
                 on_success={on_challenge_success}
                 on_close={on_challenge_close}
+            />
+            
+            <CreateChildModal 
+                is_open={*show_create_child}
+                on_success={on_create_child_success}
+                on_close={on_create_child_close}
             />
         </div>
     }
