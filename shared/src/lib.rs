@@ -162,6 +162,20 @@ pub struct AddMoneyResponse {
     pub formatted_amount: String,
 }
 
+/// Request for deleting multiple transactions
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DeleteTransactionsRequest {
+    pub transaction_ids: Vec<String>,
+}
+
+/// Response after deleting transactions
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DeleteTransactionsResponse {
+    pub deleted_count: usize,
+    pub success_message: String,
+    pub not_found_ids: Vec<String>,
+}
+
 /// Form validation result specific to money management
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MoneyFormValidation {

@@ -37,7 +37,7 @@ pub mod io;
 
 use axum::{
     http::{HeaderValue, Method},
-    routing::{get, post},
+    routing::{delete, get, post},
     Router,
 };
 use tower_http::cors::{Any, CorsLayer};
@@ -92,7 +92,7 @@ pub fn create_router(app_state: AppState) -> Router {
 
     // Set up our application routes
     let api_routes = Router::new()
-        .route("/transactions", get(io::transaction_apis::list_transactions).post(io::transaction_apis::create_transaction))
+        .route("/transactions", get(io::transaction_apis::list_transactions).post(io::transaction_apis::create_transaction).delete(io::transaction_apis::delete_transactions))
         .nest("/calendar", io::calendar_apis::router())
         .nest("/transactions", io::transaction_table_apis::router())
         .route("/money/add", post(io::money_management_apis::add_money))

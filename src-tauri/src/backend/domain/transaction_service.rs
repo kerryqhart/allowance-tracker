@@ -41,7 +41,7 @@
 //! - **Mock Support**: Development-friendly with fallback mock data
 
 use crate::backend::storage::DbConnection;
-use shared::{Transaction, TransactionListRequest, TransactionListResponse, PaginationInfo, CreateTransactionRequest};
+use shared::{Transaction, TransactionListRequest, TransactionListResponse, PaginationInfo, CreateTransactionRequest, DeleteTransactionsRequest, DeleteTransactionsResponse};
 use anyhow::Result;
 use tracing::info;
 use std::sync::Arc;
@@ -167,6 +167,48 @@ impl TransactionService {
 
         info!("Returning {} transactions, has_more: {}", response.transactions.len(), has_more);
         Ok(response)
+    }
+
+    /// Delete multiple transactions
+    pub async fn delete_transactions(&self, request: DeleteTransactionsRequest) -> Result<DeleteTransactionsResponse> {
+        info!("Deleting {} transactions: {:?}", request.transaction_ids.len(), request.transaction_ids);
+
+        if request.transaction_ids.is_empty() {
+            return Ok(DeleteTransactionsResponse {
+                deleted_count: 0,
+                success_message: "No transactions to delete".to_string(),
+                not_found_ids: vec![],
+            });
+        }
+
+        // Check which transactions actually exist
+        let existing_ids = self.db.check_transactions_exist(&request.transaction_ids).await?;
+        let not_found_ids: Vec<String> = request.transaction_ids
+            .iter()
+            .filter(|id| !existing_ids.contains(id))
+            .cloned()
+            .collect();
+
+        // Delete the existing transactions
+        let deleted_count = if !existing_ids.is_empty() {
+            self.db.delete_transactions(&existing_ids).await?
+        } else {
+            0
+        };
+
+        let success_message = match deleted_count {
+            0 => "No transactions were deleted".to_string(),
+            1 => "1 transaction deleted successfully".to_string(),
+            n => format!("{} transactions deleted successfully", n),
+        };
+
+        info!("Deleted {} transactions, {} not found", deleted_count, not_found_ids.len());
+
+        Ok(DeleteTransactionsResponse {
+            deleted_count,
+            success_message,
+            not_found_ids,
+        })
     }
 
     /// Apply cursor-based filtering (transactions after the given cursor)
@@ -631,5 +673,135 @@ mod tests {
         assert_eq!(response.transactions[0].balance, 25.0); // 10 - 5 + 20
         assert_eq!(response.transactions[1].balance, 5.0);  // 10 - 5
         assert_eq!(response.transactions[2].balance, 10.0); // 10
+    }
+
+    #[tokio::test]
+    async fn test_delete_transactions_basic() {
+        let service = create_test_service().await;
+        
+        // Create some test transactions with different timestamps to avoid ID collisions
+        let tx1 = service.create_transaction(CreateTransactionRequest {
+            description: "Transaction 1".to_string(),
+            amount: 10.0,
+            date: Some("2025-01-01T10:00:00-05:00".to_string()),
+        }).await.unwrap();
+        
+        // Small delay to ensure different timestamps
+        tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
+        
+        let tx2 = service.create_transaction(CreateTransactionRequest {
+            description: "Transaction 2".to_string(),
+            amount: 20.0,
+            date: Some("2025-01-01T11:00:00-05:00".to_string()),
+        }).await.unwrap();
+        
+        tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
+        
+        let tx3 = service.create_transaction(CreateTransactionRequest {
+            description: "Transaction 3".to_string(),
+            amount: -5.0,
+            date: Some("2025-01-01T12:00:00-05:00".to_string()),
+        }).await.unwrap();
+        
+        // Verify they exist
+        let list_response = service.list_transactions(TransactionListRequest {
+            after: None,
+            limit: Some(10),
+            start_date: None,
+            end_date: None,
+        }).await.unwrap();
+        assert_eq!(list_response.transactions.len(), 3);
+        
+        // Delete two transactions
+        let delete_request = DeleteTransactionsRequest {
+            transaction_ids: vec![tx1.id.clone(), tx3.id.clone()],
+        };
+        
+        let delete_response = service.delete_transactions(delete_request).await.unwrap();
+        assert_eq!(delete_response.deleted_count, 2);
+        assert_eq!(delete_response.success_message, "2 transactions deleted successfully");
+        assert!(delete_response.not_found_ids.is_empty());
+        
+        // Verify only tx2 remains
+        let remaining_transactions = service.list_transactions(TransactionListRequest {
+            after: None,
+            limit: Some(10),
+            start_date: None,
+            end_date: None,
+        }).await.unwrap();
+        assert_eq!(remaining_transactions.transactions.len(), 1);
+        assert_eq!(remaining_transactions.transactions[0].id, tx2.id);
+    }
+
+    #[tokio::test]
+    async fn test_delete_transactions_empty_list() {
+        let service = create_test_service().await;
+        
+        let delete_request = DeleteTransactionsRequest {
+            transaction_ids: vec![],
+        };
+        
+        let delete_response = service.delete_transactions(delete_request).await.unwrap();
+        assert_eq!(delete_response.deleted_count, 0);
+        assert_eq!(delete_response.success_message, "No transactions to delete");
+        assert!(delete_response.not_found_ids.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_delete_transactions_not_found() {
+        let service = create_test_service().await;
+        
+        // Create one transaction with specific date to avoid ID collisions
+        let tx1 = service.create_transaction(CreateTransactionRequest {
+            description: "Transaction 1".to_string(),
+            amount: 10.0,
+            date: Some("2025-01-02T10:00:00-05:00".to_string()),
+        }).await.unwrap();
+        
+        // Try to delete mix of existing and non-existing transactions
+        let delete_request = DeleteTransactionsRequest {
+            transaction_ids: vec![
+                tx1.id.clone(),
+                "nonexistent1".to_string(),
+                "nonexistent2".to_string(),
+            ],
+        };
+        
+        let delete_response = service.delete_transactions(delete_request).await.unwrap();
+        assert_eq!(delete_response.deleted_count, 1);
+        assert_eq!(delete_response.success_message, "1 transaction deleted successfully");
+        assert_eq!(delete_response.not_found_ids.len(), 2);
+        assert!(delete_response.not_found_ids.contains(&"nonexistent1".to_string()));
+        assert!(delete_response.not_found_ids.contains(&"nonexistent2".to_string()));
+        
+        // Verify the existing transaction was deleted
+        let remaining_transactions = service.list_transactions(TransactionListRequest {
+            after: None,
+            limit: Some(10),
+            start_date: None,
+            end_date: None,
+        }).await.unwrap();
+        
+        // Since we created one transaction and deleted it, there should be 0 database transactions
+        // The service might fall back to mock data if no database transactions exist
+        // So we need to check if the specific transaction we created is gone
+        let found_deleted_tx = remaining_transactions.transactions.iter()
+            .any(|tx| tx.id == tx1.id);
+        assert!(!found_deleted_tx, "Deleted transaction should not be found in results");
+    }
+
+    #[tokio::test]
+    async fn test_delete_transactions_none_found() {
+        let service = create_test_service().await;
+        
+        // Try to delete non-existing transactions
+        let delete_request = DeleteTransactionsRequest {
+            transaction_ids: vec!["nonexistent1".to_string(), "nonexistent2".to_string()],
+        };
+        
+        let delete_response = service.delete_transactions(delete_request).await.unwrap();
+        assert_eq!(delete_response.deleted_count, 0);
+        assert_eq!(delete_response.success_message, "No transactions were deleted");
+        assert_eq!(delete_response.not_found_ids.len(), 2);
     }
 }

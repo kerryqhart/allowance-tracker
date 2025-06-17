@@ -193,6 +193,63 @@ impl DbConnection {
         Ok(transactions)
     }
 
+    /// Delete multiple transactions by their IDs
+    pub async fn delete_transactions(&self, transaction_ids: &[String]) -> Result<usize> {
+        if transaction_ids.is_empty() {
+            return Ok(0);
+        }
+
+        // Create placeholders for the IN clause
+        let placeholders = transaction_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let query_str = format!(
+            "DELETE FROM transactions WHERE id IN ({})",
+            placeholders
+        );
+
+        let mut query = sqlx::query(&query_str);
+        for id in transaction_ids {
+            query = query.bind(id);
+        }
+
+        let result = query.execute(&*self.pool).await?;
+        Ok(result.rows_affected() as usize)
+    }
+
+    /// Delete a single transaction by ID
+    pub async fn delete_transaction(&self, transaction_id: &str) -> Result<bool> {
+        let result = sqlx::query(
+            "DELETE FROM transactions WHERE id = ?"
+        )
+        .bind(transaction_id)
+        .execute(&*self.pool)
+        .await?;
+
+        Ok(result.rows_affected() > 0)
+    }
+
+    /// Check if transactions exist by their IDs
+    pub async fn check_transactions_exist(&self, transaction_ids: &[String]) -> Result<Vec<String>> {
+        if transaction_ids.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let placeholders = transaction_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let query_str = format!(
+            "SELECT id FROM transactions WHERE id IN ({})",
+            placeholders
+        );
+
+        let mut query = sqlx::query(&query_str);
+        for id in transaction_ids {
+            query = query.bind(id);
+        }
+
+        let rows = query.fetch_all(&*self.pool).await?;
+        let existing_ids: Vec<String> = rows.iter().map(|row| row.get("id")).collect();
+        
+        Ok(existing_ids)
+    }
+
     /// Store a child in the database
     pub async fn store_child(&self, child: &Child) -> Result<()> {
         sqlx::query(
@@ -595,5 +652,172 @@ mod tests {
         // Verify child no longer exists
         let deleted_child = db.get_child(&child.id).await.expect("Failed to query child");
         assert!(deleted_child.is_none(), "Child should not exist after deletion");
+    }
+
+    #[tokio::test]
+    async fn test_delete_single_transaction() {
+        let db = setup_test().await;
+        
+        // Create a test transaction
+        let transaction = Transaction {
+            id: "tx123".to_string(),
+            date: "2025-01-01T10:00:00-05:00".to_string(),
+            description: "Test transaction".to_string(),
+            amount: 10.0,
+            balance: 10.0,
+        };
+        
+        // Store the transaction
+        db.store_transaction(&transaction).await.unwrap();
+        
+        // Verify it exists
+        let transactions = db.list_transactions(10, None).await.unwrap();
+        assert_eq!(transactions.len(), 1);
+        assert_eq!(transactions[0].id, "tx123");
+        
+        // Delete the transaction
+        let deleted = db.delete_transaction("tx123").await.unwrap();
+        assert!(deleted);
+        
+        // Verify it's gone
+        let transactions = db.list_transactions(10, None).await.unwrap();
+        assert_eq!(transactions.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_delete_nonexistent_transaction() {
+        let db = setup_test().await;
+        
+        // Try to delete a non-existent transaction
+        let deleted = db.delete_transaction("nonexistent").await.unwrap();
+        assert!(!deleted);
+    }
+
+    #[tokio::test]
+    async fn test_delete_multiple_transactions() {
+        let db = setup_test().await;
+        
+        // Create multiple test transactions
+        let transactions = vec![
+            Transaction {
+                id: "tx1".to_string(),
+                date: "2025-01-01T10:00:00-05:00".to_string(),
+                description: "Transaction 1".to_string(),
+                amount: 10.0,
+                balance: 10.0,
+            },
+            Transaction {
+                id: "tx2".to_string(),
+                date: "2025-01-01T11:00:00-05:00".to_string(),
+                description: "Transaction 2".to_string(),
+                amount: 20.0,
+                balance: 30.0,
+            },
+            Transaction {
+                id: "tx3".to_string(),
+                date: "2025-01-01T12:00:00-05:00".to_string(),
+                description: "Transaction 3".to_string(),
+                amount: -5.0,
+                balance: 25.0,
+            },
+        ];
+        
+        // Store all transactions
+        for tx in &transactions {
+            db.store_transaction(tx).await.unwrap();
+        }
+        
+        // Verify they exist
+        let stored = db.list_transactions(10, None).await.unwrap();
+        assert_eq!(stored.len(), 3);
+        
+        // Delete two transactions
+        let ids_to_delete = vec!["tx1".to_string(), "tx3".to_string()];
+        let deleted_count = db.delete_transactions(&ids_to_delete).await.unwrap();
+        assert_eq!(deleted_count, 2);
+        
+        // Verify only one remains
+        let remaining = db.list_transactions(10, None).await.unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].id, "tx2");
+    }
+
+    #[tokio::test]
+    async fn test_delete_empty_transaction_list() {
+        let db = setup_test().await;
+        
+        // Try to delete empty list
+        let deleted_count = db.delete_transactions(&[]).await.unwrap();
+        assert_eq!(deleted_count, 0);
+    }
+
+    #[tokio::test]
+    async fn test_delete_transactions_with_invalid_ids() {
+        let db = setup_test().await;
+        
+        // Create one test transaction
+        let transaction = Transaction {
+            id: "tx1".to_string(),
+            date: "2025-01-01T10:00:00-05:00".to_string(),
+            description: "Transaction 1".to_string(),
+            amount: 10.0,
+            balance: 10.0,
+        };
+        db.store_transaction(&transaction).await.unwrap();
+        
+        // Try to delete mix of valid and invalid IDs
+        let ids_to_delete = vec!["tx1".to_string(), "invalid".to_string(), "also_invalid".to_string()];
+        let deleted_count = db.delete_transactions(&ids_to_delete).await.unwrap();
+        assert_eq!(deleted_count, 1); // Only tx1 should be deleted
+        
+        // Verify the transaction is gone
+        let remaining = db.list_transactions(10, None).await.unwrap();
+        assert_eq!(remaining.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_check_transactions_exist() {
+        let db = setup_test().await;
+        
+        // Create test transactions
+        let transactions = vec![
+            Transaction {
+                id: "tx1".to_string(),
+                date: "2025-01-01T10:00:00-05:00".to_string(),
+                description: "Transaction 1".to_string(),
+                amount: 10.0,
+                balance: 10.0,
+            },
+            Transaction {
+                id: "tx2".to_string(),
+                date: "2025-01-01T11:00:00-05:00".to_string(),
+                description: "Transaction 2".to_string(),
+                amount: 20.0,
+                balance: 30.0,
+            },
+        ];
+        
+        // Store transactions
+        for tx in &transactions {
+            db.store_transaction(tx).await.unwrap();
+        }
+        
+        // Check which transactions exist
+        let ids_to_check = vec!["tx1".to_string(), "tx2".to_string(), "tx3".to_string()];
+        let existing_ids = db.check_transactions_exist(&ids_to_check).await.unwrap();
+        
+        assert_eq!(existing_ids.len(), 2);
+        assert!(existing_ids.contains(&"tx1".to_string()));
+        assert!(existing_ids.contains(&"tx2".to_string()));
+        assert!(!existing_ids.contains(&"tx3".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_check_transactions_exist_empty_list() {
+        let db = setup_test().await;
+        
+        // Check empty list
+        let existing_ids = db.check_transactions_exist(&[]).await.unwrap();
+        assert_eq!(existing_ids.len(), 0);
     }
 }
