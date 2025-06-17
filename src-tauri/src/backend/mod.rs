@@ -37,7 +37,7 @@ pub mod io;
 
 use axum::{
     http::{HeaderValue, Method},
-    routing::{delete, get, post},
+    routing::{get, post},
     Router,
 };
 use tower_http::cors::{Any, CorsLayer};
@@ -102,6 +102,7 @@ pub fn create_router(app_state: AppState) -> Router {
         .route("/money/spend", post(io::money_management_apis::spend_money))
         .route("/children", get(io::child_apis::list_children).post(io::child_apis::create_child))
         .route("/children/:id", get(io::child_apis::get_child).put(io::child_apis::update_child).delete(io::child_apis::delete_child))
+        .route("/active-child", get(io::child_apis::get_active_child).post(io::child_apis::set_active_child))
         .nest("/parental-control", io::parental_control_apis::router());
 
     // Define our main application router

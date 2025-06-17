@@ -268,6 +268,25 @@ pub struct ChildListResponse {
     pub children: Vec<Child>,
 }
 
+/// Request for setting the active child
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SetActiveChildRequest {
+    pub child_id: String,
+}
+
+/// Response after setting active child
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SetActiveChildResponse {
+    pub success_message: String,
+    pub active_child: Child,
+}
+
+/// Response containing the active child information
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ActiveChildResponse {
+    pub active_child: Option<Child>,
+}
+
 /// Configuration for money management forms
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MoneyManagementConfig {

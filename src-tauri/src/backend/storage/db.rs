@@ -121,6 +121,20 @@ impl DbConnection {
         .execute(pool)
         .await?;
 
+        // Create active_child table (single row to track the currently active child)
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS active_child (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                child_id TEXT NOT NULL,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (child_id) REFERENCES children (id) ON DELETE CASCADE
+            );
+            "#,
+        )
+        .execute(pool)
+        .await?;
+
         Ok(())
     }
 
@@ -425,6 +439,55 @@ impl DbConnection {
             .collect();
 
         Ok(attempts)
+    }
+
+    /// Get the currently active child ID
+    pub async fn get_active_child(&self) -> Result<Option<String>> {
+        let row = sqlx::query(
+            r#"
+            SELECT child_id
+            FROM active_child
+            WHERE id = 1
+            "#,
+        )
+        .fetch_optional(&*self.pool)
+        .await?;
+
+        match row {
+            Some(r) => Ok(Some(r.get("child_id"))),
+            None => Ok(None),
+        }
+    }
+
+    /// Set the currently active child
+    pub async fn set_active_child(&self, child_id: &str) -> Result<()> {
+        // First verify the child exists
+        let child_exists = sqlx::query(
+            r#"
+            SELECT 1 FROM children WHERE id = ?
+            "#,
+        )
+        .bind(child_id)
+        .fetch_optional(&*self.pool)
+        .await?
+        .is_some();
+
+        if !child_exists {
+            return Err(anyhow::anyhow!("Child not found: {}", child_id));
+        }
+
+        // Use INSERT OR REPLACE to handle both initial insert and updates
+        sqlx::query(
+            r#"
+            INSERT OR REPLACE INTO active_child (id, child_id, updated_at)
+            VALUES (1, ?, CURRENT_TIMESTAMP)
+            "#,
+        )
+        .bind(child_id)
+        .execute(&*self.pool)
+        .await?;
+
+        Ok(())
     }
 }
 
@@ -966,5 +1029,110 @@ mod tests {
         // Should be able to parse as datetime
         assert!(chrono::DateTime::parse_from_rfc3339(&attempt.timestamp).is_ok() || 
                 chrono::NaiveDateTime::parse_from_str(&attempt.timestamp, "%Y-%m-%d %H:%M:%S").is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_get_active_child_when_none_set() {
+        let db = setup_test().await;
+        
+        let active_child = db.get_active_child().await.expect("Failed to get active child");
+        assert!(active_child.is_none(), "Should have no active child initially");
+    }
+
+    #[tokio::test]
+    async fn test_set_and_get_active_child() {
+        let db = setup_test().await;
+        
+        // Create a test child first
+        let child = Child {
+            id: "child::1234567890000".to_string(),
+            name: "Test Child".to_string(),
+            birthdate: "2015-01-01".to_string(),
+            created_at: "2025-01-01T00:00:00Z".to_string(),
+            updated_at: "2025-01-01T00:00:00Z".to_string(),
+        };
+        db.store_child(&child).await.expect("Failed to store child");
+        
+        // Set as active child
+        db.set_active_child(&child.id).await.expect("Failed to set active child");
+        
+        // Verify it's set correctly
+        let active_child = db.get_active_child().await.expect("Failed to get active child");
+        assert!(active_child.is_some());
+        assert_eq!(active_child.unwrap(), child.id);
+    }
+
+    #[tokio::test]
+    async fn test_set_active_child_with_nonexistent_child() {
+        let db = setup_test().await;
+        
+        let result = db.set_active_child("nonexistent::child::id").await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Child not found"));
+    }
+
+    #[tokio::test]
+    async fn test_update_active_child() {
+        let db = setup_test().await;
+        
+        // Create two test children
+        let child1 = Child {
+            id: "child::1234567890000".to_string(),
+            name: "First Child".to_string(),
+            birthdate: "2015-01-01".to_string(),
+            created_at: "2025-01-01T00:00:00Z".to_string(),
+            updated_at: "2025-01-01T00:00:00Z".to_string(),
+        };
+        let child2 = Child {
+            id: "child::1234567891000".to_string(),
+            name: "Second Child".to_string(),
+            birthdate: "2016-01-01".to_string(),
+            created_at: "2025-01-01T00:00:00Z".to_string(),
+            updated_at: "2025-01-01T00:00:00Z".to_string(),
+        };
+        
+        db.store_child(&child1).await.expect("Failed to store first child");
+        db.store_child(&child2).await.expect("Failed to store second child");
+        
+        // Set first child as active
+        db.set_active_child(&child1.id).await.expect("Failed to set first child as active");
+        
+        let active_child = db.get_active_child().await.expect("Failed to get active child");
+        assert_eq!(active_child.unwrap(), child1.id);
+        
+        // Update to second child
+        db.set_active_child(&child2.id).await.expect("Failed to set second child as active");
+        
+        let active_child = db.get_active_child().await.expect("Failed to get active child");
+        assert_eq!(active_child.unwrap(), child2.id);
+    }
+
+    #[tokio::test]
+    async fn test_active_child_cascade_delete() {
+        let db = setup_test().await;
+        
+        // Create a test child
+        let child = Child {
+            id: "child::1234567890000".to_string(),
+            name: "Test Child".to_string(),
+            birthdate: "2015-01-01".to_string(),
+            created_at: "2025-01-01T00:00:00Z".to_string(),
+            updated_at: "2025-01-01T00:00:00Z".to_string(),
+        };
+        db.store_child(&child).await.expect("Failed to store child");
+        
+        // Set as active child
+        db.set_active_child(&child.id).await.expect("Failed to set active child");
+        
+        // Verify it's set
+        let active_child = db.get_active_child().await.expect("Failed to get active child");
+        assert!(active_child.is_some());
+        
+        // Delete the child
+        db.delete_child(&child.id).await.expect("Failed to delete child");
+        
+        // Active child should be cleared due to CASCADE DELETE
+        let active_child = db.get_active_child().await.expect("Failed to get active child");
+        assert!(active_child.is_none());
     }
 }

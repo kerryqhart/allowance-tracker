@@ -11,7 +11,7 @@ use log::{info, error};
 
 use crate::backend::AppState;
 use shared::{
-    CreateChildRequest, UpdateChildRequest,
+    CreateChildRequest, UpdateChildRequest, SetActiveChildRequest,
 };
 
 
@@ -100,6 +100,42 @@ pub async fn delete_child(
                 StatusCode::NOT_FOUND
             } else {
                 StatusCode::INTERNAL_SERVER_ERROR
+            };
+            (status, e.to_string()).into_response()
+        }
+    }
+}
+
+/// Get the currently active child
+pub async fn get_active_child(
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    info!("GET /api/active-child");
+
+    match state.child_service.get_active_child().await {
+        Ok(response) => (StatusCode::OK, Json(response)).into_response(),
+        Err(e) => {
+            error!("Failed to get active child: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, "Error retrieving active child").into_response()
+        }
+    }
+}
+
+/// Set the active child
+pub async fn set_active_child(
+    State(state): State<AppState>,
+    Json(request): Json<SetActiveChildRequest>,
+) -> impl IntoResponse {
+    info!("POST /api/active-child - request: {:?}", request);
+
+    match state.child_service.set_active_child(request).await {
+        Ok(response) => (StatusCode::OK, Json(response)).into_response(),
+        Err(e) => {
+            error!("Failed to set active child: {}", e);
+            let status = if e.to_string().contains("not found") {
+                StatusCode::NOT_FOUND
+            } else {
+                StatusCode::BAD_REQUEST
             };
             (status, e.to_string()).into_response()
         }

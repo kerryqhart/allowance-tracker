@@ -5,7 +5,8 @@ use std::sync::Arc;
 
 use crate::backend::storage::db::DbConnection;
 use shared::{
-    Child, CreateChildRequest, UpdateChildRequest, ChildResponse, ChildListResponse
+    Child, CreateChildRequest, UpdateChildRequest, ChildResponse, ChildListResponse,
+    SetActiveChildRequest, SetActiveChildResponse, ActiveChildResponse
 };
 
 /// Service for managing children in the allowance tracking system
@@ -125,6 +126,47 @@ impl ChildService {
         info!("Deleted child: {} with ID: {}", child.name, child.id);
 
         Ok(())
+    }
+
+    /// Get the currently active child
+    pub async fn get_active_child(&self) -> Result<ActiveChildResponse> {
+        info!("Getting active child");
+
+        let active_child_id = self.db.get_active_child().await?;
+
+        let active_child = if let Some(child_id) = active_child_id {
+            let child = self.db.get_child(&child_id).await?;
+            if child.is_some() {
+                info!("Found active child: {}", child_id);
+            } else {
+                warn!("Active child ID exists but child not found: {}", child_id);
+            }
+            child
+        } else {
+            info!("No active child set");
+            None
+        };
+
+        Ok(ActiveChildResponse { active_child })
+    }
+
+    /// Set the active child
+    pub async fn set_active_child(&self, request: SetActiveChildRequest) -> Result<SetActiveChildResponse> {
+        info!("Setting active child: {}", request.child_id);
+
+        // Validate that the child exists
+        let child = self.db.get_child(&request.child_id).await?
+            .ok_or_else(|| anyhow::anyhow!("Child not found: {}", request.child_id))?;
+
+        // Set as active child in database
+        self.db.set_active_child(&request.child_id).await?;
+
+        info!("Successfully set active child: {} ({})", child.name, child.id);
+
+        Ok(SetActiveChildResponse {
+            success_message: format!("Successfully set {} as the active child", child.name),
+            active_child: child,
+        })
     }
 
     /// Validate create child request
@@ -443,5 +485,123 @@ mod tests {
         assert!(service.validate_birthdate("2015-04-31").is_err()); // Invalid day for April
         assert!(service.validate_birthdate("1899-06-15").is_err()); // Year too early
         assert!(service.validate_birthdate("2101-06-15").is_err()); // Year too late
+    }
+
+    #[tokio::test]
+    async fn test_get_active_child_when_none_set() {
+        let service = setup_test().await;
+        
+        let response = service.get_active_child().await.expect("Failed to get active child");
+        assert!(response.active_child.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_set_and_get_active_child() {
+        let service = setup_test().await;
+        
+        // Create a test child
+        let create_request = CreateChildRequest {
+            name: "Test Child".to_string(),
+            birthdate: "2015-01-01".to_string(),
+        };
+        let child_response = service.create_child(create_request).await.expect("Failed to create child");
+        
+        // Set as active child
+        let set_request = SetActiveChildRequest {
+            child_id: child_response.child.id.clone(),
+        };
+        let set_response = service.set_active_child(set_request).await.expect("Failed to set active child");
+        
+        assert_eq!(set_response.active_child.id, child_response.child.id);
+        assert_eq!(set_response.active_child.name, "Test Child");
+        assert!(set_response.success_message.contains("Test Child"));
+        
+        // Verify it's set correctly
+        let get_response = service.get_active_child().await.expect("Failed to get active child");
+        assert!(get_response.active_child.is_some());
+        let active_child = get_response.active_child.unwrap();
+        assert_eq!(active_child.id, child_response.child.id);
+        assert_eq!(active_child.name, "Test Child");
+    }
+
+    #[tokio::test]
+    async fn test_set_active_child_with_nonexistent_child() {
+        let service = setup_test().await;
+        
+        let set_request = SetActiveChildRequest {
+            child_id: "nonexistent::child::id".to_string(),
+        };
+        
+        let result = service.set_active_child(set_request).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Child not found"));
+    }
+
+    #[tokio::test]
+    async fn test_update_active_child() {
+        let service = setup_test().await;
+        
+        // Create two test children
+        let child1_request = CreateChildRequest {
+            name: "First Child".to_string(),
+            birthdate: "2015-01-01".to_string(),
+        };
+        let child1_response = service.create_child(child1_request).await.expect("Failed to create first child");
+        
+        // Small delay to ensure different timestamp for ID generation
+        tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
+        
+        let child2_request = CreateChildRequest {
+            name: "Second Child".to_string(),
+            birthdate: "2016-01-01".to_string(),
+        };
+        let child2_response = service.create_child(child2_request).await.expect("Failed to create second child");
+        
+        // Set first child as active
+        let set1_request = SetActiveChildRequest {
+            child_id: child1_response.child.id.clone(),
+        };
+        service.set_active_child(set1_request).await.expect("Failed to set first child as active");
+        
+        let get_response = service.get_active_child().await.expect("Failed to get active child");
+        assert_eq!(get_response.active_child.unwrap().id, child1_response.child.id);
+        
+        // Update to second child
+        let set2_request = SetActiveChildRequest {
+            child_id: child2_response.child.id.clone(),
+        };
+        service.set_active_child(set2_request).await.expect("Failed to set second child as active");
+        
+        let get_response = service.get_active_child().await.expect("Failed to get active child");
+        assert_eq!(get_response.active_child.unwrap().id, child2_response.child.id);
+    }
+
+    #[tokio::test]
+    async fn test_active_child_after_child_deletion() {
+        let service = setup_test().await;
+        
+        // Create a test child
+        let create_request = CreateChildRequest {
+            name: "Test Child".to_string(),
+            birthdate: "2015-01-01".to_string(),
+        };
+        let child_response = service.create_child(create_request).await.expect("Failed to create child");
+        
+        // Set as active child
+        let set_request = SetActiveChildRequest {
+            child_id: child_response.child.id.clone(),
+        };
+        service.set_active_child(set_request).await.expect("Failed to set active child");
+        
+        // Verify it's set
+        let get_response = service.get_active_child().await.expect("Failed to get active child");
+        assert!(get_response.active_child.is_some());
+        
+        // Delete the child
+        service.delete_child(&child_response.child.id).await.expect("Failed to delete child");
+        
+        // Active child should be cleared due to CASCADE DELETE
+        let get_response = service.get_active_child().await.expect("Failed to get active child");
+        assert!(get_response.active_child.is_none());
     }
 } 
