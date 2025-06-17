@@ -162,6 +162,7 @@ fn app() -> Html {
             <Header 
                 current_balance={transactions.state.current_balance} 
                 on_toggle_delete_mode={toggle_delete_mode.clone()}
+                api_client={(*api_client).clone()}
             />
 
 

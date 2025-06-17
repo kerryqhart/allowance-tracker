@@ -2,11 +2,12 @@ use gloo::net::http::Request;
 use shared::{
     AddMoneyRequest, AddMoneyResponse, SpendMoneyRequest, SpendMoneyResponse,
     CalendarMonth, TransactionTableResponse, DeleteTransactionsRequest, DeleteTransactionsResponse,
-    ParentalControlRequest, ParentalControlResponse, CreateChildRequest, ChildResponse
+    ParentalControlRequest, ParentalControlResponse, CreateChildRequest, ChildResponse,
+    SetActiveChildRequest, SetActiveChildResponse, ActiveChildResponse, ChildListResponse
 };
 
 /// API client for communicating with the backend server
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct ApiClient {
     base_url: String,
 }
@@ -188,6 +189,79 @@ impl ApiClient {
             Ok(response) => {
                 if response.ok() {
                     match response.json::<ChildResponse>().await {
+                        Ok(data) => Ok(data),
+                        Err(e) => Err(format!("Failed to parse response: {}", e)),
+                    }
+                } else {
+                    let status = response.status();
+                    let error_text = response.text().await
+                        .unwrap_or_else(|_| "Unknown error".to_string());
+                    Err(format!("Server error {}: {}", status, error_text))
+                }
+            }
+            Err(e) => Err(format!("Network error: {}", e)),
+        }
+    }
+
+    /// Get all children
+    pub async fn list_children(&self) -> Result<ChildListResponse, String> {
+        let url = format!("{}/api/children", self.base_url);
+        
+        match Request::get(&url).send().await {
+            Ok(response) => {
+                if response.ok() {
+                    match response.json::<ChildListResponse>().await {
+                        Ok(data) => Ok(data),
+                        Err(e) => Err(format!("Failed to parse response: {}", e)),
+                    }
+                } else {
+                    let status = response.status();
+                    let error_text = response.text().await
+                        .unwrap_or_else(|_| "Unknown error".to_string());
+                    Err(format!("Server error {}: {}", status, error_text))
+                }
+            }
+            Err(e) => Err(format!("Network error: {}", e)),
+        }
+    }
+
+    /// Get the currently active child
+    pub async fn get_active_child(&self) -> Result<ActiveChildResponse, String> {
+        let url = format!("{}/api/active-child", self.base_url);
+        
+        match Request::get(&url).send().await {
+            Ok(response) => {
+                if response.ok() {
+                    match response.json::<ActiveChildResponse>().await {
+                        Ok(data) => Ok(data),
+                        Err(e) => Err(format!("Failed to parse response: {}", e)),
+                    }
+                } else {
+                    let status = response.status();
+                    let error_text = response.text().await
+                        .unwrap_or_else(|_| "Unknown error".to_string());
+                    Err(format!("Server error {}: {}", status, error_text))
+                }
+            }
+            Err(e) => Err(format!("Network error: {}", e)),
+        }
+    }
+
+    /// Set the active child
+    pub async fn set_active_child(&self, child_id: String) -> Result<SetActiveChildResponse, String> {
+        let url = format!("{}/api/active-child", self.base_url);
+        
+        let request_body = SetActiveChildRequest { child_id };
+
+        match Request::post(&url)
+            .json(&request_body)
+            .map_err(|e| format!("Failed to serialize request: {}", e))?
+            .send()
+            .await
+        {
+            Ok(response) => {
+                if response.ok() {
+                    match response.json::<SetActiveChildResponse>().await {
                         Ok(data) => Ok(data),
                         Err(e) => Err(format!("Failed to parse response: {}", e)),
                     }

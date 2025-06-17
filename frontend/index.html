@@ -56,6 +56,12 @@
             gap: 1rem;
         }
 
+        .header-menus {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
         .balance-display {
             background: linear-gradient(135deg, #4CAF50, #45a049);
             color: white;
@@ -135,6 +141,152 @@
         .settings-item svg {
             color: #667eea;
             flex-shrink: 0;
+        }
+
+        /* Child Selector Menu Styles */
+        .child-selector-menu {
+            position: relative;
+            z-index: 450;
+        }
+
+        .child-selector-button {
+            background: rgba(76, 175, 80, 0.1);
+            border: 2px solid rgba(76, 175, 80, 0.3);
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            color: #4CAF50;
+            font-weight: 600;
+            font-size: 1.1rem;
+        }
+
+        .child-selector-button:hover:not(:disabled) {
+            background: rgba(76, 175, 80, 0.2);
+            border-color: rgba(76, 175, 80, 0.5);
+            transform: scale(1.05);
+        }
+
+        .child-selector-button:disabled {
+            opacity: 0.7;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .child-selector-letter {
+            font-size: 1.1rem;
+            font-weight: 700;
+        }
+
+        .child-selector-spinner {
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(76, 175, 80, 0.3);
+            border-top: 2px solid #4CAF50;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .child-selector-backdrop {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            z-index: 420;
+        }
+
+        .child-selector-dropdown {
+            position: absolute;
+            top: calc(100% + 8px);
+            right: 0;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+            border: 1px solid rgba(76, 175, 80, 0.1);
+            min-width: 200px;
+            overflow: hidden;
+            z-index: 440;
+        }
+
+        .child-selector-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 16px;
+            cursor: pointer;
+            transition: background-color 0.2s ease;
+            color: #333;
+            font-size: 0.95rem;
+        }
+
+        .child-selector-item:hover {
+            background-color: rgba(76, 175, 80, 0.05);
+        }
+
+        .child-selector-item:not(:last-child) {
+            border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+        }
+
+        .child-selector-item.active {
+            background-color: rgba(76, 175, 80, 0.1);
+        }
+
+        .child-selector-item.no-children {
+            opacity: 0.7;
+            cursor: default;
+            font-style: italic;
+        }
+
+        .child-selector-item.no-children:hover {
+            background-color: transparent;
+        }
+
+        .child-selector-item.loading {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.75rem 1rem;
+            color: #666;
+            cursor: default;
+        }
+
+        .child-selector-item.loading:hover {
+            background-color: transparent;
+        }
+
+        .child-avatar {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #4CAF50, #45a049);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            font-size: 0.85rem;
+            flex-shrink: 0;
+        }
+
+        .child-name {
+            flex: 1;
+            font-weight: 500;
+        }
+
+        .child-active-indicator {
+            color: #4CAF50;
+            font-weight: 600;
+            font-size: 1rem;
         }
 
         .balance-label {
@@ -1130,6 +1282,12 @@
             .settings-button {
                 width: 35px;
                 height: 35px;
+            }
+            
+            .child-selector-button {
+                width: 35px;
+                height: 35px;
+                font-size: 1rem;
             }
             
             .transactions-section,
