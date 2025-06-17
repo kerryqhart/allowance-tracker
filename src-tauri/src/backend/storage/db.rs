@@ -1,7 +1,7 @@
 use anyhow::Result;
 use sqlx::{migrate::MigrateDatabase, Row, Sqlite, SqlitePool};
 use std::sync::Arc;
-use shared::{Transaction, Child};
+use shared::{Transaction, Child, ParentalControlAttempt};
 
 // The database URL for the production database
 const DATABASE_URL: &str = "sqlite:keyvalue.db";
@@ -92,6 +92,30 @@ impl DbConnection {
             r#"
             CREATE INDEX IF NOT EXISTS idx_children_name 
             ON children(name);
+            "#,
+        )
+        .execute(pool)
+        .await?;
+
+        // Create parental_control_attempts table
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS parental_control_attempts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                attempted_value TEXT NOT NULL,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                success BOOLEAN NOT NULL DEFAULT FALSE
+            );
+            "#,
+        )
+        .execute(pool)
+        .await?;
+
+        // Create index for ordering attempts by id
+        sqlx::query(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_parental_control_attempts_id 
+            ON parental_control_attempts(id DESC);
             "#,
         )
         .execute(pool)
@@ -348,6 +372,59 @@ impl DbConnection {
         .execute(&*self.pool)
         .await?;
         Ok(())
+    }
+
+    /// Record a parental control validation attempt
+    pub async fn record_parental_control_attempt(&self, attempted_value: &str, success: bool) -> Result<i64> {
+        let result = sqlx::query(
+            r#"
+            INSERT INTO parental_control_attempts (attempted_value, success)
+            VALUES (?, ?)
+            "#,
+        )
+        .bind(attempted_value)
+        .bind(success)
+        .execute(&*self.pool)
+        .await?;
+        
+        Ok(result.last_insert_rowid())
+    }
+
+    /// Get parental control attempts with optional limit
+    pub async fn get_parental_control_attempts(&self, limit: Option<u32>) -> Result<Vec<ParentalControlAttempt>> {
+        let query = if let Some(limit) = limit {
+            sqlx::query(
+                r#"
+                SELECT id, attempted_value, timestamp, success
+                FROM parental_control_attempts
+                ORDER BY id DESC
+                LIMIT ?
+                "#,
+            )
+            .bind(limit as i64)
+        } else {
+            sqlx::query(
+                r#"
+                SELECT id, attempted_value, timestamp, success
+                FROM parental_control_attempts
+                ORDER BY id DESC
+                "#,
+            )
+        };
+
+        let rows = query.fetch_all(&*self.pool).await?;
+
+        let attempts = rows
+            .iter()
+            .map(|row| ParentalControlAttempt {
+                id: row.get("id"),
+                attempted_value: row.get("attempted_value"),
+                timestamp: row.get("timestamp"),
+                success: row.get("success"),
+            })
+            .collect();
+
+        Ok(attempts)
     }
 }
 
@@ -819,5 +896,75 @@ mod tests {
         // Check empty list
         let existing_ids = db.check_transactions_exist(&[]).await.unwrap();
         assert_eq!(existing_ids.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_record_parental_control_attempt() {
+        let db = setup_test().await;
+        
+        // Record a successful attempt
+        let attempt_id = db.record_parental_control_attempt("ice cold", true).await.unwrap();
+        assert!(attempt_id > 0);
+        
+        // Record a failed attempt
+        let failed_attempt_id = db.record_parental_control_attempt("wrong answer", false).await.unwrap();
+        assert!(failed_attempt_id > 0);
+        assert_ne!(attempt_id, failed_attempt_id);
+    }
+
+    #[tokio::test]
+    async fn test_get_parental_control_attempts() {
+        let db = setup_test().await;
+        
+        // Initially should have no attempts
+        let attempts = db.get_parental_control_attempts(None).await.unwrap();
+        assert_eq!(attempts.len(), 0);
+        
+        // Record some attempts with small delays to ensure different timestamps
+        db.record_parental_control_attempt("ice cold", true).await.unwrap();
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        db.record_parental_control_attempt("wrong answer", false).await.unwrap();
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        db.record_parental_control_attempt("another wrong", false).await.unwrap();
+        
+        // Get all attempts
+        let attempts = db.get_parental_control_attempts(None).await.unwrap();
+        assert_eq!(attempts.len(), 3);
+        
+        // Should be ordered by id DESC (newest first)
+        assert_eq!(attempts[0].attempted_value, "another wrong");
+        assert_eq!(attempts[0].success, false);
+        assert_eq!(attempts[1].attempted_value, "wrong answer");
+        assert_eq!(attempts[1].success, false);
+        assert_eq!(attempts[2].attempted_value, "ice cold");
+        assert_eq!(attempts[2].success, true);
+        
+        // Test with limit
+        let limited_attempts = db.get_parental_control_attempts(Some(2)).await.unwrap();
+        assert_eq!(limited_attempts.len(), 2);
+        assert_eq!(limited_attempts[0].attempted_value, "another wrong");
+        assert_eq!(limited_attempts[1].attempted_value, "wrong answer");
+    }
+
+    #[tokio::test]
+    async fn test_parental_control_attempt_properties() {
+        let db = setup_test().await;
+        
+        // Record an attempt
+        let attempt_id = db.record_parental_control_attempt("test answer", true).await.unwrap();
+        
+        // Retrieve it
+        let attempts = db.get_parental_control_attempts(Some(1)).await.unwrap();
+        assert_eq!(attempts.len(), 1);
+        
+        let attempt = &attempts[0];
+        assert_eq!(attempt.id, attempt_id);
+        assert_eq!(attempt.attempted_value, "test answer");
+        assert_eq!(attempt.success, true);
+        // Timestamp should be a valid datetime string
+        assert!(!attempt.timestamp.is_empty());
+        // Should be able to parse as datetime
+        assert!(chrono::DateTime::parse_from_rfc3339(&attempt.timestamp).is_ok() || 
+                chrono::NaiveDateTime::parse_from_str(&attempt.timestamp, "%Y-%m-%d %H:%M:%S").is_ok());
     }
 }

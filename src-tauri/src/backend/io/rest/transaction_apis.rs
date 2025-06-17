@@ -97,7 +97,8 @@ mod tests {
         let calendar_service = CalendarService::new();
         let transaction_table_service = TransactionTableService::new();
         let money_management_service = MoneyManagementService::new();
-        let child_service = ChildService::new(db);
+        let child_service = ChildService::new(db.clone());
+        let parental_control_service = crate::backend::domain::ParentalControlService::new(db);
         
         AppState {
             transaction_service,
@@ -105,6 +106,7 @@ mod tests {
             transaction_table_service,
             money_management_service,
             child_service,
+            parental_control_service,
         }
     }
 

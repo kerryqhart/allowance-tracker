@@ -29,3 +29,4 @@ pub mod calendar_apis;
 pub mod transaction_table_apis;
 pub mod money_management_apis;
 pub mod child_apis;
+pub mod parental_control_apis;

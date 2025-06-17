@@ -128,6 +128,28 @@ pub struct TransactionTableResponse {
     pub pagination: PaginationInfo,
 }
 
+/// Represents a parental control validation attempt
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ParentalControlAttempt {
+    pub id: i64,
+    pub attempted_value: String,
+    pub timestamp: String,
+    pub success: bool,
+}
+
+/// Request for parental control validation
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ParentalControlRequest {
+    pub answer: String,
+}
+
+/// Response from parental control validation
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ParentalControlResponse {
+    pub success: bool,
+    pub message: String,
+}
+
 /// Request for spending money (creating a negative transaction)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SpendMoneyRequest {

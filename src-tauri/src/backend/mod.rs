@@ -42,7 +42,7 @@ use axum::{
 };
 use tower_http::cors::{Any, CorsLayer};
 use anyhow::Result;
-use crate::backend::domain::{TransactionService, CalendarService, TransactionTableService, MoneyManagementService, child_service::ChildService};
+use crate::backend::domain::{TransactionService, CalendarService, TransactionTableService, MoneyManagementService, child_service::ChildService, ParentalControlService};
 use crate::backend::storage::DbConnection;
 use log::info;
 
@@ -56,6 +56,7 @@ pub struct AppState {
     pub transaction_table_service: TransactionTableService,
     pub money_management_service: MoneyManagementService,
     pub child_service: ChildService,
+    pub parental_control_service: ParentalControlService,
 }
 
 /// Initialize the backend with all required services
@@ -68,7 +69,8 @@ pub async fn initialize_backend() -> Result<AppState> {
     let calendar_service = CalendarService::new();
     let transaction_table_service = TransactionTableService::new();
     let money_management_service = MoneyManagementService::new();
-    let child_service = ChildService::new(db_conn);
+    let child_service = ChildService::new(db_conn.clone());
+    let parental_control_service = ParentalControlService::new(db_conn);
 
     info!("Setting up application state");
     let app_state = AppState {
@@ -77,6 +79,7 @@ pub async fn initialize_backend() -> Result<AppState> {
         transaction_table_service,
         money_management_service,
         child_service,
+        parental_control_service,
     };
 
     Ok(app_state)
@@ -98,7 +101,8 @@ pub fn create_router(app_state: AppState) -> Router {
         .route("/money/add", post(io::money_management_apis::add_money))
         .route("/money/spend", post(io::money_management_apis::spend_money))
         .route("/children", get(io::child_apis::list_children).post(io::child_apis::create_child))
-        .route("/children/:id", get(io::child_apis::get_child).put(io::child_apis::update_child).delete(io::child_apis::delete_child));
+        .route("/children/:id", get(io::child_apis::get_child).put(io::child_apis::update_child).delete(io::child_apis::delete_child))
+        .nest("/parental-control", io::parental_control_apis::router());
 
     // Define our main application router
     Router::new()
