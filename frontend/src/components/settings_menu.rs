@@ -1,5 +1,6 @@
 use yew::prelude::*;
 use web_sys::MouseEvent;
+use super::challenge_modal::ChallengeModal;
 
 #[derive(Properties, PartialEq)]
 pub struct SettingsMenuProps {
@@ -9,11 +10,21 @@ pub struct SettingsMenuProps {
 #[function_component(SettingsMenu)]
 pub fn settings_menu(props: &SettingsMenuProps) -> Html {
     let is_open = use_state(|| false);
+    let is_authenticated = use_state(|| false);
+    let show_challenge = use_state(|| false);
     
     let toggle_menu = {
         let is_open = is_open.clone();
+        let is_authenticated = is_authenticated.clone();
+        let show_challenge = show_challenge.clone();
         Callback::from(move |_: MouseEvent| {
-            is_open.set(!*is_open);
+            if *is_authenticated {
+                // If already authenticated, just toggle menu
+                is_open.set(!*is_open);
+            } else {
+                // If not authenticated, show challenge modal
+                show_challenge.set(true);
+            }
         })
     };
     
@@ -36,6 +47,25 @@ pub fn settings_menu(props: &SettingsMenuProps) -> Html {
     let on_menu_click = Callback::from(|e: MouseEvent| {
         e.stop_propagation();
     });
+
+    // Challenge modal callbacks
+    let on_challenge_success = {
+        let is_authenticated = is_authenticated.clone();
+        let show_challenge = show_challenge.clone();
+        let is_open = is_open.clone();
+        Callback::from(move |_| {
+            is_authenticated.set(true);
+            show_challenge.set(false);
+            is_open.set(true); // Open the settings menu after successful authentication
+        })
+    };
+
+    let on_challenge_close = {
+        let show_challenge = show_challenge.clone();
+        Callback::from(move |_| {
+            show_challenge.set(false);
+        })
+    };
 
     html! {
         <div class="settings-menu">
@@ -91,6 +121,12 @@ pub fn settings_menu(props: &SettingsMenuProps) -> Html {
                     </div>
                 </>
             }
+            
+            <ChallengeModal 
+                is_open={*show_challenge}
+                on_success={on_challenge_success}
+                on_close={on_challenge_close}
+            />
         </div>
     }
 } 
