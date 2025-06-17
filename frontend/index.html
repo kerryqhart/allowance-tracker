@@ -963,6 +963,38 @@
             box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
         }
 
+        .challenge-error {
+            background: #fee;
+            color: #c53030;
+            padding: 12px;
+            border-radius: 8px;
+            margin: 16px 0;
+            border: 1px solid #fed7d7;
+            font-size: 14px;
+            text-align: center;
+        }
+
+        .challenge-spinner {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 32px;
+        }
+
+        .spinner {
+            width: 32px;
+            height: 32px;
+            border: 3px solid #e2e8f0;
+            border-top: 3px solid #4299e1;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
         /* Adjust transaction chip styling for delete mode */
         .calendar-day.delete-mode .transaction-chip {
             position: relative;

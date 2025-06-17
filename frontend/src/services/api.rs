@@ -1,7 +1,8 @@
 use gloo::net::http::Request;
 use shared::{
     AddMoneyRequest, AddMoneyResponse, SpendMoneyRequest, SpendMoneyResponse,
-    CalendarMonth, TransactionTableResponse, DeleteTransactionsRequest, DeleteTransactionsResponse
+    CalendarMonth, TransactionTableResponse, DeleteTransactionsRequest, DeleteTransactionsResponse,
+    ParentalControlRequest, ParentalControlResponse
 };
 
 /// API client for communicating with the backend server
@@ -137,6 +138,37 @@ impl ApiClient {
                     let error_text = response.text().await
                         .unwrap_or_else(|_| "Unknown error".to_string());
                     Err(error_text)
+                }
+            }
+            Err(e) => Err(format!("Network error: {}", e)),
+        }
+    }
+
+    /// Validate parental control answer
+    pub async fn validate_parental_control(&self, answer: &str) -> Result<ParentalControlResponse, String> {
+        let url = format!("{}/api/parental-control/validate", self.base_url);
+        
+        let request_body = ParentalControlRequest {
+            answer: answer.to_string(),
+        };
+
+        match Request::post(&url)
+            .json(&request_body)
+            .map_err(|e| format!("Failed to serialize request: {}", e))?
+            .send()
+            .await
+        {
+            Ok(response) => {
+                if response.ok() {
+                    match response.json::<ParentalControlResponse>().await {
+                        Ok(data) => Ok(data),
+                        Err(e) => Err(format!("Failed to parse response: {}", e)),
+                    }
+                } else {
+                    let status = response.status();
+                    let error_text = response.text().await
+                        .unwrap_or_else(|_| "Unknown error".to_string());
+                    Err(format!("Server error {}: {}", status, error_text))
                 }
             }
             Err(e) => Err(format!("Network error: {}", e)),

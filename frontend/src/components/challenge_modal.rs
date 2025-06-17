@@ -1,10 +1,13 @@
 use yew::prelude::*;
 use web_sys::{HtmlInputElement, MouseEvent};
+use wasm_bindgen_futures::spawn_local;
+use crate::services::api::ApiClient;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ChallengeStep {
     Initial,
     SecondChallenge,
+    Validating,
     Success,
 }
 
@@ -19,15 +22,19 @@ pub struct ChallengeModalProps {
 pub fn challenge_modal(props: &ChallengeModalProps) -> Html {
     let current_step = use_state(|| ChallengeStep::Initial);
     let answer_input = use_state(|| String::new());
+    let error_message = use_state(|| Option::<String>::None);
+    let api_client = ApiClient::new();
 
     // Reset state when modal opens
     use_effect_with(props.is_open, {
         let current_step = current_step.clone();
         let answer_input = answer_input.clone();
+        let error_message = error_message.clone();
         move |is_open| {
             if *is_open {
                 current_step.set(ChallengeStep::Initial);
                 answer_input.set(String::new());
+                error_message.set(None);
             }
             || ()
         }
@@ -58,17 +65,48 @@ pub fn challenge_modal(props: &ChallengeModalProps) -> Html {
     let on_submit_answer = {
         let answer_input = answer_input.clone();
         let current_step = current_step.clone();
+        let error_message = error_message.clone();
         let on_success = props.on_success.clone();
+        let api_client = api_client.clone();
         Callback::from(move |e: SubmitEvent| {
             e.prevent_default();
-            let answer = (*answer_input).clone();
-            if answer.to_lowercase().trim() == "ice cold" {
-                current_step.set(ChallengeStep::Success);
-                on_success.emit(());
-            } else {
-                // Wrong answer - could add error feedback here
-                answer_input.set(String::new());
+            let answer = (*answer_input).clone().trim().to_string();
+            
+            if answer.is_empty() {
+                error_message.set(Some("Please enter an answer".to_string()));
+                return;
             }
+            
+            // Set loading state
+            current_step.set(ChallengeStep::Validating);
+            error_message.set(None);
+            
+            // Make API call
+            let answer_input = answer_input.clone();
+            let current_step = current_step.clone();
+            let error_message = error_message.clone();
+            let on_success = on_success.clone();
+            let api_client = api_client.clone();
+            
+            spawn_local(async move {
+                match api_client.validate_parental_control(&answer).await {
+                    Ok(response) => {
+                        if response.success {
+                            current_step.set(ChallengeStep::Success);
+                            on_success.emit(());
+                        } else {
+                            current_step.set(ChallengeStep::SecondChallenge);
+                            error_message.set(Some("Incorrect answer. Try again!".to_string()));
+                            answer_input.set(String::new());
+                        }
+                    }
+                    Err(e) => {
+                        current_step.set(ChallengeStep::SecondChallenge);
+                        error_message.set(Some(format!("Network error: {}", e)));
+                        answer_input.set(String::new());
+                    }
+                }
+            });
         })
     };
 
@@ -111,6 +149,15 @@ pub fn challenge_modal(props: &ChallengeModalProps) -> Html {
                             <>
                                 <h3 class="challenge-title">{"🤔 Prove It!"}</h3>
                                 <p class="challenge-question">{"Oh yeah? If so, what's cooler than cool???"}</p>
+                                {if let Some(error) = (*error_message).clone() {
+                                    html! {
+                                        <div class="challenge-error">
+                                            {error}
+                                        </div>
+                                    }
+                                } else {
+                                    html! {}
+                                }}
                                 <form class="challenge-form" onsubmit={on_submit_answer}>
                                     <input
                                         type="text"
@@ -129,6 +176,15 @@ pub fn challenge_modal(props: &ChallengeModalProps) -> Html {
                                         </button>
                                     </div>
                                 </form>
+                            </>
+                        },
+                        ChallengeStep::Validating => html! {
+                            <>
+                                <h3 class="challenge-title">{"⏳ Validating..."}</h3>
+                                <p class="challenge-question">{"Checking your answer..."}</p>
+                                <div class="challenge-spinner">
+                                    <div class="spinner"></div>
+                                </div>
                             </>
                         },
                         ChallengeStep::Success => html! {
