@@ -71,11 +71,48 @@ fn app() -> Html {
     let delete_selected_transactions = {
         let selected_transactions = selected_transactions.clone();
         let delete_mode = delete_mode.clone();
+        let api_client = api_client.clone();
+        let refresh_transactions = transactions.actions.refresh_transactions.clone();
+        let refresh_calendar = calendar.actions.refresh_calendar.clone();
+        
         Callback::from(move |_| {
-            // TODO: Implement actual deletion logic
-            gloo::console::log!("Would delete transactions:", format!("{:?}", *selected_transactions));
-            selected_transactions.set(Vec::new());
-            delete_mode.set(false);
+            let selected_ids = (*selected_transactions).clone();
+            if selected_ids.is_empty() {
+                return;
+            }
+            
+            let api_client = api_client.clone();
+            let selected_transactions = selected_transactions.clone();
+            let delete_mode = delete_mode.clone();
+            let refresh_transactions = refresh_transactions.clone();
+            let refresh_calendar = refresh_calendar.clone();
+            
+            spawn_local(async move {
+                let request = shared::DeleteTransactionsRequest {
+                    transaction_ids: selected_ids.clone(),
+                };
+                
+                match api_client.delete_transactions(request).await {
+                    Ok(response) => {
+                        gloo::console::log!("Delete successful:", &response.success_message);
+                        if !response.not_found_ids.is_empty() {
+                            gloo::console::warn!("Some transactions not found:", format!("{:?}", response.not_found_ids));
+                        }
+                        
+                        // Clear selections and exit delete mode
+                        selected_transactions.set(Vec::new());
+                        delete_mode.set(false);
+                        
+                        // Refresh data to show updated state
+                        refresh_transactions.emit(());
+                        refresh_calendar.emit(());
+                    }
+                    Err(e) => {
+                        gloo::console::error!("Failed to delete transactions:", &e);
+                        // TODO: Show user-friendly error message
+                    }
+                }
+            });
         })
     };
     

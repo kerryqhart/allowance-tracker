@@ -1,7 +1,7 @@
 use gloo::net::http::Request;
 use shared::{
     AddMoneyRequest, AddMoneyResponse, SpendMoneyRequest, SpendMoneyResponse,
-    CalendarMonth, TransactionTableResponse
+    CalendarMonth, TransactionTableResponse, DeleteTransactionsRequest, DeleteTransactionsResponse
 };
 
 /// API client for communicating with the backend server
@@ -104,6 +104,32 @@ impl ApiClient {
             Ok(response) => {
                 if response.ok() {
                     match response.json::<SpendMoneyResponse>().await {
+                        Ok(data) => Ok(data),
+                        Err(e) => Err(format!("Failed to parse response: {}", e)),
+                    }
+                } else {
+                    let error_text = response.text().await
+                        .unwrap_or_else(|_| "Unknown error".to_string());
+                    Err(error_text)
+                }
+            }
+            Err(e) => Err(format!("Network error: {}", e)),
+        }
+    }
+
+    /// Delete multiple transactions
+    pub async fn delete_transactions(&self, request: DeleteTransactionsRequest) -> Result<DeleteTransactionsResponse, String> {
+        let url = format!("{}/api/transactions", self.base_url);
+        
+        match Request::delete(&url)
+            .json(&request)
+            .map_err(|e| format!("Failed to serialize request: {}", e))?
+            .send()
+            .await
+        {
+            Ok(response) => {
+                if response.ok() {
+                    match response.json::<DeleteTransactionsResponse>().await {
                         Ok(data) => Ok(data),
                         Err(e) => Err(format!("Failed to parse response: {}", e)),
                     }
