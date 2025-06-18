@@ -297,6 +297,7 @@ mod tests {
     fn create_test_transaction(id: &str, date: &str, description: &str, amount: f64, balance: f64) -> Transaction {
         Transaction {
             id: id.to_string(),
+            child_id: "test_child_id".to_string(),
             date: date.to_string(),
             description: description.to_string(),
             amount,

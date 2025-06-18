@@ -41,7 +41,8 @@
 //! - **Mock Support**: Development-friendly with fallback mock data
 
 use crate::backend::storage::DbConnection;
-use shared::{Transaction, TransactionListRequest, TransactionListResponse, PaginationInfo, CreateTransactionRequest, DeleteTransactionsRequest, DeleteTransactionsResponse};
+use crate::backend::domain::child_service::ChildService;
+use shared::{Transaction, TransactionListRequest, TransactionListResponse, PaginationInfo, CreateTransactionRequest, DeleteTransactionsRequest, DeleteTransactionsResponse, Child};
 use anyhow::Result;
 use tracing::info;
 use std::sync::Arc;
@@ -50,11 +51,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 #[derive(Clone)]
 pub struct TransactionService {
     db: Arc<DbConnection>,
+    child_service: ChildService,
 }
 
 impl TransactionService {
     pub fn new(db: Arc<DbConnection>) -> Self {
-        Self { db }
+        let child_service = ChildService::new(db.clone());
+        Self { db, child_service }
     }
 
     /// Create a new transaction
@@ -66,8 +69,13 @@ impl TransactionService {
             return Err(anyhow::anyhow!("Description must be between 1 and 256 characters"));
         }
 
-        // Get current balance from latest transaction
-        let current_balance = match self.db.get_latest_transaction().await? {
+        // Get the active child
+        let active_child_response = self.child_service.get_active_child().await?;
+        let active_child = active_child_response.active_child
+            .ok_or_else(|| anyhow::anyhow!("No active child found"))?;
+
+        // Get current balance from latest transaction for this child
+        let current_balance = match self.db.get_latest_transaction(&active_child.id).await? {
             Some(latest) => latest.balance,
             None => 0.0, // First transaction starts at 0
         };
@@ -101,6 +109,7 @@ impl TransactionService {
 
         let transaction = Transaction {
             id: transaction_id,
+            child_id: active_child.id,
             date,
             description: request.description,
             amount: request.amount,
@@ -118,19 +127,24 @@ impl TransactionService {
     pub async fn list_transactions(&self, request: TransactionListRequest) -> Result<TransactionListResponse> {
         info!("Listing transactions with request: {:?}", request);
 
+        // Get the active child
+        let active_child_response = self.child_service.get_active_child().await?;
+        let active_child = active_child_response.active_child
+            .ok_or_else(|| anyhow::anyhow!("No active child found"))?;
+
         // Set default limit if not provided (max 100)
         let limit = request.limit.unwrap_or(20).min(100);
         
         // Query one extra record to determine if there are more results
         let query_limit = limit + 1;
 
-        // Get transactions from database
-        let mut db_transactions = self.db.list_transactions(query_limit, request.after.as_deref()).await?;
+        // Get transactions from database for the active child
+        let mut db_transactions = self.db.list_transactions(&active_child.id, query_limit, request.after.as_deref()).await?;
 
         // If no database transactions exist, fall back to mock data for development
         if db_transactions.is_empty() {
             info!("No database transactions found, using mock data for development");
-            let mock_transactions = self.generate_mock_transactions();
+            let mock_transactions = self.generate_mock_transactions(&active_child.id);
             
             // Apply cursor filtering for mock data
             let filtered_transactions = if let Some(after_cursor) = &request.after {
@@ -181,17 +195,22 @@ impl TransactionService {
             });
         }
 
-        // Check which transactions actually exist
-        let existing_ids = self.db.check_transactions_exist(&request.transaction_ids).await?;
+        // Get the active child
+        let active_child_response = self.child_service.get_active_child().await?;
+        let active_child = active_child_response.active_child
+            .ok_or_else(|| anyhow::anyhow!("No active child found"))?;
+
+        // Check which transactions actually exist for this child
+        let existing_ids = self.db.check_transactions_exist(&active_child.id, &request.transaction_ids).await?;
         let not_found_ids: Vec<String> = request.transaction_ids
             .iter()
             .filter(|id| !existing_ids.contains(id))
             .cloned()
             .collect();
 
-        // Delete the existing transactions
+        // Delete the existing transactions for this child
         let deleted_count = if !existing_ids.is_empty() {
-            self.db.delete_transactions(&existing_ids).await?
+            self.db.delete_transactions(&active_child.id, &existing_ids).await?
         } else {
             0
         };
@@ -243,7 +262,7 @@ impl TransactionService {
     }
 
     /// Generate mock transaction data for testing
-    fn generate_mock_transactions(&self) -> Vec<Transaction> {
+    fn generate_mock_transactions(&self, child_id: &str) -> Vec<Transaction> {
         use std::time::{SystemTime, UNIX_EPOCH};
         
         let base_time = SystemTime::now()
@@ -255,6 +274,7 @@ impl TransactionService {
             // June 2025 transactions (most recent first)
             Transaction {
                 id: Transaction::generate_id(10.0, base_time - 86400000), // June 13, 2025
+                child_id: child_id.to_string(),
                 date: "2025-06-13T09:00:00-04:00".to_string(),
                 description: "Weekly allowance".to_string(),
                 amount: 10.0,
@@ -262,6 +282,7 @@ impl TransactionService {
             },
             Transaction {
                 id: Transaction::generate_id(15.0, base_time - 259200000), // June 10, 2025  
+                child_id: child_id.to_string(),
                 date: "2025-06-10T15:30:00-04:00".to_string(),
                 description: "Gift from Grandma".to_string(),
                 amount: 15.0,
@@ -269,6 +290,7 @@ impl TransactionService {
             },
             Transaction {
                 id: Transaction::generate_id(-12.0, base_time - 432000000), // June 8, 2025
+                child_id: child_id.to_string(),
                 date: "2025-06-08T14:20:15-04:00".to_string(),
                 description: "Bought new toy".to_string(),
                 amount: -12.0,
@@ -276,6 +298,7 @@ impl TransactionService {
             },
             Transaction {
                 id: Transaction::generate_id(10.0, base_time - 604800000), // June 6, 2025
+                child_id: child_id.to_string(),
                 date: "2025-06-06T09:00:00-04:00".to_string(),
                 description: "Weekly allowance".to_string(),
                 amount: 10.0,
@@ -283,6 +306,7 @@ impl TransactionService {
             },
             Transaction {
                 id: Transaction::generate_id(-5.0, base_time - 777600000), // June 4, 2025
+                child_id: child_id.to_string(),
                 date: "2025-06-04T16:45:30-04:00".to_string(),
                 description: "Movie ticket".to_string(),
                 amount: -5.0,
@@ -290,6 +314,7 @@ impl TransactionService {
             },
             Transaction {
                 id: Transaction::generate_id(10.0, base_time - 1209600000), // May 30, 2025
+                child_id: child_id.to_string(),
                 date: "2025-05-30T09:00:00-04:00".to_string(),
                 description: "Weekly allowance".to_string(),
                 amount: 10.0,
@@ -297,6 +322,7 @@ impl TransactionService {
             },
             Transaction {
                 id: Transaction::generate_id(-3.0, base_time - 1382400000), // May 28, 2025
+                child_id: child_id.to_string(),
                 date: "2025-05-28T13:15:22-04:00".to_string(),
                 description: "Ice cream treat".to_string(),
                 amount: -3.0,
@@ -304,6 +330,7 @@ impl TransactionService {
             },
             Transaction {
                 id: Transaction::generate_id(10.0, base_time - 1814400000), // May 23, 2025
+                child_id: child_id.to_string(),
                 date: "2025-05-23T09:00:00-04:00".to_string(),
                 description: "Weekly allowance".to_string(),
                 amount: 10.0,
@@ -311,6 +338,7 @@ impl TransactionService {
             },
             Transaction {
                 id: Transaction::generate_id(-8.0, base_time - 2073600000), // May 20, 2025
+                child_id: child_id.to_string(),
                 date: "2025-05-20T11:30:45-04:00".to_string(),
                 description: "Comic book".to_string(),
                 amount: -8.0,
@@ -318,6 +346,7 @@ impl TransactionService {
             },
             Transaction {
                 id: Transaction::generate_id(10.0, base_time - 2419200000), // May 16, 2025
+                child_id: child_id.to_string(),
                 date: "2025-05-16T09:00:00-04:00".to_string(),
                 description: "Weekly allowance".to_string(),
                 amount: 10.0,
@@ -325,6 +354,7 @@ impl TransactionService {
             },
             Transaction {
                 id: Transaction::generate_id(20.0, base_time - 2592000000), // May 14, 2025
+                child_id: child_id.to_string(),
                 date: "2025-05-14T10:00:00-04:00".to_string(),
                 description: "Birthday money from Uncle Bob".to_string(),
                 amount: 20.0,
@@ -332,6 +362,7 @@ impl TransactionService {
             },
             Transaction {
                 id: Transaction::generate_id(10.0, base_time - 3024000000), // May 9, 2025
+                child_id: child_id.to_string(),
                 date: "2025-05-09T09:00:00-04:00".to_string(),
                 description: "Weekly allowance".to_string(),
                 amount: 10.0,
@@ -339,6 +370,7 @@ impl TransactionService {
             },
             Transaction {
                 id: Transaction::generate_id(-15.0, base_time - 3196800000), // May 7, 2025
+                child_id: child_id.to_string(),
                 date: "2025-05-07T14:22:10-04:00".to_string(),
                 description: "Art supplies".to_string(),
                 amount: -15.0,
@@ -346,6 +378,7 @@ impl TransactionService {
             },
             Transaction {
                 id: Transaction::generate_id(10.0, base_time - 3628800000), // May 2, 2025
+                child_id: child_id.to_string(),
                 date: "2025-05-02T09:00:00-04:00".to_string(),
                 description: "Weekly allowance".to_string(),
                 amount: 10.0,
@@ -358,10 +391,28 @@ impl TransactionService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use shared::Child;
 
     async fn create_test_service() -> TransactionService {
         let db = Arc::new(DbConnection::init_test().await.expect("Failed to init test DB"));
-        TransactionService::new(db)
+        let service = TransactionService::new(db.clone());
+        
+        // Create a test child and set as active
+        let test_child = Child {
+            id: "test_child_123".to_string(),
+            name: "Test Child".to_string(),
+            birthdate: "2015-01-01".to_string(),
+            created_at: "2025-06-18T00:00:00-04:00".to_string(),
+            updated_at: "2025-06-18T00:00:00-04:00".to_string(),
+        };
+        
+        // Store the child in the database
+        db.store_child(&test_child).await.expect("Failed to store test child");
+        
+        // Set as active child
+        db.set_active_child(&test_child.id).await.expect("Failed to set active child");
+        
+        service
     }
 
     #[tokio::test]
@@ -441,7 +492,7 @@ mod tests {
     #[tokio::test]
     async fn test_cursor_filter() {
         let service = create_test_service().await;
-        let mock_transactions = service.generate_mock_transactions();
+        let mock_transactions = service.generate_mock_transactions("test_child_123");
         
         // Use the second transaction as cursor
         let cursor = &mock_transactions[1].id;
@@ -460,7 +511,7 @@ mod tests {
     #[tokio::test]
     async fn test_transaction_id_generation_consistency() {
         let service = create_test_service().await;
-        let transactions = service.generate_mock_transactions();
+        let transactions = service.generate_mock_transactions("test_child_123");
         
         for tx in &transactions {
             // Should be able to parse the generated ID
@@ -794,14 +845,97 @@ mod tests {
     async fn test_delete_transactions_none_found() {
         let service = create_test_service().await;
         
-        // Try to delete non-existing transactions
-        let delete_request = DeleteTransactionsRequest {
+        // Try to delete transactions that don't exist
+        let request = DeleteTransactionsRequest {
             transaction_ids: vec!["nonexistent1".to_string(), "nonexistent2".to_string()],
         };
+
+        let response = service.delete_transactions(request).await.unwrap();
         
-        let delete_response = service.delete_transactions(delete_request).await.unwrap();
-        assert_eq!(delete_response.deleted_count, 0);
-        assert_eq!(delete_response.success_message, "No transactions were deleted");
-        assert_eq!(delete_response.not_found_ids.len(), 2);
+        assert_eq!(response.deleted_count, 0);
+        assert_eq!(response.not_found_ids.len(), 2);
+        assert!(response.not_found_ids.contains(&"nonexistent1".to_string()));
+        assert!(response.not_found_ids.contains(&"nonexistent2".to_string()));
+        assert_eq!(response.success_message, "No transactions were deleted");
+    }
+
+    #[tokio::test]
+    async fn test_calendar_integration_with_child_scoping() {
+        let service = create_test_service().await;
+        
+        // Create some transactions for the test child
+        let request1 = CreateTransactionRequest {
+            description: "June allowance".to_string(),
+            amount: 10.0,
+            date: Some("2025-06-01T09:00:00-04:00".to_string()),
+        };
+        let tx1 = service.create_transaction(request1).await.unwrap();
+        
+        let request2 = CreateTransactionRequest {
+            description: "Spent on candy".to_string(),
+            amount: -3.0,
+            date: Some("2025-06-15T12:00:00-04:00".to_string()),
+        };
+        let tx2 = service.create_transaction(request2).await.unwrap();
+        
+        // List transactions (this is what the calendar API would call)
+        let list_request = TransactionListRequest {
+            after: None,
+            limit: Some(1000), // Calendar requests many transactions
+            start_date: None,
+            end_date: None,
+        };
+        
+        let response = service.list_transactions(list_request).await.unwrap();
+        
+        // Verify all transactions belong to the test child
+        assert!(!response.transactions.is_empty());
+        for transaction in &response.transactions {
+            assert_eq!(transaction.child_id, "test_child_123");
+        }
+        
+        // Verify our created transactions are included
+        let tx_ids: Vec<String> = response.transactions.iter().map(|t| t.id.clone()).collect();
+        assert!(tx_ids.contains(&tx1.id));
+        assert!(tx_ids.contains(&tx2.id));
+        
+        // Test calendar service integration
+        use crate::backend::domain::CalendarService;
+        let calendar_service = CalendarService::new();
+        
+        let calendar_month = calendar_service.generate_calendar_month(
+            6, // June
+            2025,
+            response.transactions,
+        );
+        
+        // Verify calendar was generated correctly
+        assert_eq!(calendar_month.month, 6);
+        assert_eq!(calendar_month.year, 2025);
+        assert!(!calendar_month.days.is_empty());
+        
+        // Find day 1 and day 15 to verify transactions are placed correctly
+        let day_1 = calendar_month.days.iter().find(|d| d.day == 1 && !d.is_empty);
+        let day_15 = calendar_month.days.iter().find(|d| d.day == 15 && !d.is_empty);
+        
+        if let Some(d1) = day_1 {
+            // Should have at least one transaction on June 1st
+            assert!(!d1.transactions.is_empty());
+            // All transactions should belong to our test child
+            for tx in &d1.transactions {
+                assert_eq!(tx.child_id, "test_child_123");
+            }
+        }
+        
+        if let Some(d15) = day_15 {
+            // Should have at least one transaction on June 15th
+            assert!(!d15.transactions.is_empty());
+            // All transactions should belong to our test child
+            for tx in &d15.transactions {
+                assert_eq!(tx.child_id, "test_child_123");
+            }
+        }
+        
+        println!("✅ Calendar API integration with child scoping works correctly!");
     }
 }

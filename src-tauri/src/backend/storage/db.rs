@@ -51,11 +51,13 @@ impl DbConnection {
             r#"
             CREATE TABLE IF NOT EXISTS transactions (
                 id TEXT PRIMARY KEY,
+                child_id TEXT NOT NULL,
                 date TEXT NOT NULL,
                 description TEXT NOT NULL,
                 amount REAL NOT NULL,
                 balance REAL NOT NULL,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (child_id) REFERENCES children (id) ON DELETE CASCADE
             );
             "#,
         )
@@ -67,6 +69,16 @@ impl DbConnection {
             r#"
             CREATE INDEX IF NOT EXISTS idx_transactions_created_at 
             ON transactions(created_at DESC);
+            "#,
+        )
+        .execute(pool)
+        .await?;
+
+        // Create index for child_id filtering
+        sqlx::query(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_transactions_child_id 
+            ON transactions(child_id);
             "#,
         )
         .execute(pool)
@@ -144,11 +156,12 @@ impl DbConnection {
     pub async fn store_transaction(&self, transaction: &Transaction) -> Result<()> {
         sqlx::query(
             r#"
-            INSERT INTO transactions (id, date, description, amount, balance)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO transactions (id, child_id, date, description, amount, balance)
+            VALUES (?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&transaction.id)
+        .bind(&transaction.child_id)
         .bind(&transaction.date)
         .bind(&transaction.description)
         .bind(transaction.amount)
@@ -158,22 +171,25 @@ impl DbConnection {
         Ok(())
     }
 
-    /// Get the most recent transaction (for calculating next balance)
-    pub async fn get_latest_transaction(&self) -> Result<Option<Transaction>> {
+    /// Get the most recent transaction for a specific child (for calculating next balance)
+    pub async fn get_latest_transaction(&self, child_id: &str) -> Result<Option<Transaction>> {
         let row = sqlx::query(
             r#"
-            SELECT id, date, description, amount, balance
+            SELECT id, child_id, date, description, amount, balance
             FROM transactions
+            WHERE child_id = ?
             ORDER BY ROWID DESC
             LIMIT 1
             "#,
         )
+        .bind(child_id)
         .fetch_optional(&*self.pool)
         .await?;
 
         match row {
             Some(r) => Ok(Some(Transaction {
                 id: r.get("id"),
+                child_id: r.get("child_id"),
                 date: r.get("date"),
                 description: r.get("description"),
                 amount: r.get("amount"),
@@ -183,35 +199,39 @@ impl DbConnection {
         }
     }
 
-    /// List transactions with pagination support
+    /// List transactions for a specific child with pagination support
     pub async fn list_transactions(
         &self,
+        child_id: &str,
         limit: u32,
         after_id: Option<&str>,
     ) -> Result<Vec<Transaction>> {
         let query = if let Some(after_id) = after_id {
             sqlx::query(
                 r#"
-                SELECT id, date, description, amount, balance
+                SELECT id, child_id, date, description, amount, balance
                 FROM transactions
-                WHERE ROWID < (
+                WHERE child_id = ? AND ROWID < (
                     SELECT ROWID FROM transactions WHERE id = ?
                 )
                 ORDER BY ROWID DESC
                 LIMIT ?
                 "#,
             )
+            .bind(child_id)
             .bind(after_id)
             .bind(limit as i64)
         } else {
             sqlx::query(
                 r#"
-                SELECT id, date, description, amount, balance
+                SELECT id, child_id, date, description, amount, balance
                 FROM transactions
+                WHERE child_id = ?
                 ORDER BY ROWID DESC
                 LIMIT ?
                 "#,
             )
+            .bind(child_id)
             .bind(limit as i64)
         };
 
@@ -221,6 +241,7 @@ impl DbConnection {
             .iter()
             .map(|row| Transaction {
                 id: row.get("id"),
+                child_id: row.get("child_id"),
                 date: row.get("date"),
                 description: row.get("description"),
                 amount: row.get("amount"),
@@ -231,8 +252,8 @@ impl DbConnection {
         Ok(transactions)
     }
 
-    /// Delete multiple transactions by their IDs
-    pub async fn delete_transactions(&self, transaction_ids: &[String]) -> Result<usize> {
+    /// Delete multiple transactions by their IDs for a specific child
+    pub async fn delete_transactions(&self, child_id: &str, transaction_ids: &[String]) -> Result<usize> {
         if transaction_ids.is_empty() {
             return Ok(0);
         }
@@ -240,11 +261,12 @@ impl DbConnection {
         // Create placeholders for the IN clause
         let placeholders = transaction_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
         let query_str = format!(
-            "DELETE FROM transactions WHERE id IN ({})",
+            "DELETE FROM transactions WHERE child_id = ? AND id IN ({})",
             placeholders
         );
 
         let mut query = sqlx::query(&query_str);
+        query = query.bind(child_id);
         for id in transaction_ids {
             query = query.bind(id);
         }
@@ -253,11 +275,12 @@ impl DbConnection {
         Ok(result.rows_affected() as usize)
     }
 
-    /// Delete a single transaction by ID
-    pub async fn delete_transaction(&self, transaction_id: &str) -> Result<bool> {
+    /// Delete a single transaction by ID for a specific child
+    pub async fn delete_transaction(&self, child_id: &str, transaction_id: &str) -> Result<bool> {
         let result = sqlx::query(
-            "DELETE FROM transactions WHERE id = ?"
+            "DELETE FROM transactions WHERE child_id = ? AND id = ?"
         )
+        .bind(child_id)
         .bind(transaction_id)
         .execute(&*self.pool)
         .await?;
@@ -265,19 +288,20 @@ impl DbConnection {
         Ok(result.rows_affected() > 0)
     }
 
-    /// Check if transactions exist by their IDs
-    pub async fn check_transactions_exist(&self, transaction_ids: &[String]) -> Result<Vec<String>> {
+    /// Check if transactions exist by their IDs for a specific child
+    pub async fn check_transactions_exist(&self, child_id: &str, transaction_ids: &[String]) -> Result<Vec<String>> {
         if transaction_ids.is_empty() {
             return Ok(vec![]);
         }
 
         let placeholders = transaction_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
         let query_str = format!(
-            "SELECT id FROM transactions WHERE id IN ({})",
+            "SELECT id FROM transactions WHERE child_id = ? AND id IN ({})",
             placeholders
         );
 
         let mut query = sqlx::query(&query_str);
+        query = query.bind(child_id);
         for id in transaction_ids {
             query = query.bind(id);
         }
@@ -507,13 +531,16 @@ mod tests {
     async fn test_store_and_get_latest_transaction() {
         let db = setup_test().await;
 
-        // Initially should have no transactions
-        let latest = db.get_latest_transaction().await.expect("Failed to get latest transaction");
+        let child_id = "test_child_id";
+
+        // Initially should have no transactions for this child
+        let latest = db.get_latest_transaction(child_id).await.expect("Failed to get latest transaction");
         assert!(latest.is_none(), "Should have no transactions initially");
 
         // Create a test transaction
         let transaction = Transaction {
             id: "transaction::income::1234567890000".to_string(),
+            child_id: child_id.to_string(),
             date: "2025-06-14T10:00:00-04:00".to_string(),
             description: "Test allowance".to_string(),
             amount: 10.0,
@@ -524,11 +551,12 @@ mod tests {
         db.store_transaction(&transaction).await.expect("Failed to store transaction");
 
         // Retrieve the latest transaction
-        let latest = db.get_latest_transaction().await.expect("Failed to get latest transaction");
+        let latest = db.get_latest_transaction(child_id).await.expect("Failed to get latest transaction");
         assert!(latest.is_some(), "Should have one transaction");
         
         let retrieved = latest.unwrap();
         assert_eq!(retrieved.id, transaction.id);
+        assert_eq!(retrieved.child_id, transaction.child_id);
         assert_eq!(retrieved.date, transaction.date);
         assert_eq!(retrieved.description, transaction.description);
         assert_eq!(retrieved.amount, transaction.amount);
@@ -539,9 +567,12 @@ mod tests {
     async fn test_store_multiple_transactions_latest_ordering() {
         let db = setup_test().await;
 
+        let child_id = "test_child_id";
+
         let transactions = vec![
             Transaction {
                 id: "transaction::income::1234567890000".to_string(),
+                child_id: child_id.to_string(),
                 date: "2025-06-14T10:00:00-04:00".to_string(),
                 description: "First transaction".to_string(),
                 amount: 10.0,
@@ -549,6 +580,7 @@ mod tests {
             },
             Transaction {
                 id: "transaction::expense::1234567891000".to_string(),
+                child_id: child_id.to_string(),
                 date: "2025-06-14T11:00:00-04:00".to_string(),
                 description: "Second transaction".to_string(),
                 amount: -5.0,
@@ -556,6 +588,7 @@ mod tests {
             },
             Transaction {
                 id: "transaction::income::1234567892000".to_string(),
+                child_id: child_id.to_string(),
                 date: "2025-06-14T12:00:00-04:00".to_string(),
                 description: "Third transaction".to_string(),
                 amount: 15.0,
@@ -569,7 +602,7 @@ mod tests {
         }
 
         // Get latest should return the third (most recently stored) transaction
-        let latest = db.get_latest_transaction().await.expect("Failed to get latest transaction");
+        let latest = db.get_latest_transaction(child_id).await.expect("Failed to get latest transaction");
         assert!(latest.is_some());
         let retrieved = latest.unwrap();
         assert_eq!(retrieved.id, transactions[2].id);
@@ -581,10 +614,13 @@ mod tests {
     async fn test_list_transactions_pagination() {
         let db = setup_test().await;
 
+        let child_id = "test_child_id";
+
         // Create test transactions
         let transactions = vec![
             Transaction {
                 id: "transaction::income::1234567890000".to_string(),
+                child_id: child_id.to_string(),
                 date: "2025-06-14T10:00:00-04:00".to_string(),
                 description: "Transaction 1".to_string(),
                 amount: 10.0,
@@ -592,6 +628,7 @@ mod tests {
             },
             Transaction {
                 id: "transaction::expense::1234567891000".to_string(),
+                child_id: child_id.to_string(),
                 date: "2025-06-14T11:00:00-04:00".to_string(),
                 description: "Transaction 2".to_string(),
                 amount: -5.0,
@@ -599,6 +636,7 @@ mod tests {
             },
             Transaction {
                 id: "transaction::income::1234567892000".to_string(),
+                child_id: child_id.to_string(),
                 date: "2025-06-14T12:00:00-04:00".to_string(),
                 description: "Transaction 3".to_string(),
                 amount: 15.0,
@@ -612,7 +650,7 @@ mod tests {
         }
 
         // Test listing all transactions (limit 10)
-        let all_transactions = db.list_transactions(10, None).await.expect("Failed to list transactions");
+        let all_transactions = db.list_transactions(child_id, 10, None).await.expect("Failed to list transactions");
         assert_eq!(all_transactions.len(), 3);
         
         // Should be in reverse chronological order (newest first)
@@ -621,13 +659,13 @@ mod tests {
         assert_eq!(all_transactions[2].description, "Transaction 1");
 
         // Test pagination with limit
-        let first_page = db.list_transactions(2, None).await.expect("Failed to list first page");
+        let first_page = db.list_transactions(child_id, 2, None).await.expect("Failed to list first page");
         assert_eq!(first_page.len(), 2);
         assert_eq!(first_page[0].description, "Transaction 3");
         assert_eq!(first_page[1].description, "Transaction 2");
 
         // Test pagination with cursor (after first transaction of previous query)
-        let second_page = db.list_transactions(2, Some(&first_page[0].id)).await.expect("Failed to list with cursor");
+        let second_page = db.list_transactions(child_id, 2, Some(&first_page[0].id)).await.expect("Failed to list with cursor");
         assert_eq!(second_page.len(), 2);
         assert_eq!(second_page[0].description, "Transaction 2");
         assert_eq!(second_page[1].description, "Transaction 1");
@@ -637,8 +675,10 @@ mod tests {
     async fn test_list_transactions_empty_database() {
         let db = setup_test().await;
 
+        let child_id = "test_child_id";
+
         // List transactions from empty database
-        let transactions = db.list_transactions(10, None).await.expect("Failed to list transactions");
+        let transactions = db.list_transactions(child_id, 10, None).await.expect("Failed to list transactions");
         assert!(transactions.is_empty(), "Should return empty vector for empty database");
     }
 
@@ -646,9 +686,12 @@ mod tests {
     async fn test_list_transactions_with_invalid_cursor() {
         let db = setup_test().await;
 
+        let child_id = "test_child_id";
+
         // Store one transaction
         let transaction = Transaction {
             id: "transaction::income::1234567890000".to_string(),
+            child_id: child_id.to_string(),
             date: "2025-06-14T10:00:00-04:00".to_string(),
             description: "Test transaction".to_string(),
             amount: 10.0,
@@ -657,7 +700,7 @@ mod tests {
         db.store_transaction(&transaction).await.expect("Failed to store transaction");
 
         // Try to list with invalid cursor
-        let transactions = db.list_transactions(10, Some("invalid_cursor_id")).await.expect("Failed to list transactions");
+        let transactions = db.list_transactions(child_id, 10, Some("invalid_cursor_id")).await.expect("Failed to list transactions");
         // Should return empty when cursor is invalid (no transaction with that ID found)
         assert_eq!(transactions.len(), 0, "Should return empty for invalid cursor");
     }
@@ -798,9 +841,12 @@ mod tests {
     async fn test_delete_single_transaction() {
         let db = setup_test().await;
         
+        let child_id = "test_child_id";
+        
         // Create a test transaction
         let transaction = Transaction {
             id: "tx123".to_string(),
+            child_id: child_id.to_string(),
             date: "2025-01-01T10:00:00-05:00".to_string(),
             description: "Test transaction".to_string(),
             amount: 10.0,
@@ -811,16 +857,16 @@ mod tests {
         db.store_transaction(&transaction).await.unwrap();
         
         // Verify it exists
-        let transactions = db.list_transactions(10, None).await.unwrap();
+        let transactions = db.list_transactions(child_id, 10, None).await.unwrap();
         assert_eq!(transactions.len(), 1);
         assert_eq!(transactions[0].id, "tx123");
         
         // Delete the transaction
-        let deleted = db.delete_transaction("tx123").await.unwrap();
+        let deleted = db.delete_transaction(child_id, "tx123").await.unwrap();
         assert!(deleted);
         
         // Verify it's gone
-        let transactions = db.list_transactions(10, None).await.unwrap();
+        let transactions = db.list_transactions(child_id, 10, None).await.unwrap();
         assert_eq!(transactions.len(), 0);
     }
 
@@ -828,8 +874,10 @@ mod tests {
     async fn test_delete_nonexistent_transaction() {
         let db = setup_test().await;
         
+        let child_id = "test_child_id";
+        
         // Try to delete a non-existent transaction
-        let deleted = db.delete_transaction("nonexistent").await.unwrap();
+        let deleted = db.delete_transaction(child_id, "nonexistent").await.unwrap();
         assert!(!deleted);
     }
 
@@ -837,10 +885,13 @@ mod tests {
     async fn test_delete_multiple_transactions() {
         let db = setup_test().await;
         
+        let child_id = "test_child_id";
+        
         // Create multiple test transactions
         let transactions = vec![
             Transaction {
                 id: "tx1".to_string(),
+                child_id: child_id.to_string(),
                 date: "2025-01-01T10:00:00-05:00".to_string(),
                 description: "Transaction 1".to_string(),
                 amount: 10.0,
@@ -848,6 +899,7 @@ mod tests {
             },
             Transaction {
                 id: "tx2".to_string(),
+                child_id: child_id.to_string(),
                 date: "2025-01-01T11:00:00-05:00".to_string(),
                 description: "Transaction 2".to_string(),
                 amount: 20.0,
@@ -855,6 +907,7 @@ mod tests {
             },
             Transaction {
                 id: "tx3".to_string(),
+                child_id: child_id.to_string(),
                 date: "2025-01-01T12:00:00-05:00".to_string(),
                 description: "Transaction 3".to_string(),
                 amount: -5.0,
@@ -868,16 +921,16 @@ mod tests {
         }
         
         // Verify they exist
-        let stored = db.list_transactions(10, None).await.unwrap();
+        let stored = db.list_transactions(child_id, 10, None).await.unwrap();
         assert_eq!(stored.len(), 3);
         
         // Delete two transactions
         let ids_to_delete = vec!["tx1".to_string(), "tx3".to_string()];
-        let deleted_count = db.delete_transactions(&ids_to_delete).await.unwrap();
+        let deleted_count = db.delete_transactions(child_id, &ids_to_delete).await.unwrap();
         assert_eq!(deleted_count, 2);
         
         // Verify only one remains
-        let remaining = db.list_transactions(10, None).await.unwrap();
+        let remaining = db.list_transactions(child_id, 10, None).await.unwrap();
         assert_eq!(remaining.len(), 1);
         assert_eq!(remaining[0].id, "tx2");
     }
@@ -886,8 +939,10 @@ mod tests {
     async fn test_delete_empty_transaction_list() {
         let db = setup_test().await;
         
+        let child_id = "test_child_id";
+        
         // Try to delete empty list
-        let deleted_count = db.delete_transactions(&[]).await.unwrap();
+        let deleted_count = db.delete_transactions(child_id, &[]).await.unwrap();
         assert_eq!(deleted_count, 0);
     }
 
@@ -895,9 +950,12 @@ mod tests {
     async fn test_delete_transactions_with_invalid_ids() {
         let db = setup_test().await;
         
+        let child_id = "test_child_id";
+        
         // Create one test transaction
         let transaction = Transaction {
             id: "tx1".to_string(),
+            child_id: child_id.to_string(),
             date: "2025-01-01T10:00:00-05:00".to_string(),
             description: "Transaction 1".to_string(),
             amount: 10.0,
@@ -907,11 +965,11 @@ mod tests {
         
         // Try to delete mix of valid and invalid IDs
         let ids_to_delete = vec!["tx1".to_string(), "invalid".to_string(), "also_invalid".to_string()];
-        let deleted_count = db.delete_transactions(&ids_to_delete).await.unwrap();
+        let deleted_count = db.delete_transactions(child_id, &ids_to_delete).await.unwrap();
         assert_eq!(deleted_count, 1); // Only tx1 should be deleted
         
         // Verify the transaction is gone
-        let remaining = db.list_transactions(10, None).await.unwrap();
+        let remaining = db.list_transactions(child_id, 10, None).await.unwrap();
         assert_eq!(remaining.len(), 0);
     }
 
@@ -919,10 +977,13 @@ mod tests {
     async fn test_check_transactions_exist() {
         let db = setup_test().await;
         
+        let child_id = "test_child_id";
+        
         // Create test transactions
         let transactions = vec![
             Transaction {
                 id: "tx1".to_string(),
+                child_id: child_id.to_string(),
                 date: "2025-01-01T10:00:00-05:00".to_string(),
                 description: "Transaction 1".to_string(),
                 amount: 10.0,
@@ -930,6 +991,7 @@ mod tests {
             },
             Transaction {
                 id: "tx2".to_string(),
+                child_id: child_id.to_string(),
                 date: "2025-01-01T11:00:00-05:00".to_string(),
                 description: "Transaction 2".to_string(),
                 amount: 20.0,
@@ -944,7 +1006,7 @@ mod tests {
         
         // Check which transactions exist
         let ids_to_check = vec!["tx1".to_string(), "tx2".to_string(), "tx3".to_string()];
-        let existing_ids = db.check_transactions_exist(&ids_to_check).await.unwrap();
+        let existing_ids = db.check_transactions_exist(child_id, &ids_to_check).await.unwrap();
         
         assert_eq!(existing_ids.len(), 2);
         assert!(existing_ids.contains(&"tx1".to_string()));
@@ -956,9 +1018,11 @@ mod tests {
     async fn test_check_transactions_exist_empty_list() {
         let db = setup_test().await;
         
-        // Check empty list
-        let existing_ids = db.check_transactions_exist(&[]).await.unwrap();
-        assert_eq!(existing_ids.len(), 0);
+                 let child_id = "test_child_id";
+         
+         // Check empty list
+         let existing_ids = db.check_transactions_exist(child_id, &[]).await.unwrap();
+         assert_eq!(existing_ids.len(), 0);
     }
 
     #[tokio::test]

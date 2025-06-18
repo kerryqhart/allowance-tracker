@@ -5,6 +5,8 @@ use std::fmt;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Transaction {
     pub id: String,
+    /// ID of the child this transaction belongs to
+    pub child_id: String,
     /// Human-readable timestamp with timezone (RFC 3339)
     pub date: String,
     /// Description of the transaction (max 256 characters)
@@ -448,6 +450,7 @@ mod tests {
     fn test_extract_timestamp() {
         let transaction = Transaction {
             id: "transaction::income::1702516122000".to_string(),
+            child_id: "test_child_id".to_string(),
             date: "2023-12-14T01:02:02.000Z".to_string(),
             description: "Test transaction".to_string(),
             amount: 10.0,
