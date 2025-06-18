@@ -49,6 +49,7 @@
             min-height: 120px;
             margin-bottom: 2rem;
             z-index: 100;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.45);
         }
 
         .header::before {
@@ -72,13 +73,13 @@
         }
 
         .header h1 {
-            font-family: 'Didot', 'Bodoni MT', 'Cochin', 'Baskerville', serif;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
             font-size: 2.8rem;
             font-weight: 400;
-            letter-spacing: 0.5px;
+            letter-spacing: -0.015em;
             color: #ffffff;
             margin: 0;
-            text-shadow: 0 2px 8px rgba(0,0,0,0.3);
+            text-shadow: 0 1px 3px rgba(0,0,0,0.2);
             flex: 1;
             text-align: left;
             line-height: 1.1;
@@ -94,31 +95,75 @@
 
         .header-menus {
             display: flex;
+            flex-direction: row;
             align-items: center;
             gap: 1rem;
         }
 
         .balance-display {
-            background: rgba(255,255,255,0.25);
-            backdrop-filter: blur(15px);
-            border-radius: 15px;
-            padding: 1.2rem 1.8rem;
+            background: transparent;
+            border: none;
+            padding: 1.6rem 1.8rem;
             text-align: center;
-            border: 1px solid rgba(255,255,255,0.3);
             color: #ffffff;
+            position: relative;
         }
 
-        /* Unicorn Dream Balance Card - Updated for Option 3 */
+        .balance-display::before,
+        .balance-display::after {
+            content: '';
+            position: absolute;
+            top: 20%;
+            bottom: 20%;
+            width: 2px;
+            background: linear-gradient(to bottom, 
+                transparent 0%, 
+                rgba(255,255,255,0.3) 20%, 
+                rgba(255,255,255,0.6) 50%, 
+                rgba(255,255,255,0.3) 80%, 
+                transparent 100%);
+        }
+
+        .balance-display::before {
+            left: 0;
+        }
+
+        .balance-display::after {
+            right: 0;
+        }
+
+        /* Unicorn Dream Balance Card - Updated for Option 2 */
         .balance-display.unicorn-dream {
-            background: rgba(255,255,255,0.25);
-            backdrop-filter: blur(15px);
-            border-radius: 15px;
-            padding: 1.2rem 1.8rem;
+            background: transparent;
+            border: none;
+            padding: 1.6rem 1.8rem;
             text-align: center;
-            border: 1px solid rgba(255,255,255,0.3);
             color: #ffffff;
             position: relative;
             z-index: 3;
+        }
+
+        .balance-display.unicorn-dream::before,
+        .balance-display.unicorn-dream::after {
+            content: '';
+            position: absolute;
+            top: 20%;
+            bottom: 20%;
+            width: 2px;
+            background: linear-gradient(to bottom, 
+                transparent 0%, 
+                rgba(255,255,255,0.3) 20%, 
+                rgba(255,255,255,0.6) 50%, 
+                rgba(255,255,255,0.3) 80%, 
+                transparent 100%);
+        }
+
+        .balance-display.unicorn-dream::before {
+            left: 0;
+        }
+
+        .balance-display.unicorn-dream::after {
+            right: 0;
         }
 
         /* Settings Menu Styles */
@@ -129,23 +174,23 @@
 
         .settings-button {
             background: transparent;
-            border: 2px solid rgba(255, 255, 255, 0.8);
-            border-radius: 50%;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 10px;
             width: 45px;
             height: 45px;
             display: flex;
             align-items: center;
             justify-content: center;
             cursor: pointer;
-            transition: all 0.3s ease;
+            transition: all 0.2s ease;
             color: #ffffff;
-            font-weight: 400;
-            font-size: 1.4rem;
+            font-weight: 500;
+            font-size: 1.1rem;
         }
 
         .settings-button:hover {
-            border-color: rgba(255, 255, 255, 1);
-            transform: scale(1.05);
+            border-color: rgba(255, 255, 255, 0.5);
+            background: rgba(255, 255, 255, 0.05);
         }
 
         .settings-backdrop {
@@ -201,25 +246,24 @@
         }
 
         .child-selector-button {
-            background: rgba(255, 255, 255, 0.25);
-            border: 2px solid rgba(255, 255, 255, 0.3);
-            border-radius: 50%;
+            background: transparent;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 10px;
             width: 45px;
             height: 45px;
             display: flex;
             align-items: center;
             justify-content: center;
             cursor: pointer;
-            transition: all 0.3s ease;
+            transition: all 0.2s ease;
             color: #ffffff;
-            font-weight: 700;
+            font-weight: 500;
             font-size: 1.1rem;
-            backdrop-filter: blur(10px);
         }
 
         .child-selector-button:hover:not(:disabled) {
-            background: rgba(255, 255, 255, 0.35);
-            transform: scale(1.05);
+            border-color: rgba(255, 255, 255, 0.5);
+            background: rgba(255, 255, 255, 0.05);
         }
 
         .child-selector-button:disabled {
@@ -230,7 +274,7 @@
 
         .child-selector-letter {
             font-size: 1.1rem;
-            font-weight: 700;
+            font-weight: 500;
         }
 
         .child-selector-spinner {
@@ -348,18 +392,22 @@
         }
 
         .balance-amount {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
             font-size: 2.2rem;
-            font-weight: 700;
-            text-shadow: 0 2px 8px rgba(0,0,0,0.3);
+            font-weight: 600;
+            letter-spacing: -0.015em;
+            text-shadow: 0 1px 3px rgba(0,0,0,0.2);
             color: #ffffff;
             margin: 0;
         }
 
         /* Enhanced balance amount for unicorn dream card */
         .balance-display.unicorn-dream .balance-amount {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
             font-size: 2.2rem;
-            font-weight: 700;
-            text-shadow: 0 2px 8px rgba(0,0,0,0.3);
+            font-weight: 600;
+            letter-spacing: -0.015em;
+            text-shadow: 0 1px 3px rgba(0,0,0,0.2);
             color: #ffffff;
             margin: 0;
         }
