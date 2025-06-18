@@ -128,7 +128,7 @@ pub fn add_money_form(props: &AddMoneyFormProps) -> Html {
                         type="text"
                         id="description"
                         name="description"
-                        placeholder="Birthday gift, chores, found money..."
+                        placeholder="Gift from grandma, gift from aunt..."
                         value={props.description.clone()}
                         onchange={props.on_description_change.clone()}
                         disabled={props.creating_transaction}
@@ -141,7 +141,7 @@ pub fn add_money_form(props: &AddMoneyFormProps) -> Html {
                         type="number" 
                         id="amount"
                         name="amount"
-                        placeholder="5.00"
+                        placeholder="$5.00"
                         step="0.01"
                         min="0.01"
                         value={props.amount.clone()}

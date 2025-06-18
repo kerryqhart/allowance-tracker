@@ -128,7 +128,7 @@ pub fn spend_money_form(props: &SpendMoneyFormProps) -> Html {
                         type="text"
                         id="spend-description"
                         name="spend-description"
-                        placeholder="Toy, candy, book, game..."
+                        placeholder="Toy, book, game..."
                         value={props.spend_description.clone()}
                         onchange={props.on_spend_description_change.clone()}
                         disabled={props.recording_spending}
@@ -141,7 +141,7 @@ pub fn spend_money_form(props: &SpendMoneyFormProps) -> Html {
                         type="number" 
                         id="spend-amount"
                         name="spend-amount"
-                        placeholder="2.50"
+                        placeholder="$2.50"
                         step="0.01"
                         min="0.01"
                         value={props.spend_amount.clone()}

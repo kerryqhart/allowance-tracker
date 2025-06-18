@@ -125,4 +125,4 @@ allowance-tracker/
 - Use workspace dependencies for shared crates 
 
 ## Git
-- "When running a `git commit`, write the provided commit message to a temporary file on disk (so you can use the full range of characters, including newlines). Then invoke the commit command using `git commit --file=<temp-file>`. After the commit succeeds, delete the temporary file."
+- "When running a `git commit`, write the provided commit message to a temporary file on disk using the edit_file tool (so you can use the full range of characters, including newlines). Then invoke the commit command using `git commit --file=<temp-file>`. After the commit succeeds, delete the temporary file."

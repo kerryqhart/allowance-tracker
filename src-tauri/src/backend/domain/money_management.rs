@@ -47,7 +47,7 @@ impl MoneyManagementService {
         let description_trimmed = description.trim();
         if description_trimmed.is_empty() {
             errors.push(MoneyValidationError::EmptyDescription);
-            suggestions.push("Try: Birthday gift, Chores completed, Found money, etc.".to_string());
+            suggestions.push("Try: Gift from grandma, gift from aunt...".to_string());
         } else if description_trimmed.len() > self.config.max_description_length {
             errors.push(MoneyValidationError::DescriptionTooLong(description_trimmed.len()));
         }
@@ -55,7 +55,7 @@ impl MoneyManagementService {
         // Validate and parse amount
         let cleaned_amount = if amount_input.trim().is_empty() {
             errors.push(MoneyValidationError::EmptyAmount);
-            suggestions.push("Enter a positive amount like 5.00 or 10".to_string());
+            suggestions.push("Enter a positive amount like $5.00 or $10".to_string());
             None
         } else {
             match self.clean_and_parse_amount(amount_input) {
@@ -74,7 +74,7 @@ impl MoneyManagementService {
                         None
                     } else if self.has_too_many_decimal_places(amount) {
                         errors.push(MoneyValidationError::AmountPrecisionTooHigh);
-                        suggestions.push("Use at most 2 decimal places (like 5.25)".to_string());
+                        suggestions.push("Use at most 2 decimal places (like $5.25)".to_string());
                         None
                     } else {
                         Some(amount)
@@ -82,7 +82,7 @@ impl MoneyManagementService {
                 }
                 Err(parse_error) => {
                     errors.push(MoneyValidationError::InvalidAmountFormat(parse_error));
-                    suggestions.push("Enter a valid number like 5.00 or 10".to_string());
+                    suggestions.push("Enter a valid number like $5.00 or $10".to_string());
                     None
                 }
             }
@@ -234,14 +234,14 @@ impl MoneyManagementService {
     /// Generate common money descriptions as suggestions
     pub fn get_description_suggestions(&self) -> Vec<String> {
         vec![
+            "Gift from grandma".to_string(),
+            "Gift from aunt".to_string(),
+            "Gift from uncle".to_string(),
             "Birthday gift".to_string(),
             "Chores completed".to_string(),
             "Found money".to_string(),
             "Allowance bonus".to_string(),
             "Good grades reward".to_string(),
-            "Helping neighbors".to_string(),
-            "Selling items".to_string(),
-            "Gift from family".to_string(),
         ]
     }
 
@@ -279,7 +279,7 @@ impl MoneyManagementService {
         let description_trimmed = description.trim();
         if description_trimmed.is_empty() {
             errors.push(MoneyValidationError::EmptyDescription);
-            suggestions.push("Try: Toy, Candy, Book, Game, etc.".to_string());
+            suggestions.push("Try: Toy, book, game...".to_string());
         } else if description_trimmed.len() > self.config.max_description_length {
             errors.push(MoneyValidationError::DescriptionTooLong(description_trimmed.len()));
         }
@@ -287,7 +287,7 @@ impl MoneyManagementService {
         // Validate and parse amount (user enters positive, we'll convert to negative later)
         let cleaned_amount = if amount_input.trim().is_empty() {
             errors.push(MoneyValidationError::EmptyAmount);
-            suggestions.push("Enter how much you spent, like 2.50 or 5".to_string());
+            suggestions.push("Enter how much you spent, like $2.50 or $5".to_string());
             None
         } else {
             match self.clean_and_parse_amount(amount_input) {
@@ -306,7 +306,7 @@ impl MoneyManagementService {
                         None
                     } else if self.has_too_many_decimal_places(amount) {
                         errors.push(MoneyValidationError::AmountPrecisionTooHigh);
-                        suggestions.push("Use at most 2 decimal places (like 5.25)".to_string());
+                        suggestions.push("Use at most 2 decimal places (like $5.25)".to_string());
                         None
                     } else {
                         Some(amount)
@@ -314,7 +314,7 @@ impl MoneyManagementService {
                 }
                 Err(parse_error) => {
                     errors.push(MoneyValidationError::InvalidAmountFormat(parse_error));
-                    suggestions.push("Enter a valid number like 2.50 or 5".to_string());
+                    suggestions.push("Enter a valid number like $2.50 or $5".to_string());
                     None
                 }
             }
