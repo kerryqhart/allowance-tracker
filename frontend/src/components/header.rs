@@ -34,16 +34,7 @@ pub fn header(props: &HeaderProps) -> Html {
                     }}
                 </h1>
                 <div class="header-right">
-                    <div class="balance-display">
-                        <span class="balance-label">
-                            {if props.child_loading {
-                                "Loading...".to_string()
-                            } else if let Some(child) = &props.active_child {
-                                format!("{}'s Balance:", child.name)
-                            } else {
-                                "Current Balance:".to_string()
-                            }}
-                        </span>
+                    <div class="balance-display unicorn-dream">
                         <span class="balance-amount">{format!("${:.2}", props.current_balance)}</span>
                     </div>
                     <div class="header-menus">
