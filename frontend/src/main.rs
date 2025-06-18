@@ -212,20 +212,6 @@ fn app() -> Html {
                     />
 
                     <div class="money-management-container">
-                        <AddMoneyForm 
-                            description={transactions.state.description.clone()}
-                            amount={transactions.state.amount.clone()}
-                            creating_transaction={transactions.state.creating_transaction}
-                            form_error={transactions.state.form_error.clone()}
-                            form_success={transactions.state.form_success}
-                            validation_suggestions={transactions.state.validation_suggestions.clone()}
-                            on_description_change={transactions.actions.on_description_change.clone()}
-                            on_amount_change={transactions.actions.on_amount_change.clone()}
-                            on_submit={Callback::from(|_| {})} // Dummy callback - using FormData instead
-                            on_debug={Callback::from(|_: String| {})} // Dummy callback
-                            on_refresh={transactions.actions.refresh_transactions.clone()}
-                        />
-
                         <SpendMoneyForm 
                             spend_description={transactions.state.spend_description.clone()}
                             spend_amount={transactions.state.spend_amount.clone()}
@@ -236,6 +222,20 @@ fn app() -> Html {
                             on_spend_description_change={transactions.actions.on_spend_description_change.clone()}
                             on_spend_amount_change={transactions.actions.on_spend_amount_change.clone()}
                             on_spend_submit={Callback::from(|_| {})} // Dummy callback - using FormData instead
+                            on_debug={Callback::from(|_: String| {})} // Dummy callback
+                            on_refresh={transactions.actions.refresh_transactions.clone()}
+                        />
+
+                        <AddMoneyForm 
+                            description={transactions.state.description.clone()}
+                            amount={transactions.state.amount.clone()}
+                            creating_transaction={transactions.state.creating_transaction}
+                            form_error={transactions.state.form_error.clone()}
+                            form_success={transactions.state.form_success}
+                            validation_suggestions={transactions.state.validation_suggestions.clone()}
+                            on_description_change={transactions.actions.on_description_change.clone()}
+                            on_amount_change={transactions.actions.on_amount_change.clone()}
+                            on_submit={Callback::from(|_| {})} // Dummy callback - using FormData instead
                             on_debug={Callback::from(|_: String| {})} // Dummy callback
                             on_refresh={transactions.actions.refresh_transactions.clone()}
                         />

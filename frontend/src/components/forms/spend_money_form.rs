@@ -22,7 +22,7 @@ pub struct SpendMoneyFormProps {
 pub fn spend_money_form(props: &SpendMoneyFormProps) -> Html {
     html! {
         <section class="spend-money-section">
-            <h2>{"💸 Spend Money"}</h2>
+            <h2>{"Spend Money"}</h2>
             
             {if let Some(error) = props.form_error.as_ref() {
                 html! {
@@ -35,7 +35,7 @@ pub fn spend_money_form(props: &SpendMoneyFormProps) -> Html {
             {if !props.validation_suggestions.is_empty() {
                 html! {
                     <div class="form-message info">
-                        <strong>{"💡 Suggestions:"}</strong>
+                        <strong>{"Suggestions:"}</strong>
                         <ul>
                             {for props.validation_suggestions.iter().map(|suggestion| {
                                 html! { <li>{suggestion}</li> }
@@ -48,7 +48,7 @@ pub fn spend_money_form(props: &SpendMoneyFormProps) -> Html {
             {if props.form_success {
                 html! {
                     <div class="form-message success">
-                        {"💸 Money spent successfully!"}
+                        {"Money spent successfully!"}
                     </div>
                 }
             } else { html! {} }}
@@ -156,9 +156,9 @@ pub fn spend_money_form(props: &SpendMoneyFormProps) -> Html {
                     disabled={props.recording_spending}
                 >
                     {if props.recording_spending {
-                        "Recording Spending..."
+                        "Spending..."
                     } else {
-                        "💸 Record Spending"
+                        "⊖ Spend Money"
                     }}
                 </button>
             </form>

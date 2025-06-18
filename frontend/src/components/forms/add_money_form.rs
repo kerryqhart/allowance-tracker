@@ -22,7 +22,7 @@ pub struct AddMoneyFormProps {
 pub fn add_money_form(props: &AddMoneyFormProps) -> Html {
     html! {
         <section class="add-money-section">
-            <h2>{"✨ Add Extra Money"}</h2>
+            <h2>{"Add Extra Money"}</h2>
             
             {if let Some(error) = props.form_error.as_ref() {
                 html! {
@@ -35,7 +35,7 @@ pub fn add_money_form(props: &AddMoneyFormProps) -> Html {
             {if !props.validation_suggestions.is_empty() {
                 html! {
                     <div class="form-message info">
-                        <strong>{"💡 Suggestions:"}</strong>
+                        <strong>{"Suggestions:"}</strong>
                         <ul>
                             {for props.validation_suggestions.iter().map(|suggestion| {
                                 html! { <li>{suggestion}</li> }
@@ -48,7 +48,7 @@ pub fn add_money_form(props: &AddMoneyFormProps) -> Html {
             {if props.form_success {
                 html! {
                     <div class="form-message success">
-                        {"🎉 Money added successfully!"}
+                        {"Money added successfully!"}
                     </div>
                 }
             } else { html! {} }}
@@ -158,7 +158,7 @@ pub fn add_money_form(props: &AddMoneyFormProps) -> Html {
                     {if props.creating_transaction {
                         "Adding Money..."
                     } else {
-                        "💰 Add Money"
+                        "⊕ Add Money"
                     }}
                 </button>
             </form>
