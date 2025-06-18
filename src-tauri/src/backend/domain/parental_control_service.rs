@@ -2,29 +2,31 @@ use anyhow::Result;
 use log::{info, warn};
 use std::sync::Arc;
 
-use crate::backend::storage::db::DbConnection;
+use crate::backend::storage::{DbConnection, ParentalControlRepository};
 use shared::{ParentalControlRequest, ParentalControlResponse};
 
 /// Service for handling parental control validation
 #[derive(Clone)]
 pub struct ParentalControlService {
-    db: Arc<DbConnection>,
+    parental_control_repository: ParentalControlRepository,
     correct_answer: String,
 }
 
 impl ParentalControlService {
     /// Create a new ParentalControlService with the default correct answer
     pub fn new(db: Arc<DbConnection>) -> Self {
+        let parental_control_repository = ParentalControlRepository::new((*db).clone());
         Self {
-            db,
+            parental_control_repository,
             correct_answer: "ice cold".to_string(),
         }
     }
 
     /// Create a new ParentalControlService with a custom correct answer (for testing)
     pub fn with_answer(db: Arc<DbConnection>, answer: String) -> Self {
+        let parental_control_repository = ParentalControlRepository::new((*db).clone());
         Self {
-            db,
+            parental_control_repository,
             correct_answer: answer.to_lowercase().trim().to_string(),
         }
     }
@@ -38,7 +40,7 @@ impl ParentalControlService {
         let is_correct = attempted_answer.to_lowercase() == self.correct_answer;
 
         // Record the attempt in the database
-        match self.db.record_parental_control_attempt(attempted_answer, is_correct).await {
+        match self.parental_control_repository.record_parental_control_attempt(attempted_answer, is_correct).await {
             Ok(attempt_id) => {
                 info!("Recorded parental control attempt with ID: {}", attempt_id);
             }
@@ -76,7 +78,7 @@ impl ParentalControlService {
     pub async fn get_recent_attempts(&self, limit: Option<u32>) -> Result<Vec<shared::ParentalControlAttempt>> {
         info!("Retrieving recent parental control attempts (limit: {:?})", limit);
         
-        let attempts = self.db.get_parental_control_attempts(limit).await?;
+        let attempts = self.parental_control_repository.get_parental_control_attempts(limit).await?;
         
         info!("Retrieved {} parental control attempts", attempts.len());
         Ok(attempts)
@@ -86,7 +88,7 @@ impl ParentalControlService {
     pub async fn get_validation_stats(&self) -> Result<ParentalControlStats> {
         info!("Calculating parental control validation statistics");
         
-        let all_attempts = self.db.get_parental_control_attempts(None).await?;
+        let all_attempts = self.parental_control_repository.get_parental_control_attempts(None).await?;
         
         let total_attempts = all_attempts.len();
         let successful_attempts = all_attempts.iter().filter(|a| a.success).count();
@@ -122,7 +124,7 @@ pub struct ParentalControlStats {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::storage::db::DbConnection;
+    use crate::backend::storage::DbConnection;
 
     async fn setup_test() -> ParentalControlService {
         let db = Arc::new(DbConnection::init_test().await.expect("Failed to create test database"));

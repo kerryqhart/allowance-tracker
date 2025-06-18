@@ -88,7 +88,7 @@ mod tests {
     use crate::backend::domain::{TransactionService, CalendarService, TransactionTableService, MoneyManagementService, child_service::ChildService};
     use crate::backend::AppState;
     use axum::http::StatusCode;
-    use shared::{CreateTransactionRequest, DeleteTransactionsRequest, Child};
+    use shared::{CreateTransactionRequest, DeleteTransactionsRequest};
     use std::sync::Arc;
 
     async fn setup_test_state() -> AppState {
@@ -100,20 +100,21 @@ mod tests {
         let child_service = ChildService::new(db.clone());
         let parental_control_service = crate::backend::domain::ParentalControlService::new(db.clone());
         
-        // Create a test child and set as active
-        let test_child = Child {
-            id: "test_child_123".to_string(),
+        // Create a test child and set as active using ChildService
+        use shared::{CreateChildRequest, SetActiveChildRequest};
+        
+        let create_request = CreateChildRequest {
             name: "Test Child".to_string(),
             birthdate: "2015-01-01".to_string(),
-            created_at: "2025-06-18T00:00:00-04:00".to_string(),
-            updated_at: "2025-06-18T00:00:00-04:00".to_string(),
         };
         
-        // Store the child in the database
-        db.store_child(&test_child).await.expect("Failed to store test child");
+        let child_response = child_service.create_child(create_request).await.expect("Failed to create test child");
         
-        // Set as active child
-        db.set_active_child(&test_child.id).await.expect("Failed to set active child");
+        let set_active_request = SetActiveChildRequest {
+            child_id: child_response.child.id.clone(),
+        };
+        
+        child_service.set_active_child(set_active_request).await.expect("Failed to set active child");
         
         AppState {
             transaction_service,
@@ -175,12 +176,15 @@ mod tests {
     async fn test_delete_transactions_handler() {
         let state = setup_test_state().await;
         
-        // Create some test transactions
+        // Create some test transactions with small delays to avoid duplicate IDs
         let tx1 = state.transaction_service.create_transaction(CreateTransactionRequest {
             description: "Transaction 1".to_string(),
             amount: 10.0,
             date: None,
         }).await.unwrap();
+        
+        // Small delay to ensure different timestamp for next transaction
+        tokio::time::sleep(tokio::time::Duration::from_millis(2)).await;
         
         let _tx2 = state.transaction_service.create_transaction(CreateTransactionRequest {
             description: "Transaction 2".to_string(),

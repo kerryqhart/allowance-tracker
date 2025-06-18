@@ -49,7 +49,7 @@ pub async fn validate_parental_control_answer(
 mod tests {
     use super::*;
     use crate::backend::{
-        storage::db::DbConnection,
+        storage::DbConnection,
         domain::{TransactionService, CalendarService, TransactionTableService, MoneyManagementService, child_service::ChildService, ParentalControlService},
     };
     use axum::{

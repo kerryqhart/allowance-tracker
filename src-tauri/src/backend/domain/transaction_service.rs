@@ -34,15 +34,15 @@
 //! ## Design Principles
 //!
 //! - **Domain-Driven Design**: Models real-world allowance transaction concepts
-//! - **Storage Agnostic**: Works with any storage implementation via DbConnection
+//! - **Storage Agnostic**: Works with any storage implementation via repositories
 //! - **Async First**: All operations are asynchronous for better performance
 //! - **Error Handling**: Comprehensive error handling with detailed messages
 //! - **Testability**: Pure business logic with comprehensive test coverage
 //! - **Mock Support**: Development-friendly with fallback mock data
 
-use crate::backend::storage::DbConnection;
+use crate::backend::storage::{DbConnection, TransactionRepository};
 use crate::backend::domain::child_service::ChildService;
-use shared::{Transaction, TransactionListRequest, TransactionListResponse, PaginationInfo, CreateTransactionRequest, DeleteTransactionsRequest, DeleteTransactionsResponse, Child};
+use shared::{Transaction, TransactionListRequest, TransactionListResponse, PaginationInfo, CreateTransactionRequest, DeleteTransactionsRequest, DeleteTransactionsResponse};
 use anyhow::Result;
 use tracing::info;
 use std::sync::Arc;
@@ -50,14 +50,15 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Clone)]
 pub struct TransactionService {
-    db: Arc<DbConnection>,
+    transaction_repository: TransactionRepository,
     child_service: ChildService,
 }
 
 impl TransactionService {
     pub fn new(db: Arc<DbConnection>) -> Self {
-        let child_service = ChildService::new(db.clone());
-        Self { db, child_service }
+        let transaction_repository = TransactionRepository::new((*db).clone());
+        let child_service = ChildService::new(db);
+        Self { transaction_repository, child_service }
     }
 
     /// Create a new transaction
@@ -75,7 +76,7 @@ impl TransactionService {
             .ok_or_else(|| anyhow::anyhow!("No active child found"))?;
 
         // Get current balance from latest transaction for this child
-        let current_balance = match self.db.get_latest_transaction(&active_child.id).await? {
+        let current_balance = match self.transaction_repository.get_latest_transaction(&active_child.id).await? {
             Some(latest) => latest.balance,
             None => 0.0, // First transaction starts at 0
         };
@@ -94,7 +95,8 @@ impl TransactionService {
         let date = match request.date {
             Some(date) => date,
             None => {
-                // Generate RFC 3339 formatted timestamp in Eastern Time (UTC-4 for EDT, UTC-5 for EST)
+                // Generate RFC 3339 formatted timestamp in Eastern Time (assuming EDT for now, UTC-4)
+                // In a production app, you'd want to detect the actual timezone or let the user configure it
                 let now = SystemTime::now();
                 let utc_datetime = time::OffsetDateTime::from(now);
                 
@@ -117,7 +119,7 @@ impl TransactionService {
         };
 
         // Store in database
-        self.db.store_transaction(&transaction).await?;
+        self.transaction_repository.store_transaction(&transaction).await?;
 
         info!("Created transaction: {} with balance: {:.2}", transaction.id, new_balance);
         Ok(transaction)
@@ -139,7 +141,7 @@ impl TransactionService {
         let query_limit = limit + 1;
 
         // Get transactions from database for the active child
-        let mut db_transactions = self.db.list_transactions(&active_child.id, query_limit, request.after.as_deref()).await?;
+        let mut db_transactions = self.transaction_repository.list_transactions(&active_child.id, query_limit, request.after.as_deref()).await?;
 
         // If no database transactions exist, fall back to mock data for development
         if db_transactions.is_empty() {
@@ -201,7 +203,7 @@ impl TransactionService {
             .ok_or_else(|| anyhow::anyhow!("No active child found"))?;
 
         // Check which transactions actually exist for this child
-        let existing_ids = self.db.check_transactions_exist(&active_child.id, &request.transaction_ids).await?;
+        let existing_ids = self.transaction_repository.check_transactions_exist(&active_child.id, &request.transaction_ids).await?;
         let not_found_ids: Vec<String> = request.transaction_ids
             .iter()
             .filter(|id| !existing_ids.contains(id))
@@ -210,7 +212,7 @@ impl TransactionService {
 
         // Delete the existing transactions for this child
         let deleted_count = if !existing_ids.is_empty() {
-            self.db.delete_transactions(&active_child.id, &existing_ids).await?
+            self.transaction_repository.delete_transactions(&active_child.id, &existing_ids).await?
         } else {
             0
         };
@@ -397,7 +399,8 @@ mod tests {
         let db = Arc::new(DbConnection::init_test().await.expect("Failed to init test DB"));
         let service = TransactionService::new(db.clone());
         
-        // Create a test child and set as active
+        // Create a test child and set as active using the child repository directly
+        // This ensures we get the specific ID we want for consistent testing
         let test_child = Child {
             id: "test_child_123".to_string(),
             name: "Test Child".to_string(),
@@ -406,11 +409,11 @@ mod tests {
             updated_at: "2025-06-18T00:00:00-04:00".to_string(),
         };
         
-        // Store the child in the database
-        db.store_child(&test_child).await.expect("Failed to store test child");
-        
-        // Set as active child
-        db.set_active_child(&test_child.id).await.expect("Failed to set active child");
+        // Use the repository directly for testing to ensure consistent IDs
+        use crate::backend::storage::repositories::ChildRepository;
+        let child_repo = ChildRepository::new((*db).clone());
+        child_repo.store_child(&test_child).await.expect("Failed to store test child");
+        child_repo.set_active_child(&test_child.id).await.expect("Failed to set active child");
         
         service
     }

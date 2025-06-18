@@ -3,7 +3,7 @@ use chrono::Utc;
 use log::{info, warn};
 use std::sync::Arc;
 
-use crate::backend::storage::db::DbConnection;
+use crate::backend::storage::{DbConnection, ChildRepository};
 use shared::{
     Child, CreateChildRequest, UpdateChildRequest, ChildResponse, ChildListResponse,
     SetActiveChildRequest, SetActiveChildResponse, ActiveChildResponse
@@ -12,13 +12,14 @@ use shared::{
 /// Service for managing children in the allowance tracking system
 #[derive(Clone)]
 pub struct ChildService {
-    db: Arc<DbConnection>,
+    child_repository: ChildRepository,
 }
 
 impl ChildService {
     /// Create a new ChildService
     pub fn new(db: Arc<DbConnection>) -> Self {
-        Self { db }
+        let child_repository = ChildRepository::new((*db).clone());
+        Self { child_repository }
     }
 
     /// Create a new child
@@ -43,7 +44,7 @@ impl ChildService {
         };
 
         // Store in database
-        self.db.store_child(&child).await?;
+        self.child_repository.store_child(&child).await?;
 
         info!("Created child: {} with ID: {}", child.name, child.id);
 
@@ -57,7 +58,7 @@ impl ChildService {
     pub async fn get_child(&self, child_id: &str) -> Result<Option<Child>> {
         info!("Getting child: {}", child_id);
 
-        let child = self.db.get_child(child_id).await?;
+        let child = self.child_repository.get_child(child_id).await?;
 
         if child.is_some() {
             info!("Found child: {}", child_id);
@@ -72,7 +73,7 @@ impl ChildService {
     pub async fn list_children(&self) -> Result<ChildListResponse> {
         info!("Listing all children");
 
-        let children = self.db.list_children().await?;
+        let children = self.child_repository.list_children().await?;
 
         info!("Found {} children", children.len());
 
@@ -84,7 +85,7 @@ impl ChildService {
         info!("Updating child: {}", child_id);
 
         // Get the existing child
-        let mut child = self.db.get_child(child_id).await?
+        let mut child = self.child_repository.get_child(child_id).await?
             .ok_or_else(|| anyhow::anyhow!("Child not found: {}", child_id))?;
 
         // Validate the update request
@@ -102,7 +103,7 @@ impl ChildService {
         child.updated_at = Utc::now().to_rfc3339();
 
         // Store updated child
-        self.db.update_child(&child).await?;
+        self.child_repository.update_child(&child).await?;
 
         info!("Updated child: {} with ID: {}", child.name, child.id);
 
@@ -117,11 +118,11 @@ impl ChildService {
         info!("Deleting child: {}", child_id);
 
         // Verify child exists
-        let child = self.db.get_child(child_id).await?
+        let child = self.child_repository.get_child(child_id).await?
             .ok_or_else(|| anyhow::anyhow!("Child not found: {}", child_id))?;
 
         // Delete from database
-        self.db.delete_child(child_id).await?;
+        self.child_repository.delete_child(child_id).await?;
 
         info!("Deleted child: {} with ID: {}", child.name, child.id);
 
@@ -132,10 +133,10 @@ impl ChildService {
     pub async fn get_active_child(&self) -> Result<ActiveChildResponse> {
         info!("Getting active child");
 
-        let active_child_id = self.db.get_active_child().await?;
+        let active_child_id = self.child_repository.get_active_child().await?;
 
         let active_child = if let Some(child_id) = active_child_id {
-            let child = self.db.get_child(&child_id).await?;
+            let child = self.child_repository.get_child(&child_id).await?;
             if child.is_some() {
                 info!("Found active child: {}", child_id);
             } else {
@@ -155,11 +156,11 @@ impl ChildService {
         info!("Setting active child: {}", request.child_id);
 
         // Validate that the child exists
-        let child = self.db.get_child(&request.child_id).await?
+        let child = self.child_repository.get_child(&request.child_id).await?
             .ok_or_else(|| anyhow::anyhow!("Child not found: {}", request.child_id))?;
 
         // Set as active child in database
-        self.db.set_active_child(&request.child_id).await?;
+        self.child_repository.set_active_child(&request.child_id).await?;
 
         info!("Successfully set active child: {} ({})", child.name, child.id);
 
@@ -271,7 +272,7 @@ impl ChildService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::storage::db::DbConnection;
+    use crate::backend::storage::DbConnection;
 
     async fn setup_test() -> ChildService {
         let db = Arc::new(DbConnection::init_test().await.expect("Failed to create test database"));

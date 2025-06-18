@@ -37,6 +37,13 @@
 //! - **Dependency Inversion**: Domain depends on storage abstractions, not implementations
 //! - **Testability**: Mock implementations for unit testing
 
-pub mod db;
+pub mod connection;
+pub mod repositories;
 
-pub use db::*; 
+// Re-export the main types that other modules need
+pub use connection::DbConnection;
+pub use repositories::{
+    TransactionRepository,
+    ChildRepository, 
+    ParentalControlRepository
+}; 
