@@ -20,7 +20,19 @@ pub fn header(props: &HeaderProps) -> Html {
     html! {
         <header class="header">
             <div class="container">
-                <h1>{"My Allowance Tracker"}</h1>
+                <h1>
+                    {if props.child_loading {
+                        "Loading...".to_string()
+                    } else if let Some(child) = &props.active_child {
+                        // Extract first name (everything before the first space)
+                        let first_name = child.name.split_whitespace()
+                            .next()
+                            .unwrap_or(&child.name);
+                        format!("{}'s Allowance Tracker", first_name)
+                    } else {
+                        "My Allowance Tracker".to_string()
+                    }}
+                </h1>
                 <div class="header-right">
                     <div class="balance-display">
                         <span class="balance-label">
