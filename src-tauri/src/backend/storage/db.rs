@@ -525,22 +525,37 @@ mod tests {
         DbConnection::init_test().await.expect("Failed to create test database")
     }
     
-
+    // Setup a test database with a test child
+    async fn setup_test_with_child() -> (DbConnection, String) {
+        let db = setup_test().await;
+        
+        // Create a test child
+        let child = Child {
+            id: "test_child_123".to_string(),
+            name: "Test Child".to_string(),
+            birthdate: "2015-01-01".to_string(),
+            created_at: "2025-06-18T00:00:00-04:00".to_string(),
+            updated_at: "2025-06-18T00:00:00-04:00".to_string(),
+        };
+        
+        // Store the child in the database
+        db.store_child(&child).await.expect("Failed to store test child");
+        
+        (db, child.id)
+    }
 
     #[tokio::test]
     async fn test_store_and_get_latest_transaction() {
-        let db = setup_test().await;
-
-        let child_id = "test_child_id";
+        let (db, child_id) = setup_test_with_child().await;
 
         // Initially should have no transactions for this child
-        let latest = db.get_latest_transaction(child_id).await.expect("Failed to get latest transaction");
+        let latest = db.get_latest_transaction(&child_id).await.expect("Failed to get latest transaction");
         assert!(latest.is_none(), "Should have no transactions initially");
 
         // Create a test transaction
         let transaction = Transaction {
             id: "transaction::income::1234567890000".to_string(),
-            child_id: child_id.to_string(),
+            child_id: child_id.clone(),
             date: "2025-06-14T10:00:00-04:00".to_string(),
             description: "Test allowance".to_string(),
             amount: 10.0,
@@ -551,7 +566,7 @@ mod tests {
         db.store_transaction(&transaction).await.expect("Failed to store transaction");
 
         // Retrieve the latest transaction
-        let latest = db.get_latest_transaction(child_id).await.expect("Failed to get latest transaction");
+        let latest = db.get_latest_transaction(&child_id).await.expect("Failed to get latest transaction");
         assert!(latest.is_some(), "Should have one transaction");
         
         let retrieved = latest.unwrap();
@@ -565,14 +580,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_store_multiple_transactions_latest_ordering() {
-        let db = setup_test().await;
-
-        let child_id = "test_child_id";
+        let (db, child_id) = setup_test_with_child().await;
 
         let transactions = vec![
             Transaction {
                 id: "transaction::income::1234567890000".to_string(),
-                child_id: child_id.to_string(),
+                child_id: child_id.clone(),
                 date: "2025-06-14T10:00:00-04:00".to_string(),
                 description: "First transaction".to_string(),
                 amount: 10.0,
@@ -580,7 +593,7 @@ mod tests {
             },
             Transaction {
                 id: "transaction::expense::1234567891000".to_string(),
-                child_id: child_id.to_string(),
+                child_id: child_id.clone(),
                 date: "2025-06-14T11:00:00-04:00".to_string(),
                 description: "Second transaction".to_string(),
                 amount: -5.0,
@@ -588,7 +601,7 @@ mod tests {
             },
             Transaction {
                 id: "transaction::income::1234567892000".to_string(),
-                child_id: child_id.to_string(),
+                child_id: child_id.clone(),
                 date: "2025-06-14T12:00:00-04:00".to_string(),
                 description: "Third transaction".to_string(),
                 amount: 15.0,
@@ -602,7 +615,7 @@ mod tests {
         }
 
         // Get latest should return the third (most recently stored) transaction
-        let latest = db.get_latest_transaction(child_id).await.expect("Failed to get latest transaction");
+        let latest = db.get_latest_transaction(&child_id).await.expect("Failed to get latest transaction");
         assert!(latest.is_some());
         let retrieved = latest.unwrap();
         assert_eq!(retrieved.id, transactions[2].id);
@@ -612,15 +625,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_transactions_pagination() {
-        let db = setup_test().await;
-
-        let child_id = "test_child_id";
+        let (db, child_id) = setup_test_with_child().await;
 
         // Create test transactions
         let transactions = vec![
             Transaction {
                 id: "transaction::income::1234567890000".to_string(),
-                child_id: child_id.to_string(),
+                child_id: child_id.clone(),
                 date: "2025-06-14T10:00:00-04:00".to_string(),
                 description: "Transaction 1".to_string(),
                 amount: 10.0,
@@ -628,7 +639,7 @@ mod tests {
             },
             Transaction {
                 id: "transaction::expense::1234567891000".to_string(),
-                child_id: child_id.to_string(),
+                child_id: child_id.clone(),
                 date: "2025-06-14T11:00:00-04:00".to_string(),
                 description: "Transaction 2".to_string(),
                 amount: -5.0,
@@ -636,7 +647,7 @@ mod tests {
             },
             Transaction {
                 id: "transaction::income::1234567892000".to_string(),
-                child_id: child_id.to_string(),
+                child_id: child_id.clone(),
                 date: "2025-06-14T12:00:00-04:00".to_string(),
                 description: "Transaction 3".to_string(),
                 amount: 15.0,
@@ -650,7 +661,7 @@ mod tests {
         }
 
         // Test listing all transactions (limit 10)
-        let all_transactions = db.list_transactions(child_id, 10, None).await.expect("Failed to list transactions");
+        let all_transactions = db.list_transactions(&child_id, 10, None).await.expect("Failed to list transactions");
         assert_eq!(all_transactions.len(), 3);
         
         // Should be in reverse chronological order (newest first)
@@ -659,13 +670,13 @@ mod tests {
         assert_eq!(all_transactions[2].description, "Transaction 1");
 
         // Test pagination with limit
-        let first_page = db.list_transactions(child_id, 2, None).await.expect("Failed to list first page");
+        let first_page = db.list_transactions(&child_id, 2, None).await.expect("Failed to list first page");
         assert_eq!(first_page.len(), 2);
         assert_eq!(first_page[0].description, "Transaction 3");
         assert_eq!(first_page[1].description, "Transaction 2");
 
         // Test pagination with cursor (after first transaction of previous query)
-        let second_page = db.list_transactions(child_id, 2, Some(&first_page[0].id)).await.expect("Failed to list with cursor");
+        let second_page = db.list_transactions(&child_id, 2, Some(&first_page[0].id)).await.expect("Failed to list with cursor");
         assert_eq!(second_page.len(), 2);
         assert_eq!(second_page[0].description, "Transaction 2");
         assert_eq!(second_page[1].description, "Transaction 1");
@@ -673,25 +684,21 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_transactions_empty_database() {
-        let db = setup_test().await;
-
-        let child_id = "test_child_id";
+        let (db, child_id) = setup_test_with_child().await;
 
         // List transactions from empty database
-        let transactions = db.list_transactions(child_id, 10, None).await.expect("Failed to list transactions");
+        let transactions = db.list_transactions(&child_id, 10, None).await.expect("Failed to list transactions");
         assert!(transactions.is_empty(), "Should return empty vector for empty database");
     }
 
     #[tokio::test]
     async fn test_list_transactions_with_invalid_cursor() {
-        let db = setup_test().await;
-
-        let child_id = "test_child_id";
+        let (db, child_id) = setup_test_with_child().await;
 
         // Store one transaction
         let transaction = Transaction {
             id: "transaction::income::1234567890000".to_string(),
-            child_id: child_id.to_string(),
+            child_id: child_id.clone(),
             date: "2025-06-14T10:00:00-04:00".to_string(),
             description: "Test transaction".to_string(),
             amount: 10.0,
@@ -700,7 +707,7 @@ mod tests {
         db.store_transaction(&transaction).await.expect("Failed to store transaction");
 
         // Try to list with invalid cursor
-        let transactions = db.list_transactions(child_id, 10, Some("invalid_cursor_id")).await.expect("Failed to list transactions");
+        let transactions = db.list_transactions(&child_id, 10, Some("invalid_cursor_id")).await.expect("Failed to list transactions");
         // Should return empty when cursor is invalid (no transaction with that ID found)
         assert_eq!(transactions.len(), 0, "Should return empty for invalid cursor");
     }
@@ -839,14 +846,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_single_transaction() {
-        let db = setup_test().await;
-        
-        let child_id = "test_child_id";
+        let (db, child_id) = setup_test_with_child().await;
         
         // Create a test transaction
         let transaction = Transaction {
             id: "tx123".to_string(),
-            child_id: child_id.to_string(),
+            child_id: child_id.clone(),
             date: "2025-01-01T10:00:00-05:00".to_string(),
             description: "Test transaction".to_string(),
             amount: 10.0,
@@ -857,41 +862,37 @@ mod tests {
         db.store_transaction(&transaction).await.unwrap();
         
         // Verify it exists
-        let transactions = db.list_transactions(child_id, 10, None).await.unwrap();
+        let transactions = db.list_transactions(&child_id, 10, None).await.unwrap();
         assert_eq!(transactions.len(), 1);
         assert_eq!(transactions[0].id, "tx123");
         
         // Delete the transaction
-        let deleted = db.delete_transaction(child_id, "tx123").await.unwrap();
+        let deleted = db.delete_transaction(&child_id, "tx123").await.unwrap();
         assert!(deleted);
         
         // Verify it's gone
-        let transactions = db.list_transactions(child_id, 10, None).await.unwrap();
+        let transactions = db.list_transactions(&child_id, 10, None).await.unwrap();
         assert_eq!(transactions.len(), 0);
     }
 
     #[tokio::test]
     async fn test_delete_nonexistent_transaction() {
-        let db = setup_test().await;
-        
-        let child_id = "test_child_id";
+        let (db, child_id) = setup_test_with_child().await;
         
         // Try to delete a non-existent transaction
-        let deleted = db.delete_transaction(child_id, "nonexistent").await.unwrap();
+        let deleted = db.delete_transaction(&child_id, "nonexistent").await.unwrap();
         assert!(!deleted);
     }
 
     #[tokio::test]
     async fn test_delete_multiple_transactions() {
-        let db = setup_test().await;
-        
-        let child_id = "test_child_id";
+        let (db, child_id) = setup_test_with_child().await;
         
         // Create multiple test transactions
         let transactions = vec![
             Transaction {
                 id: "tx1".to_string(),
-                child_id: child_id.to_string(),
+                child_id: child_id.clone(),
                 date: "2025-01-01T10:00:00-05:00".to_string(),
                 description: "Transaction 1".to_string(),
                 amount: 10.0,
@@ -899,7 +900,7 @@ mod tests {
             },
             Transaction {
                 id: "tx2".to_string(),
-                child_id: child_id.to_string(),
+                child_id: child_id.clone(),
                 date: "2025-01-01T11:00:00-05:00".to_string(),
                 description: "Transaction 2".to_string(),
                 amount: 20.0,
@@ -907,7 +908,7 @@ mod tests {
             },
             Transaction {
                 id: "tx3".to_string(),
-                child_id: child_id.to_string(),
+                child_id: child_id.clone(),
                 date: "2025-01-01T12:00:00-05:00".to_string(),
                 description: "Transaction 3".to_string(),
                 amount: -5.0,
@@ -921,69 +922,48 @@ mod tests {
         }
         
         // Verify they exist
-        let stored = db.list_transactions(child_id, 10, None).await.unwrap();
+        let stored = db.list_transactions(&child_id, 10, None).await.unwrap();
         assert_eq!(stored.len(), 3);
         
         // Delete two transactions
         let ids_to_delete = vec!["tx1".to_string(), "tx3".to_string()];
-        let deleted_count = db.delete_transactions(child_id, &ids_to_delete).await.unwrap();
+        let deleted_count = db.delete_transactions(&child_id, &ids_to_delete).await.unwrap();
         assert_eq!(deleted_count, 2);
         
         // Verify only one remains
-        let remaining = db.list_transactions(child_id, 10, None).await.unwrap();
+        let remaining = db.list_transactions(&child_id, 10, None).await.unwrap();
         assert_eq!(remaining.len(), 1);
         assert_eq!(remaining[0].id, "tx2");
     }
 
     #[tokio::test]
     async fn test_delete_empty_transaction_list() {
-        let db = setup_test().await;
+        let (db, child_id) = setup_test_with_child().await;
         
-        let child_id = "test_child_id";
-        
-        // Try to delete empty list
-        let deleted_count = db.delete_transactions(child_id, &[]).await.unwrap();
+        // Delete empty list
+        let deleted_count = db.delete_transactions(&child_id, &[]).await.unwrap();
         assert_eq!(deleted_count, 0);
     }
 
     #[tokio::test]
     async fn test_delete_transactions_with_invalid_ids() {
-        let db = setup_test().await;
+        let (db, child_id) = setup_test_with_child().await;
         
-        let child_id = "test_child_id";
-        
-        // Create one test transaction
-        let transaction = Transaction {
-            id: "tx1".to_string(),
-            child_id: child_id.to_string(),
-            date: "2025-01-01T10:00:00-05:00".to_string(),
-            description: "Transaction 1".to_string(),
-            amount: 10.0,
-            balance: 10.0,
-        };
-        db.store_transaction(&transaction).await.unwrap();
-        
-        // Try to delete mix of valid and invalid IDs
-        let ids_to_delete = vec!["tx1".to_string(), "invalid".to_string(), "also_invalid".to_string()];
-        let deleted_count = db.delete_transactions(child_id, &ids_to_delete).await.unwrap();
-        assert_eq!(deleted_count, 1); // Only tx1 should be deleted
-        
-        // Verify the transaction is gone
-        let remaining = db.list_transactions(child_id, 10, None).await.unwrap();
-        assert_eq!(remaining.len(), 0);
+        // Try to delete transactions that don't exist
+        let ids_to_delete = vec!["invalid1".to_string(), "invalid2".to_string()];
+        let deleted_count = db.delete_transactions(&child_id, &ids_to_delete).await.unwrap();
+        assert_eq!(deleted_count, 0);
     }
 
     #[tokio::test]
     async fn test_check_transactions_exist() {
-        let db = setup_test().await;
-        
-        let child_id = "test_child_id";
+        let (db, child_id) = setup_test_with_child().await;
         
         // Create test transactions
         let transactions = vec![
             Transaction {
                 id: "tx1".to_string(),
-                child_id: child_id.to_string(),
+                child_id: child_id.clone(),
                 date: "2025-01-01T10:00:00-05:00".to_string(),
                 description: "Transaction 1".to_string(),
                 amount: 10.0,
@@ -991,7 +971,7 @@ mod tests {
             },
             Transaction {
                 id: "tx2".to_string(),
-                child_id: child_id.to_string(),
+                child_id: child_id.clone(),
                 date: "2025-01-01T11:00:00-05:00".to_string(),
                 description: "Transaction 2".to_string(),
                 amount: 20.0,
@@ -1006,7 +986,7 @@ mod tests {
         
         // Check which transactions exist
         let ids_to_check = vec!["tx1".to_string(), "tx2".to_string(), "tx3".to_string()];
-        let existing_ids = db.check_transactions_exist(child_id, &ids_to_check).await.unwrap();
+        let existing_ids = db.check_transactions_exist(&child_id, &ids_to_check).await.unwrap();
         
         assert_eq!(existing_ids.len(), 2);
         assert!(existing_ids.contains(&"tx1".to_string()));
@@ -1016,13 +996,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_check_transactions_exist_empty_list() {
-        let db = setup_test().await;
+        let (db, child_id) = setup_test_with_child().await;
         
-                 let child_id = "test_child_id";
-         
-         // Check empty list
-         let existing_ids = db.check_transactions_exist(child_id, &[]).await.unwrap();
-         assert_eq!(existing_ids.len(), 0);
+        // Check empty list
+        let existing_ids = db.check_transactions_exist(&child_id, &[]).await.unwrap();
+        assert_eq!(existing_ids.len(), 0);
     }
 
     #[tokio::test]

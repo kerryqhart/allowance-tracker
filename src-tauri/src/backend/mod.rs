@@ -13,13 +13,16 @@
 //! ## Architecture
 //! 
 //! The backend follows a layered architecture:
-//! ```
+//! ```text
 //! UI Layer (Yew frontend)
-//!     ↓
+//!     |
+//!     v
 //! IO Layer (REST API, handlers)
-//!     ↓
+//!     |
+//!     v
 //! Domain Layer (Business logic, services)
-//!     ↓
+//!     |
+//!     v
 //! Storage Layer (Database, persistence)
 //! ```
 //!

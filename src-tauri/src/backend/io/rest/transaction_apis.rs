@@ -88,7 +88,7 @@ mod tests {
     use crate::backend::domain::{TransactionService, CalendarService, TransactionTableService, MoneyManagementService, child_service::ChildService};
     use crate::backend::AppState;
     use axum::http::StatusCode;
-    use shared::{CreateTransactionRequest, DeleteTransactionsRequest};
+    use shared::{CreateTransactionRequest, DeleteTransactionsRequest, Child};
     use std::sync::Arc;
 
     async fn setup_test_state() -> AppState {
@@ -98,7 +98,22 @@ mod tests {
         let transaction_table_service = TransactionTableService::new();
         let money_management_service = MoneyManagementService::new();
         let child_service = ChildService::new(db.clone());
-        let parental_control_service = crate::backend::domain::ParentalControlService::new(db);
+        let parental_control_service = crate::backend::domain::ParentalControlService::new(db.clone());
+        
+        // Create a test child and set as active
+        let test_child = Child {
+            id: "test_child_123".to_string(),
+            name: "Test Child".to_string(),
+            birthdate: "2015-01-01".to_string(),
+            created_at: "2025-06-18T00:00:00-04:00".to_string(),
+            updated_at: "2025-06-18T00:00:00-04:00".to_string(),
+        };
+        
+        // Store the child in the database
+        db.store_child(&test_child).await.expect("Failed to store test child");
+        
+        // Set as active child
+        db.set_active_child(&test_child.id).await.expect("Failed to set active child");
         
         AppState {
             transaction_service,
