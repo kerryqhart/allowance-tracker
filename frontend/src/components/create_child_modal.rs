@@ -102,7 +102,7 @@ pub fn create_child_modal(props: &CreateChildModalProps) -> Html {
                 };
                 
                 match api_client.create_child(request).await {
-                    Ok(response) => {
+                    Ok(_response) => {
                         // Success! Clear form and close modal
                         child_name.set(String::new());
                         child_birthdate.set(String::new());

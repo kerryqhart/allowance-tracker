@@ -64,7 +64,7 @@ pub fn spend_money_form(props: &SpendMoneyFormProps) -> Html {
                     
                     // Get form data directly from the event
                     use web_sys::{HtmlFormElement, FormData};
-                    use wasm_bindgen::JsCast;
+
                     
                     let form: HtmlFormElement = e.target_unchecked_into();
                     let form_data = FormData::new_with_form(&form).expect("form data");

@@ -24,7 +24,7 @@ pub struct UseCalendarActions {
 }
 
 #[hook]
-pub fn use_calendar(api_client: &ApiClient) -> UseCalendarResult {
+pub fn use_calendar(api_client: &ApiClient, child_change_trigger: u32) -> UseCalendarResult {
     let current_month = use_state(|| 6u32); // June
     let current_year = use_state(|| 2025u32);
     let calendar_data = use_state(|| Option::<CalendarMonth>::None);
@@ -84,6 +84,15 @@ pub fn use_calendar(api_client: &ApiClient) -> UseCalendarResult {
 
     // Auto-refresh calendar when month/year changes
     use_effect_with((current_month.clone(), current_year.clone()), {
+        let refresh_calendar = refresh_calendar.clone();
+        move |_| {
+            refresh_calendar.emit(());
+            || ()
+        }
+    });
+
+    // Auto-refresh calendar when child changes
+    use_effect_with(child_change_trigger, {
         let refresh_calendar = refresh_calendar.clone();
         move |_| {
             refresh_calendar.emit(());

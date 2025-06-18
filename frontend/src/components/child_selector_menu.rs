@@ -3,40 +3,21 @@ use web_sys::MouseEvent;
 use wasm_bindgen_futures::spawn_local;
 use shared::Child;
 use crate::services::api::ApiClient;
+use crate::hooks::use_active_child::UseActiveChildActions;
 
 #[derive(Properties, PartialEq)]
 pub struct ChildSelectorMenuProps {
     pub api_client: ApiClient,
+    pub active_child: Option<Child>,
+    pub child_loading: bool,
+    pub active_child_actions: UseActiveChildActions,
 }
 
 #[function_component(ChildSelectorMenu)]
 pub fn child_selector_menu(props: &ChildSelectorMenuProps) -> Html {
     let is_open = use_state(|| false);
-    let active_child = use_state(|| Option::<Child>::None);
     let all_children = use_state(|| Vec::<Child>::new());
     let loading = use_state(|| false);
-    
-    // Load initial active child only
-    {
-        let api_client = props.api_client.clone();
-        let active_child = active_child.clone();
-        
-        use_effect_with((), move |_| {
-            spawn_local(async move {
-                // Load active child on mount
-                match api_client.get_active_child().await {
-                    Ok(active_response) => {
-                        active_child.set(active_response.active_child);
-                    }
-                    Err(e) => {
-                        gloo::console::error!("Failed to load active child:", e);
-                    }
-                }
-            });
-            
-            || ()
-        });
-    }
     
     let toggle_menu = {
         let is_open = is_open.clone();
@@ -95,38 +76,17 @@ pub fn child_selector_menu(props: &ChildSelectorMenuProps) -> Html {
 
     // Handle child selection
     let on_select_child = {
-        let api_client = props.api_client.clone();
-        let active_child = active_child.clone();
+        let set_active_child = props.active_child_actions.set_active_child.clone();
         let close_menu = close_menu.clone();
-        let loading = loading.clone();
         
         Callback::from(move |child_id: String| {
-            let api_client = api_client.clone();
-            let active_child = active_child.clone();
-            let close_menu = close_menu.clone();
-            let loading = loading.clone();
-            
-            spawn_local(async move {
-                loading.set(true);
-                
-                match api_client.set_active_child(child_id).await {
-                    Ok(response) => {
-                        active_child.set(Some(response.active_child));
-                        close_menu.emit(MouseEvent::new("click").unwrap());
-                        gloo::console::log!("Active child updated successfully");
-                    }
-                    Err(e) => {
-                        gloo::console::error!("Failed to set active child:", e);
-                    }
-                }
-                
-                loading.set(false);
-            });
+            set_active_child.emit(child_id);
+            close_menu.emit(MouseEvent::new("click").unwrap());
         })
     };
 
     // Get the display letter for the current active child
-    let display_letter = active_child.as_ref()
+    let display_letter = props.active_child.as_ref()
         .map(|child| child.name.chars().next().unwrap_or('?').to_uppercase().to_string())
         .unwrap_or_else(|| "?".to_string());
 
@@ -136,9 +96,9 @@ pub fn child_selector_menu(props: &ChildSelectorMenuProps) -> Html {
                 class="child-selector-button" 
                 onclick={toggle_menu}
                 aria-label="Select child"
-                disabled={*loading}
+                disabled={props.child_loading || *loading}
             >
-                {if *loading {
+                {if props.child_loading || *loading {
                     html! { <div class="child-selector-spinner"></div> }
                 } else {
                     html! { <span class="child-selector-letter">{display_letter}</span> }
@@ -167,7 +127,7 @@ pub fn child_selector_menu(props: &ChildSelectorMenuProps) -> Html {
                                 all_children.iter().map(|child| {
                                     let child_id = child.id.clone();
                                     let child_name = child.name.clone();
-                                    let is_active = active_child.as_ref()
+                                    let is_active = props.active_child.as_ref()
                                         .map(|active| active.id == child.id)
                                         .unwrap_or(false);
                                     

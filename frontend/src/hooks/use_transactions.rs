@@ -44,7 +44,7 @@ pub struct UseTransactionsActions {
 }
 
 #[hook]
-pub fn use_transactions(api_client: &ApiClient) -> UseTransactionsResult {
+pub fn use_transactions(api_client: &ApiClient, child_change_trigger: u32) -> UseTransactionsResult {
     let formatted_transactions = use_state(|| Vec::<FormattedTransaction>::new());
     let loading = use_state(|| true);
     let current_balance = use_state(|| 0.0f64);
@@ -299,7 +299,34 @@ pub fn use_transactions(api_client: &ApiClient) -> UseTransactionsResult {
         })
     };
 
-
+    // Auto-refresh transactions and clear form data when child changes
+    use_effect_with(child_change_trigger, {
+        let refresh_transactions = refresh_transactions.clone();
+        let description = description.clone();
+        let amount = amount.clone();
+        let form_error = form_error.clone();
+        let form_success = form_success.clone();
+        let spend_description = spend_description.clone();
+        let spend_amount = spend_amount.clone();
+        let spend_form_error = spend_form_error.clone();
+        let spend_form_success = spend_form_success.clone();
+        
+        move |_| {
+            // Clear all form data when child changes
+            description.set(String::new());
+            amount.set(String::new());
+            form_error.set(None);
+            form_success.set(false);
+            spend_description.set(String::new());
+            spend_amount.set(String::new());
+            spend_form_error.set(None);
+            spend_form_success.set(false);
+            
+            // Refresh transactions for the new child
+            refresh_transactions.emit(());
+            || ()
+        }
+    });
 
     let state = TransactionState {
         formatted_transactions: (*formatted_transactions).clone(),

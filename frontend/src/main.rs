@@ -4,6 +4,7 @@ use wasm_bindgen_futures::spawn_local;
 use hooks::{
     use_transactions::use_transactions,
     use_calendar::use_calendar,
+    use_active_child::use_active_child,
 };
 
 mod services;
@@ -31,8 +32,9 @@ fn app() -> Html {
     let api_client = use_memo((), |_| ApiClient::new());
     
     // Use custom hooks for data management
-    let transactions = use_transactions(&api_client);
-    let calendar = use_calendar(&api_client);
+    let active_child = use_active_child(&api_client);
+    let transactions = use_transactions(&api_client, active_child.state.child_change_trigger);
+    let calendar = use_calendar(&api_client, active_child.state.child_change_trigger);
     
     // Connection status for parent info
     let backend_connected = use_state(|| false);
@@ -163,6 +165,9 @@ fn app() -> Html {
                 current_balance={transactions.state.current_balance} 
                 on_toggle_delete_mode={toggle_delete_mode.clone()}
                 api_client={(*api_client).clone()}
+                active_child={active_child.state.active_child.clone()}
+                child_loading={active_child.state.loading}
+                active_child_actions={active_child.actions.clone()}
             />
 
 
