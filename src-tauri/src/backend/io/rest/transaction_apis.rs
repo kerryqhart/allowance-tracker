@@ -116,6 +116,8 @@ mod tests {
         
         child_service.set_active_child(set_active_request).await.expect("Failed to set active child");
         
+        let allowance_service = crate::backend::domain::AllowanceService::new(db.clone());
+        
         AppState {
             transaction_service,
             calendar_service,
@@ -123,6 +125,7 @@ mod tests {
             money_management_service,
             child_service,
             parental_control_service,
+            allowance_service,
         }
     }
 

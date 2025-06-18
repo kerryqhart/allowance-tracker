@@ -177,6 +177,8 @@ mod tests {
         
         child_service.set_active_child(set_active_request).await.expect("Failed to set active child");
         
+        let allowance_service = crate::backend::domain::AllowanceService::new(db.clone());
+        
         AppState {
             transaction_service,
             calendar_service,
@@ -184,6 +186,7 @@ mod tests {
             money_management_service,
             child_service,
             parental_control_service,
+            allowance_service,
         }
     }
 
@@ -213,6 +216,7 @@ mod tests {
         let money_management_service = MoneyManagementService::new();
         let child_service = ChildService::new(db.clone());
         let parental_control_service = crate::backend::domain::ParentalControlService::new(db.clone());
+        let allowance_service = crate::backend::domain::AllowanceService::new(db.clone());
         
         let state = AppState {
             transaction_service,
@@ -221,6 +225,7 @@ mod tests {
             money_management_service,
             child_service,
             parental_control_service,
+            allowance_service,
         };
         
         let request = AddMoneyRequest {
@@ -261,6 +266,7 @@ mod tests {
         let money_management_service = MoneyManagementService::new();
         let child_service = ChildService::new(db.clone());
         let parental_control_service = crate::backend::domain::ParentalControlService::new(db.clone());
+        let allowance_service = crate::backend::domain::AllowanceService::new(db.clone());
         
         let state = AppState {
             transaction_service,
@@ -269,6 +275,7 @@ mod tests {
             money_management_service,
             child_service,
             parental_control_service,
+            allowance_service,
         };
         
         let request = SpendMoneyRequest {

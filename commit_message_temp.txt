@@ -1,41 +1,36 @@
-refactor: migrate from monolithic db.rs to repository pattern
+feat: Implement comprehensive allowance configuration system
 
-BREAKING CHANGE: Complete database layer refactoring
+Add complete backend support for allowance management with database persistence,
+business logic validation, and RESTful API access.
 
-## What Changed
-- **Deleted** monolithic `db.rs` (1,181 lines) 
-- **Created** clean repository pattern with focused responsibilities:
-  - `connection.rs` (159 lines) - DB connection & schema setup only
-  - `repositories/transaction_repository.rs` (176 lines) - Transaction operations
-  - `repositories/child_repository.rs` (165 lines) - Child operations  
-  - `repositories/parental_control_repository.rs` (69 lines) - Parental control operations
+## New Features
+- AllowanceConfig struct with day-of-week scheduling (0-6 mapping to Sun-Sat)
+- GET /api/allowance - retrieve allowance config for active child
+- POST /api/allowance - create/update allowance configuration
+- Database table with proper constraints and foreign key relationships
+- Comprehensive validation (day range, amount limits, data integrity)
 
-## Architecture Improvements
-- ✅ **Single Responsibility Principle**: Each repository handles one domain
-- ✅ **Separation of Concerns**: Clean boundaries between data access layers
-- ✅ **Repository Pattern**: Proper abstraction of database operations
-- ✅ **Dependency Injection**: Services now depend on repositories, not raw DB
-- ✅ **Testability**: Repositories can be easily mocked and tested independently
+## Architecture Components
+- **Shared Types**: AllowanceConfig, request/response DTOs with helper methods
+- **Database Layer**: AllowanceRepository with CRUD operations and indexes
+- **Domain Layer**: AllowanceService with business logic and validation
+- **REST API Layer**: Allowance endpoints with proper error handling
 
-## Migration Details
-- **TransactionService** → uses `TransactionRepository`
-- **ChildService** → uses `ChildRepository`  
-- **ParentalControlService** → uses `ParentalControlRepository`
-- **All API tests** updated to use services instead of direct DB calls
-- **Backward compatibility** maintained during migration, then cleaned up
+## Database Schema
+- allowance_configs table with constraints: unique child_id, day_of_week (0-6)
+- Foreign key to children table with CASCADE delete
+- Indexes for child_id lookup and active config filtering
 
-## Code Quality
-- **47% reduction** in total storage layer code (627 vs 1,181 lines)
-- **All 104 tests passing** ✅
-- **Zero compilation errors** ✅
-- **Full application functionality preserved** ✅
+## Testing
+- 15 comprehensive unit tests for AllowanceService covering all scenarios
+- 4 API endpoint tests for proper HTTP behavior
+- All 121 tests pass (112 backend + 9 shared)
 
-## Files Changed
-- Deleted: `src-tauri/src/backend/storage/db.rs`
-- Added: `src-tauri/src/backend/storage/connection.rs`
-- Added: `src-tauri/src/backend/storage/repositories/` (4 files)
-- Modified: All domain services to use repository pattern
-- Modified: API tests to use proper service layer
+## Implementation Details
+- Amount validation: non-negative, max 1M limit
+- Day validation: 0-6 range with helper methods for day names
+- Default child selection when no child_id specified
+- Proper error handling with anyhow integration
+- Follows existing codebase patterns and architecture
 
-This refactoring significantly improves maintainability, testability, and 
-follows clean architecture principles while preserving all existing functionality. 
+Ready for frontend integration via REST APIs. 

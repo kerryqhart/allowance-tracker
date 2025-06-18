@@ -45,5 +45,6 @@ pub use connection::DbConnection;
 pub use repositories::{
     TransactionRepository,
     ChildRepository, 
-    ParentalControlRepository
+    ParentalControlRepository,
+    AllowanceRepository
 }; 

@@ -154,6 +154,44 @@ impl DbConnection {
         .execute(pool)
         .await?;
 
+        // Create allowance_configs table
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS allowance_configs (
+                id TEXT PRIMARY KEY,
+                child_id TEXT NOT NULL UNIQUE,
+                amount REAL NOT NULL,
+                day_of_week INTEGER NOT NULL CHECK (day_of_week >= 0 AND day_of_week <= 6),
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (child_id) REFERENCES children (id) ON DELETE CASCADE
+            );
+            "#,
+        )
+        .execute(pool)
+        .await?;
+
+        // Create index for child_id lookup
+        sqlx::query(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_allowance_configs_child_id 
+            ON allowance_configs(child_id);
+            "#,
+        )
+        .execute(pool)
+        .await?;
+
+        // Create index for active configs
+        sqlx::query(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_allowance_configs_active 
+            ON allowance_configs(is_active);
+            "#,
+        )
+        .execute(pool)
+        .await?;
+
         Ok(())
     }
 } 

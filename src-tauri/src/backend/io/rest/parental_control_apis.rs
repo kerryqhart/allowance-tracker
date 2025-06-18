@@ -63,6 +63,8 @@ mod tests {
     async fn setup_test_app() -> Router {
         let db = Arc::new(DbConnection::init_test().await.expect("Failed to create test database"));
         
+        let allowance_service = crate::backend::domain::AllowanceService::new(db.clone());
+        
         let app_state = AppState {
             transaction_service: TransactionService::new(db.clone()),
             calendar_service: CalendarService::new(),
@@ -70,6 +72,7 @@ mod tests {
             money_management_service: MoneyManagementService::new(),
             child_service: ChildService::new(db.clone()),
             parental_control_service: ParentalControlService::new(db),
+            allowance_service,
         };
 
         router().with_state(app_state)
