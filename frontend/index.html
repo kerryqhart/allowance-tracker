@@ -14,9 +14,24 @@
 
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background-image: url('/background.jpg');
+            background-size: cover;
+            background-position: center;
+            background-attachment: fixed;
             color: #333;
             line-height: 1.6;
+            position: relative;
+        }
+
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(135deg, rgba(135, 206, 235, 0.75) 0%, rgba(176, 224, 230, 0.8) 50%, rgba(173, 216, 230, 0.85) 100%);
+            z-index: -1;
         }
 
         .container {
@@ -26,9 +41,6 @@
         }
 
         .header {
-            background-image: url('/background.jpg');
-            background-size: cover;
-            background-position: center;
             color: #ffffff;
             padding: 2rem;
             border-radius: 0;
@@ -46,7 +58,7 @@
             left: 0;
             right: 0;
             bottom: 0;
-            background: linear-gradient(135deg, rgba(203, 165, 237, 0.75) 0%, rgba(186, 148, 227, 0.8) 50%, rgba(169, 131, 217, 0.85) 100%);
+            background: rgba(255, 255, 255, 0.25);
             z-index: 1;
         }
 
