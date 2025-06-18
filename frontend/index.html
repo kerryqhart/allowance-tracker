@@ -386,13 +386,24 @@
             overflow: hidden;
         }
 
+        .transactions-table thead tr {
+            background: linear-gradient(135deg, #ff9a9e, #f093fb, #c471ed);
+        }
+
         .transactions-table th {
-            background: linear-gradient(135deg, #667eea, #764ba2);
+            background: transparent;
             color: white;
             padding: 1rem;
             text-align: left;
             font-weight: 600;
-            font-size: 1.1rem;
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-right: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .transactions-table th:last-child {
+            border-right: none;
         }
 
         .transactions-table td {
