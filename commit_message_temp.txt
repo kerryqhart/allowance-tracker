@@ -1,36 +1,46 @@
-feat: Implement comprehensive allowance configuration system
+feat: Add allowance configuration UI to frontend
 
-Add complete backend support for allowance management with database persistence,
-business logic validation, and RESTful API access.
+Implement comprehensive allowance configuration modal and integration with
+settings menu, enabling parents to set up weekly allowances via the UI.
 
-## New Features
-- AllowanceConfig struct with day-of-week scheduling (0-6 mapping to Sun-Sat)
-- GET /api/allowance - retrieve allowance config for active child
-- POST /api/allowance - create/update allowance configuration
-- Database table with proper constraints and foreign key relationships
-- Comprehensive validation (day range, amount limits, data integrity)
+## New Frontend Features
+- **Allowance Configuration Modal**: Complete form for setting weekly allowance
+  - Amount input with currency prefix ($) and validation
+  - Day of week dropdown (Sunday through Saturday)
+  - Enable/disable toggle with custom checkbox styling
+  - Loading states and error/success message handling
+- **Settings Menu Integration**: Added "Configure allowance" option with money icon
+- **API Integration**: Full REST API client support for allowance endpoints
+- **Responsive Design**: Modal works on desktop and mobile with modern styling
 
-## Architecture Components
-- **Shared Types**: AllowanceConfig, request/response DTOs with helper methods
-- **Database Layer**: AllowanceRepository with CRUD operations and indexes
-- **Domain Layer**: AllowanceService with business logic and validation
-- **REST API Layer**: Allowance endpoints with proper error handling
+## Technical Implementation
+- **Components**: New AllowanceConfigModal with proper Yew patterns
+- **API Client**: GET and POST methods for /api/allowance endpoints
+- **State Management**: Handles existing config loading and form submission
+- **Validation**: Client-side validation for amount and day constraints
+- **UX Enhancements**: Auto-close on success, loading indicators, proper focus
 
-## Database Schema
-- allowance_configs table with constraints: unique child_id, day_of_week (0-6)
-- Foreign key to children table with CASCADE delete
-- Indexes for child_id lookup and active config filtering
+## Modal Features
+- Loads existing allowance config on open (defaults to Sunday, $5.00)
+- Real-time form validation with user-friendly error messages
+- Stylish currency input with integrated dollar sign prefix
+- Day selection with readable day names (Sunday through Saturday)
+- Enable/disable toggle with custom styled checkbox
+- Success message with auto-close after save
+- Proper backdrop handling and keyboard accessibility
 
-## Testing
-- 15 comprehensive unit tests for AllowanceService covering all scenarios
-- 4 API endpoint tests for proper HTTP behavior
-- All 121 tests pass (112 backend + 9 shared)
+## Styling & UX
+- Modern modal design matching existing app theme
+- Smooth animations and transitions
+- Custom input group styling for currency field
+- Professional form layout with proper spacing
+- Responsive design for different screen sizes
+- Consistent color scheme with app branding (#667eea)
 
-## Implementation Details
-- Amount validation: non-negative, max 1M limit
-- Day validation: 0-6 range with helper methods for day names
-- Default child selection when no child_id specified
-- Proper error handling with anyhow integration
-- Follows existing codebase patterns and architecture
+## Dependencies
+- Added HtmlSelectElement to web-sys features for dropdown handling
+- Integrated with existing gloo timers for success message timing
+- Uses shared types for request/response DTOs
 
-Ready for frontend integration via REST APIs. 
+Ready for production use - parents can now configure weekly allowances
+through an intuitive settings interface. 

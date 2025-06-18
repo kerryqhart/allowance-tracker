@@ -1370,6 +1370,220 @@
             text-align: center;
         }
 
+        /* Allowance Configuration Modal Styles */
+        .allowance-config-modal-backdrop {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(0, 0, 0, 0.7);
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            backdrop-filter: blur(8px);
+        }
+
+        .allowance-config-modal {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 500px;
+            width: 90%;
+            max-height: 90vh;
+            overflow-y: auto;
+            position: relative;
+            animation: modalSlideIn 0.3s ease-out;
+        }
+
+        .allowance-config-modal-content {
+            padding: 2rem;
+        }
+
+        .allowance-config-title {
+            color: #667eea;
+            font-size: 1.5rem;
+            margin-bottom: 1.5rem;
+            font-weight: 600;
+            text-align: center;
+        }
+
+        .allowance-config-form {
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        .allowance-config-form .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .allowance-config-form label {
+            font-weight: 600;
+            color: #333;
+            font-size: 1rem;
+        }
+
+        .allowance-config-input,
+        .allowance-config-select {
+            width: 100%;
+            padding: 0.75rem;
+            border: 2px solid #e9ecef;
+            border-radius: 10px;
+            font-size: 1rem;
+            transition: all 0.3s ease;
+            background: white;
+        }
+
+        .allowance-config-input:focus,
+        .allowance-config-select:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .allowance-config-input:disabled,
+        .allowance-config-select:disabled {
+            background-color: #f8f9fa;
+            opacity: 0.7;
+            cursor: not-allowed;
+        }
+
+        .input-group {
+            display: flex;
+            align-items: stretch;
+            position: relative;
+        }
+
+        .input-group-text {
+            background-color: #fff;
+            border: 2px solid #e9ecef;
+            border-right: none;
+            border-radius: 10px 0 0 10px;
+            padding: 0.75rem;
+            font-weight: 600;
+            color: #667eea;
+            display: flex;
+            align-items: center;
+            min-width: 45px;
+            justify-content: center;
+        }
+
+        .input-group .allowance-config-input {
+            border-left: none;
+            border-radius: 0 10px 10px 0;
+            padding-left: 0.75rem;
+        }
+
+        .input-group:focus-within .input-group-text {
+            border-color: #667eea;
+            background-color: #fff;
+            color: #667eea;
+        }
+
+        .checkbox-label {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            font-weight: 600;
+            color: #333;
+            cursor: pointer;
+            position: relative;
+            padding-left: 2rem;
+        }
+
+        .checkbox-label input[type="checkbox"] {
+            position: absolute;
+            left: 0;
+            opacity: 0;
+            width: 1.5rem;
+            height: 1.5rem;
+        }
+
+        .checkmark {
+            position: absolute;
+            left: 0;
+            width: 1.5rem;
+            height: 1.5rem;
+            background-color: #e9ecef;
+            border: 2px solid #e9ecef;
+            border-radius: 6px;
+            transition: all 0.3s ease;
+        }
+
+        .checkbox-label:hover .checkmark {
+            background-color: #dee2e6;
+            border-color: #dee2e6;
+        }
+
+        .checkbox-label input:checked ~ .checkmark {
+            background-color: #667eea;
+            border-color: #667eea;
+        }
+
+        .checkmark:after {
+            content: "";
+            position: absolute;
+            display: none;
+            left: 5px;
+            top: 2px;
+            width: 6px;
+            height: 10px;
+            border: solid white;
+            border-width: 0 2px 2px 0;
+            transform: rotate(45deg);
+        }
+
+        .checkbox-label input:checked ~ .checkmark:after {
+            display: block;
+        }
+
+        .form-text {
+            font-size: 0.85rem;
+            color: #6c757d;
+            margin-top: 0.25rem;
+        }
+
+        .allowance-config-buttons {
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin-top: 0.5rem;
+        }
+
+        .allowance-config-error {
+            color: #dc3545;
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+            padding: 0.75rem;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+            font-size: 0.9rem;
+            text-align: center;
+        }
+
+        .allowance-config-success {
+            color: #155724;
+            background-color: #d4edda;
+            border: 1px solid #c3e6cb;
+            padding: 0.75rem;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+            font-size: 0.9rem;
+            text-align: center;
+        }
+
+        .allowance-config-loading {
+            text-align: center;
+            padding: 2rem;
+            color: #667eea;
+            font-size: 1rem;
+        }
+
         /* Adjust transaction chip styling for delete mode */
         .calendar-day.delete-mode .transaction-chip {
             position: relative;

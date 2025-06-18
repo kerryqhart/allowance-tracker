@@ -5,4 +5,5 @@ pub mod header;
 pub mod settings_menu;
 pub mod challenge_modal;
 pub mod create_child_modal;
-pub mod child_selector_menu; 
+pub mod child_selector_menu;
+pub mod allowance_config_modal; 

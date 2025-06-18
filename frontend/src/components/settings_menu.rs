@@ -2,6 +2,7 @@ use yew::prelude::*;
 use web_sys::MouseEvent;
 use super::challenge_modal::ChallengeModal;
 use super::create_child_modal::CreateChildModal;
+use super::allowance_config_modal::AllowanceConfigModal;
 
 #[derive(Properties, PartialEq)]
 pub struct SettingsMenuProps {
@@ -14,6 +15,7 @@ pub fn settings_menu(props: &SettingsMenuProps) -> Html {
     let is_authenticated = use_state(|| false);
     let show_challenge = use_state(|| false);
     let show_create_child = use_state(|| false);
+    let show_allowance_config = use_state(|| false);
     
     let toggle_menu = {
         let is_open = is_open.clone();
@@ -94,6 +96,31 @@ pub fn settings_menu(props: &SettingsMenuProps) -> Html {
         })
     };
 
+    // Allowance config modal callbacks
+    let on_allowance_config_click = {
+        let close_menu = close_menu.clone();
+        let show_allowance_config = show_allowance_config.clone();
+        Callback::from(move |_: MouseEvent| {
+            close_menu.emit(MouseEvent::new("click").unwrap());
+            show_allowance_config.set(true);
+        })
+    };
+
+    let on_allowance_config_success = {
+        let show_allowance_config = show_allowance_config.clone();
+        Callback::from(move |_| {
+            show_allowance_config.set(false);
+            // TODO: Show success message or refresh data
+        })
+    };
+
+    let on_allowance_config_close = {
+        let show_allowance_config = show_allowance_config.clone();
+        Callback::from(move |_| {
+            show_allowance_config.set(false);
+        })
+    };
+
     html! {
         <div class="settings-menu">
             <button 
@@ -122,6 +149,13 @@ pub fn settings_menu(props: &SettingsMenuProps) -> Html {
                                 <path d="M17 5h4M19 3v4" stroke="white" stroke-width="1.5"/>
                             </svg>
                             <span>{"Create child"}</span>
+                        </div>
+                        
+                        <div class="settings-item" onclick={on_allowance_config_click}>
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1.41 16.09V20h-2.67v-1.93c-1.71-.36-3.16-1.46-3.27-3.4h1.96c.1 1.05.82 1.87 2.65 1.87 1.96 0 2.4-.98 2.4-1.59 0-.83-.44-1.61-2.67-2.14-2.48-.6-4.18-1.62-4.18-3.67 0-1.72 1.39-2.84 3.11-3.21V4h2.67v1.95c1.86.45 2.79 1.86 2.85 3.39H14.3c-.05-1.11-.64-1.87-2.22-1.87-1.5 0-2.4.68-2.4 1.64 0 .84.65 1.39 2.67 1.91s4.18 1.39 4.18 3.91c-.01 1.83-1.38 2.83-3.12 3.16z" fill="currentColor"/>
+                            </svg>
+                            <span>{"Configure allowance"}</span>
                         </div>
                         
                         <div class="settings-item" onclick={{
@@ -158,6 +192,12 @@ pub fn settings_menu(props: &SettingsMenuProps) -> Html {
                 is_open={*show_create_child}
                 on_success={on_create_child_success}
                 on_close={on_create_child_close}
+            />
+            
+            <AllowanceConfigModal 
+                is_open={*show_allowance_config}
+                on_success={on_allowance_config_success}
+                on_close={on_allowance_config_close}
             />
         </div>
     }

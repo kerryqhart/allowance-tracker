@@ -3,7 +3,8 @@ use shared::{
     AddMoneyRequest, AddMoneyResponse, SpendMoneyRequest, SpendMoneyResponse,
     CalendarMonth, TransactionTableResponse, DeleteTransactionsRequest, DeleteTransactionsResponse,
     ParentalControlRequest, ParentalControlResponse, CreateChildRequest, ChildResponse,
-    SetActiveChildRequest, SetActiveChildResponse, ActiveChildResponse, ChildListResponse
+    SetActiveChildRequest, SetActiveChildResponse, ActiveChildResponse, ChildListResponse,
+    GetAllowanceConfigRequest, GetAllowanceConfigResponse, UpdateAllowanceConfigRequest, UpdateAllowanceConfigResponse
 };
 
 /// API client for communicating with the backend server
@@ -262,6 +263,55 @@ impl ApiClient {
             Ok(response) => {
                 if response.ok() {
                     match response.json::<SetActiveChildResponse>().await {
+                        Ok(data) => Ok(data),
+                        Err(e) => Err(format!("Failed to parse response: {}", e)),
+                    }
+                } else {
+                    let status = response.status();
+                    let error_text = response.text().await
+                        .unwrap_or_else(|_| "Unknown error".to_string());
+                    Err(format!("Server error {}: {}", status, error_text))
+                }
+            }
+            Err(e) => Err(format!("Network error: {}", e)),
+        }
+    }
+
+    /// Get allowance configuration for active child
+    pub async fn get_allowance_config(&self, _request: GetAllowanceConfigRequest) -> Result<GetAllowanceConfigResponse, String> {
+        let url = format!("{}/api/allowance", self.base_url);
+        
+        match Request::get(&url).send().await {
+            Ok(response) => {
+                if response.ok() {
+                    match response.json::<GetAllowanceConfigResponse>().await {
+                        Ok(data) => Ok(data),
+                        Err(e) => Err(format!("Failed to parse allowance config: {}", e)),
+                    }
+                } else {
+                    let status = response.status();
+                    let error_text = response.text().await
+                        .unwrap_or_else(|_| "Unknown error".to_string());
+                    Err(format!("Server error {}: {}", status, error_text))
+                }
+            }
+            Err(e) => Err(format!("Network error: {}", e)),
+        }
+    }
+
+    /// Update allowance configuration
+    pub async fn update_allowance_config(&self, request: UpdateAllowanceConfigRequest) -> Result<UpdateAllowanceConfigResponse, String> {
+        let url = format!("{}/api/allowance", self.base_url);
+        
+        match Request::post(&url)
+            .json(&request)
+            .map_err(|e| format!("Failed to serialize request: {}", e))?
+            .send()
+            .await
+        {
+            Ok(response) => {
+                if response.ok() {
+                    match response.json::<UpdateAllowanceConfigResponse>().await {
                         Ok(data) => Ok(data),
                         Err(e) => Err(format!("Failed to parse response: {}", e)),
                     }
