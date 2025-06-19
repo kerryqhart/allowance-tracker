@@ -68,10 +68,28 @@ pub fn calendar(props: &CalendarProps) -> Html {
     
     // Add days of the month using backend-provided day data
     for day_data in &calendar_data.days {
+        // Check if this is the current day
+        let current_date = Date::new_0();
+        let current_year = current_date.get_full_year() as u32;
+        let current_month = (current_date.get_month() as u32) + 1; // JS months are 0-based
+        let current_day = current_date.get_date() as u32;
+        
+        let is_today = calendar_data.year == current_year 
+            && calendar_data.month == current_month 
+            && day_data.day == current_day;
+        
         let day_class = if props.delete_mode {
-            "calendar-day delete-mode"
+            if is_today {
+                "calendar-day delete-mode today"
+            } else {
+                "calendar-day delete-mode"
+            }
         } else {
-            "calendar-day"
+            if is_today {
+                "calendar-day today"
+            } else {
+                "calendar-day"
+            }
         };
         
         calendar_days.push(html! {

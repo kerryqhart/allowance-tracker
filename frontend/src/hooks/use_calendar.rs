@@ -2,6 +2,7 @@ use yew::prelude::*;
 use shared::CalendarMonth;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::MouseEvent;
+use js_sys::Date;
 use crate::services::api::ApiClient;
 
 #[derive(Clone)]
@@ -25,8 +26,14 @@ pub struct UseCalendarActions {
 
 #[hook]
 pub fn use_calendar(api_client: &ApiClient, child_change_trigger: u32) -> UseCalendarResult {
-    let current_month = use_state(|| 6u32); // June
-    let current_year = use_state(|| 2025u32);
+    let current_month = use_state(|| {
+        let date = Date::new_0();
+        (date.get_month() + 1) as u32 // JS months are 0-based
+    });
+    let current_year = use_state(|| {
+        let date = Date::new_0();
+        date.get_full_year() as u32
+    });
     let calendar_data = use_state(|| Option::<CalendarMonth>::None);
 
     // Refresh calendar callback

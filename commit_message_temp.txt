@@ -1,66 +1,11 @@
-feat: Add allowance configuration UI to frontend
+Fix calendar navigation and add current day highlighting
 
-Implement comprehensive allowance configuration modal and integration with
-settings menu, enabling parents to set up weekly allowances via the UI.
+- Fix calendar initialization to use system clock instead of hardcoded June 2025
+- Calendar now properly opens to current month/year on startup
+- Fix calendar navigation buttons to work correctly without reverting
+- Add light pink outline (2px #ffc0cb) with subtle glow to highlight current day
+- Current day highlighting works in both normal and delete modes
 
-## New Frontend Features
-- **Allowance Configuration Modal**: Complete form for setting weekly allowance
-  - Amount input with currency prefix ($) and validation
-  - Day of week dropdown (Sunday through Saturday)
-  - Enable/disable toggle with custom checkbox styling
-  - Loading states and error/success message handling
-- **Settings Menu Integration**: Added "Configure allowance" option with money icon
-- **API Integration**: Full REST API client support for allowance endpoints
-- **Responsive Design**: Modal works on desktop and mobile with modern styling
-
-## Technical Implementation
-- **Components**: New AllowanceConfigModal with proper Yew patterns
-- **API Client**: GET and POST methods for /api/allowance endpoints
-- **State Management**: Handles existing config loading and form submission
-- **Validation**: Client-side validation for amount and day constraints
-- **UX Enhancements**: Auto-close on success, loading indicators, proper focus
-
-## Modal Features
-- Loads existing allowance config on open (defaults to Sunday, $5.00)
-- Real-time form validation with user-friendly error messages
-- Stylish currency input with integrated dollar sign prefix
-- Day selection with readable day names (Sunday through Saturday)
-- Enable/disable toggle with custom styled checkbox
-- Success message with auto-close after save
-- Proper backdrop handling and keyboard accessibility
-
-## Styling & UX
-- Modern modal design matching existing app theme
-- Smooth animations and transitions
-- Custom input group styling for currency field
-- Professional form layout with proper spacing
-- Responsive design for different screen sizes
-- Consistent color scheme with app branding (#667eea)
-
-## Dependencies
-- Added HtmlSelectElement to web-sys features for dropdown handling
-- Integrated with existing gloo timers for success message timing
-- Uses shared types for request/response DTOs
-
-Ready for production use - parents can now configure weekly allowances
-through an intuitive settings interface.
-
-feat: Add allowance indicators on calendar with future-only display
-
-- Created new `use_allowance` hook to fetch allowance configuration from backend API
-- Modified calendar component to display allowance chips on matching days of the week
-- Added future date filtering - allowance indicators only appear on future dates
-- Replaced blue circles with green dashed chips showing actual allowance amounts
-- Chips use same color scheme as income transactions but with dashed borders to distinguish from real transactions
-- Added hover effects and tooltips showing "Weekly allowance: $X.XX"
-- Integrated with existing calendar transaction display system
-
-Technical changes:
-- Added `js-sys` dependency for date calculations
-- Created `frontend/src/hooks/use_allowance.rs` with allowance state management
-- Updated calendar props to accept allowance configuration
-- Added CSS styling for `.allowance-chip` with dashed green borders
-- Modified `main.rs` to use allowance hook and pass data to calendar
-
-The allowance chips now appear alongside transaction chips in the day view,
-making it easy to see when allowance is scheduled to be given in the future. 
+This resolves the calendar navigation issues where buttons weren't working
+and the calendar was stuck on June 2025. The calendar now properly tracks
+the current date and allows smooth month-to-month navigation. 
