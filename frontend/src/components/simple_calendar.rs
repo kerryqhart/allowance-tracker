@@ -226,7 +226,7 @@ pub fn simple_calendar() -> Html {
                         <button class="calendar-nav-button" disabled=true>
                             <i class="fas fa-chevron-left"></i>
                         </button>
-                        <h2 class="calendar-title">{"Loading..."}</h2>
+                        <h2>{"Loading..."}</h2>
                         <button class="calendar-nav-button" disabled=true>
                             <i class="fas fa-chevron-right"></i>
                         </button>
@@ -261,7 +261,7 @@ pub fn simple_calendar() -> Html {
                         <button class="calendar-nav-button" disabled=true>
                             <i class="fas fa-chevron-left"></i>
                         </button>
-                        <h2 class="calendar-title">{"Error"}</h2>
+                        <h2>{"Error"}</h2>
                         <button class="calendar-nav-button" disabled=true>
                             <i class="fas fa-chevron-right"></i>
                         </button>
@@ -293,20 +293,21 @@ pub fn simple_calendar() -> Html {
         Some(focus_date) => {
             let calendar_days = generate_calendar_days(focus_date.month, focus_date.year, &*current_date);
             
-            html! {
-                <div class="calendar-card">
-                    <div class="calendar-header-container">
-                        <div class="calendar-header">
-                            <button class="calendar-nav-button" onclick={on_previous} title="Previous Month">
-                                <i class="fas fa-chevron-left"></i>
-                            </button>
-                            <h2 class="calendar-title">
-                                {format!("🆕 {} {}", month_name(focus_date.month), focus_date.year)}
-                            </h2>
-                            <button class="calendar-nav-button" onclick={on_next} title="Next Month">
-                                <i class="fas fa-chevron-right"></i>
-                            </button>
-                        </div>
+                html! {
+        <div class="calendar-card">
+            <section class="calendar-section">
+                <div class="calendar-header-container">
+                    <div class="calendar-header">
+                        <button class="calendar-nav-button" onclick={on_previous} title="Previous Month">
+                            <i class="fas fa-chevron-left"></i>
+                        </button>
+                        <h2>
+                            {format!("🆕 {} {}", month_name(focus_date.month), focus_date.year)}
+                        </h2>
+                        <button class="calendar-nav-button" onclick={on_next} title="Next Month">
+                            <i class="fas fa-chevron-right"></i>
+                        </button>
+                    </div>
                         
                         <div style="text-align: center; margin-top: 0.5rem; font-size: 0.9rem; color: #666;">
                             {format!("Debug: {} clicks | Backend: {}/{} | Today: {}", 
@@ -335,7 +336,8 @@ pub fn simple_calendar() -> Html {
                     <div class="calendar-grid">
                         {for calendar_days}
                     </div>
-                </div>
+                </section>
+            </div>
             }
         }
         None => {
@@ -346,7 +348,7 @@ pub fn simple_calendar() -> Html {
                             <button class="calendar-nav-button" disabled=true>
                                 <i class="fas fa-chevron-left"></i>
                             </button>
-                            <h2 class="calendar-title">{"🆕 Simple Calendar"}</h2>
+                            <h2>{"🆕 Simple Calendar"}</h2>
                             <button class="calendar-nav-button" disabled=true>
                                 <i class="fas fa-chevron-right"></i>
                             </button>
