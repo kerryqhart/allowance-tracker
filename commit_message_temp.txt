@@ -9,3 +9,15 @@ Fix calendar navigation and add current day highlighting
 This resolves the calendar navigation issues where buttons weren't working
 and the calendar was stuck on June 2025. The calendar now properly tracks
 the current date and allows smooth month-to-month navigation. 
+
+Remove fallback mock data logic from production transaction service
+
+- Remove fallback to mock data when database is empty in list_transactions()
+- Move generate_mock_transactions() and apply_cursor_filter() to test-only scope using #[cfg(test)]
+- Update documentation to remove references to mock data support in production
+- Fix test_list_transactions_with_cursor to create real database transactions instead of relying on fallback
+- Preserve comprehensive mock data functionality for testing scenarios
+
+This ensures production code only uses real database data while maintaining full test coverage through test-only mock utilities. The system is now clearer about its production vs. test behavior.
+
+All tests passing (112/112) and application builds successfully. 

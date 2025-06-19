@@ -11,7 +11,7 @@
 //! - **Data Persistence**: Interfacing with storage layer for transaction data
 //! - **Pagination**: Cursor-based pagination for efficient data retrieval
 //! - **Business Rules**: Enforcing transaction validation and business constraints
-//! - **Mock Data**: Providing development data when database is not available
+
 //! - **Date Filtering**: Supporting date range queries for transaction lists
 //!
 //! ## Core Components
@@ -38,7 +38,7 @@
 //! - **Async First**: All operations are asynchronous for better performance
 //! - **Error Handling**: Comprehensive error handling with detailed messages
 //! - **Testability**: Pure business logic with comprehensive test coverage
-//! - **Mock Support**: Development-friendly with fallback mock data
+
 
 use crate::backend::storage::{DbConnection, TransactionRepository};
 use crate::backend::domain::child_service::ChildService;
@@ -143,25 +143,6 @@ impl TransactionService {
         // Get transactions from database for the active child
         let mut db_transactions = self.transaction_repository.list_transactions(&active_child.id, query_limit, request.after.as_deref()).await?;
 
-        // If no database transactions exist, fall back to mock data for development
-        if db_transactions.is_empty() {
-            info!("No database transactions found, using mock data for development");
-            let mock_transactions = self.generate_mock_transactions(&active_child.id);
-            
-            // Apply cursor filtering for mock data
-            let filtered_transactions = if let Some(after_cursor) = &request.after {
-                self.apply_cursor_filter(mock_transactions, after_cursor)?
-            } else {
-                mock_transactions
-            };
-
-            // Apply date range filtering
-            let date_filtered = self.apply_date_filter(filtered_transactions, &request)?;
-
-            // Apply limit and determine pagination
-            db_transactions = date_filtered.into_iter().take(query_limit as usize).collect();
-        }
-
         let has_more = db_transactions.len() > limit as usize;
         if has_more {
             db_transactions.pop(); // Remove the extra record we queried
@@ -232,37 +213,13 @@ impl TransactionService {
         })
     }
 
-    /// Apply cursor-based filtering (transactions after the given cursor)
-    fn apply_cursor_filter(&self, transactions: Vec<Transaction>, after_cursor: &str) -> Result<Vec<Transaction>> {
-        // Parse the cursor timestamp for comparison
-        let (_, cursor_timestamp) = Transaction::parse_id(after_cursor)
-            .map_err(|e| anyhow::anyhow!("Invalid cursor format: {}", e))?;
 
-        // Filter transactions that come after the cursor timestamp
-        let filtered: Vec<Transaction> = transactions
-            .into_iter()
-            .filter(|tx| {
-                if let Ok(tx_timestamp) = tx.extract_timestamp() {
-                    tx_timestamp < cursor_timestamp // Reverse chronological order (newest first)
-                } else {
-                    false
-                }
-            })
-            .collect();
 
-        Ok(filtered)
-    }
 
-    /// Apply date range filtering
-    fn apply_date_filter(&self, transactions: Vec<Transaction>, request: &TransactionListRequest) -> Result<Vec<Transaction>> {
-        // For now, just return all transactions since we don't have date parsing yet
-        // In a real implementation, we would parse start_date and end_date and filter accordingly
-        if request.start_date.is_some() || request.end_date.is_some() {
-            info!("Date filtering requested but not yet implemented");
-        }
-        Ok(transactions)
-    }
+}
 
+#[cfg(test)]
+impl TransactionService {
     /// Generate mock transaction data for testing
     fn generate_mock_transactions(&self, child_id: &str) -> Vec<Transaction> {
         use std::time::{SystemTime, UNIX_EPOCH};
@@ -388,6 +345,27 @@ impl TransactionService {
             },
         ]
     }
+
+    /// Apply cursor-based filtering (transactions after the given cursor) - for testing
+    fn apply_cursor_filter(&self, transactions: Vec<Transaction>, after_cursor: &str) -> Result<Vec<Transaction>> {
+        // Parse the cursor timestamp for comparison
+        let (_, cursor_timestamp) = Transaction::parse_id(after_cursor)
+            .map_err(|e| anyhow::anyhow!("Invalid cursor format: {}", e))?;
+
+        // Filter transactions that come after the cursor timestamp
+        let filtered: Vec<Transaction> = transactions
+            .into_iter()
+            .filter(|tx| {
+                if let Ok(tx_timestamp) = tx.extract_timestamp() {
+                    tx_timestamp < cursor_timestamp // Reverse chronological order (newest first)
+                } else {
+                    false
+                }
+            })
+            .collect();
+
+        Ok(filtered)
+    }
 }
 
 #[cfg(test)]
@@ -462,6 +440,19 @@ mod tests {
     #[tokio::test]
     async fn test_list_transactions_with_cursor() {
         let service = create_test_service().await;
+        
+        // Create some test transactions to work with
+        for i in 1..=5 {
+            let request = CreateTransactionRequest {
+                description: format!("Test transaction {}", i),
+                amount: 10.0 * i as f64,
+                date: None,
+            };
+            service.create_transaction(request).await.unwrap();
+            
+            // Small delay to ensure different timestamps
+            tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
+        }
         
         // First, get initial transactions
         let first_request = TransactionListRequest {
