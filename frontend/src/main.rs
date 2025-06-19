@@ -12,6 +12,7 @@ mod components;
 mod hooks;
 use services::{
     api::ApiClient,
+    logging::Logger,
 };
 use components::{
     simple_calendar::SimpleCalendar,
@@ -155,6 +156,9 @@ fn app() -> Html {
                         backend_connected.set(true);
                         backend_endpoint.set("localhost:3000".to_string());
                         
+                        // Log successful frontend startup and backend connection
+                        Logger::info_with_component("frontend-startup", "Frontend initialized and successfully connected to backend API");
+                        
                         // Load all data
                         refresh_transactions.emit(());
                     },
@@ -252,5 +256,8 @@ fn app() -> Html {
 
 
 fn main() {
+    // Log frontend application startup
+    Logger::info_with_component("frontend-main", "Frontend application starting up...");
+    
     yew::Renderer::<App>::new().render();
 }

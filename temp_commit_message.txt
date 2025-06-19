@@ -1,0 +1,7 @@
+Add frontend startup and connection logging
+
+- Add logging service import to main.rs
+- Add startup log in main() function to indicate frontend initialization
+- Add connection success log when frontend connects to backend API
+- Provides visibility into frontend startup process through backend logging system
+- Helps with debugging frontend initialization and backend connectivity issues 

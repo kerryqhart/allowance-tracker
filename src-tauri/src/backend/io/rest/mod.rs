@@ -31,3 +31,4 @@ pub mod money_management_apis;
 pub mod child_apis;
 pub mod parental_control_apis;
 pub mod allowance_apis;
+pub mod logging_apis;

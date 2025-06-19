@@ -57,8 +57,10 @@ impl AllowanceService {
             .get_allowance_config(&child_id)
             .await?;
 
-        if allowance_config.is_some() {
+        if let Some(ref config) = allowance_config {
             info!("Found allowance config for child: {}", child_id);
+            info!("🔍 DEBUG: Allowance config details - day_of_week: {}, day_name: {}, amount: {}, is_active: {}", 
+                config.day_of_week, config.day_name(), config.amount, config.is_active);
         } else {
             info!("No allowance config found for child: {}", child_id);
         }

@@ -1,6 +1,7 @@
 use yew::prelude::*;
 use shared::{CalendarFocusDate, CurrentDateResponse, AllowanceConfig, GetAllowanceConfigRequest, CalendarMonth};
 use crate::services::api::ApiClient;
+use crate::services::logging::Logger;
 use wasm_bindgen_futures::spawn_local;
 
 #[derive(Properties, PartialEq)]
@@ -86,6 +87,8 @@ pub fn simple_calendar(props: &SimpleCalendarProps) -> Html {
         
         use_effect_with((), move |_| {
             spawn_local(async move {
+                // Test log to verify frontend logging is working
+                Logger::info_with_component("calendar", "Calendar component initializing - TESTING FRONTEND LOGGING");
                 // Fetch focus date, current date, and allowance config first
                 let focus_date_result = (*api_client).get_focus_date().await;
                 let current_date_result = (*api_client).get_current_date().await;
@@ -106,6 +109,15 @@ pub fn simple_calendar(props: &SimpleCalendarProps) -> Html {
                             current_date_response.month, current_date_response.day, current_date_response.year,
                             allowance_response.allowance_config,
                             calendar_month.days.len()));
+                        
+                        // Debug allowance config details
+                        if let Some(ref config) = allowance_response.allowance_config {
+                            Logger::debug_with_component("calendar", &format!("Frontend received allowance config - day_of_week: {}, amount: {}, is_active: {}", 
+                                config.day_of_week, config.amount, config.is_active));
+                        } else {
+                            Logger::debug_with_component("calendar", "Frontend received no allowance config");
+                        }
+                        
                         calendar_state.set(Some(focus_date));
                         current_date.set(Some(current_date_response));
                         allowance_config.set(allowance_response.allowance_config);
@@ -285,7 +297,10 @@ pub fn simple_calendar(props: &SimpleCalendarProps) -> Html {
                                    allowance_config_ref: &Option<AllowanceConfig>| -> bool {
         // Check if we have allowance config and it's active
         if let Some(config) = allowance_config_ref {
+            Logger::debug_with_component("allowance", &format!("Checking allowance for {}/{}/{} - config day_of_week: {}", month, day, year, config.day_of_week));
+            
             if !config.is_active {
+                Logger::debug_with_component("allowance", "Allowance config is not active");
                 return false;
             }
             
@@ -298,11 +313,18 @@ pub fn simple_calendar(props: &SimpleCalendarProps) -> Html {
                 // Our format: Sunday = 0, Monday = 1, ..., Saturday = 6
                 let chrono_weekday = date.weekday().num_days_from_sunday() as u8;
                 
+                Logger::debug_with_component("allowance", &format!("Date {}/{}/{} is weekday {} (chrono), config expects {}", 
+                    month, day, year, chrono_weekday, config.day_of_week));
+                
                 // Check if this day matches the configured allowance day of week
                 if chrono_weekday != config.day_of_week {
+                    Logger::debug_with_component("allowance", &format!("Day {} != config {}, no allowance", chrono_weekday, config.day_of_week));
                     return false;
                 }
+                
+                Logger::debug_with_component("allowance", &format!("Day {} matches config {}, checking if future date", chrono_weekday, config.day_of_week));
             } else {
+                Logger::debug_with_component("allowance", &format!("Invalid date {}/{}/{}", month, day, year));
                 // Invalid date, don't show allowance
                 return false;
             }
@@ -362,6 +384,10 @@ pub fn simple_calendar(props: &SimpleCalendarProps) -> Html {
                 // Check if this day should show an allowance chip
                 let show_allowance_chip = is_future_allowance_day(day_data.day, calendar_month.month, calendar_month.year, current_date_ref, allowance_config_ref);
                 let allowance_amount = allowance_config_ref.as_ref().map(|config| config.amount).unwrap_or(0.0);
+                
+                if show_allowance_chip {
+                    Logger::debug_with_component("allowance", &format!("SHOWING allowance chip for {}/{}/{}", calendar_month.month, day_data.day, calendar_month.year));
+                }
                 
                 // Process transactions for this day (limit to 4, then show "+X more")
                 let transactions = &day_data.transactions;
