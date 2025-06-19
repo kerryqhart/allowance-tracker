@@ -187,7 +187,13 @@ fn app() -> Html {
             <main class="main">
                 <div class="container">
                     // Calendar with transaction chips and allowance indicators
-                    <SimpleCalendar refresh_trigger={*calendar_refresh_trigger} />
+                    <SimpleCalendar 
+                        refresh_trigger={*calendar_refresh_trigger}
+                        delete_mode={*delete_mode}
+                        selected_transactions={(*selected_transactions).clone()}
+                        on_toggle_transaction_selection={toggle_transaction_selection.clone()}
+                        on_delete_selected={delete_selected_transactions.clone()}
+                    />
                     
                     // Legacy calendar section removed - now using SimpleCalendar above
 

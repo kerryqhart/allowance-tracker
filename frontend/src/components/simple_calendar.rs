@@ -7,6 +7,14 @@ use wasm_bindgen_futures::spawn_local;
 pub struct SimpleCalendarProps {
     #[prop_or(0)]
     pub refresh_trigger: u32,
+    #[prop_or(false)]
+    pub delete_mode: bool,
+    #[prop_or_default]
+    pub selected_transactions: Vec<String>,
+    #[prop_or_default]
+    pub on_toggle_transaction_selection: Callback<String>,
+    #[prop_or_default]
+    pub on_delete_selected: Callback<()>,
 }
 
 #[function_component(SimpleCalendar)]
@@ -31,22 +39,27 @@ pub fn simple_calendar(props: &SimpleCalendarProps) -> Html {
         let calendar_month_data = calendar_month_data.clone();
         let api_client = api_client.clone();
         
-        use_callback((), move |_, _| {
-            let calendar_state = calendar_state.clone();
+        use_callback((calendar_state.clone(),), move |_, (current_calendar_state,)| {
             let calendar_month_data = calendar_month_data.clone();
             let api_client = api_client.clone();
+            let current_state = current_calendar_state.clone();
             
             spawn_local(async move {
-                if let Some(focus_date) = (*calendar_state).as_ref() {
+                if let Some(focus_date) = (*current_state).as_ref() {
+                    gloo::console::log!(&format!("Refreshing calendar for {}/{}", focus_date.month, focus_date.year));
                     match (*api_client).get_calendar_month(focus_date.month, focus_date.year).await {
                         Ok(calendar_month) => {
-                            gloo::console::log!(&format!("Refreshed calendar month data with {} days", calendar_month.days.len()));
+                            gloo::console::log!(&format!("Refreshed calendar month data with {} days and {} total transactions", 
+                                calendar_month.days.len(),
+                                calendar_month.days.iter().map(|d| d.transactions.len()).sum::<usize>()));
                             calendar_month_data.set(Some(calendar_month));
                         }
                         Err(e) => {
                             gloo::console::warn!(&format!("Failed to refresh calendar month data: {}", e));
                         }
                     }
+                } else {
+                    gloo::console::warn!("No focus date available for calendar refresh");
                 }
             });
         })
@@ -379,8 +392,38 @@ pub fn simple_calendar(props: &SimpleCalendarProps) -> Html {
                                     "simple-calendar-transaction-chip negative"
                                 };
                                 
+                                let is_selected = props.selected_transactions.contains(&transaction.id);
+                                let transaction_id = transaction.id.clone();
+                                let on_toggle_selection = props.on_toggle_transaction_selection.clone();
+                                let delete_mode = props.delete_mode;
+                                
+                                let chip_click = Callback::from(move |_: MouseEvent| {
+                                    if delete_mode {
+                                        on_toggle_selection.emit(transaction_id.clone());
+                                    }
+                                });
+                                
+                                let final_chip_class = if is_selected {
+                                    format!("{} selected", chip_class)
+                                } else {
+                                    chip_class.to_string()
+                                };
+                                
                                 html! {
-                                    <div class={chip_class}>
+                                    <div class={final_chip_class} 
+                                         onclick={chip_click}>
+                                        {if props.delete_mode {
+                                            html! {
+                                                <input 
+                                                    type="checkbox" 
+                                                    class="transaction-checkbox"
+                                                    checked={is_selected}
+                                                    readonly=true
+                                                />
+                                            }
+                                        } else {
+                                            html! {}
+                                        }}
                                         <span class="transaction-amount">
                                             {if transaction.amount >= 0.0 {
                                                 format!("+${:.0}", transaction.amount)
@@ -502,6 +545,35 @@ pub fn simple_calendar(props: &SimpleCalendarProps) -> Html {
                             <i class="fas fa-chevron-right"></i>
                         </button>
                     </div>
+                    
+                    {if props.delete_mode {
+                        html! {
+                            <div class="delete-mode-controls">
+                                <span class="selection-count">
+                                    {format!("{} transaction{} selected", 
+                                        props.selected_transactions.len(),
+                                        if props.selected_transactions.len() == 1 { "" } else { "s" }
+                                    )}
+                                </span>
+                                <button 
+                                    class="delete-button"
+                                    onclick={{
+                                        let on_delete = props.on_delete_selected.clone();
+                                        Callback::from(move |_: MouseEvent| {
+                                            on_delete.emit(());
+                                        })
+                                    }}
+                                    disabled={props.selected_transactions.is_empty()}
+                                    title="Delete selected transactions"
+                                >
+                                    <i class="fas fa-trash"></i>
+                                    {" Delete"}
+                                </button>
+                            </div>
+                        }
+                    } else {
+                        html! {}
+                    }}
                     </div>
                     
                     <div class="calendar-weekdays">

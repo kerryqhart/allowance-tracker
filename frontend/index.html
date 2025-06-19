@@ -1706,6 +1706,34 @@
             padding-left: 0.3rem; /* Normal padding when not in delete mode */
         }
 
+        /* Transaction chip selection styles */
+        .simple-calendar-transaction-chip {
+            position: relative;
+            cursor: pointer;
+        }
+
+        .simple-calendar-transaction-chip.selected {
+            background-color: rgba(239, 68, 68, 0.1);
+            border-color: #ef4444;
+            transform: scale(1.05);
+        }
+
+        .transaction-checkbox {
+            position: absolute;
+            left: 4px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 12px;
+            height: 12px;
+            margin: 0;
+            z-index: 1;
+        }
+
+        /* Adjust transaction chip content when in delete mode */
+        .simple-calendar-transaction-chip input[type="checkbox"] + .transaction-amount {
+            margin-left: 16px;
+        }
+
         @media (max-width: 768px) {
             .container {
                 padding: 0 15px;
