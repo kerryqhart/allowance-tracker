@@ -1,5 +1,5 @@
 use yew::prelude::*;
-use shared::{CalendarFocusDate, CurrentDateResponse};
+use shared::{CalendarFocusDate, CurrentDateResponse, AllowanceConfig, GetAllowanceConfigRequest};
 use crate::services::api::ApiClient;
 use wasm_bindgen_futures::spawn_local;
 
@@ -8,6 +8,7 @@ pub fn simple_calendar() -> Html {
     // State for current month/year from backend
     let calendar_state = use_state(|| Option::<CalendarFocusDate>::None);
     let current_date = use_state(|| Option::<CurrentDateResponse>::None);
+    let allowance_config = use_state(|| Option::<AllowanceConfig>::None);
     let is_loading = use_state(|| true);
     let error_message = use_state(|| Option::<String>::None);
     
@@ -17,43 +18,72 @@ pub fn simple_calendar() -> Html {
     // API client
     let api_client = use_memo((), |_| ApiClient::new());
 
-    // Load initial focus date and current date from backend
+    // Load initial focus date, current date, and allowance config from backend
     {
         let calendar_state = calendar_state.clone();
         let current_date = current_date.clone();
+        let allowance_config = allowance_config.clone();
         let is_loading = is_loading.clone();
         let error_message = error_message.clone();
         let api_client = api_client.clone();
         
         use_effect_with((), move |_| {
             spawn_local(async move {
-                // Fetch both focus date and current date
+                // Fetch focus date, current date, and allowance config
                 let focus_date_result = (*api_client).get_focus_date().await;
                 let current_date_result = (*api_client).get_current_date().await;
+                let allowance_result = (*api_client).get_allowance_config(GetAllowanceConfigRequest { child_id: None }).await;
                 
-                match (focus_date_result, current_date_result) {
-                    (Ok(focus_date), Ok(current_date_response)) => {
-                        gloo::console::log!(&format!("Loaded focus date: {}/{} and current date: {}/{}/{}", 
+                // Handle all three API results
+                match (focus_date_result, current_date_result, allowance_result) {
+                    (Ok(focus_date), Ok(current_date_response), Ok(allowance_response)) => {
+                        gloo::console::log!(&format!("Loaded focus date: {}/{}, current date: {}/{}/{}, allowance: {:?}", 
                             focus_date.month, focus_date.year,
-                            current_date_response.month, current_date_response.day, current_date_response.year));
+                            current_date_response.month, current_date_response.day, current_date_response.year,
+                            allowance_response.allowance_config));
                         calendar_state.set(Some(focus_date));
                         current_date.set(Some(current_date_response));
+                        allowance_config.set(allowance_response.allowance_config);
                         error_message.set(None);
                     }
-                    (Ok(focus_date), Err(current_date_error)) => {
+                    (Ok(focus_date), Ok(current_date_response), Err(allowance_error)) => {
+                        gloo::console::warn!(&format!("Failed to load allowance config: {}", allowance_error));
+                        calendar_state.set(Some(focus_date));
+                        current_date.set(Some(current_date_response));
+                        // Continue without allowance config - just won't show allowance chips
+                        error_message.set(None);
+                    }
+                    (Ok(focus_date), Err(current_date_error), Ok(allowance_response)) => {
                         gloo::console::warn!(&format!("Failed to load current date: {}", current_date_error));
                         calendar_state.set(Some(focus_date));
-                        // Continue without current date - just won't highlight today
+                        allowance_config.set(allowance_response.allowance_config);
+                        // Continue without current date - just won't highlight today or filter future allowances properly
                         error_message.set(None);
                     }
-                    (Err(focus_date_error), Ok(current_date_response)) => {
+                    (Err(focus_date_error), Ok(current_date_response), Ok(allowance_response)) => {
                         gloo::console::error!(&format!("Failed to load focus date: {}", focus_date_error));
+                        current_date.set(Some(current_date_response));
+                        allowance_config.set(allowance_response.allowance_config);
+                        error_message.set(Some(format!("Failed to load calendar state: {}", focus_date_error)));
+                    }
+                    (Ok(focus_date), Err(current_date_error), Err(allowance_error)) => {
+                        gloo::console::warn!(&format!("Failed to load current date and allowance: {}, {}", current_date_error, allowance_error));
+                        calendar_state.set(Some(focus_date));
+                        error_message.set(None);
+                    }
+                    (Err(focus_date_error), Ok(current_date_response), Err(allowance_error)) => {
+                        gloo::console::warn!(&format!("Failed to load focus date and allowance: {}, {}", focus_date_error, allowance_error));
                         current_date.set(Some(current_date_response));
                         error_message.set(Some(format!("Failed to load calendar state: {}", focus_date_error)));
                     }
-                    (Err(focus_date_error), Err(current_date_error)) => {
-                        gloo::console::error!(&format!("Failed to load both: focus={}, current={}", focus_date_error, current_date_error));
+                    (Err(focus_date_error), Err(current_date_error), Ok(allowance_response)) => {
+                        gloo::console::error!(&format!("Failed to load focus and current date: {}, {}", focus_date_error, current_date_error));
+                        allowance_config.set(allowance_response.allowance_config);
                         error_message.set(Some(format!("Backend error - Focus: {}, Current: {}", focus_date_error, current_date_error)));
+                    }
+                    (Err(focus_date_error), Err(current_date_error), Err(allowance_error)) => {
+                        gloo::console::error!(&format!("Failed to load all: focus={}, current={}, allowance={}", focus_date_error, current_date_error, allowance_error));
+                        error_message.set(Some(format!("Backend error - Focus: {}, Current: {}, Allowance: {}", focus_date_error, current_date_error, allowance_error)));
                     }
                 }
                 is_loading.set(false);
@@ -167,8 +197,52 @@ pub fn simple_calendar() -> Html {
         day
     };
 
+    // Helper function to determine if a day should show allowance chip
+    let is_future_allowance_day = |day: u32, month: u32, year: u32, 
+                                   current_date_ref: &Option<CurrentDateResponse>, 
+                                   allowance_config_ref: &Option<AllowanceConfig>| -> bool {
+        // Check if we have allowance config and it's active
+        if let Some(config) = allowance_config_ref {
+            if !config.is_active {
+                return false;
+            }
+            
+            // Calculate day of week for this day (0 = Sunday, 1 = Monday, ..., 6 = Saturday)
+            let a = (14 - month) / 12;
+            let y = year - a;
+            let m = month + 12 * a - 2;
+            let day_of_week = (day + y + y / 4 - y / 100 + y / 400 + (31 * m) / 12) % 7;
+            
+            // Check if this day matches the configured allowance day of week
+            if day_of_week as u8 != config.day_of_week {
+                return false;
+            }
+            
+            // Only show allowance indicator for future dates if we have current date info
+            if let Some(current_date) = current_date_ref {
+                // Compare the calendar day with current date
+                if year > current_date.year {
+                    return true; // Future year
+                } else if year == current_date.year {
+                    if month > current_date.month {
+                        return true; // Future month in current year
+                    } else if month == current_date.month {
+                        return day > current_date.day; // Future day in current month
+                    }
+                }
+                
+                false // Past date
+            } else {
+                // Fallback: if we don't have current date info, show allowance indicators
+                true
+            }
+        } else {
+            false
+        }
+    };
+
     // Generate calendar days for the given month/year
-    let generate_calendar_days = |month: u32, year: u32, current_date_ref: &Option<CurrentDateResponse>| -> Vec<Html> {
+    let generate_calendar_days = |month: u32, year: u32, current_date_ref: &Option<CurrentDateResponse>, allowance_config_ref: &Option<AllowanceConfig>| -> Vec<Html> {
         let mut days = Vec::new();
         let days_in_current_month = days_in_month(month, year);
         let first_day = first_day_of_week(month, year);
@@ -197,6 +271,10 @@ pub fn simple_calendar() -> Html {
                 "calendar-day"
             };
             
+            // Check if this day should show an allowance chip
+            let show_allowance_chip = is_future_allowance_day(day, month, year, current_date_ref, allowance_config_ref);
+            let allowance_amount = allowance_config_ref.as_ref().map(|config| config.amount).unwrap_or(0.0);
+            
             days.push(html! {
                 <div class={day_class}>
                     <div class="day-header">
@@ -208,7 +286,17 @@ pub fn simple_calendar() -> Html {
                         </div>
                     </div>
                     <div class="day-transactions">
-                        // Empty for now - just showing the basic structure
+                        {if show_allowance_chip {
+                            html! {
+                                <div class="simple-calendar-allowance-chip" title={format!("Weekly allowance: ${:.2}", allowance_amount)}>
+                                    <span class="transaction-amount">
+                                        {format!("+${:.0}", allowance_amount)}
+                                    </span>
+                                </div>
+                            }
+                        } else {
+                            html! {}
+                        }}
                     </div>
                 </div>
             });
@@ -291,7 +379,7 @@ pub fn simple_calendar() -> Html {
     // Render calendar with backend state
     match calendar_state.as_ref() {
         Some(focus_date) => {
-            let calendar_days = generate_calendar_days(focus_date.month, focus_date.year, &*current_date);
+            let calendar_days = generate_calendar_days(focus_date.month, focus_date.year, &*current_date, &*allowance_config);
             
                 html! {
         <div class="calendar-card">
