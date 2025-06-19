@@ -302,25 +302,12 @@ pub fn simple_calendar() -> Html {
                             <i class="fas fa-chevron-left"></i>
                         </button>
                         <h2>
-                            {format!("🆕 {} {}", month_name(focus_date.month), focus_date.year)}
+                            {format!("{} {}", month_name(focus_date.month), focus_date.year)}
                         </h2>
                         <button class="calendar-nav-button" onclick={on_next} title="Next Month">
                             <i class="fas fa-chevron-right"></i>
                         </button>
                     </div>
-                        
-                        <div style="text-align: center; margin-top: 0.5rem; font-size: 0.9rem; color: #666;">
-                            {format!("Debug: {} clicks | Backend: {}/{} | Today: {}", 
-                                *click_count, 
-                                focus_date.month, 
-                                focus_date.year,
-                                if let Some(cd) = &*current_date { 
-                                    format!("{}/{}/{}", cd.month, cd.day, cd.year) 
-                                } else { 
-                                    "Loading...".to_string() 
-                                }
-                            )}
-                        </div>
                     </div>
                     
                     <div class="calendar-weekdays">
@@ -348,7 +335,7 @@ pub fn simple_calendar() -> Html {
                             <button class="calendar-nav-button" disabled=true>
                                 <i class="fas fa-chevron-left"></i>
                             </button>
-                            <h2>{"🆕 Simple Calendar"}</h2>
+                            <h2>{"Simple Calendar"}</h2>
                             <button class="calendar-nav-button" disabled=true>
                                 <i class="fas fa-chevron-right"></i>
                             </button>
