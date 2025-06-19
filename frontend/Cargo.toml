@@ -15,3 +15,4 @@ serde_json.workspace = true
 uuid.workspace = true
 time.workspace = true
 anyhow.workspace = true
+js-sys = "0.3"

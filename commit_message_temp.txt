@@ -43,4 +43,24 @@ settings menu, enabling parents to set up weekly allowances via the UI.
 - Uses shared types for request/response DTOs
 
 Ready for production use - parents can now configure weekly allowances
-through an intuitive settings interface. 
+through an intuitive settings interface.
+
+feat: Add allowance indicators on calendar with future-only display
+
+- Created new `use_allowance` hook to fetch allowance configuration from backend API
+- Modified calendar component to display allowance chips on matching days of the week
+- Added future date filtering - allowance indicators only appear on future dates
+- Replaced blue circles with green dashed chips showing actual allowance amounts
+- Chips use same color scheme as income transactions but with dashed borders to distinguish from real transactions
+- Added hover effects and tooltips showing "Weekly allowance: $X.XX"
+- Integrated with existing calendar transaction display system
+
+Technical changes:
+- Added `js-sys` dependency for date calculations
+- Created `frontend/src/hooks/use_allowance.rs` with allowance state management
+- Updated calendar props to accept allowance configuration
+- Added CSS styling for `.allowance-chip` with dashed green borders
+- Modified `main.rs` to use allowance hook and pass data to calendar
+
+The allowance chips now appear alongside transaction chips in the day view,
+making it easy to see when allowance is scheduled to be given in the future. 

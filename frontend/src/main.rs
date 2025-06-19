@@ -5,6 +5,7 @@ use hooks::{
     use_transactions::use_transactions,
     use_calendar::use_calendar,
     use_active_child::use_active_child,
+    use_allowance::use_allowance,
 };
 
 mod services;
@@ -35,6 +36,7 @@ fn app() -> Html {
     let active_child = use_active_child(&api_client);
     let transactions = use_transactions(&api_client, active_child.state.child_change_trigger);
     let calendar = use_calendar(&api_client, active_child.state.child_change_trigger);
+    let allowance = use_allowance();
     
     // Connection status for parent info
     let backend_connected = use_state(|| false);
@@ -199,6 +201,7 @@ fn app() -> Html {
                                     selected_transactions={(*selected_transactions).clone()}
                                     on_toggle_transaction_selection={toggle_transaction_selection.clone()}
                                     on_delete_selected={delete_selected_transactions.clone()}
+                                    allowance_config={allowance.config.clone()}
                                 /> 
                             }
                         } else {

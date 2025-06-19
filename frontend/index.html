@@ -944,6 +944,33 @@
             margin-bottom: 0.25rem;
         }
 
+        .day-number-container {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            position: relative;
+        }
+
+        .allowance-chip {
+            font-size: 0.7rem;
+            font-weight: 600;
+            padding: 0.15rem 0.3rem;
+            border-radius: 8px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            background: white;
+            border: 1.5px dashed #4CAF50;
+            color: #4CAF50;
+            opacity: 0.8;
+        }
+
+        .allowance-chip:hover {
+            transform: scale(1.05);
+            background: rgba(76, 175, 80, 0.05);
+            opacity: 1;
+        }
+
         .day-balance-subtle {
             font-size: 0.7rem;
             font-weight: 500;
