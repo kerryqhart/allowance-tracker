@@ -5,10 +5,11 @@
 //! only handle presentation concerns, while all calendar computations
 //! and business rules are handled here.
 
-use shared::{Transaction, CalendarMonth, CalendarDay, CurrentDateResponse, CalendarFocusDate};
+use shared::{Transaction, TransactionType, CalendarMonth, CalendarDay, CalendarDayType, CurrentDateResponse, CalendarFocusDate};
 use std::collections::HashMap;
 use chrono::{Local, Datelike};
 use std::sync::{Arc, Mutex};
+use log;
 
 /// Calendar service that handles all calendar-related business logic
 #[derive(Clone)]
@@ -26,7 +27,7 @@ impl CalendarService {
         }
     }
 
-    /// Generate a calendar month view with transaction data
+    /// Generate a calendar month view with transaction data and future allowances
     pub fn generate_calendar_month(
         &self,
         month: u32,
@@ -36,36 +37,56 @@ impl CalendarService {
         let days_in_month = self.days_in_month(month, year);
         let first_day = self.first_day_of_month(month, year);
         
-        // Group transactions by day for the current month
-        let transactions_by_day = self.group_transactions_by_day(month, year, &transactions);
+        log::info!("🗓️ CALENDAR DEBUG: Generating calendar for {}/{}", month, year);
+        log::info!("🗓️ CALENDAR DEBUG: Days in month: {}, First day of week: {}", days_in_month, first_day);
         
-        // Calculate daily balances
-        let daily_balances = self.calculate_daily_balances(month, year, &transactions, days_in_month);
+        // Transactions already include future allowances from the transaction service
+        let all_transactions = transactions;
+        
+        // Group all transactions by day for the current month
+        let transactions_by_day = self.group_transactions_by_day(month, year, &all_transactions);
+        
+        // Calculate daily balances (only use regular transactions, not future allowances)
+        let regular_transactions: Vec<Transaction> = all_transactions.iter()
+            .filter(|t| t.transaction_type != TransactionType::FutureAllowance)
+            .cloned()
+            .collect();
+        let daily_balances = self.calculate_daily_balances(month, year, &regular_transactions, days_in_month);
         
         let mut calendar_days = Vec::new();
         
         // Add empty cells for days before the first day of month
-        for _ in 0..first_day {
+        log::info!("🗓️ CALENDAR DEBUG: Adding {} padding days before month", first_day);
+        for i in 0..first_day {
+            log::info!("🗓️ CALENDAR DEBUG: Adding padding day {} with PaddingBefore", i);
             calendar_days.push(CalendarDay {
                 day: 0,
                 balance: 0.0,
                 transactions: Vec::new(),
+                day_type: CalendarDayType::PaddingBefore,
+                #[allow(deprecated)]
                 is_empty: true,
             });
         }
         
         // Add days of the month
+        log::info!("🗓️ CALENDAR DEBUG: Adding {} actual month days", days_in_month);
         for day in 1..=days_in_month {
             let day_transactions = transactions_by_day.get(&day).cloned().unwrap_or_default();
             let day_balance = daily_balances.get(&day).copied().unwrap_or(0.0);
             
+            log::info!("🗓️ CALENDAR DEBUG: Adding month day {} with {} transactions", day, day_transactions.len());
             calendar_days.push(CalendarDay {
                 day,
                 balance: day_balance,
                 transactions: day_transactions,
+                day_type: CalendarDayType::MonthDay,
+                #[allow(deprecated)]
                 is_empty: false,
             });
         }
+        
+        log::info!("🗓️ CALENDAR DEBUG: Total calendar days created: {}", calendar_days.len());
         
         CalendarMonth {
             month,
@@ -325,6 +346,7 @@ mod tests {
             description: description.to_string(),
             amount,
             balance,
+            transaction_type: if amount >= 0.0 { TransactionType::Income } else { TransactionType::Expense },
         }
     }
 
@@ -418,7 +440,7 @@ mod tests {
         assert!(!calendar.days.is_empty());
         
         // Find day 1 and verify it has a transaction
-        let day_1 = calendar.days.iter().find(|d| d.day == 1 && !d.is_empty);
+        let day_1 = calendar.days.iter().find(|d| d.day == 1 && d.day_type == CalendarDayType::MonthDay);
         assert!(day_1.is_some());
         assert_eq!(day_1.unwrap().transactions.len(), 1);
     }

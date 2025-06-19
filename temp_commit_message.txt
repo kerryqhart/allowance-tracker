@@ -1,7 +1,17 @@
-Add frontend startup and connection logging
+Fix calendar double-padding bug with explicit CalendarDayType enum
 
-- Add logging service import to main.rs
-- Add startup log in main() function to indicate frontend initialization
-- Add connection success log when frontend connects to backend API
-- Provides visibility into frontend startup process through backend logging system
-- Helps with debugging frontend initialization and backend connectivity issues 
+- Added CalendarDayType enum (PaddingBefore, MonthDay, PaddingAfter) to shared types
+- Updated CalendarDay struct to include explicit day_type field instead of relying on is_empty
+- Modified backend calendar service to set appropriate CalendarDayType for each day
+- Fixed frontend calendar component that was duplicating padding days:
+  * Removed frontend logic that added extra padding days based on first_day_of_week
+  * Backend already provides complete calendar grid with proper padding
+  * Frontend now renders backend-provided days directly without additional padding
+- Updated calendar rendering to use CalendarDayType enum for display decisions
+- Added comprehensive debug logging to track calendar generation
+
+This fixes the issue where August 2025 showed 10+ empty cells instead of 5,
+and ensures all months display with correct day alignment and numbering.
+
+The root cause was frontend adding padding days on top of backend-provided padding,
+resulting in doubled empty cells and misaligned calendars. 

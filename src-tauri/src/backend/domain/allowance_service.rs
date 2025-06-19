@@ -1,5 +1,5 @@
 use anyhow::Result;
-use chrono::Utc;
+use chrono::{Utc, NaiveDate, Datelike, Local};
 use log::{info, warn};
 use std::sync::Arc;
 
@@ -7,7 +7,7 @@ use crate::backend::storage::{DbConnection, AllowanceRepository};
 use crate::backend::domain::child_service::ChildService;
 use shared::{
     AllowanceConfig, GetAllowanceConfigRequest, GetAllowanceConfigResponse,
-    UpdateAllowanceConfigRequest, UpdateAllowanceConfigResponse,
+    UpdateAllowanceConfigRequest, UpdateAllowanceConfigResponse, Transaction, TransactionType,
 };
 
 /// Service for managing allowance configurations
@@ -192,6 +192,70 @@ impl AllowanceService {
         info!("Found {} allowance configurations", configs.len());
 
         Ok(configs)
+    }
+
+    /// Generate forward-looking allowance transactions for a given date range
+    pub async fn generate_future_allowance_transactions(
+        &self,
+        child_id: &str,
+        start_date: NaiveDate,
+        end_date: NaiveDate,
+    ) -> Result<Vec<Transaction>> {
+        info!("Generating future allowance transactions for child: {} from {} to {}", 
+              child_id, start_date, end_date);
+
+        // Get allowance config for the child
+        let allowance_config = self.allowance_repository.get_allowance_config(child_id).await?;
+        
+        let config = match allowance_config {
+            Some(config) if config.is_active => config,
+            _ => {
+                info!("No active allowance config found for child: {}", child_id);
+                return Ok(Vec::new());
+            }
+        };
+
+        let mut future_allowances = Vec::new();
+        let current_date = Local::now().date_naive();
+
+        // Iterate through each date in the range
+        let mut current = start_date;
+        while current <= end_date {
+            // Check if this date is in the future and matches the allowance day of week
+            if current > current_date {
+                let day_of_week = current.weekday().num_days_from_sunday() as u8;
+                
+                if day_of_week == config.day_of_week {
+                    // This is a future allowance day!
+                    let formatted_date = current.and_hms_opt(12, 0, 0).unwrap().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
+                    let allowance_transaction = Transaction {
+                        id: format!("future-allowance::{}::{}", child_id, current.format("%Y-%m-%d")),
+                        child_id: child_id.to_string(),
+                        date: formatted_date.clone(),
+                        description: "Weekly allowance".to_string(),
+                        amount: config.amount,
+                        balance: 0.0, // Balance is not meaningful for future transactions
+                        transaction_type: TransactionType::FutureAllowance,
+                    };
+                    
+                    future_allowances.push(allowance_transaction);
+                    info!("🔍 ALLOWANCE DEBUG: Generated future allowance for {} on {} (day_of_week: {}, expected: {}, formatted_date: {})", 
+                          child_id, current, day_of_week, config.day_of_week, formatted_date);
+                }
+            }
+            
+            // Move to next day
+            current = current.succ_opt().unwrap_or(current);
+            if current == current.succ_opt().unwrap_or(current) {
+                // Prevent infinite loop if succ_opt fails
+                break;
+            }
+        }
+
+        info!("Generated {} future allowance transactions for child: {}", 
+              future_allowances.len(), child_id);
+
+        Ok(future_allowances)
     }
 }
 

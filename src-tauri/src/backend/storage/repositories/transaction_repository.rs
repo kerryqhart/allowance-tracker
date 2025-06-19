@@ -1,6 +1,6 @@
 use anyhow::Result;
 use sqlx::Row;
-use shared::Transaction;
+use shared::{Transaction, TransactionType};
 use crate::backend::storage::connection::DbConnection;
 
 /// Repository for transaction operations
@@ -56,6 +56,7 @@ impl TransactionRepository {
                 description: r.get("description"),
                 amount: r.get("amount"),
                 balance: r.get("balance"),
+                transaction_type: if r.get::<f64, _>("amount") >= 0.0 { TransactionType::Income } else { TransactionType::Expense },
             })),
             None => Ok(None),
         }
@@ -108,6 +109,7 @@ impl TransactionRepository {
                 description: row.get("description"),
                 amount: row.get("amount"),
                 balance: row.get("balance"),
+                transaction_type: if row.get::<f64, _>("amount") >= 0.0 { TransactionType::Income } else { TransactionType::Expense },
             })
             .collect();
 

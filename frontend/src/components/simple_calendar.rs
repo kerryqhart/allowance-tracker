@@ -1,5 +1,5 @@
 use yew::prelude::*;
-use shared::{CalendarFocusDate, CurrentDateResponse, AllowanceConfig, GetAllowanceConfigRequest, CalendarMonth};
+use shared::{CalendarFocusDate, CurrentDateResponse, AllowanceConfig, GetAllowanceConfigRequest, CalendarMonth, CalendarDayType, TransactionType};
 use crate::services::api::ApiClient;
 use crate::services::logging::Logger;
 use wasm_bindgen_futures::spawn_local;
@@ -264,108 +264,24 @@ pub fn simple_calendar(props: &SimpleCalendarProps) -> Html {
         })
     };
 
-    // Helper function to calculate days in month
-    let days_in_month = |month: u32, year: u32| -> u32 {
-        match month {
-            1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
-            4 | 6 | 9 | 11 => 30,
-            2 => {
-                if (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0) {
-                    29
-                } else {
-                    28
-                }
-            }
-            _ => 30,
-        }
-    };
-
-    // Helper function to get first day of week (0 = Sunday, 1 = Monday, etc.)
-    let first_day_of_week = |month: u32, year: u32| -> u32 {
-        // Simple calculation for first day of week
-        // This is a basic implementation - you might want to use a more robust date library
-        let a = (14 - month) / 12;
-        let y = year - a;
-        let m = month + 12 * a - 2;
-        let day = (1 + y + y / 4 - y / 100 + y / 400 + (31 * m) / 12) % 7;
-        day
-    };
-
-    // Helper function to determine if a day should show allowance chip
-    let is_future_allowance_day = |day: u32, month: u32, year: u32, 
-                                   current_date_ref: &Option<CurrentDateResponse>, 
-                                   allowance_config_ref: &Option<AllowanceConfig>| -> bool {
-        // Check if we have allowance config and it's active
-        if let Some(config) = allowance_config_ref {
-            Logger::debug_with_component("allowance", &format!("Checking allowance for {}/{}/{} - config day_of_week: {}", month, day, year, config.day_of_week));
-            
-            if !config.is_active {
-                Logger::debug_with_component("allowance", "Allowance config is not active");
-                return false;
-            }
-            
-            // Use chrono to get the correct day of week
-            use chrono::{NaiveDate, Datelike};
-            
-            // Create a date and get the day of week
-            if let Some(date) = NaiveDate::from_ymd_opt(year as i32, month, day) {
-                // chrono's weekday(): Monday = 1, ..., Sunday = 7
-                // Our format: Sunday = 0, Monday = 1, ..., Saturday = 6
-                let chrono_weekday = date.weekday().num_days_from_sunday() as u8;
-                
-                Logger::debug_with_component("allowance", &format!("Date {}/{}/{} is weekday {} (chrono), config expects {}", 
-                    month, day, year, chrono_weekday, config.day_of_week));
-                
-                // Check if this day matches the configured allowance day of week
-                if chrono_weekday != config.day_of_week {
-                    Logger::debug_with_component("allowance", &format!("Day {} != config {}, no allowance", chrono_weekday, config.day_of_week));
-                    return false;
-                }
-                
-                Logger::debug_with_component("allowance", &format!("Day {} matches config {}, checking if future date", chrono_weekday, config.day_of_week));
-            } else {
-                Logger::debug_with_component("allowance", &format!("Invalid date {}/{}/{}", month, day, year));
-                // Invalid date, don't show allowance
-                return false;
-            }
-            
-            // Only show allowance indicator for future dates if we have current date info
-            if let Some(current_date) = current_date_ref {
-                // Compare the calendar day with current date
-                if year > current_date.year {
-                    return true; // Future year
-                } else if year == current_date.year {
-                    if month > current_date.month {
-                        return true; // Future month in current year
-                    } else if month == current_date.month {
-                        return day > current_date.day; // Future day in current month
-                    }
-                }
-                
-                false // Past date
-            } else {
-                // Fallback: if we don't have current date info, show allowance indicators
-                true
-            }
-        } else {
-            false
-        }
-    };
+    // All calendar logic is now handled by the backend!
+    // Future allowances are included as transactions, so no complex frontend calculations needed.
 
     // Generate calendar days using backend calendar month data
-    let generate_calendar_days = |calendar_month_ref: &Option<CalendarMonth>, current_date_ref: &Option<CurrentDateResponse>, allowance_config_ref: &Option<AllowanceConfig>| -> Vec<Html> {
+    // Future allowances are now included as transactions from the backend!
+    let generate_calendar_days = |calendar_month_ref: &Option<CalendarMonth>, current_date_ref: &Option<CurrentDateResponse>, _allowance_config_ref: &Option<AllowanceConfig>| -> Vec<Html> {
         let mut days = Vec::new();
         
         if let Some(calendar_month) = calendar_month_ref {
-            // Add empty cells for days before the first day of month
-            for _ in 0..calendar_month.first_day_of_week {
-                days.push(html! {
-                    <div class="calendar-day empty"></div>
-                });
-            }
+            Logger::debug_with_component("calendar-render", &format!("🎯 Generating calendar for {}/{} with {} days", 
+                calendar_month.month, calendar_month.year, calendar_month.days.len()));
             
-            // Add days of the month using backend-provided day data
+            // The backend already provides a complete calendar grid with padding days included,
+            // so we just need to render each day from the backend's days array
             for day_data in &calendar_month.days {
+                Logger::debug_with_component("calendar-render", &format!("📅 Processing day {}/{}/{} with {} transactions, type: {:?}", 
+                    calendar_month.month, day_data.day, calendar_month.year, day_data.transactions.len(), day_data.day_type));
+                
                 // Check if this is the current day using backend date info
                 let is_today = if let Some(current_date_response) = current_date_ref {
                     calendar_month.year == current_date_response.year 
@@ -380,14 +296,6 @@ pub fn simple_calendar(props: &SimpleCalendarProps) -> Html {
                 } else {
                     "calendar-day"
                 };
-                
-                // Check if this day should show an allowance chip
-                let show_allowance_chip = is_future_allowance_day(day_data.day, calendar_month.month, calendar_month.year, current_date_ref, allowance_config_ref);
-                let allowance_amount = allowance_config_ref.as_ref().map(|config| config.amount).unwrap_or(0.0);
-                
-                if show_allowance_chip {
-                    Logger::debug_with_component("allowance", &format!("SHOWING allowance chip for {}/{}/{}", calendar_month.month, day_data.day, calendar_month.year));
-                }
                 
                 // Process transactions for this day (limit to 4, then show "+X more")
                 let transactions = &day_data.transactions;
@@ -406,47 +314,39 @@ pub fn simple_calendar(props: &SimpleCalendarProps) -> Html {
                     <div class={day_class}>
                         <div class="day-header">
                             <div class="day-number-container">
-                                <div class="day-number">{day_data.day}</div>
+                                <div class="day-number">
+                                    {match day_data.day_type {
+                                        CalendarDayType::MonthDay => html! { {day_data.day} },
+                                        CalendarDayType::PaddingBefore | CalendarDayType::PaddingAfter => html! {},
+                                    }}
+                                </div>
                             </div>
                             <div class="day-balance-subtle">
-                                {format!("${:.0}", day_data.balance)}
+                                {match day_data.day_type {
+                                    CalendarDayType::MonthDay => format!("${:.0}", day_data.balance),
+                                    CalendarDayType::PaddingBefore | CalendarDayType::PaddingAfter => String::new(),
+                                }}
                             </div>
                         </div>
                         <div class="day-transactions">
-                            // Show allowance chip if this is a future allowance day
-                            {if show_allowance_chip {
-                                html! {
-                                    <div class="transaction-tooltip">
-                                        <div class="simple-calendar-allowance-chip">
-                                            <span class="transaction-amount">
-                                                {format!("+${:.0}", allowance_amount)}
-                                            </span>
-                                        </div>
-                                        <div class="custom-tooltip allowance-border">
-                                            <div class="tooltip-header">
-                                                {"Upcoming allowance"}
-                                            </div>
-                                            <div class="tooltip-body">
-                                                <div class="tooltip-row">
-                                                    <span class="tooltip-label">{"Amount:"}</span>
-                                                    <span class="tooltip-value positive">
-                                                        {format!("+${:.2}", allowance_amount)}
-                                                    </span>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                }
-                            } else {
-                                html! {}
-                            }}
-                            
-                            // Show transaction chips
+                            // Show transaction chips (including future allowances from backend)
                             {for display_transactions.iter().map(|transaction| {
-                                let chip_class = if transaction.amount >= 0.0 {
-                                    "simple-calendar-transaction-chip positive"
-                                } else {
-                                    "simple-calendar-transaction-chip negative"
+                                let (chip_class, tooltip_border_class, tooltip_header) = match transaction.transaction_type {
+                                    TransactionType::FutureAllowance => (
+                                        "simple-calendar-allowance-chip",
+                                        "allowance-border",
+                                        "Upcoming allowance".to_string()
+                                    ),
+                                    TransactionType::Income => (
+                                        "simple-calendar-transaction-chip positive",
+                                        "income-border", 
+                                        create_transaction_tooltip(transaction)
+                                    ),
+                                    TransactionType::Expense => (
+                                        "simple-calendar-transaction-chip negative",
+                                        "spending-border",
+                                        create_transaction_tooltip(transaction)
+                                    ),
                                 };
                                 
                                 let is_selected = props.selected_transactions.contains(&transaction.id);
@@ -490,9 +390,9 @@ pub fn simple_calendar(props: &SimpleCalendarProps) -> Html {
                                                 }}
                                             </span>
                                         </div>
-                                        <div class={format!("custom-tooltip {}", if transaction.amount >= 0.0 { "income-border" } else { "spending-border" })}>
+                                        <div class={format!("custom-tooltip {}", tooltip_border_class)}>
                                             <div class="tooltip-header">
-                                                {create_transaction_tooltip(transaction)}
+                                                {tooltip_header}
                                             </div>
                                             <div class="tooltip-body">
                                                 <div class="tooltip-row">

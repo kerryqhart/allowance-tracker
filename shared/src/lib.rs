@@ -16,6 +16,19 @@ pub struct Transaction {
     pub amount: f64,
     /// Account balance after this transaction
     pub balance: f64,
+    /// Type of transaction for rendering purposes
+    pub transaction_type: TransactionType,
+}
+
+/// Type of transaction for rendering and business logic
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum TransactionType {
+    /// Regular income transaction (money added)
+    Income,
+    /// Regular expense transaction (money spent)
+    Expense,
+    /// Future allowance transaction (not yet received)
+    FutureAllowance,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -52,6 +65,17 @@ pub struct PaginationInfo {
     pub next_cursor: Option<String>,
 }
 
+/// Type of calendar day for explicit rendering logic
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum CalendarDayType {
+    /// Empty padding day before the start of the month
+    PaddingBefore,
+    /// Actual day within the month
+    MonthDay,
+    /// Empty padding day after the end of the month (if needed for grid alignment)
+    PaddingAfter,
+}
+
 /// Represents a calendar month with its associated transaction data
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct CalendarMonth {
@@ -67,6 +91,8 @@ pub struct CalendarDay {
     pub day: u32,
     pub balance: f64,
     pub transactions: Vec<Transaction>,
+    pub day_type: CalendarDayType,
+    #[deprecated(note = "Use day_type instead of is_empty")]
     pub is_empty: bool, // For padding days before/after month
 }
 

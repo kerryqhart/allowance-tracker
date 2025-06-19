@@ -42,23 +42,27 @@
 
 use crate::backend::storage::{DbConnection, TransactionRepository};
 use crate::backend::domain::child_service::ChildService;
-use shared::{Transaction, TransactionListRequest, TransactionListResponse, PaginationInfo, CreateTransactionRequest, DeleteTransactionsRequest, DeleteTransactionsResponse};
+use crate::backend::domain::allowance_service::AllowanceService;
+use shared::{Transaction, TransactionType, TransactionListRequest, TransactionListResponse, PaginationInfo, CreateTransactionRequest, DeleteTransactionsRequest, DeleteTransactionsResponse};
 use anyhow::Result;
 use tracing::info;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+use chrono::{NaiveDate, Local, Datelike};
 
 #[derive(Clone)]
 pub struct TransactionService {
     transaction_repository: TransactionRepository,
     child_service: ChildService,
+    allowance_service: AllowanceService,
 }
 
 impl TransactionService {
     pub fn new(db: Arc<DbConnection>) -> Self {
         let transaction_repository = TransactionRepository::new((*db).clone());
-        let child_service = ChildService::new(db);
-        Self { transaction_repository, child_service }
+        let child_service = ChildService::new(db.clone());
+        let allowance_service = AllowanceService::new(db);
+        Self { transaction_repository, child_service, allowance_service }
     }
 
     /// Create a new transaction
@@ -116,6 +120,7 @@ impl TransactionService {
             description: request.description,
             amount: request.amount,
             balance: new_balance,
+            transaction_type: if request.amount >= 0.0 { TransactionType::Income } else { TransactionType::Expense },
         };
 
         // Store in database
@@ -143,9 +148,41 @@ impl TransactionService {
         // Get transactions from database for the active child
         let mut db_transactions = self.transaction_repository.list_transactions(&active_child.id, query_limit, request.after.as_deref()).await?;
 
+        // Generate future allowance transactions for the requested date range if specified
+        let future_allowances = if let (Some(start_date_str), Some(end_date_str)) = (&request.start_date, &request.end_date) {
+            // Parse the date strings to NaiveDate
+            match (chrono::DateTime::parse_from_rfc3339(start_date_str), chrono::DateTime::parse_from_rfc3339(end_date_str)) {
+                (Ok(start_dt), Ok(end_dt)) => {
+                    let start_date = start_dt.date_naive();
+                    let end_date = end_dt.date_naive();
+                    
+                    info!("🔍 TRANSACTION SERVICE: Generating future allowances for date range {} to {}", start_date, end_date);
+                    
+                    self.allowance_service
+                        .generate_future_allowance_transactions(&active_child.id, start_date, end_date)
+                        .await?
+                }
+                _ => {
+                    info!("Failed to parse start_date: {} or end_date: {}, skipping future allowances", start_date_str, end_date_str);
+                    Vec::new()
+                }
+            }
+        } else {
+            // No date range specified, don't generate future allowances
+            info!("No start_date/end_date specified, skipping future allowances");
+            Vec::new()
+        };
+
+        // Combine database transactions with future allowances
+        db_transactions.extend(future_allowances);
+
+        // Sort all transactions by date (newest first)
+        db_transactions.sort_by(|a, b| b.date.cmp(&a.date));
+
+        // Apply pagination to the combined list
         let has_more = db_transactions.len() > limit as usize;
         if has_more {
-            db_transactions.pop(); // Remove the extra record we queried
+            db_transactions.truncate(limit as usize);
         }
 
         let next_cursor = if has_more {
@@ -162,7 +199,13 @@ impl TransactionService {
             },
         };
 
-        info!("Returning {} transactions, has_more: {}", response.transactions.len(), has_more);
+        // Debug log the transactions being returned
+        info!("🔍 TRANSACTION DEBUG: Returning {} transactions (including future allowances), has_more: {}", response.transactions.len(), has_more);
+        for (i, transaction) in response.transactions.iter().enumerate() {
+            info!("🔍 Transaction {}: id={}, date={}, description={}, amount={}, type={:?}", 
+                  i + 1, transaction.id, transaction.date, transaction.description, transaction.amount, transaction.transaction_type);
+        }
+        
         Ok(response)
     }
 
@@ -238,6 +281,7 @@ impl TransactionService {
                 description: "Weekly allowance".to_string(),
                 amount: 10.0,
                 balance: 55.0,
+                transaction_type: TransactionType::Income,
             },
             Transaction {
                 id: Transaction::generate_id(15.0, base_time - 259200000), // June 10, 2025  
@@ -246,6 +290,7 @@ impl TransactionService {
                 description: "Gift from Grandma".to_string(),
                 amount: 15.0,
                 balance: 45.0,
+                transaction_type: TransactionType::Income,
             },
             Transaction {
                 id: Transaction::generate_id(-12.0, base_time - 432000000), // June 8, 2025
@@ -254,6 +299,7 @@ impl TransactionService {
                 description: "Bought new toy".to_string(),
                 amount: -12.0,
                 balance: 30.0,
+                transaction_type: TransactionType::Expense,
             },
             Transaction {
                 id: Transaction::generate_id(10.0, base_time - 604800000), // June 6, 2025
@@ -262,6 +308,7 @@ impl TransactionService {
                 description: "Weekly allowance".to_string(),
                 amount: 10.0,
                 balance: 42.0,
+                transaction_type: TransactionType::Income,
             },
             Transaction {
                 id: Transaction::generate_id(-5.0, base_time - 777600000), // June 4, 2025
@@ -270,6 +317,7 @@ impl TransactionService {
                 description: "Movie ticket".to_string(),
                 amount: -5.0,
                 balance: 32.0,
+                transaction_type: TransactionType::Expense,
             },
             Transaction {
                 id: Transaction::generate_id(10.0, base_time - 1209600000), // May 30, 2025
@@ -278,6 +326,7 @@ impl TransactionService {
                 description: "Weekly allowance".to_string(),
                 amount: 10.0,
                 balance: 37.0,
+                transaction_type: TransactionType::Income,
             },
             Transaction {
                 id: Transaction::generate_id(-3.0, base_time - 1382400000), // May 28, 2025
@@ -286,6 +335,7 @@ impl TransactionService {
                 description: "Ice cream treat".to_string(),
                 amount: -3.0,
                 balance: 27.0,
+                transaction_type: TransactionType::Expense,
             },
             Transaction {
                 id: Transaction::generate_id(10.0, base_time - 1814400000), // May 23, 2025
@@ -294,6 +344,7 @@ impl TransactionService {
                 description: "Weekly allowance".to_string(),
                 amount: 10.0,
                 balance: 30.0,
+                transaction_type: TransactionType::Income,
             },
             Transaction {
                 id: Transaction::generate_id(-8.0, base_time - 2073600000), // May 20, 2025
@@ -302,6 +353,7 @@ impl TransactionService {
                 description: "Comic book".to_string(),
                 amount: -8.0,
                 balance: 20.0,
+                transaction_type: TransactionType::Expense,
             },
             Transaction {
                 id: Transaction::generate_id(10.0, base_time - 2419200000), // May 16, 2025
@@ -310,6 +362,7 @@ impl TransactionService {
                 description: "Weekly allowance".to_string(),
                 amount: 10.0,
                 balance: 28.0,
+                transaction_type: TransactionType::Income,
             },
             Transaction {
                 id: Transaction::generate_id(20.0, base_time - 2592000000), // May 14, 2025
@@ -318,6 +371,7 @@ impl TransactionService {
                 description: "Birthday money from Uncle Bob".to_string(),
                 amount: 20.0,
                 balance: 18.0,
+                transaction_type: TransactionType::Income,
             },
             Transaction {
                 id: Transaction::generate_id(10.0, base_time - 3024000000), // May 9, 2025
@@ -326,6 +380,7 @@ impl TransactionService {
                 description: "Weekly allowance".to_string(),
                 amount: 10.0,
                 balance: -2.0, // Negative balance from previous spending
+                transaction_type: TransactionType::Income,
             },
             Transaction {
                 id: Transaction::generate_id(-15.0, base_time - 3196800000), // May 7, 2025
@@ -334,6 +389,7 @@ impl TransactionService {
                 description: "Art supplies".to_string(),
                 amount: -15.0,
                 balance: -12.0,
+                transaction_type: TransactionType::Expense,
             },
             Transaction {
                 id: Transaction::generate_id(10.0, base_time - 3628800000), // May 2, 2025
@@ -342,6 +398,7 @@ impl TransactionService {
                 description: "Weekly allowance".to_string(),
                 amount: 10.0,
                 balance: 3.0,
+                transaction_type: TransactionType::Income,
             },
         ]
     }
@@ -901,6 +958,7 @@ mod tests {
             6, // June
             2025,
             response.transactions,
+            None, // No allowance config for this test
         );
         
         // Verify calendar was generated correctly

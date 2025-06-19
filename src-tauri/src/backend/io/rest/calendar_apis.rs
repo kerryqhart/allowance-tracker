@@ -10,6 +10,7 @@ use serde::Deserialize;
 
 use crate::backend::AppState;
 use shared::{CalendarMonthRequest, TransactionListRequest, UpdateCalendarFocusRequest};
+use chrono::{NaiveDate, NaiveTime};
 
 // Query parameters for calendar month API
 #[derive(Debug, Deserialize)]
@@ -40,16 +41,36 @@ async fn get_calendar_month(
         year: query.year,
     };
 
-    match state
-        .transaction_service
-        .list_transactions(TransactionListRequest {
-            after: None,
-            limit: Some(1000), // Get enough transactions for calendar calculations
-            start_date: None,
-            end_date: None,
-        })
-        .await
-    {
+    // Calculate start and end dates for the requested month using chrono
+    let start_of_month = match NaiveDate::from_ymd_opt(request.year as i32, request.month, 1) {
+        Some(date) => date,
+        None => return (StatusCode::BAD_REQUEST, "Invalid month/year").into_response(),
+    };
+    
+    // Get the last day of the month by going to next month and subtracting 1 day
+    let next_month = if request.month == 12 {
+        NaiveDate::from_ymd_opt(request.year as i32 + 1, 1, 1)
+    } else {
+        NaiveDate::from_ymd_opt(request.year as i32, request.month + 1, 1)
+    };
+    
+    let end_of_month = match next_month {
+        Some(date) => date.pred_opt().unwrap(),
+        None => return (StatusCode::BAD_REQUEST, "Invalid month/year").into_response(),
+    };
+    
+    let start_date = start_of_month.and_time(NaiveTime::from_hms_opt(0, 0, 0).unwrap())
+        .format("%Y-%m-%dT%H:%M:%SZ").to_string();
+    let end_date = end_of_month.and_time(NaiveTime::from_hms_opt(23, 59, 59).unwrap())
+        .format("%Y-%m-%dT%H:%M:%SZ").to_string();
+
+    // Get transactions for the specific month - include future allowances for this month
+    match state.transaction_service.list_transactions(TransactionListRequest {
+        after: None,
+        limit: Some(1000), // Get enough transactions for calendar calculations
+        start_date: Some(start_date),
+        end_date: Some(end_date),
+    }).await {
         Ok(transactions_response) => {
             let calendar_month = state.calendar_service.generate_calendar_month(
                 request.month,
