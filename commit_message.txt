@@ -1,0 +1,5 @@
+feat(frontend): Refresh calendar data on new transaction
+
+The calendar view now correctly updates when a new transaction is added via the "Add Money" or "Spend Money" forms.
+
+This was achieved by creating a unified `refresh_all_data` callback in the main `App` component that refreshes both the transaction list and the calendar data. This callback is now passed to the money management forms. 

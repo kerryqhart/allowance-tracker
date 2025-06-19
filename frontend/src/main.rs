@@ -38,6 +38,16 @@ fn app() -> Html {
     let calendar = use_calendar(&api_client, active_child.state.child_change_trigger);
     let allowance = use_allowance();
     
+    let refresh_all_data = {
+        let refresh_transactions = transactions.actions.refresh_transactions.clone();
+        let refresh_calendar = calendar.actions.refresh_calendar.clone();
+        Callback::from(move |_| {
+            gloo::console::log!("Refreshing all data (transactions and calendar)");
+            refresh_transactions.emit(());
+            refresh_calendar.emit(());
+        })
+    };
+    
     // Connection status for parent info
     let backend_connected = use_state(|| false);
     let backend_endpoint = use_state(|| String::from("Checking..."));
@@ -226,7 +236,7 @@ fn app() -> Html {
                             on_spend_amount_change={transactions.actions.on_spend_amount_change.clone()}
                             on_spend_submit={Callback::from(|_| {})} // Dummy callback - using FormData instead
                             on_debug={Callback::from(|_: String| {})} // Dummy callback
-                            on_refresh={transactions.actions.refresh_transactions.clone()}
+                            on_refresh={refresh_all_data.clone()}
                         />
 
                         <AddMoneyForm 
@@ -240,7 +250,7 @@ fn app() -> Html {
                             on_amount_change={transactions.actions.on_amount_change.clone()}
                             on_submit={Callback::from(|_| {})} // Dummy callback - using FormData instead
                             on_debug={Callback::from(|_: String| {})} // Dummy callback
-                            on_refresh={transactions.actions.refresh_transactions.clone()}
+                            on_refresh={refresh_all_data.clone()}
                         />
 
 
