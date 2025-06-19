@@ -5,11 +5,14 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use log::{error, info};
+use log::{error, info, warn};
 use serde::Deserialize;
 
 use crate::backend::AppState;
-use shared::{CalendarMonthRequest, TransactionListRequest, UpdateCalendarFocusRequest};
+use shared::{
+    CalendarMonth, CalendarFocusDate, UpdateCalendarFocusRequest, UpdateCalendarFocusResponse,
+    CurrentDateResponse, TransactionListRequest, TransactionListResponse, PaginationInfo,
+};
 use chrono::{NaiveDate, NaiveTime};
 
 // Query parameters for calendar month API
@@ -36,7 +39,7 @@ async fn get_calendar_month(
 ) -> impl IntoResponse {
     info!("GET /api/calendar/month - query: {:?}", query);
 
-    let request = CalendarMonthRequest {
+    let request = CalendarMonthQuery {
         month: query.month,
         year: query.year,
     };
@@ -64,26 +67,73 @@ async fn get_calendar_month(
     let end_date = end_of_month.and_time(NaiveTime::from_hms_opt(23, 59, 59).unwrap())
         .format("%Y-%m-%dT%H:%M:%SZ").to_string();
 
-    // Get transactions for the specific month - include future allowances for this month
-    match state.transaction_service.list_transactions(TransactionListRequest {
+    // Get transactions for this month (including future allowances)
+    let transaction_request = TransactionListRequest {
         after: None,
-        limit: Some(1000), // Get enough transactions for calendar calculations
+        limit: Some(1000),
         start_date: Some(start_date),
         end_date: Some(end_date),
-    }).await {
-        Ok(transactions_response) => {
-            let calendar_month = state.calendar_service.generate_calendar_month(
-                request.month,
-                request.year,
-                transactions_response.transactions,
-            );
-            (StatusCode::OK, Json(calendar_month)).into_response()
-        }
+    };
+
+    let transaction_response = match state.transaction_service.list_transactions(transaction_request).await {
+        Ok(response) => response,
         Err(e) => {
-            error!("Failed to fetch transactions for calendar: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, "Error generating calendar").into_response()
+            error!("Failed to get transactions for calendar: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Error getting transactions").into_response();
         }
+    };
+
+    let mut all_transactions = transaction_response.transactions;
+
+    // Also get the most recent transaction from before this month for starting balance calculation
+    // This is critical for proper balance calculation on days without transactions
+    let previous_month_end = if request.month == 1 {
+        format!("{:04}-12-31T23:59:59Z", request.year - 1)
+    } else {
+        let prev_month_days = state.calendar_service.days_in_month(request.month - 1, request.year);
+        format!("{:04}-{:02}-{:02}T23:59:59Z", request.year, request.month - 1, prev_month_days)
+    };
+
+    // Get the most recent transaction before this month (limit to 1, no date range start)
+    let previous_transaction_request = TransactionListRequest {
+        after: None,
+        limit: Some(1),
+        start_date: None, // No start date - get from all time
+        end_date: Some(previous_month_end), // Only transactions before this month
+    };
+
+    let previous_transaction_response = match state.transaction_service.list_transactions(previous_transaction_request).await {
+        Ok(response) => response,
+        Err(e) => {
+            warn!("Failed to get previous transactions for calendar starting balance: {}", e);
+            // Continue without previous transactions - starting balance will be 0
+            TransactionListResponse {
+                transactions: vec![],
+                pagination: PaginationInfo {
+                    has_more: false,
+                    next_cursor: None,
+                },
+            }
+        }
+    };
+
+    // Add the previous transaction if found (for balance calculation)
+    if !previous_transaction_response.transactions.is_empty() {
+        let prev_transaction = &previous_transaction_response.transactions[0];
+        info!("🗓️ STARTING BALANCE: Found previous transaction for {}/{}: {} on {} with balance ${:.2}", 
+              request.month, request.year, prev_transaction.id, prev_transaction.date, prev_transaction.balance);
+        all_transactions.push(prev_transaction.clone());
+    } else {
+        info!("🗓️ STARTING BALANCE: No previous transactions found before {}/{}, starting balance will be $0.00", 
+              request.month, request.year);
     }
+
+    let calendar_month = state.calendar_service.generate_calendar_month(
+        request.month,
+        request.year,
+        all_transactions,
+    );
+    (StatusCode::OK, Json(calendar_month)).into_response()
 }
 
 /// Get current date information from the backend

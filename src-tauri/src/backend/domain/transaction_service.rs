@@ -149,7 +149,7 @@ impl TransactionService {
         let mut db_transactions = self.transaction_repository.list_transactions(&active_child.id, query_limit, request.after.as_deref()).await?;
 
         // Generate future allowance transactions for the requested date range if specified
-        let future_allowances = if let (Some(start_date_str), Some(end_date_str)) = (&request.start_date, &request.end_date) {
+        let mut future_allowances = if let (Some(start_date_str), Some(end_date_str)) = (&request.start_date, &request.end_date) {
             // Parse the date strings to NaiveDate
             match (chrono::DateTime::parse_from_rfc3339(start_date_str), chrono::DateTime::parse_from_rfc3339(end_date_str)) {
                 (Ok(start_dt), Ok(end_dt)) => {
@@ -172,6 +172,27 @@ impl TransactionService {
             info!("No start_date/end_date specified, skipping future allowances");
             Vec::new()
         };
+
+        // Calculate proper balances for future allowances
+        if !future_allowances.is_empty() {
+            // Get the current balance from the latest real transaction
+            let current_balance = match self.transaction_repository.get_latest_transaction(&active_child.id).await? {
+                Some(latest) => latest.balance,
+                None => 0.0,
+            };
+
+            // Sort future allowances by date (chronological order)
+            future_allowances.sort_by(|a, b| a.date.cmp(&b.date));
+
+            // Calculate projected balances for future allowances
+            let mut running_balance = current_balance;
+            for future_allowance in &mut future_allowances {
+                running_balance += future_allowance.amount;
+                future_allowance.balance = running_balance;
+                info!("🔍 FUTURE BALANCE: Set future allowance {} balance to ${:.2}", 
+                     future_allowance.id, running_balance);
+            }
+        }
 
         // Combine database transactions with future allowances
         db_transactions.extend(future_allowances);

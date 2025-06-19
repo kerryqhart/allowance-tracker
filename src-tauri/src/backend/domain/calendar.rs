@@ -46,12 +46,9 @@ impl CalendarService {
         // Group all transactions by day for the current month
         let transactions_by_day = self.group_transactions_by_day(month, year, &all_transactions);
         
-        // Calculate daily balances (only use regular transactions, not future allowances)
-        let regular_transactions: Vec<Transaction> = all_transactions.iter()
-            .filter(|t| t.transaction_type != TransactionType::FutureAllowance)
-            .cloned()
-            .collect();
-        let daily_balances = self.calculate_daily_balances(month, year, &regular_transactions, days_in_month);
+        // Calculate daily balances using stored balances from ALL transactions (including future allowances)
+        // Future allowances now have proper projected balances calculated in the transaction service
+        let daily_balances = self.calculate_daily_balances(month, year, &all_transactions, days_in_month);
         
         let mut calendar_days = Vec::new();
         
@@ -158,7 +155,7 @@ impl CalendarService {
         transactions_by_day
     }
 
-    /// Calculate daily running balances for a month
+    /// Calculate daily balances using stored transaction balances (much simpler and more reliable)
     fn calculate_daily_balances(
         &self,
         month: u32,
@@ -168,32 +165,45 @@ impl CalendarService {
     ) -> HashMap<u32, f64> {
         let mut daily_balances: HashMap<u32, f64> = HashMap::new();
         
-        // Sort all transactions by date to get proper chronological order
+        // Group transactions by day
+        let transactions_by_day = self.group_transactions_by_day(month, year, transactions);
+        
+        // Find the starting balance for this month from the most recent previous transaction
         let mut sorted_transactions = transactions.to_vec();
         sorted_transactions.sort_by(|a, b| {
             let date_a = self.parse_transaction_date(&a.date).unwrap_or((0, 0, 0));
             let date_b = self.parse_transaction_date(&b.date).unwrap_or((0, 0, 0));
-            // Reverse chronological order (newest first)
-            date_b.cmp(&date_a)
+            date_b.cmp(&date_a) // Newest first
         });
         
-        // Find the balance at the start of this month
-        let mut current_balance = self.calculate_starting_balance_for_month(
-            month,
-            year,
-            &sorted_transactions,
-        );
+        let starting_balance = self.calculate_starting_balance_for_month(month, year, &sorted_transactions);
+        let mut previous_balance = starting_balance;
         
-        // Group transactions by day for this month
-        let transactions_by_day = self.group_transactions_by_day(month, year, transactions);
+        log::info!("🗓️ BALANCE DEBUG: Starting balance for {}/{}: ${:.2}", month, year, starting_balance);
         
-        // Calculate balance for each day
+        // For each day, find the latest transaction (chronologically) and use its balance
         for day in 1..=days_in_month {
             if let Some(day_transactions) = transactions_by_day.get(&day) {
-                let daily_change: f64 = day_transactions.iter().map(|t| t.amount).sum();
-                current_balance += daily_change;
+                // Find the transaction with the latest time on this day
+                let latest_transaction = day_transactions.iter()
+                    .max_by(|a, b| a.date.cmp(&b.date));
+                
+                if let Some(latest) = latest_transaction {
+                    // Use the stored balance from the latest transaction of the day
+                    daily_balances.insert(day, latest.balance);
+                    previous_balance = latest.balance;
+                    log::info!("🗓️ BALANCE DEBUG: Day {}: Using stored balance ${:.2} from transaction {}", 
+                              day, latest.balance, latest.id);
+                } else {
+                    // No transactions on this day, carry forward previous balance
+                    daily_balances.insert(day, previous_balance);
+                }
+            } else {
+                // No transactions on this day, carry forward previous balance
+                daily_balances.insert(day, previous_balance);
+                log::info!("🗓️ BALANCE DEBUG: Day {}: No transactions, using previous balance ${:.2}", 
+                          day, previous_balance);
             }
-            daily_balances.insert(day, current_balance);
         }
         
         daily_balances
@@ -206,18 +216,31 @@ impl CalendarService {
         year: u32,
         sorted_transactions: &[Transaction],
     ) -> f64 {
-        // Find first transaction of current month to calculate starting balance
+        // Find the most recent transaction BEFORE the start of the target month
+        // This gives us the balance at the end of the previous month
         for transaction in sorted_transactions {
             if let Some((t_year, t_month, _)) = self.parse_transaction_date(&transaction.date) {
-                if t_year == year && t_month == month {
-                    // This is a transaction in our target month
-                    // Work backwards to get starting balance
-                    return transaction.balance - transaction.amount;
+                // Check if this transaction is before the target month
+                let transaction_is_before_target = if t_year < year {
+                    true // Transaction is from a previous year
+                } else if t_year == year && t_month < month {
+                    true // Transaction is from earlier month in same year
+                } else {
+                    false // Transaction is from target month or later
+                };
+                
+                if transaction_is_before_target {
+                    // This is the most recent transaction before our target month
+                    // Return its balance (which represents the account balance after this transaction)
+                    log::info!("🗓️ BALANCE DEBUG: Found starting balance for {}/{}: ${:.2} from transaction on {}/{}/{}", 
+                              month, year, transaction.balance, t_month, t_year, transaction.id);
+                    return transaction.balance;
                 }
             }
         }
         
-        // No transactions found in this month, return 0 as default
+        // No transactions found before this month, starting balance is 0
+        log::info!("🗓️ BALANCE DEBUG: No transactions found before {}/{}, starting balance: $0.00", month, year);
         0.0
     }
 
