@@ -33,6 +33,15 @@ pub fn simple_calendar(props: &SimpleCalendarProps) -> Html {
     // API client
     let api_client = use_memo((), |_| ApiClient::new());
 
+    // Helper function to create tooltip text for transaction chips
+    let create_transaction_tooltip = |transaction: &shared::Transaction| -> String {
+        if transaction.amount >= 0.0 {
+            format!("Got money from {}", transaction.description)
+        } else {
+            format!("Spent on {}", transaction.description)
+        }
+    };
+
     // Helper function to refresh calendar month data
     let refresh_calendar_month_data = {
         let calendar_state = calendar_state.clone();
@@ -374,10 +383,25 @@ pub fn simple_calendar(props: &SimpleCalendarProps) -> Html {
                             // Show allowance chip if this is a future allowance day
                             {if show_allowance_chip {
                                 html! {
-                                    <div class="simple-calendar-allowance-chip">
-                                        <span class="transaction-amount">
-                                            {format!("+${:.0}", allowance_amount)}
-                                        </span>
+                                    <div class="transaction-tooltip">
+                                        <div class="simple-calendar-allowance-chip">
+                                            <span class="transaction-amount">
+                                                {format!("+${:.0}", allowance_amount)}
+                                            </span>
+                                        </div>
+                                        <div class="custom-tooltip allowance-border">
+                                            <div class="tooltip-header">
+                                                {"Upcoming allowance"}
+                                            </div>
+                                            <div class="tooltip-body">
+                                                <div class="tooltip-row">
+                                                    <span class="tooltip-label">{"Amount:"}</span>
+                                                    <span class="tooltip-value positive">
+                                                        {format!("+${:.2}", allowance_amount)}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
                                     </div>
                                 }
                             } else {
@@ -410,27 +434,46 @@ pub fn simple_calendar(props: &SimpleCalendarProps) -> Html {
                                 };
                                 
                                 html! {
-                                    <div class={final_chip_class} 
-                                         onclick={chip_click}>
-                                        {if props.delete_mode {
-                                            html! {
-                                                <input 
-                                                    type="checkbox" 
-                                                    class="transaction-checkbox"
-                                                    checked={is_selected}
-                                                    readonly=true
-                                                />
-                                            }
-                                        } else {
-                                            html! {}
-                                        }}
-                                        <span class="transaction-amount">
-                                            {if transaction.amount >= 0.0 {
-                                                format!("+${:.0}", transaction.amount)
+                                    <div class="transaction-tooltip">
+                                        <div class={final_chip_class} 
+                                             onclick={chip_click}>
+                                            {if props.delete_mode {
+                                                html! {
+                                                    <input 
+                                                        type="checkbox" 
+                                                        class="transaction-checkbox"
+                                                        checked={is_selected}
+                                                        readonly=true
+                                                    />
+                                                }
                                             } else {
-                                                format!("-${:.0}", transaction.amount.abs())
+                                                html! {}
                                             }}
-                                        </span>
+                                            <span class="transaction-amount">
+                                                {if transaction.amount >= 0.0 {
+                                                    format!("+${:.0}", transaction.amount)
+                                                } else {
+                                                    format!("-${:.0}", transaction.amount.abs())
+                                                }}
+                                            </span>
+                                        </div>
+                                        <div class={format!("custom-tooltip {}", if transaction.amount >= 0.0 { "income-border" } else { "spending-border" })}>
+                                            <div class="tooltip-header">
+                                                {create_transaction_tooltip(transaction)}
+                                            </div>
+                                            <div class="tooltip-body">
+                                                <div class="tooltip-row">
+                                                    <span class="tooltip-label">{"Amount:"}</span>
+                                                    <span class={format!("tooltip-value {}", if transaction.amount >= 0.0 { "positive" } else { "negative" })}>
+                                                        {if transaction.amount >= 0.0 {
+                                                            format!("+${:.2}", transaction.amount)
+                                                        } else {
+                                                            format!("-${:.2}", transaction.amount.abs())
+                                                        }}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
                                     </div>
                                 }
                             })}

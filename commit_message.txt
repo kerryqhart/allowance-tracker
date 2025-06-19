@@ -1,27 +1,12 @@
-feat: implement delete transactions functionality and fix calendar refresh
+feat: Add mouseover tooltips to calendar chips
 
-## New Features
-- **Delete Transactions Mode**: Added delete mode to settings menu with transaction selection
-- **Transaction Selection**: Checkboxes appear on transaction chips when in delete mode
-- **Bulk Delete**: Trashcan button with selection count for deleting multiple transactions
-- **Visual Feedback**: Selected transactions are highlighted with red border and scale effect
-
-## Bug Fixes
-- **Calendar Refresh Issue**: Fixed stale closure problem in calendar refresh callback
-  - Updated `use_callback` dependencies to include `calendar_state`
-  - Calendar now properly refreshes after add money, spend money, and delete operations
-  - Eliminated need for manual month navigation to see updated transactions
-
-## Technical Changes
-- Enhanced `SimpleCalendar` component with delete mode props and selection handling
-- Added delete mode state management in main app component
-- Fixed callback dependency issues that prevented proper calendar updates
-- Added comprehensive CSS styling for delete mode UI elements
-
-## UI/UX Improvements
-- Delete mode only shows on actual transaction chips (not future allowance indicators)
-- Smooth transitions and hover effects for transaction selection
-- Clear visual distinction between selected and unselected transactions
-- Proper z-index management for delete controls
-
-The calendar now updates immediately after any transaction changes, providing a seamless user experience. 
+- Add custom tooltips to transaction and allowance chips on calendar
+- Transaction tooltips show "Got money from [description]" for income
+- Transaction tooltips show "Spent on [description]" for spending  
+- Allowance tooltips show "Upcoming allowance"
+- Tooltips use glassy white background with frosted glass effect
+- Border colors match chip types: green for income/allowance, gray for spending
+- Allowance tooltips use dashed borders to match chip styling
+- Border thickness matches chips exactly (1.5px)
+- Amount colors coordinate with border colors for visual consistency
+- Enhanced UX with smooth animations and proper z-index stacking 

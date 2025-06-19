@@ -1159,10 +1159,10 @@
             bottom: calc(100% + 8px);
             left: 50%;
             transform: translateX(-50%);
-            background: rgba(0, 0, 0, 0.95);
-            color: white;
+            background: rgba(255, 255, 255, 0.85);
+            color: #333;
             padding: 0.75rem;
-            border-radius: 8px;
+            border-radius: 12px;
             font-size: 0.8rem;
             white-space: nowrap;
             z-index: 250;
@@ -1170,10 +1170,23 @@
             visibility: hidden;
             transition: all 0.3s ease;
             pointer-events: none;
-            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-            backdrop-filter: blur(10px);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.08);
+            backdrop-filter: blur(20px) saturate(180%);
+            -webkit-backdrop-filter: blur(20px) saturate(180%);
             min-width: 200px;
-            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        /* Tooltip border variations to match chip styles */
+        .custom-tooltip.income-border {
+            border: 1.5px solid #4CAF50;
+        }
+
+        .custom-tooltip.allowance-border {
+            border: 1.5px dashed #4CAF50;
+        }
+
+        .custom-tooltip.spending-border {
+            border: 1.5px solid #718096;
         }
 
         .custom-tooltip::after {
@@ -1183,7 +1196,20 @@
             left: 50%;
             transform: translateX(-50%);
             border: 6px solid transparent;
-            border-top-color: rgba(0, 0, 0, 0.9);
+            border-top-color: rgba(255, 255, 255, 0.85);
+        }
+
+        /* Tooltip arrow variations to match border colors */
+        .custom-tooltip.income-border::after {
+            border-top-color: #4CAF50;
+        }
+
+        .custom-tooltip.allowance-border::after {
+            border-top-color: #4CAF50;
+        }
+
+        .custom-tooltip.spending-border::after {
+            border-top-color: #718096;
         }
 
         .transaction-tooltip:hover .custom-tooltip {
@@ -1195,8 +1221,9 @@
         .tooltip-header {
             margin-bottom: 0.5rem;
             padding-bottom: 0.5rem;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+            border-bottom: 1px solid rgba(0, 0, 0, 0.1);
             text-align: center;
+            font-weight: 600;
         }
 
         .tooltip-body {
@@ -1228,7 +1255,7 @@
         }
 
         .tooltip-value.negative {
-            color: #E57373; /* Softer red for negative values */
+            color: #718096; /* Match the gray border color for spending */
         }
 
         /* Delete Mode Styles */
