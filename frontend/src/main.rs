@@ -3,7 +3,6 @@ use wasm_bindgen_futures::spawn_local;
 
 use hooks::{
     use_transactions::use_transactions,
-    use_calendar::use_calendar,
     use_active_child::use_active_child,
     use_allowance::use_allowance,
 };
@@ -15,7 +14,6 @@ use services::{
     api::ApiClient,
 };
 use components::{
-    calendar::Calendar,
     simple_calendar::SimpleCalendar,
     transactions::transaction_table::TransactionTable,
     forms::{
@@ -35,7 +33,6 @@ fn app() -> Html {
     // Use custom hooks for data management
     let active_child = use_active_child(&api_client);
     let transactions = use_transactions(&api_client, active_child.state.child_change_trigger);
-    let calendar = use_calendar(&api_client, active_child.state.child_change_trigger);
     let allowance = use_allowance();
     
     // Calendar refresh trigger - increment when transactions change
@@ -43,12 +40,10 @@ fn app() -> Html {
     
     let refresh_all_data = {
         let refresh_transactions = transactions.actions.refresh_transactions.clone();
-        let refresh_calendar = calendar.actions.refresh_calendar.clone();
         let calendar_refresh_trigger = calendar_refresh_trigger.clone();
-        Callback::from(move |_| {
+        Callback::from(move |_: ()| {
             gloo::console::log!("Refreshing all data (transactions and calendar)");
             refresh_transactions.emit(());
-            refresh_calendar.emit(());
             calendar_refresh_trigger.set(*calendar_refresh_trigger + 1);
         })
     };
@@ -92,10 +87,9 @@ fn app() -> Html {
         let delete_mode = delete_mode.clone();
         let api_client = api_client.clone();
         let refresh_transactions = transactions.actions.refresh_transactions.clone();
-        let refresh_calendar = calendar.actions.refresh_calendar.clone();
         let calendar_refresh_trigger = calendar_refresh_trigger.clone();
         
-        Callback::from(move |_| {
+        Callback::from(move |_: ()| {
             let selected_ids = (*selected_transactions).clone();
             if selected_ids.is_empty() {
                 return;
@@ -105,7 +99,6 @@ fn app() -> Html {
             let selected_transactions = selected_transactions.clone();
             let delete_mode = delete_mode.clone();
             let refresh_transactions = refresh_transactions.clone();
-            let refresh_calendar = refresh_calendar.clone();
             let calendar_refresh_trigger = calendar_refresh_trigger.clone();
             
             spawn_local(async move {
@@ -126,7 +119,6 @@ fn app() -> Html {
                         
                         // Refresh data to show updated state
                         refresh_transactions.emit(());
-                        refresh_calendar.emit(());
                         calendar_refresh_trigger.set(*calendar_refresh_trigger + 1);
                     }
                     Err(e) => {
@@ -194,45 +186,10 @@ fn app() -> Html {
 
             <main class="main">
                 <div class="container">
-                    // Simple test calendar above the existing one
+                    // Calendar with transaction chips and allowance indicators
                     <SimpleCalendar refresh_trigger={*calendar_refresh_trigger} />
                     
-                    <section class="calendar-section">
-                        {if calendar.state.loading {
-                            html! { 
-                                <div class="loading">
-                                    {"Loading Calendar State from Backend..."}
-                                </div> 
-                            }
-                        } else if let Some(error) = &calendar.state.error_message {
-                            html! {
-                                <div class="error-banner" style="background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%); color: white; padding: 1rem; border-radius: 8px; margin-bottom: 1rem; text-align: center;">
-                                    <div style="font-weight: bold; margin-bottom: 0.5rem;">{"Calendar Error:"}</div>
-                                    <div>{error}</div>
-                                </div>
-                            }
-                        } else if let Some(cal_data) = calendar.state.calendar_data.as_ref() {
-                            html! {
-                                <Calendar 
-                                    calendar_data={cal_data.clone()} 
-                                    delete_mode={*delete_mode}
-                                    selected_transactions={(*selected_transactions).clone()}
-                                    on_toggle_transaction_selection={toggle_transaction_selection.clone()}
-                                    on_delete_selected={delete_selected_transactions.clone()}
-                                    allowance_config={(*allowance).config.clone()}
-                                    on_previous_month={calendar.actions.previous_month.clone()}
-                                    on_next_month={calendar.actions.next_month.clone()}
-                                    current_date={calendar.state.current_date.clone()}
-                                />
-                            }
-                        } else {
-                            html! { 
-                                <div class="loading">
-                                    {"No Calendar Data Available"}
-                                </div> 
-                            }
-                        }}
-                    </section>
+                    // Legacy calendar section removed - now using SimpleCalendar above
 
                     <TransactionTable 
                         transactions={transactions.state.formatted_transactions.clone()} 
