@@ -5,7 +5,7 @@ use shared::{
     ParentalControlRequest, ParentalControlResponse, CreateChildRequest, ChildResponse,
     SetActiveChildRequest, SetActiveChildResponse, ActiveChildResponse, ChildListResponse,
     GetAllowanceConfigRequest, GetAllowanceConfigResponse, UpdateAllowanceConfigRequest, UpdateAllowanceConfigResponse,
-    CurrentDateResponse
+    CurrentDateResponse, CalendarFocusDate, UpdateCalendarFocusRequest, UpdateCalendarFocusResponse
 };
 
 /// API client for communicating with the backend server
@@ -317,7 +317,7 @@ impl ApiClient {
 
     /// Update allowance configuration
     pub async fn update_allowance_config(&self, request: UpdateAllowanceConfigRequest) -> Result<UpdateAllowanceConfigResponse, String> {
-        let url = format!("{}/api/allowance", self.base_url);
+        let url = format!("{}/api/allowance/config", self.base_url);
         
         match Request::post(&url)
             .json(&request)
@@ -336,6 +336,103 @@ impl ApiClient {
                     let error_text = response.text().await
                         .unwrap_or_else(|_| "Unknown error".to_string());
                     Err(format!("Server error {}: {}", status, error_text))
+                }
+            }
+            Err(e) => Err(format!("Network error: {}", e)),
+        }
+    }
+
+    /// Get the current calendar focus date
+    pub async fn get_focus_date(&self) -> Result<CalendarFocusDate, String> {
+        let url = format!("{}/api/calendar/focus-date", self.base_url);
+        
+        match Request::get(&url).send().await {
+            Ok(response) => {
+                if response.ok() {
+                    match response.json::<CalendarFocusDate>().await {
+                        Ok(data) => Ok(data),
+                        Err(e) => Err(format!("Failed to parse focus date: {}", e)),
+                    }
+                } else {
+                    let error_text = response.text().await
+                        .unwrap_or_else(|_| "Unknown error".to_string());
+                    Err(error_text)
+                }
+            }
+            Err(e) => Err(format!("Failed to fetch focus date: {}", e)),
+        }
+    }
+
+    /// Set the calendar focus date
+    pub async fn set_focus_date(&self, month: u32, year: u32) -> Result<UpdateCalendarFocusResponse, String> {
+        let url = format!("{}/api/calendar/focus-date", self.base_url);
+        
+        let request_body = UpdateCalendarFocusRequest { month, year };
+
+        match Request::post(&url)
+            .json(&request_body)
+            .map_err(|e| format!("Failed to serialize request: {}", e))?
+            .send()
+            .await
+        {
+            Ok(response) => {
+                if response.ok() {
+                    match response.json::<UpdateCalendarFocusResponse>().await {
+                        Ok(data) => Ok(data),
+                        Err(e) => Err(format!("Failed to parse response: {}", e)),
+                    }
+                } else {
+                    let error_text = response.text().await
+                        .unwrap_or_else(|_| "Unknown error".to_string());
+                    Err(error_text)
+                }
+            }
+            Err(e) => Err(format!("Network error: {}", e)),
+        }
+    }
+
+    /// Navigate to the previous month
+    pub async fn navigate_previous_month(&self) -> Result<UpdateCalendarFocusResponse, String> {
+        let url = format!("{}/api/calendar/focus-date/previous", self.base_url);
+        
+        match Request::post(&url)
+            .send()
+            .await
+        {
+            Ok(response) => {
+                if response.ok() {
+                    match response.json::<UpdateCalendarFocusResponse>().await {
+                        Ok(data) => Ok(data),
+                        Err(e) => Err(format!("Failed to parse response: {}", e)),
+                    }
+                } else {
+                    let error_text = response.text().await
+                        .unwrap_or_else(|_| "Unknown error".to_string());
+                    Err(error_text)
+                }
+            }
+            Err(e) => Err(format!("Network error: {}", e)),
+        }
+    }
+
+    /// Navigate to the next month
+    pub async fn navigate_next_month(&self) -> Result<UpdateCalendarFocusResponse, String> {
+        let url = format!("{}/api/calendar/focus-date/next", self.base_url);
+        
+        match Request::post(&url)
+            .send()
+            .await
+        {
+            Ok(response) => {
+                if response.ok() {
+                    match response.json::<UpdateCalendarFocusResponse>().await {
+                        Ok(data) => Ok(data),
+                        Err(e) => Err(format!("Failed to parse response: {}", e)),
+                    }
+                } else {
+                    let error_text = response.text().await
+                        .unwrap_or_else(|_| "Unknown error".to_string());
+                    Err(error_text)
                 }
             }
             Err(e) => Err(format!("Network error: {}", e)),

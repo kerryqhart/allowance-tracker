@@ -16,6 +16,7 @@ use services::{
 };
 use components::{
     calendar::Calendar,
+    simple_calendar::SimpleCalendar,
     transactions::transaction_table::TransactionTable,
     forms::{
         add_money_form::AddMoneyForm,
@@ -185,8 +186,24 @@ fn app() -> Html {
 
             <main class="main">
                 <div class="container">
+                    // Simple test calendar above the existing one
+                    <SimpleCalendar />
+                    
                     <section class="calendar-section">
-                        {if let Some(cal_data) = calendar.state.calendar_data.as_ref() {
+                        {if calendar.state.loading {
+                            html! { 
+                                <div class="loading">
+                                    {"Loading Calendar State from Backend..."}
+                                </div> 
+                            }
+                        } else if let Some(error) = &calendar.state.error_message {
+                            html! {
+                                <div class="error-banner" style="background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%); color: white; padding: 1rem; border-radius: 8px; margin-bottom: 1rem; text-align: center;">
+                                    <div style="font-weight: bold; margin-bottom: 0.5rem;">{"Calendar Error:"}</div>
+                                    <div>{error}</div>
+                                </div>
+                            }
+                        } else if let Some(cal_data) = calendar.state.calendar_data.as_ref() {
                             html! {
                                 <Calendar 
                                     calendar_data={cal_data.clone()} 
@@ -201,7 +218,11 @@ fn app() -> Html {
                                 />
                             }
                         } else {
-                            html! { <div class="loading">{"Loading Calendar..."}</div> }
+                            html! { 
+                                <div class="loading">
+                                    {"No Calendar Data Available"}
+                                </div> 
+                            }
                         }}
                     </section>
 

@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use chrono::Datelike;
 
 /// Transaction ID in format: "transaction::<income|expense>::epoch_millis"
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -74,6 +75,37 @@ pub struct CalendarDay {
 pub struct CalendarMonthRequest {
     pub month: u32,
     pub year: u32,
+}
+
+/// Represents the current focus date for calendar navigation
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CalendarFocusDate {
+    pub month: u32,
+    pub year: u32,
+}
+
+impl Default for CalendarFocusDate {
+    fn default() -> Self {
+        let now = chrono::Local::now();
+        Self {
+            month: now.month(),
+            year: now.year() as u32,
+        }
+    }
+}
+
+/// Request to update the calendar focus date
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct UpdateCalendarFocusRequest {
+    pub month: u32,
+    pub year: u32,
+}
+
+/// Response after updating calendar focus date
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct UpdateCalendarFocusResponse {
+    pub focus_date: CalendarFocusDate,
+    pub success_message: String,
 }
 
 /// Represents a formatted transaction for display purposes

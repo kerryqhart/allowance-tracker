@@ -43,13 +43,10 @@ pub fn calendar(props: &CalendarProps) -> Html {
     let next_click_count = use_state(|| 0u32);
     let last_update_time = use_state(|| "never".to_string());
     
-    let on_previous_month_click = {
-        let on_previous_month = props.on_previous_month.clone();
-        let flash_color = flash_color.clone();
-        let prev_click_count = prev_click_count.clone();
-        let last_update_time = last_update_time.clone();
-        Callback::from(move |_| {
-            let new_count = *prev_click_count + 1;
+    let on_previous_month_click = use_callback(
+        (props.on_previous_month.clone(), flash_color.clone(), prev_click_count.clone(), last_update_time.clone()),
+        move |_: MouseEvent, (on_previous_month, flash_color, prev_click_count, last_update_time)| {
+            let new_count = **prev_click_count + 1;
             prev_click_count.set(new_count);
             last_update_time.set(format!("PREV-{}", new_count));
             
@@ -64,16 +61,13 @@ pub fn calendar(props: &CalendarProps) -> Html {
             });
             
             on_previous_month.emit(());
-        })
-    };
+        }
+    );
 
-    let on_next_month_click = {
-        let on_next_month = props.on_next_month.clone();
-        let flash_color = flash_color.clone();
-        let next_click_count = next_click_count.clone();
-        let last_update_time = last_update_time.clone();
-        Callback::from(move |_| {
-            let new_count = *next_click_count + 1;
+    let on_next_month_click = use_callback(
+        (props.on_next_month.clone(), flash_color.clone(), next_click_count.clone(), last_update_time.clone()),
+        move |_: MouseEvent, (on_next_month, flash_color, next_click_count, last_update_time)| {
+            let new_count = **next_click_count + 1;
             next_click_count.set(new_count);
             last_update_time.set(format!("NEXT-{}", new_count));
             
@@ -88,8 +82,8 @@ pub fn calendar(props: &CalendarProps) -> Html {
             });
             
             on_next_month.emit(());
-        })
-    };
+        }
+    );
     
     // Helper function to determine if a day should show allowance indicator
     let is_allowance_day = |day: u32| -> bool {

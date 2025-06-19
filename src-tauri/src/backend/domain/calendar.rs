@@ -5,18 +5,25 @@
 //! only handle presentation concerns, while all calendar computations
 //! and business rules are handled here.
 
-use shared::{Transaction, CalendarMonth, CalendarDay, CurrentDateResponse};
+use shared::{Transaction, CalendarMonth, CalendarDay, CurrentDateResponse, CalendarFocusDate};
 use std::collections::HashMap;
 use chrono::{Local, Datelike};
+use std::sync::{Arc, Mutex};
 
 /// Calendar service that handles all calendar-related business logic
 #[derive(Clone)]
-pub struct CalendarService;
+pub struct CalendarService {
+    /// Current focus date for calendar navigation (month/year only)
+    /// This is kept in memory and not persisted to database
+    current_focus_date: Arc<Mutex<CalendarFocusDate>>,
+}
 
 impl CalendarService {
     /// Create a new CalendarService instance
     pub fn new() -> Self {
-        Self
+        Self {
+            current_focus_date: Arc::new(Mutex::new(CalendarFocusDate::default())),
+        }
     }
 
     /// Generate a calendar month view with transaction data
@@ -260,6 +267,45 @@ impl CalendarService {
             iso_date,
         }
     }
+
+    /// Get the current focus date for calendar navigation
+    pub fn get_focus_date(&self) -> CalendarFocusDate {
+        self.current_focus_date.lock().unwrap().clone()
+    }
+
+    /// Set the focus date for calendar navigation
+    pub fn set_focus_date(&self, month: u32, year: u32) -> Result<CalendarFocusDate, String> {
+        if month < 1 || month > 12 {
+            return Err(format!("Invalid month: {}. Must be between 1 and 12", month));
+        }
+        
+        let new_focus_date = CalendarFocusDate { month, year };
+        
+        {
+            let mut focus_date = self.current_focus_date.lock().unwrap();
+            *focus_date = new_focus_date.clone();
+        }
+        
+        Ok(new_focus_date)
+    }
+
+    /// Navigate to the previous month
+    pub fn navigate_previous_month(&self) -> CalendarFocusDate {
+        let current_focus = self.get_focus_date();
+        let (prev_month, prev_year) = self.previous_month(current_focus.month, current_focus.year);
+        
+        // This should never fail since previous_month returns valid values
+        self.set_focus_date(prev_month, prev_year).unwrap()
+    }
+
+    /// Navigate to the next month  
+    pub fn navigate_next_month(&self) -> CalendarFocusDate {
+        let current_focus = self.get_focus_date();
+        let (next_month, next_year) = self.next_month(current_focus.month, current_focus.year);
+        
+        // This should never fail since next_month returns valid values
+        self.set_focus_date(next_month, next_year).unwrap()
+    }
 }
 
 impl Default for CalendarService {
@@ -394,5 +440,79 @@ mod tests {
         assert_eq!(grouped.get(&1).unwrap().len(), 2); // Day 1 has 2 transactions
         assert_eq!(grouped.get(&15).unwrap().len(), 1); // Day 15 has 1 transaction
         assert!(grouped.get(&30).is_none()); // Different month transaction not included
+    }
+
+    #[test]
+    fn test_get_focus_date() {
+        let service = CalendarService::new();
+        
+        // Should return current month/year by default
+        let focus_date = service.get_focus_date();
+        assert!(focus_date.month >= 1 && focus_date.month <= 12);
+        assert!(focus_date.year >= 2025); // Assuming we're in 2025 or later
+    }
+
+    #[test]
+    fn test_set_focus_date() {
+        let service = CalendarService::new();
+        
+        // Test valid date
+        let result = service.set_focus_date(6, 2025);
+        assert!(result.is_ok());
+        let focus_date = result.unwrap();
+        assert_eq!(focus_date.month, 6);
+        assert_eq!(focus_date.year, 2025);
+        
+        // Verify it's actually set
+        let retrieved = service.get_focus_date();
+        assert_eq!(retrieved.month, 6);
+        assert_eq!(retrieved.year, 2025);
+        
+        // Test invalid month
+        let result = service.set_focus_date(13, 2025);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Invalid month"));
+        
+        let result = service.set_focus_date(0, 2025);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Invalid month"));
+    }
+
+    #[test]
+    fn test_navigate_previous_month() {
+        let service = CalendarService::new();
+        
+        // Set to June 2025
+        service.set_focus_date(6, 2025).unwrap();
+        
+        // Navigate to previous month
+        let focus_date = service.navigate_previous_month();
+        assert_eq!(focus_date.month, 5);
+        assert_eq!(focus_date.year, 2025);
+        
+        // Test year rollover
+        service.set_focus_date(1, 2025).unwrap();
+        let focus_date = service.navigate_previous_month();
+        assert_eq!(focus_date.month, 12);
+        assert_eq!(focus_date.year, 2024);
+    }
+
+    #[test]
+    fn test_navigate_next_month() {
+        let service = CalendarService::new();
+        
+        // Set to June 2025
+        service.set_focus_date(6, 2025).unwrap();
+        
+        // Navigate to next month
+        let focus_date = service.navigate_next_month();
+        assert_eq!(focus_date.month, 7);
+        assert_eq!(focus_date.year, 2025);
+        
+        // Test year rollover
+        service.set_focus_date(12, 2025).unwrap();
+        let focus_date = service.navigate_next_month();
+        assert_eq!(focus_date.month, 1);
+        assert_eq!(focus_date.year, 2026);
     }
 } 
