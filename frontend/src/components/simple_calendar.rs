@@ -289,14 +289,21 @@ pub fn simple_calendar(props: &SimpleCalendarProps) -> Html {
                 return false;
             }
             
-            // Calculate day of week for this day (0 = Sunday, 1 = Monday, ..., 6 = Saturday)
-            let a = (14 - month) / 12;
-            let y = year - a;
-            let m = month + 12 * a - 2;
-            let day_of_week = (day + y + y / 4 - y / 100 + y / 400 + (31 * m) / 12) % 7;
+            // Use chrono to get the correct day of week
+            use chrono::{NaiveDate, Datelike};
             
-            // Check if this day matches the configured allowance day of week
-            if day_of_week as u8 != config.day_of_week {
+            // Create a date and get the day of week
+            if let Some(date) = NaiveDate::from_ymd_opt(year as i32, month, day) {
+                // chrono's weekday(): Monday = 1, ..., Sunday = 7
+                // Our format: Sunday = 0, Monday = 1, ..., Saturday = 6
+                let chrono_weekday = date.weekday().num_days_from_sunday() as u8;
+                
+                // Check if this day matches the configured allowance day of week
+                if chrono_weekday != config.day_of_week {
+                    return false;
+                }
+            } else {
+                // Invalid date, don't show allowance
                 return false;
             }
             

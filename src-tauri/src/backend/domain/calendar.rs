@@ -91,18 +91,17 @@ impl CalendarService {
 
     /// Get the first day of month (0 = Sunday, 1 = Monday, etc.)
     pub fn first_day_of_month(&self, month: u32, year: u32) -> u32 {
-        // Calculate using Zeller's congruence or similar algorithm
-        // This is a simplified calculation - in production, consider using a proper date library
-        let days_since_epoch = (year - 1970) * 365 + (year - 1969) / 4 - (year - 1901) / 100 + (year - 1601) / 400;
-        let days_in_months = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334];
-        let mut total_days = days_since_epoch + days_in_months[(month - 1) as usize];
+        // Use chrono to get the correct first day of month
+        use chrono::{NaiveDate, Datelike};
         
-        // Add leap day if current year is leap and month > February
-        if month > 2 && self.is_leap_year(year) {
-            total_days += 1;
+        if let Some(date) = NaiveDate::from_ymd_opt(year as i32, month, 1) {
+            // chrono's weekday(): Monday = 1, ..., Sunday = 7
+            // Our format: Sunday = 0, Monday = 1, ..., Saturday = 6
+            date.weekday().num_days_from_sunday()
+        } else {
+            // Invalid date, fallback to 0 (Sunday)
+            0
         }
-        
-        (total_days + 4) % 7 // January 1, 1970 was a Thursday (4)
     }
 
     /// Get the human-readable name for a month number
