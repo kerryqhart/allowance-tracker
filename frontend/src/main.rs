@@ -38,13 +38,18 @@ fn app() -> Html {
     let calendar = use_calendar(&api_client, active_child.state.child_change_trigger);
     let allowance = use_allowance();
     
+    // Calendar refresh trigger - increment when transactions change
+    let calendar_refresh_trigger = use_state(|| 0u32);
+    
     let refresh_all_data = {
         let refresh_transactions = transactions.actions.refresh_transactions.clone();
         let refresh_calendar = calendar.actions.refresh_calendar.clone();
+        let calendar_refresh_trigger = calendar_refresh_trigger.clone();
         Callback::from(move |_| {
             gloo::console::log!("Refreshing all data (transactions and calendar)");
             refresh_transactions.emit(());
             refresh_calendar.emit(());
+            calendar_refresh_trigger.set(*calendar_refresh_trigger + 1);
         })
     };
     
@@ -88,6 +93,7 @@ fn app() -> Html {
         let api_client = api_client.clone();
         let refresh_transactions = transactions.actions.refresh_transactions.clone();
         let refresh_calendar = calendar.actions.refresh_calendar.clone();
+        let calendar_refresh_trigger = calendar_refresh_trigger.clone();
         
         Callback::from(move |_| {
             let selected_ids = (*selected_transactions).clone();
@@ -100,6 +106,7 @@ fn app() -> Html {
             let delete_mode = delete_mode.clone();
             let refresh_transactions = refresh_transactions.clone();
             let refresh_calendar = refresh_calendar.clone();
+            let calendar_refresh_trigger = calendar_refresh_trigger.clone();
             
             spawn_local(async move {
                 let request = shared::DeleteTransactionsRequest {
@@ -120,6 +127,7 @@ fn app() -> Html {
                         // Refresh data to show updated state
                         refresh_transactions.emit(());
                         refresh_calendar.emit(());
+                        calendar_refresh_trigger.set(*calendar_refresh_trigger + 1);
                     }
                     Err(e) => {
                         gloo::console::error!("Failed to delete transactions:", &e);
@@ -187,7 +195,7 @@ fn app() -> Html {
             <main class="main">
                 <div class="container">
                     // Simple test calendar above the existing one
-                    <SimpleCalendar />
+                    <SimpleCalendar refresh_trigger={*calendar_refresh_trigger} />
                     
                     <section class="calendar-section">
                         {if calendar.state.loading {

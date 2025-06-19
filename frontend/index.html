@@ -860,6 +860,48 @@
             opacity: 1;
         }
 
+        .simple-calendar-transaction-chip {
+            font-size: 0.7rem;
+            font-weight: 600;
+            padding: 0.15rem 0.3rem;
+            border-radius: 8px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            background: white;
+            border: 1.5px solid;
+            opacity: 0.9;
+            margin-bottom: 0.1rem;
+        }
+
+        .simple-calendar-transaction-chip:hover {
+            transform: scale(1.05);
+            background: rgba(0, 0, 0, 0.02);
+            opacity: 1;
+        }
+
+        .simple-calendar-transaction-chip.positive {
+            border-color: #4CAF50;
+            color: #4CAF50;
+        }
+
+        .simple-calendar-transaction-chip.negative {
+            border-color: #718096;
+            color: #718096;
+        }
+
+        .simple-calendar-more-indicator {
+            font-size: 0.6rem;
+            font-weight: 500;
+            padding: 0.1rem 0.2rem;
+            border-radius: 6px;
+            text-align: center;
+            background: rgba(102, 126, 234, 0.1);
+            color: #667eea;
+            border: 1px dashed #667eea;
+            opacity: 0.7;
+        }
+
         .calendar-header-container {
             padding: 1rem 1rem 0.5rem 1rem;
             border-bottom: 1px solid rgba(0, 0, 0, 0.08);

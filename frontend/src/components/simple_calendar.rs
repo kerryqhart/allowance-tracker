@@ -1,14 +1,21 @@
 use yew::prelude::*;
-use shared::{CalendarFocusDate, CurrentDateResponse, AllowanceConfig, GetAllowanceConfigRequest};
+use shared::{CalendarFocusDate, CurrentDateResponse, AllowanceConfig, GetAllowanceConfigRequest, CalendarMonth};
 use crate::services::api::ApiClient;
 use wasm_bindgen_futures::spawn_local;
 
+#[derive(Properties, PartialEq)]
+pub struct SimpleCalendarProps {
+    #[prop_or(0)]
+    pub refresh_trigger: u32,
+}
+
 #[function_component(SimpleCalendar)]
-pub fn simple_calendar() -> Html {
+pub fn simple_calendar(props: &SimpleCalendarProps) -> Html {
     // State for current month/year from backend
     let calendar_state = use_state(|| Option::<CalendarFocusDate>::None);
     let current_date = use_state(|| Option::<CurrentDateResponse>::None);
     let allowance_config = use_state(|| Option::<AllowanceConfig>::None);
+    let calendar_month_data = use_state(|| Option::<CalendarMonth>::None);
     let is_loading = use_state(|| true);
     let error_message = use_state(|| Option::<String>::None);
     
@@ -18,76 +25,101 @@ pub fn simple_calendar() -> Html {
     // API client
     let api_client = use_memo((), |_| ApiClient::new());
 
-    // Load initial focus date, current date, and allowance config from backend
+    // Helper function to refresh calendar month data
+    let refresh_calendar_month_data = {
+        let calendar_state = calendar_state.clone();
+        let calendar_month_data = calendar_month_data.clone();
+        let api_client = api_client.clone();
+        
+        use_callback((), move |_, _| {
+            let calendar_state = calendar_state.clone();
+            let calendar_month_data = calendar_month_data.clone();
+            let api_client = api_client.clone();
+            
+            spawn_local(async move {
+                if let Some(focus_date) = (*calendar_state).as_ref() {
+                    match (*api_client).get_calendar_month(focus_date.month, focus_date.year).await {
+                        Ok(calendar_month) => {
+                            gloo::console::log!(&format!("Refreshed calendar month data with {} days", calendar_month.days.len()));
+                            calendar_month_data.set(Some(calendar_month));
+                        }
+                        Err(e) => {
+                            gloo::console::warn!(&format!("Failed to refresh calendar month data: {}", e));
+                        }
+                    }
+                }
+            });
+        })
+    };
+
+    // Load initial focus date, current date, allowance config, and calendar month data from backend
     {
         let calendar_state = calendar_state.clone();
         let current_date = current_date.clone();
         let allowance_config = allowance_config.clone();
+        let calendar_month_data = calendar_month_data.clone();
         let is_loading = is_loading.clone();
         let error_message = error_message.clone();
         let api_client = api_client.clone();
         
         use_effect_with((), move |_| {
             spawn_local(async move {
-                // Fetch focus date, current date, and allowance config
+                // Fetch focus date, current date, and allowance config first
                 let focus_date_result = (*api_client).get_focus_date().await;
                 let current_date_result = (*api_client).get_current_date().await;
                 let allowance_result = (*api_client).get_allowance_config(GetAllowanceConfigRequest { child_id: None }).await;
                 
-                // Handle all three API results
-                match (focus_date_result, current_date_result, allowance_result) {
-                    (Ok(focus_date), Ok(current_date_response), Ok(allowance_response)) => {
-                        gloo::console::log!(&format!("Loaded focus date: {}/{}, current date: {}/{}/{}, allowance: {:?}", 
+                // If we got focus date, also fetch calendar month data
+                let calendar_month_result = if let Ok(ref focus_date) = focus_date_result {
+                    (*api_client).get_calendar_month(focus_date.month, focus_date.year).await
+                } else {
+                    Err("No focus date available".to_string())
+                };
+                
+                // Handle all four API results
+                match (focus_date_result, current_date_result, allowance_result, calendar_month_result) {
+                    (Ok(focus_date), Ok(current_date_response), Ok(allowance_response), Ok(calendar_month)) => {
+                        gloo::console::log!(&format!("Loaded focus date: {}/{}, current date: {}/{}/{}, allowance: {:?}, calendar month with {} days", 
                             focus_date.month, focus_date.year,
                             current_date_response.month, current_date_response.day, current_date_response.year,
-                            allowance_response.allowance_config));
+                            allowance_response.allowance_config,
+                            calendar_month.days.len()));
                         calendar_state.set(Some(focus_date));
                         current_date.set(Some(current_date_response));
                         allowance_config.set(allowance_response.allowance_config);
+                        calendar_month_data.set(Some(calendar_month));
                         error_message.set(None);
                     }
-                    (Ok(focus_date), Ok(current_date_response), Err(allowance_error)) => {
-                        gloo::console::warn!(&format!("Failed to load allowance config: {}", allowance_error));
+                    (Ok(focus_date), Ok(current_date_response), Ok(allowance_response), Err(calendar_error)) => {
+                        gloo::console::warn!(&format!("Failed to load calendar month data: {}", calendar_error));
                         calendar_state.set(Some(focus_date));
                         current_date.set(Some(current_date_response));
-                        // Continue without allowance config - just won't show allowance chips
+                        allowance_config.set(allowance_response.allowance_config);
+                        // Continue without calendar month data - just won't show transaction chips
                         error_message.set(None);
                     }
-                    (Ok(focus_date), Err(current_date_error), Ok(allowance_response)) => {
-                        gloo::console::warn!(&format!("Failed to load current date: {}", current_date_error));
-                        calendar_state.set(Some(focus_date));
-                        allowance_config.set(allowance_response.allowance_config);
-                        // Continue without current date - just won't highlight today or filter future allowances properly
-                        error_message.set(None);
-                    }
-                    (Err(focus_date_error), Ok(current_date_response), Ok(allowance_response)) => {
-                        gloo::console::error!(&format!("Failed to load focus date: {}", focus_date_error));
-                        current_date.set(Some(current_date_response));
-                        allowance_config.set(allowance_response.allowance_config);
-                        error_message.set(Some(format!("Failed to load calendar state: {}", focus_date_error)));
-                    }
-                    (Ok(focus_date), Err(current_date_error), Err(allowance_error)) => {
-                        gloo::console::warn!(&format!("Failed to load current date and allowance: {}, {}", current_date_error, allowance_error));
-                        calendar_state.set(Some(focus_date));
-                        error_message.set(None);
-                    }
-                    (Err(focus_date_error), Ok(current_date_response), Err(allowance_error)) => {
-                        gloo::console::warn!(&format!("Failed to load focus date and allowance: {}, {}", focus_date_error, allowance_error));
-                        current_date.set(Some(current_date_response));
-                        error_message.set(Some(format!("Failed to load calendar state: {}", focus_date_error)));
-                    }
-                    (Err(focus_date_error), Err(current_date_error), Ok(allowance_response)) => {
-                        gloo::console::error!(&format!("Failed to load focus and current date: {}, {}", focus_date_error, current_date_error));
-                        allowance_config.set(allowance_response.allowance_config);
-                        error_message.set(Some(format!("Backend error - Focus: {}, Current: {}", focus_date_error, current_date_error)));
-                    }
-                    (Err(focus_date_error), Err(current_date_error), Err(allowance_error)) => {
-                        gloo::console::error!(&format!("Failed to load all: focus={}, current={}, allowance={}", focus_date_error, current_date_error, allowance_error));
-                        error_message.set(Some(format!("Backend error - Focus: {}, Current: {}, Allowance: {}", focus_date_error, current_date_error, allowance_error)));
+                    // Handle other combinations with simplified logic - just log and continue
+                    _ => {
+                        gloo::console::warn!("Some API calls failed, continuing with partial data");
+                        error_message.set(Some("Failed to load calendar state".to_string()));
                     }
                 }
                 is_loading.set(false);
             });
+            || ()
+        });
+    }
+
+    // Effect to refresh calendar month data when refresh_trigger changes
+    {
+        let refresh_calendar_month_data = refresh_calendar_month_data.clone();
+        let refresh_trigger = props.refresh_trigger;
+        
+        use_effect_with(refresh_trigger, move |trigger| {
+            if *trigger > 0 {
+                gloo::console::log!(&format!("Calendar refresh triggered: {}", trigger));
+                refresh_calendar_month_data.emit(());
+            }
             || ()
         });
     }
@@ -105,12 +137,14 @@ pub fn simple_calendar() -> Html {
     // Previous month callback
     let on_previous = {
         let calendar_state = calendar_state.clone();
+        let calendar_month_data = calendar_month_data.clone();
         let click_count = click_count.clone();
         let error_message = error_message.clone();
         let api_client = api_client.clone();
         
         Callback::from(move |_: MouseEvent| {
             let calendar_state = calendar_state.clone();
+            let calendar_month_data = calendar_month_data.clone();
             let click_count = click_count.clone();
             let error_message = error_message.clone();
             let api_client = api_client.clone();
@@ -124,7 +158,19 @@ pub fn simple_calendar() -> Html {
                 match (*api_client).navigate_previous_month().await {
                     Ok(response) => {
                         gloo::console::log!(&format!("Backend response: {}", response.success_message));
-                        calendar_state.set(Some(response.focus_date));
+                        calendar_state.set(Some(response.focus_date.clone()));
+                        
+                        // Also fetch calendar month data for the new month
+                        match (*api_client).get_calendar_month(response.focus_date.month, response.focus_date.year).await {
+                            Ok(calendar_month) => {
+                                calendar_month_data.set(Some(calendar_month));
+                            }
+                            Err(e) => {
+                                gloo::console::warn!(&format!("Failed to load calendar month data: {}", e));
+                                calendar_month_data.set(None);
+                            }
+                        }
+                        
                         error_message.set(None);
                     }
                     Err(e) => {
@@ -139,12 +185,14 @@ pub fn simple_calendar() -> Html {
     // Next month callback
     let on_next = {
         let calendar_state = calendar_state.clone();
+        let calendar_month_data = calendar_month_data.clone();
         let click_count = click_count.clone();
         let error_message = error_message.clone();
         let api_client = api_client.clone();
         
         Callback::from(move |_: MouseEvent| {
             let calendar_state = calendar_state.clone();
+            let calendar_month_data = calendar_month_data.clone();
             let click_count = click_count.clone();
             let error_message = error_message.clone();
             let api_client = api_client.clone();
@@ -158,7 +206,19 @@ pub fn simple_calendar() -> Html {
                 match (*api_client).navigate_next_month().await {
                     Ok(response) => {
                         gloo::console::log!(&format!("Backend response: {}", response.success_message));
-                        calendar_state.set(Some(response.focus_date));
+                        calendar_state.set(Some(response.focus_date.clone()));
+                        
+                        // Also fetch calendar month data for the new month
+                        match (*api_client).get_calendar_month(response.focus_date.month, response.focus_date.year).await {
+                            Ok(calendar_month) => {
+                                calendar_month_data.set(Some(calendar_month));
+                            }
+                            Err(e) => {
+                                gloo::console::warn!(&format!("Failed to load calendar month data: {}", e));
+                                calendar_month_data.set(None);
+                            }
+                        }
+                        
                         error_message.set(None);
                     }
                     Err(e) => {
@@ -241,65 +301,111 @@ pub fn simple_calendar() -> Html {
         }
     };
 
-    // Generate calendar days for the given month/year
-    let generate_calendar_days = |month: u32, year: u32, current_date_ref: &Option<CurrentDateResponse>, allowance_config_ref: &Option<AllowanceConfig>| -> Vec<Html> {
+    // Generate calendar days using backend calendar month data
+    let generate_calendar_days = |calendar_month_ref: &Option<CalendarMonth>, current_date_ref: &Option<CurrentDateResponse>, allowance_config_ref: &Option<AllowanceConfig>| -> Vec<Html> {
         let mut days = Vec::new();
-        let days_in_current_month = days_in_month(month, year);
-        let first_day = first_day_of_week(month, year);
         
-        // Add empty cells for days before the first of the month
-        for _ in 0..first_day {
-            days.push(html! {
-                <div class="calendar-day empty"></div>
-            });
-        }
-        
-        // Add days of the current month
-        for day in 1..=days_in_current_month {
-            // Check if this is the current day using backend date info
-            let is_today = if let Some(current_date_response) = current_date_ref {
-                year == current_date_response.year 
-                    && month == current_date_response.month 
-                    && day == current_date_response.day
-            } else {
-                false // If we don't have current date info, no day is marked as today
-            };
+        if let Some(calendar_month) = calendar_month_ref {
+            // Add empty cells for days before the first day of month
+            for _ in 0..calendar_month.first_day_of_week {
+                days.push(html! {
+                    <div class="calendar-day empty"></div>
+                });
+            }
             
-            let day_class = if is_today {
-                "calendar-day today"
-            } else {
-                "calendar-day"
-            };
-            
-            // Check if this day should show an allowance chip
-            let show_allowance_chip = is_future_allowance_day(day, month, year, current_date_ref, allowance_config_ref);
-            let allowance_amount = allowance_config_ref.as_ref().map(|config| config.amount).unwrap_or(0.0);
-            
-            days.push(html! {
-                <div class={day_class}>
-                    <div class="day-header">
-                        <div class="day-number-container">
-                            <div class="day-number">{day}</div>
+            // Add days of the month using backend-provided day data
+            for day_data in &calendar_month.days {
+                // Check if this is the current day using backend date info
+                let is_today = if let Some(current_date_response) = current_date_ref {
+                    calendar_month.year == current_date_response.year 
+                        && calendar_month.month == current_date_response.month 
+                        && day_data.day == current_date_response.day
+                } else {
+                    false // If we don't have current date info, no day is marked as today
+                };
+                
+                let day_class = if is_today {
+                    "calendar-day today"
+                } else {
+                    "calendar-day"
+                };
+                
+                // Check if this day should show an allowance chip
+                let show_allowance_chip = is_future_allowance_day(day_data.day, calendar_month.month, calendar_month.year, current_date_ref, allowance_config_ref);
+                let allowance_amount = allowance_config_ref.as_ref().map(|config| config.amount).unwrap_or(0.0);
+                
+                // Process transactions for this day (limit to 4, then show "+X more")
+                let transactions = &day_data.transactions;
+                let display_transactions = if transactions.len() <= 4 {
+                    transactions.clone()
+                } else {
+                    transactions[0..4].to_vec()
+                };
+                let remaining_count = if transactions.len() > 4 {
+                    transactions.len() - 4
+                } else {
+                    0
+                };
+                
+                days.push(html! {
+                    <div class={day_class}>
+                        <div class="day-header">
+                            <div class="day-number-container">
+                                <div class="day-number">{day_data.day}</div>
+                            </div>
+                            <div class="day-balance-subtle">
+                                {format!("${:.0}", day_data.balance)}
+                            </div>
                         </div>
-                        <div class="day-balance-subtle">
-                            {"$0"}
+                        <div class="day-transactions">
+                            // Show allowance chip if this is a future allowance day
+                            {if show_allowance_chip {
+                                html! {
+                                    <div class="simple-calendar-allowance-chip">
+                                        <span class="transaction-amount">
+                                            {format!("+${:.0}", allowance_amount)}
+                                        </span>
+                                    </div>
+                                }
+                            } else {
+                                html! {}
+                            }}
+                            
+                            // Show transaction chips
+                            {for display_transactions.iter().map(|transaction| {
+                                let chip_class = if transaction.amount >= 0.0 {
+                                    "simple-calendar-transaction-chip positive"
+                                } else {
+                                    "simple-calendar-transaction-chip negative"
+                                };
+                                
+                                html! {
+                                    <div class={chip_class}>
+                                        <span class="transaction-amount">
+                                            {if transaction.amount >= 0.0 {
+                                                format!("+${:.0}", transaction.amount)
+                                            } else {
+                                                format!("-${:.0}", transaction.amount.abs())
+                                            }}
+                                        </span>
+                                    </div>
+                                }
+                            })}
+                            
+                            // Show "+X more" indicator if there are remaining transactions
+                            {if remaining_count > 0 {
+                                html! {
+                                    <div class="simple-calendar-more-indicator">
+                                        {format!("+{} more", remaining_count)}
+                                    </div>
+                                }
+                            } else {
+                                html! {}
+                            }}
                         </div>
                     </div>
-                    <div class="day-transactions">
-                        {if show_allowance_chip {
-                            html! {
-                                <div class="simple-calendar-allowance-chip" title={format!("Weekly allowance: ${:.2}", allowance_amount)}>
-                                    <span class="transaction-amount">
-                                        {format!("+${:.0}", allowance_amount)}
-                                    </span>
-                                </div>
-                            }
-                        } else {
-                            html! {}
-                        }}
-                    </div>
-                </div>
-            });
+                });
+            }
         }
         
         days
@@ -379,7 +485,7 @@ pub fn simple_calendar() -> Html {
     // Render calendar with backend state
     match calendar_state.as_ref() {
         Some(focus_date) => {
-            let calendar_days = generate_calendar_days(focus_date.month, focus_date.year, &*current_date, &*allowance_config);
+            let calendar_days = generate_calendar_days(&*calendar_month_data, &*current_date, &*allowance_config);
             
                 html! {
         <div class="calendar-card">
