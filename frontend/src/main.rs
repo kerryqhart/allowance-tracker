@@ -197,6 +197,7 @@ fn app() -> Html {
                                     allowance_config={(*allowance).config.clone()}
                                     on_previous_month={calendar.actions.previous_month.clone()}
                                     on_next_month={calendar.actions.next_month.clone()}
+                                    current_date={calendar.state.current_date.clone()}
                                 />
                             }
                         } else {

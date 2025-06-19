@@ -5,8 +5,9 @@
 //! only handle presentation concerns, while all calendar computations
 //! and business rules are handled here.
 
-use shared::{Transaction, CalendarMonth, CalendarDay};
+use shared::{Transaction, CalendarMonth, CalendarDay, CurrentDateResponse};
 use std::collections::HashMap;
+use chrono::{Local, Datelike};
 
 /// Calendar service that handles all calendar-related business logic
 #[derive(Clone)]
@@ -236,6 +237,27 @@ impl CalendarService {
             (1, current_year + 1)
         } else {
             (current_month + 1, current_year)
+        }
+    }
+
+    /// Get current date information
+    pub fn get_current_date(&self) -> CurrentDateResponse {
+        let now = Local::now();
+        let month = now.month();
+        let year = now.year() as u32;
+        let day = now.day();
+        
+        // Format the date
+        let month_name = self.month_name(month);
+        let formatted_date = format!("{} {}, {}", month_name, day, year);
+        let iso_date = format!("{:04}-{:02}-{:02}", year, month, day);
+        
+        CurrentDateResponse {
+            month,
+            year,
+            day,
+            formatted_date,
+            iso_date,
         }
     }
 }

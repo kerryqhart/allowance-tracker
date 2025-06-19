@@ -353,6 +353,16 @@ pub struct UpdateAllowanceConfigResponse {
     pub success_message: String,
 }
 
+/// Current date information from the backend
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CurrentDateResponse {
+    pub month: u32,
+    pub year: u32,
+    pub day: u32,
+    pub formatted_date: String, // e.g., "June 19, 2025"
+    pub iso_date: String, // e.g., "2025-06-19"
+}
+
 impl Transaction {
     /// Generate transaction ID from amount and timestamp
     pub fn generate_id(amount: f64, epoch_millis: u64) -> String {

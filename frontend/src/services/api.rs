@@ -4,7 +4,8 @@ use shared::{
     CalendarMonth, TransactionTableResponse, DeleteTransactionsRequest, DeleteTransactionsResponse,
     ParentalControlRequest, ParentalControlResponse, CreateChildRequest, ChildResponse,
     SetActiveChildRequest, SetActiveChildResponse, ActiveChildResponse, ChildListResponse,
-    GetAllowanceConfigRequest, GetAllowanceConfigResponse, UpdateAllowanceConfigRequest, UpdateAllowanceConfigResponse
+    GetAllowanceConfigRequest, GetAllowanceConfigResponse, UpdateAllowanceConfigRequest, UpdateAllowanceConfigResponse,
+    CurrentDateResponse
 };
 
 /// API client for communicating with the backend server
@@ -65,6 +66,21 @@ impl ApiClient {
                 }
             }
             Err(e) => Err(format!("Failed to fetch calendar data: {}", e)),
+        }
+    }
+
+    /// Get current date from the backend
+    pub async fn get_current_date(&self) -> Result<CurrentDateResponse, String> {
+        let url = format!("{}/api/calendar/current-date", self.base_url);
+        
+        match Request::get(&url).send().await {
+            Ok(response) => {
+                match response.json::<CurrentDateResponse>().await {
+                    Ok(data) => Ok(data),
+                    Err(e) => Err(format!("Failed to parse current date: {}", e)),
+                }
+            }
+            Err(e) => Err(format!("Failed to fetch current date: {}", e)),
         }
     }
 

@@ -1,9 +1,9 @@
 use yew::prelude::*;
-use shared::{CalendarMonth, AllowanceConfig};
+use shared::{CalendarMonth, AllowanceConfig, CurrentDateResponse};
 use crate::services::date_utils::{format_calendar_date, month_name};
-use js_sys::Date;
+use web_sys::console;
 
-#[derive(Properties, PartialEq)]
+#[derive(Properties, Clone, PartialEq)]
 pub struct CalendarProps {
     pub calendar_data: CalendarMonth,
     pub delete_mode: bool,
@@ -13,34 +13,92 @@ pub struct CalendarProps {
     pub allowance_config: Option<AllowanceConfig>,
     pub on_previous_month: Callback<()>,
     pub on_next_month: Callback<()>,
+    pub current_date: Option<CurrentDateResponse>,
 }
 
 #[function_component(Calendar)]
 pub fn calendar(props: &CalendarProps) -> Html {
+    let flash_color = use_state(|| "#4f46e5".to_string());
+    
+    // Flash effect for navigation test indicator
+    use_effect_with((), {
+        let flash_color = flash_color.clone();
+        move |_| {
+            let flash_color = flash_color.clone();
+            gloo::timers::callback::Timeout::new(100, move || {
+                flash_color.set("#10b981".to_string()); // Green flash
+                let flash_color = flash_color.clone();
+                gloo::timers::callback::Timeout::new(300, move || {
+                    flash_color.set("#4f46e5".to_string()); // Back to blue
+                }).forget();
+            }).forget();
+            || ()
+        }
+    });
+
     let calendar_data = &props.calendar_data;
+    
+    // State for test glyph flash color and debugging counters
+    let prev_click_count = use_state(|| 0u32);
+    let next_click_count = use_state(|| 0u32);
+    let last_update_time = use_state(|| "never".to_string());
     
     let on_previous_month_click = {
         let on_previous_month = props.on_previous_month.clone();
+        let flash_color = flash_color.clone();
+        let prev_click_count = prev_click_count.clone();
+        let last_update_time = last_update_time.clone();
         Callback::from(move |_| {
+            let new_count = *prev_click_count + 1;
+            prev_click_count.set(new_count);
+            last_update_time.set(format!("PREV-{}", new_count));
+            
+            console::log_1(&format!("Left arrow clicked! Count: {}", new_count).into());
+            flash_color.set("red".to_string());
+            
+            // Reset flash color after 300ms
+            let flash_color_reset = flash_color.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                gloo::timers::future::sleep(std::time::Duration::from_millis(300)).await;
+                flash_color_reset.set("green".to_string());
+            });
+            
             on_previous_month.emit(());
         })
     };
 
     let on_next_month_click = {
         let on_next_month = props.on_next_month.clone();
+        let flash_color = flash_color.clone();
+        let next_click_count = next_click_count.clone();
+        let last_update_time = last_update_time.clone();
         Callback::from(move |_| {
+            let new_count = *next_click_count + 1;
+            next_click_count.set(new_count);
+            last_update_time.set(format!("NEXT-{}", new_count));
+            
+            console::log_1(&format!("Right arrow clicked! Count: {}", new_count).into());
+            flash_color.set("blue".to_string());
+            
+            // Reset flash color after 300ms
+            let flash_color_reset = flash_color.clone();
+            wasm_bindgen_futures::spawn_local(async move {
+                gloo::timers::future::sleep(std::time::Duration::from_millis(300)).await;
+                flash_color_reset.set("green".to_string());
+            });
+            
             on_next_month.emit(());
         })
     };
     
     // Helper function to determine if a day should show allowance indicator
     let is_allowance_day = |day: u32| -> bool {
-        if let Some(ref config) = props.allowance_config {
+        if let Some(config) = &props.allowance_config {
             if !config.is_active {
                 return false;
             }
             
-            // Calculate day of week for this day
+            // Calculate day of week for this day in the calendar
             let days_from_first = day - 1; // 0-based index from first day of month
             let day_of_week = (calendar_data.first_day_of_week + days_from_first) % 7;
             
@@ -49,24 +107,24 @@ pub fn calendar(props: &CalendarProps) -> Html {
                 return false;
             }
             
-            // Only show allowance indicator for future dates
-            let current_date = Date::new_0();
-            let current_year = current_date.get_full_year() as u32;
-            let current_month = (current_date.get_month() as u32) + 1; // JS months are 0-based
-            let current_day = current_date.get_date() as u32;
-            
-            // Compare the calendar day with current date
-            if calendar_data.year > current_year {
-                return true; // Future year
-            } else if calendar_data.year == current_year {
-                if calendar_data.month > current_month {
-                    return true; // Future month in current year
-                } else if calendar_data.month == current_month {
-                    return day > current_day; // Future day in current month
+            // Only show allowance indicator for future dates if we have current date info
+            if let Some(current_date) = &props.current_date {
+                // Compare the calendar day with current date
+                if calendar_data.year > current_date.year {
+                    return true; // Future year
+                } else if calendar_data.year == current_date.year {
+                    if calendar_data.month > current_date.month {
+                        return true; // Future month in current year
+                    } else if calendar_data.month == current_date.month {
+                        return day > current_date.day; // Future day in current month
+                    }
                 }
+                
+                false // Past date
+            } else {
+                // Fallback: if we don't have current date info, show allowance indicators
+                true
             }
-            
-            false // Past date
         } else {
             false
         }
@@ -84,15 +142,14 @@ pub fn calendar(props: &CalendarProps) -> Html {
     
     // Add days of the month using backend-provided day data
     for day_data in &calendar_data.days {
-        // Check if this is the current day
-        let current_date = Date::new_0();
-        let current_year = current_date.get_full_year() as u32;
-        let current_month = (current_date.get_month() as u32) + 1; // JS months are 0-based
-        let current_day = current_date.get_date() as u32;
-        
-        let is_today = calendar_data.year == current_year 
-            && calendar_data.month == current_month 
-            && day_data.day == current_day;
+        // Check if this is the current day using backend date info
+        let is_today = if let Some(current_date) = &props.current_date {
+            calendar_data.year == current_date.year 
+                && calendar_data.month == current_date.month 
+                && day_data.day == current_date.day
+        } else {
+            false // If we don't have current date info, no day is marked as today
+        };
         
         let day_class = if props.delete_mode {
             if is_today {
@@ -230,7 +287,22 @@ pub fn calendar(props: &CalendarProps) -> Html {
     }
     
     html! {
-        <div class="calendar-card">
+        <div class="calendar-card" style="position: relative;">
+            // Test glyph positioned in whitespace between left arrow and title
+            <div style="position: absolute; top: 10px; left: 35%; transform: translateX(-50%); z-index: 1000; display: flex; flex-direction: column; align-items: center; gap: 4px;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <div class="test-glyph" style={format!("background-color: {}; width: 24px; height: 24px; border-radius: 50%; transition: background-color 0.3s ease; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 14px; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.2);", *flash_color)} title="Navigation Test Indicator">
+                        {"●"}
+                    </div>
+                    <div style="background-color: rgba(0,0,0,0.8); color: white; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-family: monospace; white-space: nowrap;" title="Current Calendar State">
+                        {format!("{}/{}", calendar_data.month, calendar_data.year)}
+                    </div>
+                </div>
+                <div style="background-color: rgba(0,0,0,0.8); color: white; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-family: monospace; white-space: nowrap;" title="Click Debug Info">
+                    {format!("←{} →{} | {}", *prev_click_count, *next_click_count, *last_update_time)}
+                </div>
+            </div>
+            
             <div class="calendar-header-container">
                 <div class="calendar-header">
                     <button class="calendar-nav-button" onclick={on_previous_month_click} title="Previous Month">

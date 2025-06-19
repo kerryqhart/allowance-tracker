@@ -20,7 +20,9 @@ pub struct CalendarMonthQuery {
 
 /// Create a router for calendar related APIs
 pub fn router() -> Router<AppState> {
-    Router::new().route("/month", get(get_calendar_month))
+    Router::new()
+        .route("/month", get(get_calendar_month))
+        .route("/current-date", get(get_current_date))
 }
 
 /// Get calendar month data with transactions
@@ -58,4 +60,12 @@ async fn get_calendar_month(
             (StatusCode::INTERNAL_SERVER_ERROR, "Error generating calendar").into_response()
         }
     }
+}
+
+/// Get current date information from the backend
+async fn get_current_date(State(state): State<AppState>) -> impl IntoResponse {
+    info!("GET /api/calendar/current-date");
+
+    let current_date = state.calendar_service.get_current_date();
+    (StatusCode::OK, Json(current_date)).into_response()
 } 
