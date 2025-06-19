@@ -120,13 +120,98 @@ pub fn simple_calendar() -> Html {
         })
     };
 
+    // Helper function to calculate days in month
+    let days_in_month = |month: u32, year: u32| -> u32 {
+        match month {
+            1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+            4 | 6 | 9 | 11 => 30,
+            2 => {
+                if (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0) {
+                    29
+                } else {
+                    28
+                }
+            }
+            _ => 30,
+        }
+    };
+
+    // Helper function to get first day of week (0 = Sunday, 1 = Monday, etc.)
+    let first_day_of_week = |month: u32, year: u32| -> u32 {
+        // Simple calculation for first day of week
+        // This is a basic implementation - you might want to use a more robust date library
+        let mut a = (14 - month) / 12;
+        let y = year - a;
+        let m = month + 12 * a - 2;
+        let day = (1 + y + y / 4 - y / 100 + y / 400 + (31 * m) / 12) % 7;
+        day
+    };
+
+    // Generate calendar days for the given month/year
+    let generate_calendar_days = |month: u32, year: u32| -> Vec<Html> {
+        let mut days = Vec::new();
+        let days_in_current_month = days_in_month(month, year);
+        let first_day = first_day_of_week(month, year);
+        
+        // Add empty cells for days before the first of the month
+        for _ in 0..first_day {
+            days.push(html! {
+                <div class="calendar-day empty"></div>
+            });
+        }
+        
+        // Add days of the current month
+        for day in 1..=days_in_current_month {
+            days.push(html! {
+                <div class="calendar-day">
+                    <div class="day-header">
+                        <div class="day-number-container">
+                            <div class="day-number">{day}</div>
+                        </div>
+                        <div class="day-balance-subtle">
+                            {"$0"}
+                        </div>
+                    </div>
+                    <div class="day-transactions">
+                        // Empty for now - just showing the basic structure
+                    </div>
+                </div>
+            });
+        }
+        
+        days
+    };
+
     // Render loading state
     if *is_loading {
         return html! {
-            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 1rem; border-radius: 8px; margin-bottom: 1rem;">
-                <h3 style="margin: 0 0 1rem 0; text-align: center;">{"🆕 Simple Calendar Test (Backend State)"}</h3>
-                <div style="text-align: center; padding: 2rem;">
-                    {"Loading calendar state from backend..."}
+            <div class="calendar-card">
+                <div class="calendar-header-container">
+                    <div class="calendar-header">
+                        <button class="calendar-nav-button" disabled=true>
+                            <i class="fas fa-chevron-left"></i>
+                        </button>
+                        <h2 class="calendar-title">{"Loading..."}</h2>
+                        <button class="calendar-nav-button" disabled=true>
+                            <i class="fas fa-chevron-right"></i>
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="calendar-weekdays">
+                    <div class="weekday">{"Sun"}</div>
+                    <div class="weekday">{"Mon"}</div>
+                    <div class="weekday">{"Tue"}</div>
+                    <div class="weekday">{"Wed"}</div>
+                    <div class="weekday">{"Thu"}</div>
+                    <div class="weekday">{"Fri"}</div>
+                    <div class="weekday">{"Sat"}</div>
+                </div>
+
+                <div class="calendar-grid">
+                    <div style="grid-column: 1 / -1; text-align: center; padding: 2rem; color: #666;">
+                        {"Loading calendar state from backend..."}
+                    </div>
                 </div>
             </div>
         };
@@ -135,11 +220,34 @@ pub fn simple_calendar() -> Html {
     // Render error state
     if let Some(error) = error_message.as_ref() {
         return html! {
-            <div style="background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%); color: white; padding: 1rem; border-radius: 8px; margin-bottom: 1rem;">
-                <h3 style="margin: 0 0 1rem 0; text-align: center;">{"🆕 Simple Calendar Test (Backend State)"}</h3>
-                <div style="text-align: center; padding: 1rem;">
-                    <div style="font-weight: bold; margin-bottom: 0.5rem;">{"Error:"}</div>
-                    <div>{error}</div>
+            <div class="calendar-card">
+                <div class="calendar-header-container">
+                    <div class="calendar-header">
+                        <button class="calendar-nav-button" disabled=true>
+                            <i class="fas fa-chevron-left"></i>
+                        </button>
+                        <h2 class="calendar-title">{"Error"}</h2>
+                        <button class="calendar-nav-button" disabled=true>
+                            <i class="fas fa-chevron-right"></i>
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="calendar-weekdays">
+                    <div class="weekday">{"Sun"}</div>
+                    <div class="weekday">{"Mon"}</div>
+                    <div class="weekday">{"Tue"}</div>
+                    <div class="weekday">{"Wed"}</div>
+                    <div class="weekday">{"Thu"}</div>
+                    <div class="weekday">{"Fri"}</div>
+                    <div class="weekday">{"Sat"}</div>
+                </div>
+
+                <div class="calendar-grid">
+                    <div style="grid-column: 1 / -1; text-align: center; padding: 2rem; color: #dc2626;">
+                        <div style="font-weight: bold; margin-bottom: 0.5rem;">{"Error:"}</div>
+                        <div>{error}</div>
+                    </div>
                 </div>
             </div>
         };
@@ -148,44 +256,73 @@ pub fn simple_calendar() -> Html {
     // Render calendar with backend state
     match calendar_state.as_ref() {
         Some(focus_date) => {
+            let calendar_days = generate_calendar_days(focus_date.month, focus_date.year);
+            
             html! {
-                <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 1rem; border-radius: 8px; margin-bottom: 1rem;">
-                    <h3 style="margin: 0 0 1rem 0; text-align: center;">{"🆕 Simple Calendar Test (Backend State)"}</h3>
-                    
-                    <div style="display: flex; align-items: center; justify-content: center; gap: 1rem;">
-                        <button 
-                            onclick={on_previous}
-                            style="background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.3); color: white; border-radius: 50%; width: 40px; height: 40px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 1.2rem;"
-                            title="Previous Month"
-                        >
-                            {"◀"}
-                        </button>
-                        
-                        <div style="font-size: 1.5rem; font-weight: bold; min-width: 200px; text-align: center;">
-                            {format!("{} {}", month_name(focus_date.month), focus_date.year)}
+                <div class="calendar-card">
+                    <div class="calendar-header-container">
+                        <div class="calendar-header">
+                            <button class="calendar-nav-button" onclick={on_previous} title="Previous Month">
+                                <i class="fas fa-chevron-left"></i>
+                            </button>
+                            <h2 class="calendar-title">
+                                {format!("🆕 {} {}", month_name(focus_date.month), focus_date.year)}
+                            </h2>
+                            <button class="calendar-nav-button" onclick={on_next} title="Next Month">
+                                <i class="fas fa-chevron-right"></i>
+                            </button>
                         </div>
                         
-                        <button 
-                            onclick={on_next}
-                            style="background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.3); color: white; border-radius: 50%; width: 40px; height: 40px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 1.2rem;"
-                            title="Next Month"
-                        >
-                            {"▶"}
-                        </button>
+                        <div style="text-align: center; margin-top: 0.5rem; font-size: 0.9rem; color: #666;">
+                            {format!("Debug: {} total clicks | Backend: {}/{}", *click_count, focus_date.month, focus_date.year)}
+                        </div>
                     </div>
                     
-                    <div style="text-align: center; margin-top: 0.5rem; font-size: 0.9rem; opacity: 0.8;">
-                        {format!("Debug: {} total clicks | Backend: {}/{}", *click_count, focus_date.month, focus_date.year)}
+                    <div class="calendar-weekdays">
+                        <div class="weekday">{"Sun"}</div>
+                        <div class="weekday">{"Mon"}</div>
+                        <div class="weekday">{"Tue"}</div>
+                        <div class="weekday">{"Wed"}</div>
+                        <div class="weekday">{"Thu"}</div>
+                        <div class="weekday">{"Fri"}</div>
+                        <div class="weekday">{"Sat"}</div>
+                    </div>
+
+                    <div class="calendar-grid">
+                        {for calendar_days}
                     </div>
                 </div>
             }
         }
         None => {
             html! {
-                <div style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); color: white; padding: 1rem; border-radius: 8px; margin-bottom: 1rem;">
-                    <h3 style="margin: 0 0 1rem 0; text-align: center;">{"🆕 Simple Calendar Test (Backend State)"}</h3>
-                    <div style="text-align: center; padding: 1rem;">
-                        {"No calendar state available"}
+                <div class="calendar-card">
+                    <div class="calendar-header-container">
+                        <div class="calendar-header">
+                            <button class="calendar-nav-button" disabled=true>
+                                <i class="fas fa-chevron-left"></i>
+                            </button>
+                            <h2 class="calendar-title">{"🆕 Simple Calendar"}</h2>
+                            <button class="calendar-nav-button" disabled=true>
+                                <i class="fas fa-chevron-right"></i>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="calendar-weekdays">
+                        <div class="weekday">{"Sun"}</div>
+                        <div class="weekday">{"Mon"}</div>
+                        <div class="weekday">{"Tue"}</div>
+                        <div class="weekday">{"Wed"}</div>
+                        <div class="weekday">{"Thu"}</div>
+                        <div class="weekday">{"Fri"}</div>
+                        <div class="weekday">{"Sat"}</div>
+                    </div>
+
+                    <div class="calendar-grid">
+                        <div style="grid-column: 1 / -1; text-align: center; padding: 2rem; color: #f59e0b;">
+                            {"No calendar state available"}
+                        </div>
                     </div>
                 </div>
             }
