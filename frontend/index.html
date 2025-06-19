@@ -4,6 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>My Allowance Tracker</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <link data-trunk rel="copy-file" href="public/background.jpg" />
     <style>
         * {
@@ -832,43 +833,78 @@
             box-shadow: 0 8px 32px rgba(102, 126, 234, 0.2);
         }
 
+        .calendar-header-container {
+            padding: 1rem 1rem 0.5rem 1rem;
+            border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+        }
+
         .calendar-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 1.5rem;
         }
 
         .calendar-title {
-            color: #667eea;
-            font-size: 1.8rem;
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: #333;
             margin: 0;
-            text-align: center;
-            flex: 1;
         }
 
-        .calendar-nav-btn {
-            background: white;
-            border: 2px solid #667eea;
+        .calendar-nav-button {
+            background: transparent;
+            border: 1px solid transparent;
             border-radius: 50%;
-            width: 45px;
-            height: 45px;
-            font-size: 1.6rem;
-            cursor: pointer;
-            transition: all 0.3s ease;
+            width: 36px;
+            height: 36px;
             display: flex;
             align-items: center;
             justify-content: center;
-            color: #667eea;
-            font-weight: 600;
-            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.15);
+            font-size: 1.1rem;
+            color: #555;
+            cursor: pointer;
+            transition: all 0.2s ease;
         }
 
-        .calendar-nav-btn:hover {
-            border-color: #764ba2;
-            color: #764ba2;
-            transform: scale(1.05);
-            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.25);
+        .calendar-nav-button:hover {
+            background-color: rgba(0, 0, 0, 0.05);
+            color: #000;
+        }
+        
+        .delete-mode-controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.5rem 0;
+            margin-top: 0.5rem;
+            background-color: rgba(255, 224, 224, 0.7);
+            border-radius: 6px;
+            padding: 0.5rem 1rem;
+        }
+
+        .selection-count {
+            font-size: 0.9rem;
+            color: #5D4037;
+        }
+
+        .delete-button {
+            background-color: #EF5350;
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: background-color 0.2s;
+        }
+
+        .delete-button:hover {
+            background-color: #E53935;
+        }
+        
+        .delete-button:disabled {
+            background-color: #BDBDBD;
+            cursor: not-allowed;
         }
 
         .calendar {
@@ -1123,7 +1159,7 @@
         }
 
         .tooltip-value.negative {
-            color: #ff6b35;
+            color: #E57373; /* Softer red for negative values */
         }
 
         /* Delete Mode Styles */
@@ -1142,31 +1178,6 @@
         .delete-info {
             font-weight: 600;
             font-size: 0.9rem;
-        }
-
-        .delete-button {
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            background: rgba(255, 255, 255, 0.2);
-            color: white;
-            border: 1px solid rgba(255, 255, 255, 0.3);
-            border-radius: 6px;
-            padding: 0.5rem 1rem;
-            font-size: 0.9rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.2s ease;
-        }
-
-        .delete-button:hover {
-            background: rgba(255, 255, 255, 0.3);
-            border-color: rgba(255, 255, 255, 0.5);
-            transform: translateY(-1px);
-        }
-
-        .delete-button svg {
-            flex-shrink: 0;
         }
 
         .transaction-checkbox {

@@ -1,6 +1,6 @@
 use yew::prelude::*;
 use shared::{CalendarMonth, AllowanceConfig};
-use crate::services::date_utils::format_calendar_date;
+use crate::services::date_utils::{format_calendar_date, month_name};
 use js_sys::Date;
 
 #[derive(Properties, PartialEq)]
@@ -11,11 +11,27 @@ pub struct CalendarProps {
     pub on_toggle_transaction_selection: Callback<String>,
     pub on_delete_selected: Callback<()>,
     pub allowance_config: Option<AllowanceConfig>,
+    pub on_previous_month: Callback<()>,
+    pub on_next_month: Callback<()>,
 }
 
 #[function_component(Calendar)]
 pub fn calendar(props: &CalendarProps) -> Html {
     let calendar_data = &props.calendar_data;
+    
+    let on_previous_month_click = {
+        let on_previous_month = props.on_previous_month.clone();
+        Callback::from(move |_| {
+            on_previous_month.emit(());
+        })
+    };
+
+    let on_next_month_click = {
+        let on_next_month = props.on_next_month.clone();
+        Callback::from(move |_| {
+            on_next_month.emit(());
+        })
+    };
     
     // Helper function to determine if a day should show allowance indicator
     let is_allowance_day = |day: u32| -> bool {
@@ -214,37 +230,47 @@ pub fn calendar(props: &CalendarProps) -> Html {
     }
     
     html! {
-        <div class="calendar">
-            // Delete button that appears when transactions are selected
-            {if props.delete_mode && !props.selected_transactions.is_empty() {
-                html! {
-                    <div class="delete-actions-bar">
-                        <div class="delete-info">
-                            {format!("{} transaction{} selected", 
-                                props.selected_transactions.len(),
-                                if props.selected_transactions.len() == 1 { "" } else { "s" }
-                            )}
+        <div class="calendar-card">
+            <div class="calendar-header-container">
+                <div class="calendar-header">
+                    <button class="calendar-nav-button" onclick={on_previous_month_click} title="Previous Month">
+                        <i class="fas fa-chevron-left"></i>
+                    </button>
+                    <h2 class="calendar-title">
+                        {
+                            if props.delete_mode {
+                                format!("🗑️ Delete Mode - {} {}", month_name(calendar_data.month), calendar_data.year)
+                            } else {
+                                format!("{} {}", month_name(calendar_data.month), calendar_data.year)
+                            }
+                        }
+                    </h2>
+                    <button class="calendar-nav-button" onclick={on_next_month_click} title="Next Month">
+                        <i class="fas fa-chevron-right"></i>
+                    </button>
+                </div>
+                 { if props.delete_mode {
+                    html! {
+                        <div class="delete-mode-controls">
+                            <span class="selection-count">{format!("{} selected", props.selected_transactions.len())}</span>
+                            <button 
+                                class="delete-button" 
+                                onclick={
+                                    let on_delete_selected = props.on_delete_selected.clone();
+                                    Callback::from(move |_: MouseEvent| {
+                                        on_delete_selected.emit(());
+                                    })
+                                }
+                                disabled={props.selected_transactions.is_empty()}
+                            >
+                                {"Delete Selected"}
+                            </button>
                         </div>
-                        <button 
-                            class="delete-button"
-                            onclick={{
-                                let on_delete = props.on_delete_selected.clone();
-                                Callback::from(move |_: web_sys::MouseEvent| {
-                                    on_delete.emit(());
-                                })
-                            }}
-                            title="Delete selected transactions"
-                        >
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z" fill="currentColor"/>
-                            </svg>
-                            {"Delete"}
-                        </button>
-                    </div>
-                }
-            } else {
-                html! {}
-            }}
+                    }
+                } else {
+                    html! {}
+                }}
+            </div>
             
             <div class="calendar-weekdays">
                 <div class="weekday">{"Sun"}</div>
@@ -255,6 +281,7 @@ pub fn calendar(props: &CalendarProps) -> Html {
                 <div class="weekday">{"Fri"}</div>
                 <div class="weekday">{"Sat"}</div>
             </div>
+
             <div class="calendar-grid">
                 {for calendar_days}
             </div>

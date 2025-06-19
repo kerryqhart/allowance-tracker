@@ -12,7 +12,6 @@ mod services;
 mod components;
 mod hooks;
 use services::{
-    date_utils::month_name,
     api::ApiClient,
 };
 use components::{
@@ -187,35 +186,21 @@ fn app() -> Html {
             <main class="main">
                 <div class="container">
                     <section class="calendar-section">
-                        <div class="calendar-header">
-                            <button class="calendar-nav-btn" onclick={calendar.actions.prev_month}>{"‹"}</button>
-                            <h2 class="calendar-title">
-                                {if let Some(cal_data) = calendar.state.calendar_data.as_ref() {
-                                    if *delete_mode {
-                                        format!("🗑️ Delete Mode - {} {}", month_name(cal_data.month), cal_data.year)
-                                    } else {
-                                        format!("{} {}", month_name(cal_data.month), cal_data.year)
-                                    }
-                                } else {
-                                    format!("Loading...")
-                                }}
-                            </h2>
-                            <button class="calendar-nav-btn" onclick={calendar.actions.next_month}>{"›"}</button>
-                        </div>
-                        
                         {if let Some(cal_data) = calendar.state.calendar_data.as_ref() {
-                            html! { 
+                            html! {
                                 <Calendar 
                                     calendar_data={cal_data.clone()} 
                                     delete_mode={*delete_mode}
                                     selected_transactions={(*selected_transactions).clone()}
                                     on_toggle_transaction_selection={toggle_transaction_selection.clone()}
                                     on_delete_selected={delete_selected_transactions.clone()}
-                                    allowance_config={allowance.config.clone()}
-                                /> 
+                                    allowance_config={(*allowance).config.clone()}
+                                    on_previous_month={calendar.actions.previous_month.clone()}
+                                    on_next_month={calendar.actions.next_month.clone()}
+                                />
                             }
                         } else {
-                            html! { <div class="loading">{"Loading calendar..."}</div> }
+                            html! { <div class="loading">{"Loading Calendar..."}</div> }
                         }}
                     </section>
 
