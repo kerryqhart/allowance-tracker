@@ -14,6 +14,11 @@ impl TransactionRepository {
         Self { db }
     }
 
+    /// Get the underlying database connection for testing purposes
+    pub fn get_db_connection(&self) -> &DbConnection {
+        &self.db
+    }
+
     /// Store a transaction in the database
     pub async fn store_transaction(&self, transaction: &Transaction) -> Result<()> {
         sqlx::query(
@@ -34,13 +39,14 @@ impl TransactionRepository {
     }
 
     /// Get the most recent transaction for a specific child (for calculating next balance)
+    /// NOTE: This now orders by date instead of ROWID for proper chronological ordering
     pub async fn get_latest_transaction(&self, child_id: &str) -> Result<Option<Transaction>> {
         let row = sqlx::query(
             r#"
             SELECT id, child_id, date, description, amount, balance
             FROM transactions
             WHERE child_id = ?
-            ORDER BY ROWID DESC
+            ORDER BY date DESC, ROWID DESC
             LIMIT 1
             "#,
         )
@@ -63,6 +69,7 @@ impl TransactionRepository {
     }
 
     /// List transactions for a specific child with pagination support
+    /// Updated to order by date for proper chronological ordering
     pub async fn list_transactions(
         &self,
         child_id: &str,
@@ -70,18 +77,23 @@ impl TransactionRepository {
         after_id: Option<&str>,
     ) -> Result<Vec<Transaction>> {
         let query = if let Some(after_id) = after_id {
+            // For cursor-based pagination, we need to find the date of the cursor transaction
+            // and get transactions before that date (or same date but earlier ROWID)
             sqlx::query(
                 r#"
                 SELECT id, child_id, date, description, amount, balance
                 FROM transactions
-                WHERE child_id = ? AND ROWID < (
-                    SELECT ROWID FROM transactions WHERE id = ?
+                WHERE child_id = ? AND (
+                    date < (SELECT date FROM transactions WHERE id = ?) OR
+                    (date = (SELECT date FROM transactions WHERE id = ?) AND ROWID < (SELECT ROWID FROM transactions WHERE id = ?))
                 )
-                ORDER BY ROWID DESC
+                ORDER BY date DESC, ROWID DESC
                 LIMIT ?
                 "#,
             )
             .bind(child_id)
+            .bind(after_id)
+            .bind(after_id)
             .bind(after_id)
             .bind(limit as i64)
         } else {
@@ -90,7 +102,7 @@ impl TransactionRepository {
                 SELECT id, child_id, date, description, amount, balance
                 FROM transactions
                 WHERE child_id = ?
-                ORDER BY ROWID DESC
+                ORDER BY date DESC, ROWID DESC
                 LIMIT ?
                 "#,
             )
@@ -114,6 +126,140 @@ impl TransactionRepository {
             .collect();
 
         Ok(transactions)
+    }
+
+    /// Get all transactions after a specific date (inclusive) for balance recalculation
+    /// Returns transactions in chronological order (oldest first)
+    pub async fn get_transactions_after_date(&self, child_id: &str, date: &str) -> Result<Vec<Transaction>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id, child_id, date, description, amount, balance
+            FROM transactions
+            WHERE child_id = ? AND date >= ?
+            ORDER BY date ASC, ROWID ASC
+            "#,
+        )
+        .bind(child_id)
+        .bind(date)
+        .fetch_all(self.db.pool())
+        .await?;
+
+        let transactions = rows
+            .iter()
+            .map(|row| Transaction {
+                id: row.get("id"),
+                child_id: row.get("child_id"),
+                date: row.get("date"),
+                description: row.get("description"),
+                amount: row.get("amount"),
+                balance: row.get("balance"),
+                transaction_type: if row.get::<f64, _>("amount") >= 0.0 { TransactionType::Income } else { TransactionType::Expense },
+            })
+            .collect();
+
+        Ok(transactions)
+    }
+
+    /// Get all transactions in chronological order for a child
+    /// Returns transactions ordered by date (oldest first)
+    pub async fn get_all_transactions_chronological(&self, child_id: &str) -> Result<Vec<Transaction>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id, child_id, date, description, amount, balance
+            FROM transactions
+            WHERE child_id = ?
+            ORDER BY date ASC, ROWID ASC
+            "#,
+        )
+        .bind(child_id)
+        .fetch_all(self.db.pool())
+        .await?;
+
+        let transactions = rows
+            .iter()
+            .map(|row| Transaction {
+                id: row.get("id"),
+                child_id: row.get("child_id"),
+                date: row.get("date"),
+                description: row.get("description"),
+                amount: row.get("amount"),
+                balance: row.get("balance"),
+                transaction_type: if row.get::<f64, _>("amount") >= 0.0 { TransactionType::Income } else { TransactionType::Expense },
+            })
+            .collect();
+
+        Ok(transactions)
+    }
+
+    /// Get the most recent transaction before a specific date
+    /// This is useful for finding the starting balance when inserting backdated transactions
+    pub async fn get_latest_transaction_before_date(&self, child_id: &str, date: &str) -> Result<Option<Transaction>> {
+        let row = sqlx::query(
+            r#"
+            SELECT id, child_id, date, description, amount, balance
+            FROM transactions
+            WHERE child_id = ? AND date < ?
+            ORDER BY date DESC, ROWID DESC
+            LIMIT 1
+            "#,
+        )
+        .bind(child_id)
+        .bind(date)
+        .fetch_optional(self.db.pool())
+        .await?;
+
+        match row {
+            Some(r) => Ok(Some(Transaction {
+                id: r.get("id"),
+                child_id: r.get("child_id"),
+                date: r.get("date"),
+                description: r.get("description"),
+                amount: r.get("amount"),
+                balance: r.get("balance"),
+                transaction_type: if r.get::<f64, _>("amount") >= 0.0 { TransactionType::Income } else { TransactionType::Expense },
+            })),
+            None => Ok(None),
+        }
+    }
+
+    /// Update the balance of a specific transaction
+    /// Used during balance recalculation after backdated transactions
+    pub async fn update_transaction_balance(&self, transaction_id: &str, new_balance: f64) -> Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE transactions 
+            SET balance = ? 
+            WHERE id = ?
+            "#,
+        )
+        .bind(new_balance)
+        .bind(transaction_id)
+        .execute(self.db.pool())
+        .await?;
+        Ok(())
+    }
+
+    /// Update multiple transaction balances atomically
+    /// Used for bulk balance recalculation after backdated transactions
+    pub async fn update_transaction_balances(&self, updates: &[(String, f64)]) -> Result<()> {
+        let mut tx = self.db.pool().begin().await?;
+        
+        for (transaction_id, new_balance) in updates {
+            sqlx::query(
+                r#"
+                UPDATE transactions 
+                SET balance = ? 
+                WHERE id = ?
+                "#,
+            )
+            .bind(new_balance)
+            .bind(transaction_id)
+            .execute(&mut *tx)
+            .await?;
+        }
+        
+        tx.commit().await?;
+        Ok(())
     }
 
     /// Delete multiple transactions by their IDs for a specific child

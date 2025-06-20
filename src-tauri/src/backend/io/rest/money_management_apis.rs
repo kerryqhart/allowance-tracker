@@ -30,7 +30,7 @@ pub async fn add_money(
         }
     };
 
-    let _active_child = match active_child_response.active_child {
+    let active_child = match active_child_response.active_child {
         Some(child) => child,
         None => {
             error!("No active child found for add money operation");
@@ -38,9 +38,14 @@ pub async fn add_money(
         }
     };
 
-    // First validate the request
+    // Enhanced validation that includes date validation if provided
     let validation = state.money_management_service
-        .validate_add_money_form(&request.description, &request.amount.to_string());
+        .validate_add_money_form_with_date(
+            &request.description, 
+            &request.amount.to_string(),
+            request.date.as_deref(),
+            Some(&active_child.created_at)
+        );
 
     if !validation.is_valid {
         let error_message = state.money_management_service
@@ -51,13 +56,23 @@ pub async fn add_money(
 
     // Convert to CreateTransactionRequest
     let create_request = state.money_management_service
-        .to_create_transaction_request(request);
+        .to_create_transaction_request(request.clone());
 
     // Create the transaction (automatically scoped to active child)
+    // The TransactionService will handle backdated transaction logic
     match state.transaction_service.create_transaction(create_request).await {
         Ok(transaction) => {
-            let success_message = state.money_management_service
-                .generate_success_message(transaction.amount);
+            let success_message = if let Some(date) = &request.date {
+                // Check if this was a backdated transaction
+                match state.money_management_service.is_backdated_transaction(date) {
+                    Ok(true) => format!("🎉 {} added successfully (backdated to {})!", 
+                                      state.money_management_service.format_positive_amount(transaction.amount),
+                                      date),
+                    _ => state.money_management_service.generate_success_message(transaction.amount),
+                }
+            } else {
+                state.money_management_service.generate_success_message(transaction.amount)
+            };
             
             let formatted_amount = state.money_management_service
                 .format_positive_amount(transaction.amount);
@@ -94,7 +109,7 @@ pub async fn spend_money(
         }
     };
 
-    let _active_child = match active_child_response.active_child {
+    let active_child = match active_child_response.active_child {
         Some(child) => child,
         None => {
             error!("No active child found for spend money operation");
@@ -102,9 +117,14 @@ pub async fn spend_money(
         }
     };
 
-    // First validate the request
+    // Enhanced validation that includes date validation if provided
     let validation = state.money_management_service
-        .validate_spend_money_form(&request.description, &request.amount.to_string());
+        .validate_spend_money_form_with_date(
+            &request.description, 
+            &request.amount.to_string(),
+            request.date.as_deref(),
+            Some(&active_child.created_at)
+        );
 
     if !validation.is_valid {
         let error_message = state.money_management_service
@@ -118,10 +138,20 @@ pub async fn spend_money(
         .spend_to_create_transaction_request(request.clone());
 
     // Create the transaction (automatically scoped to active child)
+    // The TransactionService will handle backdated transaction logic
     match state.transaction_service.create_transaction(create_request).await {
         Ok(transaction) => {
-            let success_message = state.money_management_service
-                .generate_spend_success_message(request.amount);
+            let success_message = if let Some(date) = &request.date {
+                // Check if this was a backdated transaction
+                match state.money_management_service.is_backdated_transaction(date) {
+                    Ok(true) => format!("💸 {} spent successfully (backdated to {})!", 
+                                      state.money_management_service.format_amount(request.amount.abs()),
+                                      date),
+                    _ => state.money_management_service.generate_spend_success_message(request.amount),
+                }
+            } else {
+                state.money_management_service.generate_spend_success_message(request.amount)
+            };
             
             let formatted_amount = state.money_management_service
                 .format_negative_amount(request.amount);
@@ -160,6 +190,8 @@ mod tests {
         let money_management_service = MoneyManagementService::new();
         let child_service = ChildService::new(db.clone());
         let parental_control_service = crate::backend::domain::ParentalControlService::new(db.clone());
+        let allowance_service = crate::backend::domain::AllowanceService::new(db.clone());
+        let balance_service = crate::backend::domain::BalanceService::new(db);
         
         // Create a test child and set as active using ChildService
         use shared::{CreateChildRequest, SetActiveChildRequest};
@@ -177,8 +209,6 @@ mod tests {
         
         child_service.set_active_child(set_active_request).await.expect("Failed to set active child");
         
-        let allowance_service = crate::backend::domain::AllowanceService::new(db.clone());
-        
         AppState {
             transaction_service,
             calendar_service,
@@ -187,6 +217,7 @@ mod tests {
             child_service,
             parental_control_service,
             allowance_service,
+            balance_service,
         }
     }
 
@@ -217,6 +248,7 @@ mod tests {
         let child_service = ChildService::new(db.clone());
         let parental_control_service = crate::backend::domain::ParentalControlService::new(db.clone());
         let allowance_service = crate::backend::domain::AllowanceService::new(db.clone());
+        let balance_service = crate::backend::domain::BalanceService::new(db);
         
         let state = AppState {
             transaction_service,
@@ -226,6 +258,7 @@ mod tests {
             child_service,
             parental_control_service,
             allowance_service,
+            balance_service,
         };
         
         let request = AddMoneyRequest {
@@ -234,7 +267,7 @@ mod tests {
             date: None,
         };
 
-        let response = add_money(State(state), Json(request)).await;
+        let _response = add_money(State(state), Json(request)).await;
         
         // Should handle no active child gracefully
         // The function should return a response (not panic)
@@ -267,6 +300,7 @@ mod tests {
         let child_service = ChildService::new(db.clone());
         let parental_control_service = crate::backend::domain::ParentalControlService::new(db.clone());
         let allowance_service = crate::backend::domain::AllowanceService::new(db.clone());
+        let balance_service = crate::backend::domain::BalanceService::new(db);
         
         let state = AppState {
             transaction_service,
@@ -276,6 +310,7 @@ mod tests {
             child_service,
             parental_control_service,
             allowance_service,
+            balance_service,
         };
         
         let request = SpendMoneyRequest {
@@ -284,7 +319,7 @@ mod tests {
             date: None,
         };
 
-        let response = spend_money(State(state), Json(request)).await;
+        let _response = spend_money(State(state), Json(request)).await;
         
         // Should handle no active child gracefully
         // The function should return a response (not panic)

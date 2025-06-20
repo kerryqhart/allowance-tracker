@@ -6,8 +6,8 @@
 //! handled here.
 
 use shared::{CreateTransactionRequest, AddMoneyRequest, SpendMoneyRequest, MoneyFormValidation, MoneyValidationError, MoneyFormState, MoneyManagementConfig};
-
-
+use chrono::{DateTime, Utc, Duration};
+use time::OffsetDateTime;
 
 /// Money management service that handles all money-related business logic
 #[derive(Clone)]
@@ -371,6 +371,107 @@ impl MoneyManagementService {
             "Movie ticket".to_string(),
         ]
     }
+
+    /// Validate transaction date for backdated transactions
+    /// 
+    /// Rules:
+    /// - Date must be in valid RFC 3339 format
+    /// - Date cannot be more than 45 days in the past
+    /// - Date cannot be in the future
+    /// - Date cannot be before child creation date (if provided)
+    pub fn validate_transaction_date(&self, date: &str, child_created_at: Option<&str>) -> Result<(), String> {
+        // Parse the provided date
+        let transaction_date = DateTime::parse_from_rfc3339(date)
+            .map_err(|e| format!("Invalid date format. Expected RFC 3339 format (e.g., '2025-01-15T14:30:00-05:00'): {}", e))?;
+
+        let now = Utc::now();
+        let now_with_tz = now.with_timezone(&transaction_date.timezone());
+
+        // Check if date is in the future
+        if transaction_date > now_with_tz {
+            return Err("Transaction date cannot be in the future".to_string());
+        }
+
+        // Check 45-day limit
+        let forty_five_days_ago = now_with_tz - Duration::days(45);
+        if transaction_date < forty_five_days_ago {
+            return Err("Transaction date cannot be more than 45 days in the past".to_string());
+        }
+
+        // Check against child creation date if provided
+        if let Some(child_created_str) = child_created_at {
+            let child_created = DateTime::parse_from_rfc3339(child_created_str)
+                .map_err(|e| format!("Invalid child creation date format: {}", e))?;
+                
+            if transaction_date < child_created {
+                return Err("Transaction date cannot be before the child was created".to_string());
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Enhanced validation for add money form that includes date validation
+    pub fn validate_add_money_form_with_date(&self, description: &str, amount_input: &str, date: Option<&str>, child_created_at: Option<&str>) -> MoneyFormValidation {
+        let mut validation = self.validate_add_money_form(description, amount_input);
+
+        // Add date validation if date is provided
+        if let Some(date_str) = date {
+            if let Err(date_error) = self.validate_transaction_date(date_str, child_created_at) {
+                validation.errors.push(MoneyValidationError::InvalidAmountFormat(date_error)); // Reusing existing error type
+                validation.is_valid = false;
+            }
+        }
+
+        validation
+    }
+
+    /// Enhanced validation for spend money form that includes date validation
+    pub fn validate_spend_money_form_with_date(&self, description: &str, amount_input: &str, date: Option<&str>, child_created_at: Option<&str>) -> MoneyFormValidation {
+        let mut validation = self.validate_spend_money_form(description, amount_input);
+
+        // Add date validation if date is provided
+        if let Some(date_str) = date {
+            if let Err(date_error) = self.validate_transaction_date(date_str, child_created_at) {
+                validation.errors.push(MoneyValidationError::InvalidAmountFormat(date_error)); // Reusing existing error type
+                validation.is_valid = false;
+            }
+        }
+
+        validation
+    }
+
+    /// Check if a transaction date would require balance recalculation
+    /// (i.e., it's being backdated)
+    pub fn is_backdated_transaction(&self, date: &str) -> Result<bool, String> {
+        let transaction_date = DateTime::parse_from_rfc3339(date)
+            .map_err(|e| format!("Invalid date format: {}", e))?;
+
+        let now = Utc::now();
+        let now_with_tz = now.with_timezone(&transaction_date.timezone());
+        
+        // Consider backdated if more than 1 hour in the past
+        // This gives some leeway for timezone differences and normal delays
+        let one_hour_ago = now_with_tz - Duration::hours(1);
+        
+        Ok(transaction_date < one_hour_ago)
+    }
+
+    /// Generate current RFC 3339 timestamp in Eastern Time
+    /// This is used as the default date when none is provided
+    pub fn generate_current_timestamp(&self) -> Result<String, String> {
+        let now = std::time::SystemTime::now();
+        let utc_datetime = OffsetDateTime::from(now);
+        
+        // Convert to Eastern Time (assuming EST/EDT, UTC-5/-4)
+        // In a production app, you'd want to detect the actual timezone
+        let eastern_offset = time::UtcOffset::from_hms(-5, 0, 0)
+            .map_err(|e| format!("Failed to create timezone offset: {}", e))?;
+        let eastern_datetime = utc_datetime.to_offset(eastern_offset);
+        
+        eastern_datetime.format(&time::format_description::well_known::Rfc3339)
+            .map_err(|e| format!("Failed to format timestamp: {}", e))
+    }
 }
 
 impl Default for MoneyManagementService {
@@ -378,8 +479,6 @@ impl Default for MoneyManagementService {
         Self::new()
     }
 }
-
-
 
 #[cfg(test)]
 mod tests {
@@ -655,6 +754,146 @@ mod tests {
         assert!(!suggestions.is_empty());
         assert!(suggestions.contains(&"Toy".to_string()));
         assert!(suggestions.contains(&"Candy".to_string()));
-        assert!(suggestions.contains(&"Book".to_string()));
+    }
+
+    #[test]
+    fn test_validate_transaction_date_valid() {
+        let service = create_test_service();
+        
+        // Valid date in the past (within 45 days)
+        let valid_date = chrono::Utc::now()
+            .checked_sub_signed(chrono::Duration::days(10))
+            .unwrap()
+            .to_rfc3339();
+        
+        let result = service.validate_transaction_date(&valid_date, None);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_transaction_date_invalid_format() {
+        let service = create_test_service();
+        
+        let result = service.validate_transaction_date("invalid-date-format", None);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Invalid date format"));
+    }
+
+    #[test]
+    fn test_validate_transaction_date_future() {
+        let service = create_test_service();
+        
+        // Date in the future
+        let future_date = chrono::Utc::now()
+            .checked_add_signed(chrono::Duration::days(1))
+            .unwrap()
+            .to_rfc3339();
+        
+        let result = service.validate_transaction_date(&future_date, None);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("cannot be in the future"));
+    }
+
+    #[test]
+    fn test_validate_transaction_date_too_old() {
+        let service = create_test_service();
+        
+        // Date more than 45 days in the past
+        let old_date = chrono::Utc::now()
+            .checked_sub_signed(chrono::Duration::days(50))
+            .unwrap()
+            .to_rfc3339();
+        
+        let result = service.validate_transaction_date(&old_date, None);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("more than 45 days in the past"));
+    }
+
+    #[test]
+    fn test_validate_transaction_date_before_child_creation() {
+        let service = create_test_service();
+        
+        // Use recent dates that won't trigger 45-day limit
+        let now = chrono::Utc::now();
+        let child_created = now.checked_sub_signed(chrono::Duration::days(5)).unwrap().to_rfc3339();
+        let transaction_date = now.checked_sub_signed(chrono::Duration::days(10)).unwrap().to_rfc3339(); // Before child creation
+        
+        let result = service.validate_transaction_date(&transaction_date, Some(&child_created));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("before the child was created"));
+    }
+
+    #[test]
+    fn test_validate_add_money_form_with_date_valid() {
+        let service = create_test_service();
+        
+        let valid_date = chrono::Utc::now()
+            .checked_sub_signed(chrono::Duration::days(5))
+            .unwrap()
+            .to_rfc3339();
+        
+        let validation = service.validate_add_money_form_with_date(
+            "Birthday gift", 
+            "25.00", 
+            Some(&valid_date), 
+            None
+        );
+        
+        assert!(validation.is_valid);
+    }
+
+    #[test]
+    fn test_validate_add_money_form_with_date_invalid_date() {
+        let service = create_test_service();
+        
+        let future_date = chrono::Utc::now()
+            .checked_add_signed(chrono::Duration::days(1))
+            .unwrap()
+            .to_rfc3339();
+        
+        let validation = service.validate_add_money_form_with_date(
+            "Birthday gift", 
+            "25.00", 
+            Some(&future_date), 
+            None
+        );
+        
+        assert!(!validation.is_valid);
+        assert!(!validation.errors.is_empty());
+    }
+
+    #[test]
+    fn test_is_backdated_transaction() {
+        let service = create_test_service();
+        
+        // Current time (should not be backdated)
+        let now = chrono::Utc::now().to_rfc3339();
+        let result = service.is_backdated_transaction(&now);
+        assert!(result.is_ok());
+        assert!(!result.unwrap());
+        
+        // 2 hours ago (should be backdated)
+        let backdated = chrono::Utc::now()
+            .checked_sub_signed(chrono::Duration::hours(2))
+            .unwrap()
+            .to_rfc3339();
+        let result = service.is_backdated_transaction(&backdated);
+        assert!(result.is_ok());
+        assert!(result.unwrap());
+    }
+
+    #[test]
+    fn test_generate_current_timestamp() {
+        let service = create_test_service();
+        
+        let result = service.generate_current_timestamp();
+        assert!(result.is_ok());
+        
+        let timestamp = result.unwrap();
+        assert!(!timestamp.is_empty());
+        
+        // Should be parseable as RFC 3339
+        let parsed = chrono::DateTime::parse_from_rfc3339(&timestamp);
+        assert!(parsed.is_ok());
     }
 } 

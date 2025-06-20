@@ -84,7 +84,8 @@ mod tests {
         let money_management_service = crate::backend::domain::MoneyManagementService::new();
         let child_service = ChildService::new(db_conn.clone());
         let parental_control_service = crate::backend::domain::ParentalControlService::new(db_conn.clone());
-        let allowance_service = AllowanceService::new(db_conn);
+        let allowance_service = AllowanceService::new(db_conn.clone());
+        let balance_service = crate::backend::domain::BalanceService::new(db_conn);
 
         AppState {
             transaction_service,
@@ -94,6 +95,7 @@ mod tests {
             child_service,
             parental_control_service,
             allowance_service,
+            balance_service,
         }
     }
 

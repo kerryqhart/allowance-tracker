@@ -11,6 +11,7 @@
 //! - **Data Persistence**: Interfacing with storage layer for transaction data
 //! - **Pagination**: Cursor-based pagination for efficient data retrieval
 //! - **Business Rules**: Enforcing transaction validation and business constraints
+//! - **Backdated Transactions**: Supporting historical transaction insertion with balance recalculation
 
 //! - **Date Filtering**: Supporting date range queries for transaction lists
 //!
@@ -30,6 +31,7 @@
 //! - Unique transaction IDs are generated based on amount and timestamp
 //! - Balance calculations consider all historical transactions
 //! - Pagination uses cursor-based approach for consistent results
+//! - Backdated transactions trigger balance recalculation for subsequent transactions
 //!
 //! ## Design Principles
 //!
@@ -40,13 +42,16 @@
 //! - **Testability**: Pure business logic with comprehensive test coverage
 
 
-use crate::backend::storage::{DbConnection, TransactionRepository};
-use crate::backend::domain::child_service::ChildService;
-use crate::backend::domain::allowance_service::AllowanceService;
-use shared::{Transaction, TransactionType, TransactionListRequest, TransactionListResponse, PaginationInfo, CreateTransactionRequest, DeleteTransactionsRequest, DeleteTransactionsResponse};
 use anyhow::Result;
-use tracing::info;
+use log::info;
 use std::sync::Arc;
+use shared::{
+    CreateTransactionRequest, DeleteTransactionsRequest, DeleteTransactionsResponse,
+    PaginationInfo, Transaction, TransactionListRequest, TransactionListResponse,
+    TransactionType,
+};
+use crate::backend::storage::{connection::DbConnection, repositories::transaction_repository::TransactionRepository};
+use crate::backend::domain::{child_service::ChildService, AllowanceService, BalanceService};
 use std::time::{SystemTime, UNIX_EPOCH};
 use chrono::{NaiveDate, Local, Datelike};
 
@@ -55,17 +60,19 @@ pub struct TransactionService {
     transaction_repository: TransactionRepository,
     child_service: ChildService,
     allowance_service: AllowanceService,
+    balance_service: BalanceService,
 }
 
 impl TransactionService {
     pub fn new(db: Arc<DbConnection>) -> Self {
         let transaction_repository = TransactionRepository::new((*db).clone());
         let child_service = ChildService::new(db.clone());
-        let allowance_service = AllowanceService::new(db);
-        Self { transaction_repository, child_service, allowance_service }
+        let allowance_service = AllowanceService::new(db.clone());
+        let balance_service = BalanceService::new(db);
+        Self { transaction_repository, child_service, allowance_service, balance_service }
     }
 
-    /// Create a new transaction
+    /// Create a new transaction with support for backdated transactions
     pub async fn create_transaction(&self, request: CreateTransactionRequest) -> Result<Transaction> {
         info!("Creating transaction: {:?}", request);
 
@@ -79,16 +86,7 @@ impl TransactionService {
         let active_child = active_child_response.active_child
             .ok_or_else(|| anyhow::anyhow!("No active child found"))?;
 
-        // Get current balance from latest transaction for this child
-        let current_balance = match self.transaction_repository.get_latest_transaction(&active_child.id).await? {
-            Some(latest) => latest.balance,
-            None => 0.0, // First transaction starts at 0
-        };
-
-        // Calculate new balance
-        let new_balance = current_balance + request.amount;
-
-        // Generate transaction ID and date
+        // Generate transaction ID and determine final date
         let now_millis = SystemTime::now()
             .duration_since(UNIX_EPOCH)?
             .as_millis() as u64;
@@ -96,37 +94,55 @@ impl TransactionService {
         let transaction_id = Transaction::generate_id(request.amount, now_millis);
         
         // Use provided date or generate current RFC 3339 timestamp in Eastern Time
-        let date = match request.date {
+        let transaction_date = match request.date {
             Some(date) => date,
             None => {
-                // Generate RFC 3339 formatted timestamp in Eastern Time (assuming EDT for now, UTC-4)
-                // In a production app, you'd want to detect the actual timezone or let the user configure it
+                // Generate RFC 3339 formatted timestamp in Eastern Time (assuming EST/EDT, UTC-5/-4)
                 let now = SystemTime::now();
                 let utc_datetime = time::OffsetDateTime::from(now);
                 
-                // Convert to Eastern Time (assuming EDT for now, UTC-4)
-                // In a production app, you'd want to detect the actual timezone or let the user configure it
-                let eastern_offset = time::UtcOffset::from_hms(-4, 0, 0)?;
+                // Convert to Eastern Time (assuming EST for now, UTC-5)
+                let eastern_offset = time::UtcOffset::from_hms(-5, 0, 0)?;
                 let eastern_datetime = utc_datetime.to_offset(eastern_offset);
                 
                 eastern_datetime.format(&time::format_description::well_known::Rfc3339)?
             }
         };
 
+        // Calculate the correct balance for this transaction based on its date
+        let transaction_balance = self.balance_service
+            .calculate_balance_for_new_transaction(&active_child.id, &transaction_date, request.amount)
+            .await?;
+
         let transaction = Transaction {
             id: transaction_id,
-            child_id: active_child.id,
-            date,
+            child_id: active_child.id.clone(),
+            date: transaction_date.clone(),
             description: request.description,
             amount: request.amount,
-            balance: new_balance,
+            balance: transaction_balance,
             transaction_type: if request.amount >= 0.0 { TransactionType::Income } else { TransactionType::Expense },
         };
 
-        // Store in database
+        // Store the transaction in database
         self.transaction_repository.store_transaction(&transaction).await?;
 
-        info!("Created transaction: {} with balance: {:.2}", transaction.id, new_balance);
+        info!("Created transaction: {} with balance: {:.2}", transaction.id, transaction_balance);
+
+        // Check if this is a backdated transaction that requires balance recalculation
+        if self.balance_service.requires_balance_recalculation(&active_child.id, &transaction_date).await? {
+            info!("Backdated transaction detected, triggering balance recalculation from {}", transaction_date);
+            
+            // Recalculate balances for all transactions from this date forward
+            let updated_count = self.balance_service
+                .recalculate_balances_from_date(&active_child.id, &transaction_date)
+                .await?;
+            
+            info!("Recalculated {} transaction balances due to backdated transaction", updated_count);
+        } else {
+            info!("Transaction is current, no balance recalculation needed");
+        }
+
         Ok(transaction)
     }
 
@@ -276,10 +292,6 @@ impl TransactionService {
             not_found_ids,
         })
     }
-
-
-
-
 }
 
 #[cfg(test)]
@@ -979,7 +991,6 @@ mod tests {
             6, // June
             2025,
             response.transactions,
-            None, // No allowance config for this test
         );
         
         // Verify calendar was generated correctly

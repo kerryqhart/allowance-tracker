@@ -45,7 +45,7 @@ use axum::{
 };
 use tower_http::cors::{Any, CorsLayer};
 use anyhow::Result;
-use crate::backend::domain::{TransactionService, CalendarService, TransactionTableService, MoneyManagementService, child_service::ChildService, ParentalControlService, AllowanceService};
+use crate::backend::domain::{TransactionService, CalendarService, TransactionTableService, MoneyManagementService, child_service::ChildService, ParentalControlService, AllowanceService, BalanceService};
 use crate::backend::storage::DbConnection;
 use log::info;
 
@@ -61,6 +61,7 @@ pub struct AppState {
     pub child_service: ChildService,
     pub parental_control_service: ParentalControlService,
     pub allowance_service: AllowanceService,
+    pub balance_service: BalanceService,
 }
 
 /// Initialize the backend with all required services
@@ -75,7 +76,8 @@ pub async fn initialize_backend() -> Result<AppState> {
     let money_management_service = MoneyManagementService::new();
     let child_service = ChildService::new(db_conn.clone());
     let parental_control_service = ParentalControlService::new(db_conn.clone());
-    let allowance_service = AllowanceService::new(db_conn);
+    let allowance_service = AllowanceService::new(db_conn.clone());
+    let balance_service = BalanceService::new(db_conn);
 
     info!("Setting up application state");
     let app_state = AppState {
@@ -86,6 +88,7 @@ pub async fn initialize_backend() -> Result<AppState> {
         child_service,
         parental_control_service,
         allowance_service,
+        balance_service,
     };
 
     Ok(app_state)

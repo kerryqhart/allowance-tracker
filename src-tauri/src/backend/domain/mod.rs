@@ -59,10 +59,12 @@ pub mod money_management;
 pub mod child_service;
 pub mod parental_control_service;
 pub mod allowance_service;
+pub mod balance_service;
 
 pub use transaction_service::*;
 pub use transaction_table::*;
 pub use calendar::*;
 pub use money_management::*;
 pub use parental_control_service::*;
-pub use allowance_service::*; 
+pub use allowance_service::*;
+pub use balance_service::*; 

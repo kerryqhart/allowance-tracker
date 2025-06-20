@@ -589,6 +589,7 @@ mod tests {
             description: "Test transaction".to_string(),
             amount: 10.0,
             balance: 100.0,
+            transaction_type: TransactionType::Income,
         };
 
         assert_eq!(transaction.extract_timestamp().unwrap(), 1702516122000);
