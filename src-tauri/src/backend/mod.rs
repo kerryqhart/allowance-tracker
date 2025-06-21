@@ -69,6 +69,9 @@ pub async fn initialize_backend() -> Result<AppState> {
     info!("Setting up CSV storage for transactions");
     let csv_conn = std::sync::Arc::new(CsvConnection::new_default()?);
     
+    // Log the data directory location for user reference
+    info!("Allowance Tracker data directory: {:?}", csv_conn.base_directory());
+    
     info!("Setting up database for other services");
     let db_conn = std::sync::Arc::new(DbConnection::init().await?);
 

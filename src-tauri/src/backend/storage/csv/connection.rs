@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::fs;
 use chrono::Utc;
 use crate::backend::storage::traits::Connection;
+use log::info;
 
 /// CsvConnection manages file paths and ensures CSV files exist for each child
 #[derive(Clone)]
@@ -26,9 +27,18 @@ impl CsvConnection {
     }
     
     /// Create a new CSV connection in the default data directory
+    /// This uses ~/Documents/Allowance Tracker
     pub fn new_default() -> Result<Self> {
-        // Use a data directory in the app's working directory
-        let data_dir = PathBuf::from("data");
+        // Get the user's home directory and construct the Documents path
+        let home_dir = std::env::var("HOME")
+            .or_else(|_| std::env::var("USERPROFILE"))
+            .map_err(|_| anyhow::anyhow!("Could not determine home directory"))?;
+        
+        let documents_dir = PathBuf::from(home_dir).join("Documents");
+        let data_dir = documents_dir.join("Allowance Tracker");
+        
+        info!("Using data directory: {}", data_dir.display());
+        
         Self::new(data_dir)
     }
     
