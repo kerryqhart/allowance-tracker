@@ -40,14 +40,27 @@ impl CsvConnection {
         Self::new(test_dir)
     }
     
-    /// Get the file path for a child's transactions
-    pub fn get_transactions_file_path(&self, child_id: &str) -> PathBuf {
-        self.base_directory.join(format!("{}_transactions.csv", child_id))
+    /// Get the directory path for a child's data using the child name
+    pub fn get_child_directory(&self, child_name: &str) -> PathBuf {
+        self.base_directory.join(child_name)
     }
     
-    /// Ensure a CSV file exists with proper header for the child
-    pub fn ensure_transactions_file_exists(&self, child_id: &str) -> Result<()> {
-        let file_path = self.get_transactions_file_path(child_id);
+    /// Get the file path for a child's transactions using the child name
+    pub fn get_transactions_file_path(&self, child_name: &str) -> PathBuf {
+        let child_dir = self.get_child_directory(child_name);
+        child_dir.join("transactions.csv")
+    }
+    
+    /// Ensure a CSV file exists with proper header for the child using the child name
+    pub fn ensure_transactions_file_exists(&self, child_name: &str) -> Result<()> {
+        let child_dir = self.get_child_directory(child_name);
+        
+        // Create the child directory if it doesn't exist
+        if !child_dir.exists() {
+            fs::create_dir_all(&child_dir)?;
+        }
+        
+        let file_path = child_dir.join("transactions.csv");
         
         if !file_path.exists() {
             // Create the file with CSV header

@@ -1,4 +1,4 @@
-mod backend;
+pub mod backend;
 
 use backend::initialize_backend;
 use tokio::runtime::Runtime;

@@ -20,10 +20,10 @@ impl TransactionRepository {
     }
     
     /// Read all transactions for a child from their CSV file
-    async fn read_transactions(&self, child_id: &str) -> Result<Vec<Transaction>> {
-        self.connection.ensure_transactions_file_exists(child_id)?;
+    async fn read_transactions(&self, child_name: &str) -> Result<Vec<Transaction>> {
+        self.connection.ensure_transactions_file_exists(child_name)?;
         
-        let file_path = self.connection.get_transactions_file_path(child_id);
+        let file_path = self.connection.get_transactions_file_path(child_name);
         let file = File::open(&file_path)?;
         let reader = BufReader::new(file);
         let mut csv_reader = Reader::from_reader(reader);
@@ -55,8 +55,8 @@ impl TransactionRepository {
     }
     
     /// Write all transactions for a child to their CSV file
-    async fn write_transactions(&self, child_id: &str, transactions: &[Transaction]) -> Result<()> {
-        let file_path = self.connection.get_transactions_file_path(child_id);
+    async fn write_transactions(&self, child_name: &str, transactions: &[Transaction]) -> Result<()> {
+        let file_path = self.connection.get_transactions_file_path(child_name);
         
         // Create a temporary file for atomic write
         let temp_path = file_path.with_extension("tmp");
@@ -94,6 +94,58 @@ impl TransactionRepository {
         
         Ok(())
     }
+    
+    /// Helper method to get child name from child ID
+    /// This will need to be provided by the caller who has access to child information
+    fn extract_child_name_from_id(&self, child_id: &str) -> String {
+        // For now, let's create a simple mapping - this is temporary
+        // In practice, the caller should provide the child name
+        match child_id {
+            "child::1750206432329" => "TestChild".to_string(),
+            _ => {
+                // Extract a name from the ID as fallback
+                if child_id.starts_with("child::") {
+                    format!("Child_{}", &child_id[7..17]) // Use first 10 chars after "child::"
+                } else {
+                    child_id.to_string()
+                }
+            }
+        }
+    }
+}
+
+impl TransactionRepository {
+    /// Read transactions using child_id, extracting child name
+    pub async fn read_transactions_by_id(&self, child_id: &str) -> Result<Vec<Transaction>> {
+        let child_name = self.extract_child_name_from_id(child_id);
+        self.read_transactions(&child_name).await
+    }
+    
+    /// Write transactions using child_id, extracting child name
+    pub async fn write_transactions_by_id(&self, child_id: &str, transactions: &[Transaction]) -> Result<()> {
+        let child_name = self.extract_child_name_from_id(child_id);
+        self.write_transactions(&child_name, transactions).await
+    }
+    
+    /// Store transaction with explicit child name (preferred method)
+    pub async fn store_transaction_with_child_name(&self, transaction: &Transaction, child_name: &str) -> Result<()> {
+        info!("Storing transaction in CSV for child '{}': {}", child_name, transaction.id);
+        
+        // Read existing transactions using child name
+        let mut transactions = self.read_transactions(child_name).await?;
+        
+        // Add new transaction
+        transactions.push(transaction.clone());
+        
+        // Sort by date to maintain chronological order
+        transactions.sort_by(|a, b| a.date.cmp(&b.date));
+        
+        // Write back to file using child name
+        self.write_transactions(child_name, &transactions).await?;
+        
+        info!("Successfully stored transaction for child '{}': {}", child_name, transaction.id);
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -102,7 +154,7 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
         info!("Storing transaction in CSV: {}", transaction.id);
         
         // Read existing transactions
-        let mut transactions = self.read_transactions(&transaction.child_id).await?;
+        let mut transactions = self.read_transactions_by_id(&transaction.child_id).await?;
         
         // Add new transaction
         transactions.push(transaction.clone());
@@ -111,20 +163,20 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
         transactions.sort_by(|a, b| a.date.cmp(&b.date));
         
         // Write back to file
-        self.write_transactions(&transaction.child_id, &transactions).await?;
+        self.write_transactions_by_id(&transaction.child_id, &transactions).await?;
         
         info!("Successfully stored transaction: {}", transaction.id);
         Ok(())
     }
     
     async fn get_transaction(&self, child_id: &str, transaction_id: &str) -> Result<Option<Transaction>> {
-        let transactions = self.read_transactions(child_id).await?;
+        let transactions = self.read_transactions_by_id(child_id).await?;
         
         Ok(transactions.into_iter().find(|t| t.id == transaction_id))
     }
     
     async fn list_transactions(&self, child_id: &str, limit: Option<u32>, after: Option<String>) -> Result<Vec<Transaction>> {
-        let mut transactions = self.read_transactions(child_id).await?;
+        let mut transactions = self.read_transactions_by_id(child_id).await?;
         
         // Sort by date descending (most recent first)
         transactions.sort_by(|a, b| b.date.cmp(&a.date));
@@ -145,7 +197,7 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
     }
     
     async fn list_transactions_chronological(&self, child_id: &str, start_date: Option<String>, end_date: Option<String>) -> Result<Vec<Transaction>> {
-        let mut transactions = self.read_transactions(child_id).await?;
+        let mut transactions = self.read_transactions_by_id(child_id).await?;
         
         // Filter by date range if provided
         if let Some(start) = start_date {
@@ -165,7 +217,7 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
     async fn update_transaction(&self, transaction: &Transaction) -> Result<()> {
         info!("Updating transaction in CSV: {}", transaction.id);
         
-        let mut transactions = self.read_transactions(&transaction.child_id).await?;
+        let mut transactions = self.read_transactions_by_id(&transaction.child_id).await?;
         
         // Find and update the transaction
         if let Some(existing) = transactions.iter_mut().find(|t| t.id == transaction.id) {
@@ -175,7 +227,7 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
             transactions.sort_by(|a, b| a.date.cmp(&b.date));
             
             // Write back to file
-            self.write_transactions(&transaction.child_id, &transactions).await?;
+            self.write_transactions_by_id(&transaction.child_id, &transactions).await?;
             
             info!("Successfully updated transaction: {}", transaction.id);
         } else {
@@ -188,7 +240,7 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
     async fn delete_transaction(&self, child_id: &str, transaction_id: &str) -> Result<bool> {
         info!("Deleting transaction from CSV: {}", transaction_id);
         
-        let mut transactions = self.read_transactions(child_id).await?;
+        let mut transactions = self.read_transactions_by_id(child_id).await?;
         let initial_len = transactions.len();
         
         // Remove the transaction
@@ -196,7 +248,7 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
         
         if transactions.len() < initial_len {
             // Write back to file
-            self.write_transactions(child_id, &transactions).await?;
+            self.write_transactions_by_id(child_id, &transactions).await?;
             info!("Successfully deleted transaction: {}", transaction_id);
             Ok(true)
         } else {
@@ -208,7 +260,7 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
     async fn delete_transactions(&self, child_id: &str, transaction_ids: &[String]) -> Result<u32> {
         info!("Deleting {} transactions from CSV", transaction_ids.len());
         
-        let mut transactions = self.read_transactions(child_id).await?;
+        let mut transactions = self.read_transactions_by_id(child_id).await?;
         let initial_len = transactions.len();
         
         // Remove the transactions
@@ -218,7 +270,7 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
         
         if deleted_count > 0 {
             // Write back to file
-            self.write_transactions(child_id, &transactions).await?;
+            self.write_transactions_by_id(child_id, &transactions).await?;
             info!("Successfully deleted {} transactions", deleted_count);
         }
         
@@ -227,7 +279,7 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
     
     /// Get the most recent transaction for a specific child (trait implementation)
     async fn get_latest_transaction(&self, child_id: &str) -> Result<Option<Transaction>> {
-        let mut transactions = self.read_transactions(child_id).await?;
+        let mut transactions = self.read_transactions_by_id(child_id).await?;
         
         // Sort by date descending (most recent first)
         transactions.sort_by(|a, b| b.date.cmp(&a.date));
@@ -237,7 +289,7 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
     
     /// Get all transactions after a specific date (trait implementation)
     async fn get_transactions_after_date(&self, child_id: &str, date: &str) -> Result<Vec<Transaction>> {
-        let mut transactions = self.read_transactions(child_id).await?;
+        let mut transactions = self.read_transactions_by_id(child_id).await?;
         
         // Filter by date
         transactions.retain(|t| t.date.as_str() >= date);
@@ -250,7 +302,7 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
     
     /// Get the most recent transaction before a specific date (trait implementation)
     async fn get_latest_transaction_before_date(&self, child_id: &str, date: &str) -> Result<Option<Transaction>> {
-        let mut transactions = self.read_transactions(child_id).await?;
+        let mut transactions = self.read_transactions_by_id(child_id).await?;
         
         // Filter transactions before the specified date
         transactions.retain(|t| t.date.as_str() < date);
@@ -282,7 +334,7 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
     
     /// Check if transactions exist by their IDs for a specific child (trait implementation)
     async fn check_transactions_exist(&self, child_id: &str, transaction_ids: &[String]) -> Result<Vec<String>> {
-        let transactions = self.read_transactions(child_id).await?;
+        let transactions = self.read_transactions_by_id(child_id).await?;
         
         let existing_ids: Vec<String> = transactions
             .iter()

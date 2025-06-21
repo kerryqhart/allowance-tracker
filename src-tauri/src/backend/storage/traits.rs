@@ -5,7 +5,7 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use shared::Transaction;
+use shared::{Transaction, Child, AllowanceConfig, ParentalControlAttempt};
 
 /// Trait defining the interface for transaction storage operations
 /// 
@@ -60,6 +60,63 @@ pub trait TransactionStorage: Send + Sync {
     
     /// Check if transactions exist by their IDs for a specific child
     async fn check_transactions_exist(&self, child_id: &str, transaction_ids: &[String]) -> Result<Vec<String>>;
+}
+
+/// Trait defining the interface for child storage operations
+#[async_trait]
+pub trait ChildStorage: Send + Sync {
+    /// Store a new child
+    async fn store_child(&self, child: &Child) -> Result<()>;
+    
+    /// Retrieve a specific child by ID
+    async fn get_child(&self, child_id: &str) -> Result<Option<Child>>;
+    
+    /// List all children ordered by name
+    async fn list_children(&self) -> Result<Vec<Child>>;
+    
+    /// Update an existing child
+    async fn update_child(&self, child: &Child) -> Result<()>;
+    
+    /// Delete a child by ID
+    async fn delete_child(&self, child_id: &str) -> Result<()>;
+    
+    /// Get the currently active child ID
+    async fn get_active_child(&self) -> Result<Option<String>>;
+    
+    /// Set the currently active child
+    async fn set_active_child(&self, child_id: &str) -> Result<()>;
+}
+
+/// Trait defining the interface for allowance config storage operations
+#[async_trait]
+pub trait AllowanceStorage: Send + Sync {
+    /// Store a new allowance config for a child
+    async fn store_allowance_config(&self, config: &AllowanceConfig) -> Result<()>;
+    
+    /// Retrieve allowance config for a specific child by child ID
+    async fn get_allowance_config(&self, child_id: &str) -> Result<Option<AllowanceConfig>>;
+    
+    /// Update an existing allowance config for a child
+    async fn update_allowance_config(&self, config: &AllowanceConfig) -> Result<()>;
+    
+    /// Delete allowance config for a specific child
+    async fn delete_allowance_config(&self, child_id: &str) -> Result<bool>;
+    
+    /// List all allowance configs (for admin purposes)
+    async fn list_allowance_configs(&self) -> Result<Vec<AllowanceConfig>>;
+}
+
+/// Trait defining the interface for parental control attempt storage operations
+#[async_trait]
+pub trait ParentalControlStorage: Send + Sync {
+    /// Record a parental control validation attempt for a specific child
+    async fn record_parental_control_attempt(&self, child_id: &str, attempted_value: &str, success: bool) -> Result<i64>;
+    
+    /// Get parental control attempts for a specific child with optional limit
+    async fn get_parental_control_attempts(&self, child_id: &str, limit: Option<u32>) -> Result<Vec<ParentalControlAttempt>>;
+    
+    /// Get all parental control attempts across all children (for admin/debugging)
+    async fn get_all_parental_control_attempts(&self, limit: Option<u32>) -> Result<Vec<ParentalControlAttempt>>;
 }
 
 /// Trait defining the interface for storage connections

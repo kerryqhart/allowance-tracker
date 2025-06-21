@@ -22,6 +22,14 @@
 
 pub mod connection;
 pub mod transaction_repository;
+pub mod child_repository;
+pub mod allowance_repository;
+pub mod parental_control_repository;
+pub mod global_config_repository;
 
 pub use connection::CsvConnection;
-pub use transaction_repository::TransactionRepository; 
+pub use transaction_repository::TransactionRepository;
+pub use child_repository::ChildRepository;
+pub use allowance_repository::AllowanceRepository;
+pub use parental_control_repository::ParentalControlRepository;
+pub use global_config_repository::{GlobalConfigRepository, GlobalConfig, GlobalConfigStorage}; 

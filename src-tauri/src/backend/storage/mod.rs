@@ -47,7 +47,8 @@ pub mod csv;
 // Re-export the main types that other modules need
 pub use connection::DbConnection;
 pub use csv::CsvConnection;
-pub use traits::{Connection, TransactionStorage};
+pub use traits::{Connection, TransactionStorage, ChildStorage, AllowanceStorage, ParentalControlStorage};
+pub use csv::{GlobalConfig, GlobalConfigStorage};
 pub use repositories::{
     TransactionRepository,
     ChildRepository, 
