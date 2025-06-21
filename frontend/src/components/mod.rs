@@ -6,4 +6,5 @@ pub mod challenge_modal;
 pub mod create_child_modal;
 pub mod child_selector_menu;
 pub mod allowance_config_modal;
-pub mod simple_calendar; 
+pub mod simple_calendar;
+pub mod date_picker; 

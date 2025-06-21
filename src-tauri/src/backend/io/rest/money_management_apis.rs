@@ -22,23 +22,31 @@ pub async fn add_money(
     info!("POST /api/money/add - request: {:?}", request);
 
     // Check for active child first
+    info!("🔍 Checking for active child...");
     let active_child_response = match state.child_service.get_active_child().await {
-        Ok(response) => response,
+        Ok(response) => {
+            info!("✅ Got active child response: {:?}", response);
+            response
+        },
         Err(e) => {
-            error!("Failed to get active child: {}", e);
+            error!("❌ Failed to get active child: {}", e);
             return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to get active child").into_response();
         }
     };
 
     let active_child = match active_child_response.active_child {
-        Some(child) => child,
+        Some(child) => {
+            info!("✅ Active child found: {}", child.id);
+            child
+        },
         None => {
-            error!("No active child found for add money operation");
+            error!("❌ No active child found for add money operation");
             return (StatusCode::BAD_REQUEST, "No active child found. Please select a child first.").into_response();
         }
     };
 
     // Enhanced validation that includes date validation if provided
+    info!("🔍 Starting validation with date: {:?}", request.date);
     let validation = state.money_management_service
         .validate_add_money_form_with_date(
             &request.description, 
@@ -47,30 +55,45 @@ pub async fn add_money(
             Some(&active_child.created_at)
         );
 
+    info!("🔍 Validation result - is_valid: {}, errors: {:?}", validation.is_valid, validation.errors);
+
     if !validation.is_valid {
         let error_message = state.money_management_service
             .get_first_error_message(&validation.errors)
             .unwrap_or_else(|| "Invalid input".to_string());
+        error!("❌ Validation failed: {}", error_message);
         return (StatusCode::BAD_REQUEST, error_message).into_response();
     }
 
     // Convert to CreateTransactionRequest
+    info!("🔄 Converting to CreateTransactionRequest...");
     let create_request = state.money_management_service
         .to_create_transaction_request(request.clone());
+    info!("✅ CreateTransactionRequest: {:?}", create_request);
 
     // Create the transaction (automatically scoped to active child)
     // The TransactionService will handle backdated transaction logic
+    info!("🚀 Creating transaction via TransactionService...");
     match state.transaction_service.create_transaction(create_request).await {
         Ok(transaction) => {
+            info!("✅ Transaction created successfully: {:?}", transaction);
+            
             let success_message = if let Some(date) = &request.date {
                 // Check if this was a backdated transaction
                 match state.money_management_service.is_backdated_transaction(date) {
-                    Ok(true) => format!("🎉 {} added successfully (backdated to {})!", 
+                    Ok(true) => {
+                        info!("📅 This was a backdated transaction");
+                        format!("🎉 {} added successfully (backdated to {})!", 
                                       state.money_management_service.format_positive_amount(transaction.amount),
-                                      date),
-                    _ => state.money_management_service.generate_success_message(transaction.amount),
+                                      date)
+                    },
+                    _ => {
+                        info!("📅 This was a current-date transaction");
+                        state.money_management_service.generate_success_message(transaction.amount)
+                    }
                 }
             } else {
+                info!("📅 No date provided, using current date");
                 state.money_management_service.generate_success_message(transaction.amount)
             };
             
@@ -79,15 +102,16 @@ pub async fn add_money(
 
             let response = AddMoneyResponse {
                 transaction_id: transaction.id,
-                success_message,
+                success_message: success_message.clone(),
                 new_balance: transaction.balance,
                 formatted_amount,
             };
 
+            info!("✅ Sending success response: {:?}", response);
             (StatusCode::CREATED, Json(response)).into_response()
         }
         Err(e) => {
-            error!("Failed to add money: {}", e);
+            error!("❌ Failed to add money: {}", e);
             (StatusCode::INTERNAL_SERVER_ERROR, "Failed to add money").into_response()
         }
     }
@@ -101,23 +125,31 @@ pub async fn spend_money(
     info!("POST /api/money/spend - request: {:?}", request);
 
     // Check for active child first
+    info!("🔍 Checking for active child...");
     let active_child_response = match state.child_service.get_active_child().await {
-        Ok(response) => response,
+        Ok(response) => {
+            info!("✅ Got active child response: {:?}", response);
+            response
+        },
         Err(e) => {
-            error!("Failed to get active child: {}", e);
+            error!("❌ Failed to get active child: {}", e);
             return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to get active child").into_response();
         }
     };
 
     let active_child = match active_child_response.active_child {
-        Some(child) => child,
+        Some(child) => {
+            info!("✅ Active child found: {}", child.id);
+            child
+        },
         None => {
-            error!("No active child found for spend money operation");
+            error!("❌ No active child found for spend money operation");
             return (StatusCode::BAD_REQUEST, "No active child found. Please select a child first.").into_response();
         }
     };
 
     // Enhanced validation that includes date validation if provided
+    info!("🔍 Starting validation with date: {:?}", request.date);
     let validation = state.money_management_service
         .validate_spend_money_form_with_date(
             &request.description, 
@@ -126,30 +158,45 @@ pub async fn spend_money(
             Some(&active_child.created_at)
         );
 
+    info!("🔍 Validation result - is_valid: {}, errors: {:?}", validation.is_valid, validation.errors);
+
     if !validation.is_valid {
         let error_message = state.money_management_service
             .get_first_error_message(&validation.errors)
             .unwrap_or_else(|| "Invalid input".to_string());
+        error!("❌ Validation failed: {}", error_message);
         return (StatusCode::BAD_REQUEST, error_message).into_response();
     }
 
     // Convert to CreateTransactionRequest (this will make the amount negative)
+    info!("🔄 Converting to CreateTransactionRequest...");
     let create_request = state.money_management_service
         .spend_to_create_transaction_request(request.clone());
+    info!("✅ CreateTransactionRequest: {:?}", create_request);
 
     // Create the transaction (automatically scoped to active child)
     // The TransactionService will handle backdated transaction logic
+    info!("🚀 Creating transaction via TransactionService...");
     match state.transaction_service.create_transaction(create_request).await {
         Ok(transaction) => {
+            info!("✅ Transaction created successfully: {:?}", transaction);
+            
             let success_message = if let Some(date) = &request.date {
                 // Check if this was a backdated transaction
                 match state.money_management_service.is_backdated_transaction(date) {
-                    Ok(true) => format!("💸 {} spent successfully (backdated to {})!", 
+                    Ok(true) => {
+                        info!("📅 This was a backdated transaction");
+                        format!("💸 {} spent successfully (backdated to {})!", 
                                       state.money_management_service.format_amount(request.amount.abs()),
-                                      date),
-                    _ => state.money_management_service.generate_spend_success_message(request.amount),
+                                      date)
+                    },
+                    _ => {
+                        info!("📅 This was a current-date transaction");
+                        state.money_management_service.generate_spend_success_message(request.amount)
+                    }
                 }
             } else {
+                info!("📅 No date provided, using current date");
                 state.money_management_service.generate_spend_success_message(request.amount)
             };
             
@@ -158,15 +205,16 @@ pub async fn spend_money(
 
             let response = SpendMoneyResponse {
                 transaction_id: transaction.id,
-                success_message,
+                success_message: success_message.clone(),
                 new_balance: transaction.balance,
                 formatted_amount,
             };
 
+            info!("✅ Sending success response: {:?}", response);
             (StatusCode::CREATED, Json(response)).into_response()
         }
         Err(e) => {
-            error!("Failed to spend money: {}", e);
+            error!("❌ Failed to spend money: {}", e);
             (StatusCode::INTERNAL_SERVER_ERROR, "Failed to record spending").into_response()
         }
     }

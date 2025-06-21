@@ -1,10 +1,12 @@
 use yew::prelude::*;
+use crate::components::date_picker::DatePicker;
 
 #[derive(Properties, PartialEq)]
 pub struct SpendMoneyFormProps {
     // Form state
     pub spend_description: String,
     pub spend_amount: String,
+    pub selected_spend_date: Option<String>, // YYYY-MM-DD format or None for "today"
     pub recording_spending: bool,
     pub form_error: Option<String>,
     pub form_success: bool,
@@ -13,6 +15,7 @@ pub struct SpendMoneyFormProps {
     // Event handlers
     pub on_spend_description_change: Callback<Event>,
     pub on_spend_amount_change: Callback<Event>,
+    pub on_spend_date_change: Callback<Option<String>>,
     pub on_spend_submit: Callback<()>,
     pub on_debug: Callback<String>,
     pub on_refresh: Callback<()>,
@@ -56,6 +59,7 @@ pub fn spend_money_form(props: &SpendMoneyFormProps) -> Html {
             <form class="spend-money-form" onsubmit={
                 let on_debug = props.on_debug.clone();
                 let on_refresh = props.on_refresh.clone();
+                let selected_spend_date = props.selected_spend_date.clone();
                 Callback::from(move |e: SubmitEvent| {
                     e.prevent_default();
                     
@@ -74,6 +78,7 @@ pub fn spend_money_form(props: &SpendMoneyFormProps) -> Html {
                     
                     gloo::console::log!("🔥 Form data - desc:", &description);
                     gloo::console::log!("🔥 Form data - amount:", &amount_str);
+                    gloo::console::log!("🔥 Form data - spend date:", format!("{:?}", &selected_spend_date));
                     
                     // Parse amount and make API call
                     if !description.trim().is_empty() && !amount_str.trim().is_empty() {
@@ -90,21 +95,25 @@ pub fn spend_money_form(props: &SpendMoneyFormProps) -> Html {
                                 let request = SpendMoneyRequest {
                                     description: description.clone(),
                                     amount,
-                                    date: None,
+                                    date: selected_spend_date.clone(),
                                 };
                                 
                                 let on_refresh = on_refresh.clone();
                                 wasm_bindgen_futures::spawn_local(async move {
+                                    gloo::console::log!("🚀 Starting API call for spend money...");
                                     match api_client.spend_money(request).await {
-                                        Ok(_) => {
+                                        Ok(response) => {
                                             gloo::console::log!("✅ API call successful!");
+                                            gloo::console::log!("✅ Response:", format!("{:?}", response));
                                             
                                             // Trigger UI refresh using the callback
+                                            gloo::console::log!("🔄 Triggering UI refresh...");
                                             on_refresh.emit(());
                                             gloo::console::log!("✅ UI refresh triggered!");
                                         }
                                         Err(e) => {
                                             gloo::console::log!("❌ API call failed:", format!("{:?}", e));
+                                            gloo::console::error!("❌ Full error details:", format!("{:?}", e));
                                         }
                                     }
                                 });
@@ -147,6 +156,15 @@ pub fn spend_money_form(props: &SpendMoneyFormProps) -> Html {
                         value={props.spend_amount.clone()}
                         onchange={props.on_spend_amount_change.clone()}
                         disabled={props.recording_spending}
+                    />
+                </div>
+                
+                <div class="form-group">
+                    <DatePicker
+                        selected_date={props.selected_spend_date.clone()}
+                        on_date_change={props.on_spend_date_change.clone()}
+                        disabled={props.recording_spending}
+                        label={"When did you spend this money?"}
                     />
                 </div>
                 

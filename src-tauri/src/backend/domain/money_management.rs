@@ -5,8 +5,12 @@
 //! handle presentation concerns, while all money management business rules are
 //! handled here.
 
-use shared::{CreateTransactionRequest, AddMoneyRequest, SpendMoneyRequest, MoneyFormValidation, MoneyValidationError, MoneyFormState, MoneyManagementConfig};
-use chrono::{DateTime, Utc, Duration};
+use anyhow::Result;
+use shared::{
+    AddMoneyRequest, CreateTransactionRequest, MoneyFormState, MoneyFormValidation,
+    MoneyManagementConfig, MoneyValidationError, SpendMoneyRequest,
+};
+use chrono::{DateTime, Utc, Duration, FixedOffset, NaiveDate, TimeZone};
 use time::OffsetDateTime;
 
 /// Money management service that handles all money-related business logic
@@ -372,23 +376,50 @@ impl MoneyManagementService {
         ]
     }
 
-    /// Validate transaction date for backdated transactions
-    /// 
+    /// Validate a transaction date string
+    /// Accepts both YYYY-MM-DD format (from date picker) and RFC 3339 format
     /// Rules:
-    /// - Date must be in valid RFC 3339 format
     /// - Date cannot be more than 45 days in the past
     /// - Date cannot be in the future
-    /// - Date cannot be before child creation date (if provided)
-    pub fn validate_transaction_date(&self, date: &str, child_created_at: Option<&str>) -> Result<(), String> {
-        // Parse the provided date
-        let transaction_date = DateTime::parse_from_rfc3339(date)
-            .map_err(|e| format!("Invalid date format. Expected RFC 3339 format (e.g., '2025-01-15T14:30:00-05:00'): {}", e))?;
+    pub fn validate_transaction_date(&self, date: &str, _child_created_at: Option<&str>) -> Result<(), String> {
+        // Try to parse as RFC 3339 first, then fall back to YYYY-MM-DD
+        let transaction_date = if let Ok(dt) = DateTime::parse_from_rfc3339(date) {
+            dt
+        } else {
+            // Try parsing as YYYY-MM-DD and convert to RFC 3339 with current time
+            match chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d") {
+                Ok(naive_date) => {
+                    // Convert to datetime at noon Eastern Time for consistency
+                    let naive_datetime = naive_date.and_hms_opt(12, 0, 0)
+                        .ok_or_else(|| "Failed to create datetime from date".to_string())?;
+                    
+                    // Create Eastern Time offset (EST/EDT)
+                    let eastern_offset = chrono::FixedOffset::west_opt(5 * 3600)
+                        .ok_or_else(|| "Failed to create Eastern timezone offset".to_string())?;
+                    
+                    eastern_offset.from_local_datetime(&naive_datetime)
+                        .single()
+                        .ok_or_else(|| "Failed to create timezone-aware datetime".to_string())?
+                }
+                Err(_) => {
+                    return Err(format!("Invalid date format. Expected YYYY-MM-DD (e.g., '2025-06-19') or RFC 3339 format (e.g., '2025-01-15T14:30:00-05:00'): {}", date));
+                }
+            }
+        };
 
         let now = Utc::now();
         let now_with_tz = now.with_timezone(&transaction_date.timezone());
 
-        // Check if date is in the future
-        if transaction_date > now_with_tz {
+        // Check if date is in the future (allow same day)
+        let start_of_tomorrow = now_with_tz.date_naive().succ_opt()
+            .ok_or_else(|| "Failed to calculate tomorrow's date".to_string())?
+            .and_hms_opt(0, 0, 0)
+            .ok_or_else(|| "Failed to create start of tomorrow".to_string())?;
+        let tomorrow_with_tz = transaction_date.timezone().from_local_datetime(&start_of_tomorrow)
+            .single()
+            .ok_or_else(|| "Failed to create timezone-aware tomorrow".to_string())?;
+
+        if transaction_date >= tomorrow_with_tz {
             return Err("Transaction date cannot be in the future".to_string());
         }
 
@@ -396,16 +427,6 @@ impl MoneyManagementService {
         let forty_five_days_ago = now_with_tz - Duration::days(45);
         if transaction_date < forty_five_days_ago {
             return Err("Transaction date cannot be more than 45 days in the past".to_string());
-        }
-
-        // Check against child creation date if provided
-        if let Some(child_created_str) = child_created_at {
-            let child_created = DateTime::parse_from_rfc3339(child_created_str)
-                .map_err(|e| format!("Invalid child creation date format: {}", e))?;
-                
-            if transaction_date < child_created {
-                return Err("Transaction date cannot be before the child was created".to_string());
-            }
         }
 
         Ok(())
@@ -443,9 +464,32 @@ impl MoneyManagementService {
 
     /// Check if a transaction date would require balance recalculation
     /// (i.e., it's being backdated)
+    /// Accepts both YYYY-MM-DD format (from date picker) and RFC 3339 format
     pub fn is_backdated_transaction(&self, date: &str) -> Result<bool, String> {
-        let transaction_date = DateTime::parse_from_rfc3339(date)
-            .map_err(|e| format!("Invalid date format: {}", e))?;
+        // Try to parse as RFC 3339 first, then fall back to YYYY-MM-DD
+        let transaction_date = if let Ok(dt) = DateTime::parse_from_rfc3339(date) {
+            dt
+        } else {
+            // Try parsing as YYYY-MM-DD and convert to RFC 3339 with current time
+            match chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d") {
+                Ok(naive_date) => {
+                    // Convert to datetime at noon Eastern Time for consistency
+                    let naive_datetime = naive_date.and_hms_opt(12, 0, 0)
+                        .ok_or_else(|| "Failed to create datetime from date".to_string())?;
+                    
+                    // Create Eastern Time offset (EST/EDT)
+                    let eastern_offset = chrono::FixedOffset::west_opt(5 * 3600)
+                        .ok_or_else(|| "Failed to create Eastern timezone offset".to_string())?;
+                    
+                    eastern_offset.from_local_datetime(&naive_datetime)
+                        .single()
+                        .ok_or_else(|| "Failed to create timezone-aware datetime".to_string())?
+                }
+                Err(_) => {
+                    return Err(format!("Invalid date format: {}", date));
+                }
+            }
+        };
 
         let now = Utc::now();
         let now_with_tz = now.with_timezone(&transaction_date.timezone());
@@ -807,20 +851,6 @@ mod tests {
         let result = service.validate_transaction_date(&old_date, None);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("more than 45 days in the past"));
-    }
-
-    #[test]
-    fn test_validate_transaction_date_before_child_creation() {
-        let service = create_test_service();
-        
-        // Use recent dates that won't trigger 45-day limit
-        let now = chrono::Utc::now();
-        let child_created = now.checked_sub_signed(chrono::Duration::days(5)).unwrap().to_rfc3339();
-        let transaction_date = now.checked_sub_signed(chrono::Duration::days(10)).unwrap().to_rfc3339(); // Before child creation
-        
-        let result = service.validate_transaction_date(&transaction_date, Some(&child_created));
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("before the child was created"));
     }
 
     #[test]

@@ -43,7 +43,7 @@
 
 
 use anyhow::Result;
-use log::info;
+use log::{info, error};
 use std::sync::Arc;
 use shared::{
     CreateTransactionRequest, DeleteTransactionsRequest, DeleteTransactionsResponse,
@@ -54,6 +54,7 @@ use crate::backend::storage::{connection::DbConnection, repositories::transactio
 use crate::backend::domain::{child_service::ChildService, AllowanceService, BalanceService};
 use std::time::{SystemTime, UNIX_EPOCH};
 use chrono::{NaiveDate, Local, Datelike};
+use time;
 
 #[derive(Clone)]
 pub struct TransactionService {
@@ -74,7 +75,7 @@ impl TransactionService {
 
     /// Create a new transaction with support for backdated transactions
     pub async fn create_transaction(&self, request: CreateTransactionRequest) -> Result<Transaction> {
-        info!("Creating transaction: {:?}", request);
+        info!("🚀 TransactionService::create_transaction called with: {:?}", request);
 
         // Validate description length
         if request.description.is_empty() || request.description.len() > 256 {
@@ -85,6 +86,8 @@ impl TransactionService {
         let active_child_response = self.child_service.get_active_child().await?;
         let active_child = active_child_response.active_child
             .ok_or_else(|| anyhow::anyhow!("No active child found"))?;
+
+        info!("✅ Active child for transaction: {}", active_child.id);
 
         // Generate transaction ID and determine final date
         let now_millis = SystemTime::now()
@@ -109,10 +112,14 @@ impl TransactionService {
             }
         };
 
+        info!("📅 Transaction date: {}", transaction_date);
+
         // Calculate the correct balance for this transaction based on its date
         let transaction_balance = self.balance_service
             .calculate_balance_for_new_transaction(&active_child.id, &transaction_date, request.amount)
             .await?;
+
+        info!("💰 Calculated balance: {:.2}", transaction_balance);
 
         let transaction = Transaction {
             id: transaction_id,
@@ -125,22 +132,23 @@ impl TransactionService {
         };
 
         // Store the transaction in database
+        info!("💾 Storing transaction in database...");
         self.transaction_repository.store_transaction(&transaction).await?;
 
-        info!("Created transaction: {} with balance: {:.2}", transaction.id, transaction_balance);
+        info!("✅ Transaction stored: {} with balance: {:.2}", transaction.id, transaction_balance);
 
         // Check if this is a backdated transaction that requires balance recalculation
         if self.balance_service.requires_balance_recalculation(&active_child.id, &transaction_date).await? {
-            info!("Backdated transaction detected, triggering balance recalculation from {}", transaction_date);
+            info!("📅 Backdated transaction detected, triggering balance recalculation from {}", transaction_date);
             
             // Recalculate balances for all transactions from this date forward
             let updated_count = self.balance_service
                 .recalculate_balances_from_date(&active_child.id, &transaction_date)
                 .await?;
             
-            info!("Recalculated {} transaction balances due to backdated transaction", updated_count);
+            info!("✅ Recalculated {} transaction balances due to backdated transaction", updated_count);
         } else {
-            info!("Transaction is current, no balance recalculation needed");
+            info!("📅 Transaction is current, no balance recalculation needed");
         }
 
         Ok(transaction)

@@ -13,6 +13,7 @@ pub struct TransactionState {
     // Add money form state
     pub description: String,
     pub amount: String,
+    pub selected_date: Option<String>, // YYYY-MM-DD format or None for "today"
     pub creating_transaction: bool,
     pub form_error: Option<String>,
     pub form_success: bool,
@@ -21,6 +22,7 @@ pub struct TransactionState {
     // Spend money form state
     pub spend_description: String,
     pub spend_amount: String,
+    pub selected_spend_date: Option<String>, // YYYY-MM-DD format or None for "today"
     pub creating_spend_transaction: bool,
     pub spend_form_error: Option<String>,
     pub spend_form_success: bool,
@@ -39,8 +41,10 @@ pub struct UseTransactionsActions {
     pub spend_money: Callback<()>,
     pub on_description_change: Callback<Event>,
     pub on_amount_change: Callback<Event>,
+    pub on_date_change: Callback<Option<String>>,
     pub on_spend_description_change: Callback<Event>,
     pub on_spend_amount_change: Callback<Event>,
+    pub on_spend_date_change: Callback<Option<String>>,
 }
 
 #[hook]
@@ -52,6 +56,7 @@ pub fn use_transactions(api_client: &ApiClient, child_change_trigger: u32) -> Us
     // Add money form states
     let description = use_state(|| String::new());
     let amount = use_state(|| String::new());
+    let selected_date = use_state(|| Option::<String>::None);
     let creating_transaction = use_state(|| false);
     let form_error = use_state(|| Option::<String>::None);
     let form_success = use_state(|| false);
@@ -60,6 +65,7 @@ pub fn use_transactions(api_client: &ApiClient, child_change_trigger: u32) -> Us
     // Spend money form states
     let spend_description = use_state(String::new);
     let spend_amount = use_state(String::new);
+    let selected_spend_date = use_state(|| Option::<String>::None);
     let creating_spend_transaction = use_state(|| false);
     let spend_form_error = use_state(|| None::<String>);
     let spend_form_success = use_state(|| false);
@@ -103,6 +109,7 @@ pub fn use_transactions(api_client: &ApiClient, child_change_trigger: u32) -> Us
         let api_client = api_client.clone();
         let description = description.clone();
         let amount = amount.clone();
+        let selected_date = selected_date.clone();
         let creating_transaction = creating_transaction.clone();
         let form_error = form_error.clone();
         let form_success = form_success.clone();
@@ -115,6 +122,7 @@ pub fn use_transactions(api_client: &ApiClient, child_change_trigger: u32) -> Us
             let api_client = api_client.clone();
             let description = description.clone();
             let amount = amount.clone();
+            let selected_date = selected_date.clone();
             let creating_transaction = creating_transaction.clone();
             let form_error = form_error.clone();
             let form_success = form_success.clone();
@@ -147,7 +155,7 @@ pub fn use_transactions(api_client: &ApiClient, child_change_trigger: u32) -> Us
                 let request = AddMoneyRequest {
                     description: desc_value.clone(),
                     amount: amount_value,
-                    date: None,
+                    date: (*selected_date).clone(),
                 };
                 
                 gloo::console::log!("=== FINAL REQUEST BEING SENT ===");
@@ -183,6 +191,7 @@ pub fn use_transactions(api_client: &ApiClient, child_change_trigger: u32) -> Us
         let api_client = api_client.clone();
         let spend_description = spend_description.clone();
         let spend_amount = spend_amount.clone();
+        let selected_spend_date = selected_spend_date.clone();
         let creating_spend_transaction = creating_spend_transaction.clone();
         let spend_form_error = spend_form_error.clone();
         let spend_form_success = spend_form_success.clone();
@@ -195,6 +204,7 @@ pub fn use_transactions(api_client: &ApiClient, child_change_trigger: u32) -> Us
             let api_client = api_client.clone();
             let spend_description = spend_description.clone();
             let spend_amount = spend_amount.clone();
+            let selected_spend_date = selected_spend_date.clone();
             let creating_spend_transaction = creating_spend_transaction.clone();
             let spend_form_error = spend_form_error.clone();
             let spend_form_success = spend_form_success.clone();
@@ -227,7 +237,7 @@ pub fn use_transactions(api_client: &ApiClient, child_change_trigger: u32) -> Us
                 let request = SpendMoneyRequest {
                     description: desc_value.clone(),
                     amount: amount_value,
-                    date: None,
+                    date: (*selected_spend_date).clone(),
                 };
                 
                 gloo::console::log!("=== FINAL REQUEST BEING SENT ===");
@@ -299,15 +309,35 @@ pub fn use_transactions(api_client: &ApiClient, child_change_trigger: u32) -> Us
         })
     };
 
+    let on_date_change = {
+        let selected_date = selected_date.clone();
+        let form_error = form_error.clone();
+        use_callback((), move |new_date: Option<String>, _| {
+            selected_date.set(new_date);
+            form_error.set(None);
+        })
+    };
+
+    let on_spend_date_change = {
+        let selected_spend_date = selected_spend_date.clone();
+        let spend_form_error = spend_form_error.clone();
+        use_callback((), move |new_date: Option<String>, _| {
+            selected_spend_date.set(new_date);
+            spend_form_error.set(None);
+        })
+    };
+
     // Auto-refresh transactions and clear form data when child changes
     use_effect_with(child_change_trigger, {
         let refresh_transactions = refresh_transactions.clone();
         let description = description.clone();
         let amount = amount.clone();
+        let selected_date = selected_date.clone();
         let form_error = form_error.clone();
         let form_success = form_success.clone();
         let spend_description = spend_description.clone();
         let spend_amount = spend_amount.clone();
+        let selected_spend_date = selected_spend_date.clone();
         let spend_form_error = spend_form_error.clone();
         let spend_form_success = spend_form_success.clone();
         
@@ -315,10 +345,12 @@ pub fn use_transactions(api_client: &ApiClient, child_change_trigger: u32) -> Us
             // Clear all form data when child changes
             description.set(String::new());
             amount.set(String::new());
+            selected_date.set(None);
             form_error.set(None);
             form_success.set(false);
             spend_description.set(String::new());
             spend_amount.set(String::new());
+            selected_spend_date.set(None);
             spend_form_error.set(None);
             spend_form_success.set(false);
             
@@ -334,12 +366,14 @@ pub fn use_transactions(api_client: &ApiClient, child_change_trigger: u32) -> Us
         current_balance: *current_balance,
         description: (*description).clone(),
         amount: (*amount).clone(),
+        selected_date: (*selected_date).clone(),
         creating_transaction: *creating_transaction,
         form_error: (*form_error).clone(),
         form_success: *form_success,
         validation_suggestions: (*validation_suggestions).clone(),
         spend_description: (*spend_description).clone(),
         spend_amount: (*spend_amount).clone(),
+        selected_spend_date: (*selected_spend_date).clone(),
         creating_spend_transaction: *creating_spend_transaction,
         spend_form_error: (*spend_form_error).clone(),
         spend_form_success: *spend_form_success,
@@ -352,8 +386,10 @@ pub fn use_transactions(api_client: &ApiClient, child_change_trigger: u32) -> Us
         spend_money,
         on_description_change,
         on_amount_change,
+        on_date_change,
         on_spend_description_change,
         on_spend_amount_change,
+        on_spend_date_change,
     };
 
     UseTransactionsResult { state, actions }
