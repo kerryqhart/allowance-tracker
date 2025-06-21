@@ -323,7 +323,7 @@ pub fn simple_calendar(props: &SimpleCalendarProps) -> Html {
                             </div>
                             <div class="day-balance-subtle">
                                 {match day_data.day_type {
-                                    CalendarDayType::MonthDay => format!("${:.0}", day_data.balance),
+                                    CalendarDayType::MonthDay => format!("${:.2}", day_data.balance),
                                     CalendarDayType::PaddingBefore | CalendarDayType::PaddingAfter => String::new(),
                                 }}
                             </div>
@@ -384,9 +384,9 @@ pub fn simple_calendar(props: &SimpleCalendarProps) -> Html {
                                             }}
                                             <span class="transaction-amount">
                                                 {if transaction.amount >= 0.0 {
-                                                    format!("+${:.0}", transaction.amount)
+                                                    format!("+${:.2}", transaction.amount)
                                                 } else {
-                                                    format!("-${:.0}", transaction.amount.abs())
+                                                    format!("-${:.2}", transaction.amount.abs())
                                                 }}
                                             </span>
                                         </div>
