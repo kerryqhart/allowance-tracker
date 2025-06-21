@@ -2,6 +2,7 @@ use anyhow::Result;
 use std::path::{Path, PathBuf};
 use std::fs;
 use chrono::Utc;
+use crate::backend::storage::traits::Connection;
 
 /// CsvConnection manages file paths and ensures CSV files exist for each child
 #[derive(Clone)]
@@ -69,5 +70,13 @@ impl CsvConnection {
             fs::remove_dir_all(&self.base_directory)?;
         }
         Ok(())
+    }
+}
+
+impl Connection for CsvConnection {
+    type TransactionRepository = super::transaction_repository::TransactionRepository;
+    
+    fn create_transaction_repository(&self) -> Self::TransactionRepository {
+        super::transaction_repository::TransactionRepository::new(self.clone())
     }
 } 

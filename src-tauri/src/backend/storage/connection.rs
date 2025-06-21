@@ -1,6 +1,7 @@
 use anyhow::Result;
 use sqlx::{migrate::MigrateDatabase, Sqlite, SqlitePool};
 use std::sync::Arc;
+use crate::backend::storage::traits::Connection;
 
 // The database URL for the production database
 const DATABASE_URL: &str = "sqlite:keyvalue.db";
@@ -193,5 +194,13 @@ impl DbConnection {
         .await?;
 
         Ok(())
+    }
+}
+
+impl Connection for DbConnection {
+    type TransactionRepository = crate::backend::storage::repositories::transaction_repository::TransactionRepository;
+    
+    fn create_transaction_repository(&self) -> Self::TransactionRepository {
+        crate::backend::storage::repositories::transaction_repository::TransactionRepository::new(self.clone())
     }
 } 

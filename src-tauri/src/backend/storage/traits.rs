@@ -38,4 +38,17 @@ pub trait TransactionStorage: Send + Sync {
     /// Delete multiple transactions
     /// Returns the number of transactions actually deleted
     async fn delete_transactions(&self, child_id: &str, transaction_ids: &[String]) -> Result<u32>;
+}
+
+/// Trait defining the interface for storage connections
+/// 
+/// This trait abstracts away the specific connection type (database, CSV, etc.)
+/// and provides factory methods for creating repositories. This allows the domain
+/// layer to work with any storage backend without knowing the implementation details.
+pub trait Connection: Send + Sync + Clone {
+    /// The type of TransactionStorage this connection creates
+    type TransactionRepository: TransactionStorage;
+    
+    /// Create a new transaction repository for this connection
+    fn create_transaction_repository(&self) -> Self::TransactionRepository;
 } 

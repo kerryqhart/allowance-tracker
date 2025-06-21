@@ -41,7 +41,11 @@ impl TransactionRepository {
                 description: record.get(3).unwrap_or("").to_string(),
                 amount: record.get(4).unwrap_or("0").parse::<f64>().unwrap_or(0.0),
                 balance: record.get(5).unwrap_or("0").parse::<f64>().unwrap_or(0.0),
-                created_at: record.get(2).unwrap_or("").to_string(), // Use date as created_at
+                transaction_type: if record.get(4).unwrap_or("0").parse::<f64>().unwrap_or(0.0) >= 0.0 { 
+                    shared::TransactionType::Income 
+                } else { 
+                    shared::TransactionType::Expense 
+                },
             };
             
             transactions.push(transaction);

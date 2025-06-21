@@ -1,11 +1,33 @@
-Fix calendar selector horizontal offset issue
+feat: Implement trait-based storage architecture (Phases 1-2)
 
-- Fixed CSS positioning for date picker calendar dropdown
-- Changed desktop positioning from left:0/right:0 to centered with transform
-- Added flex-direction: column to calendar-grid for proper layout
-- Added on_debug prop to DatePicker component for debugging
-- Updated forms to pass debug callback to DatePicker
-- Removed problematic DOM measurement code causing compilation errors
+Add Connection and TransactionStorage traits to create a unified storage interface
+that allows domain services to work with different storage backends seamlessly.
 
-The calendar dropdowns now properly center below their date picker buttons
-instead of being horizontally offset to span the full form width. 
+## Phase 1: Connection Trait Implementation
+* Add `Connection` trait in `storage/traits.rs` with factory method pattern
+* Implement `Connection` for `DbConnection` (creates SQL repositories)  
+* Implement `Connection` for `CsvConnection` (creates CSV repositories)
+* Update storage module exports to include new traits and CSV types
+
+## Phase 2: Database Repository Interface Fix
+* Implement `TransactionStorage` trait for database `TransactionRepository`
+* Fix recursive call issues in trait implementations
+* Add missing dependencies: `async-trait` and `csv` crates
+* Remove invalid `created_at` field, add proper `transaction_type` handling
+* Maintain backward compatibility with existing repository methods
+
+## Architecture Benefits
+* Storage-agnostic domain layer through common trait interface
+* Type-safe compile-time verification of storage implementations  
+* Easy testing with mock storage backends
+* Seamless switching between SQL and CSV storage
+* Foundation for future storage backend additions
+
+## Validation
+* ✅ All code compiles successfully (`cargo check --workspace`)
+* ✅ Both connection types implement unified `Connection` trait
+* ✅ Both repositories implement `TransactionStorage` trait interface
+* ✅ Backward compatibility preserved for existing functionality
+
+Ready for Phase 3: Update domain services to use trait-based connections
+Ready for Phase 4: Switch REST API layer from database to CSV storage 

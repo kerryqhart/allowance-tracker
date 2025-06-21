@@ -19,16 +19,18 @@
 //! ## Current Implementation
 //!
 //! - **Primary Storage**: SQLite database with SQLx for type-safe queries
+//! - **CSV Storage**: Alternative file-based storage for development and testing
 //! - **Development Mode**: Mock data for rapid prototyping
 //! - **Future Flexibility**: Designed to support multiple storage backends
 //!
 //! ## Storage Features
 //!
-//! - **ACID Compliance**: Atomicity, Consistency, Isolation, Durability
+//! - **ACID Compliance**: Atomicity, Consistency, Isolation, Durability (for DB)
 //! - **Type Safety**: Compile-time checked SQL queries with SQLx macros
 //! - **Async Operations**: Non-blocking database operations
 //! - **Connection Pooling**: Efficient database connection management
 //! - **Error Handling**: Graceful handling of storage failures
+//! - **Storage Abstraction**: Common traits for different storage backends
 //!
 //! ## Design Principles
 //!
@@ -39,9 +41,13 @@
 
 pub mod connection;
 pub mod repositories;
+pub mod traits;
+pub mod csv;
 
 // Re-export the main types that other modules need
 pub use connection::DbConnection;
+pub use csv::CsvConnection;
+pub use traits::{Connection, TransactionStorage};
 pub use repositories::{
     TransactionRepository,
     ChildRepository, 
