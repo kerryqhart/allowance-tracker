@@ -1,33 +1,44 @@
-feat: Implement trait-based storage architecture (Phases 1-2)
+feat: Complete trait-based storage migration (Phases 3-4)
 
-Add Connection and TransactionStorage traits to create a unified storage interface
-that allows domain services to work with different storage backends seamlessly.
+Successfully implement generic domain services and migrate transaction 
+storage from database to CSV while maintaining hybrid architecture.
 
-## Phase 1: Connection Trait Implementation
-* Add `Connection` trait in `storage/traits.rs` with factory method pattern
-* Implement `Connection` for `DbConnection` (creates SQL repositories)  
-* Implement `Connection` for `CsvConnection` (creates CSV repositories)
-* Update storage module exports to include new traits and CSV types
+## Phase 3: Generic Domain Services
+* Update `TransactionService<C: Connection>` to be generic over connection type
+* Update `BalanceService<C: Connection>` to be generic over connection type  
+* Modify constructors to accept connection trait instead of concrete types
+* Add missing trait methods to `TransactionStorage` for full interface compatibility:
+  - `get_latest_transaction()` for balance calculations
+  - `get_transactions_after_date()` for balance recalculation
+  - `get_latest_transaction_before_date()` for starting balance lookup
+  - `update_transaction_balance()` and `update_transaction_balances()` for bulk updates
+  - `check_transactions_exist()` for validation
 
-## Phase 2: Database Repository Interface Fix
-* Implement `TransactionStorage` trait for database `TransactionRepository`
-* Fix recursive call issues in trait implementations
-* Add missing dependencies: `async-trait` and `csv` crates
-* Remove invalid `created_at` field, add proper `transaction_type` handling
-* Maintain backward compatibility with existing repository methods
+## Phase 4: Hybrid Storage Architecture  
+* Migrate transaction storage to CSV files in `data/` directory
+* Keep other services (child, allowance, parental control) on database for now
+* Update `AppState` to use `TransactionService<CsvConnection>` and `BalanceService<CsvConnection>`
+* Implement full trait interface for both CSV and database repositories
+* Update service initialization to use appropriate connection types
 
-## Architecture Benefits
-* Storage-agnostic domain layer through common trait interface
-* Type-safe compile-time verification of storage implementations  
-* Easy testing with mock storage backends
-* Seamless switching between SQL and CSV storage
-* Foundation for future storage backend additions
+## CSV Storage Implementation
+* File-based transaction storage: `{child_id}_transactions.csv`
+* Full CRUD operations with atomic file writes
+* Compatible trait interface with database implementation
+* Efficient date-based filtering and sorting
+* Graceful handling of CSV storage limitations (bulk balance updates)
 
-## Validation
-* ✅ All code compiles successfully (`cargo check --workspace`)
-* ✅ Both connection types implement unified `Connection` trait
-* ✅ Both repositories implement `TransactionStorage` trait interface
-* ✅ Backward compatibility preserved for existing functionality
+## Architecture Benefits Achieved
+* **Storage Flexibility**: Easy switching between storage backends via traits
+* **Hybrid Support**: Can use different storage types for different services  
+* **Type Safety**: Compile-time verification of storage compatibility
+* **Clean Separation**: Domain logic completely independent of storage implementation
+* **Performance**: File-based CSV storage for high-frequency transaction operations
 
-Ready for Phase 3: Update domain services to use trait-based connections
-Ready for Phase 4: Switch REST API layer from database to CSV storage 
+## Validation Results
+* ✅ Full workspace compilation without errors
+* ✅ Application starts successfully with CSV transaction storage
+* ✅ Backward compatibility maintained for non-transaction services
+* ✅ Trait interface ensures consistent behavior across storage types
+
+Ready for production use with CSV-based transaction storage! 

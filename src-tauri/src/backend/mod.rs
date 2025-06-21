@@ -46,7 +46,7 @@ use axum::{
 use tower_http::cors::{Any, CorsLayer};
 use anyhow::Result;
 use crate::backend::domain::{TransactionService, CalendarService, TransactionTableService, MoneyManagementService, child_service::ChildService, ParentalControlService, AllowanceService, BalanceService};
-use crate::backend::storage::DbConnection;
+use crate::backend::storage::{CsvConnection, DbConnection};
 use log::info;
 
 // Re-exports removed to avoid unused import warnings
@@ -54,30 +54,33 @@ use log::info;
 /// Main application state that holds all services
 #[derive(Clone)]
 pub struct AppState {
-    pub transaction_service: TransactionService,
+    pub transaction_service: TransactionService<CsvConnection>,
     pub calendar_service: CalendarService,
     pub transaction_table_service: TransactionTableService,
     pub money_management_service: MoneyManagementService,
     pub child_service: ChildService,
     pub parental_control_service: ParentalControlService,
     pub allowance_service: AllowanceService,
-    pub balance_service: BalanceService,
+    pub balance_service: BalanceService<CsvConnection>,
 }
 
 /// Initialize the backend with all required services
 pub async fn initialize_backend() -> Result<AppState> {
-    info!("Setting up database");
+    info!("Setting up CSV storage for transactions");
+    let csv_conn = std::sync::Arc::new(CsvConnection::new_default()?);
+    
+    info!("Setting up database for other services");
     let db_conn = std::sync::Arc::new(DbConnection::init().await?);
 
     info!("Setting up domain model");
-    let transaction_service = TransactionService::new(db_conn.clone());
     let calendar_service = CalendarService::new();
     let transaction_table_service = TransactionTableService::new();
     let money_management_service = MoneyManagementService::new();
     let child_service = ChildService::new(db_conn.clone());
     let parental_control_service = ParentalControlService::new(db_conn.clone());
     let allowance_service = AllowanceService::new(db_conn.clone());
-    let balance_service = BalanceService::new(db_conn);
+    let balance_service = BalanceService::new(csv_conn.clone());
+    let transaction_service = TransactionService::new(csv_conn, child_service.clone(), allowance_service.clone(), balance_service.clone());
 
     info!("Setting up application state");
     let app_state = AppState {

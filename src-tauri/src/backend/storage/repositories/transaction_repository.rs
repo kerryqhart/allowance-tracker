@@ -485,4 +485,34 @@ impl TransactionStorage for TransactionRepository {
         let result = query.execute(self.db.pool()).await?;
         Ok(result.rows_affected() as u32)
     }
+    
+    /// Get the most recent transaction for a specific child (trait implementation)
+    async fn get_latest_transaction(&self, child_id: &str) -> Result<Option<Transaction>> {
+        self.get_latest_transaction(child_id).await
+    }
+    
+    /// Get all transactions after a specific date (trait implementation)
+    async fn get_transactions_after_date(&self, child_id: &str, date: &str) -> Result<Vec<Transaction>> {
+        self.get_transactions_after_date(child_id, date).await
+    }
+    
+    /// Get the most recent transaction before a specific date (trait implementation)
+    async fn get_latest_transaction_before_date(&self, child_id: &str, date: &str) -> Result<Option<Transaction>> {
+        self.get_latest_transaction_before_date(child_id, date).await
+    }
+    
+    /// Update the balance of a specific transaction (trait implementation)
+    async fn update_transaction_balance(&self, transaction_id: &str, new_balance: f64) -> Result<()> {
+        self.update_transaction_balance(transaction_id, new_balance).await
+    }
+    
+    /// Update multiple transaction balances atomically (trait implementation)
+    async fn update_transaction_balances(&self, updates: &[(String, f64)]) -> Result<()> {
+        self.update_transaction_balances(updates).await
+    }
+    
+    /// Check if transactions exist by their IDs for a specific child (trait implementation)
+    async fn check_transactions_exist(&self, child_id: &str, transaction_ids: &[String]) -> Result<Vec<String>> {
+        self.check_transactions_exist(child_id, transaction_ids).await
+    }
 } 

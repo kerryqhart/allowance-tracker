@@ -50,26 +50,23 @@ use shared::{
     PaginationInfo, Transaction, TransactionListRequest, TransactionListResponse,
     TransactionType,
 };
-use crate::backend::storage::{connection::DbConnection, repositories::transaction_repository::TransactionRepository};
+use crate::backend::storage::{Connection, TransactionStorage};
 use crate::backend::domain::{child_service::ChildService, AllowanceService, BalanceService};
 use std::time::{SystemTime, UNIX_EPOCH};
 use chrono::{NaiveDate, Local, Datelike};
 use time;
 
 #[derive(Clone)]
-pub struct TransactionService {
-    transaction_repository: TransactionRepository,
+pub struct TransactionService<C: Connection> {
+    transaction_repository: C::TransactionRepository,
     child_service: ChildService,
     allowance_service: AllowanceService,
-    balance_service: BalanceService,
+    balance_service: BalanceService<C>,
 }
 
-impl TransactionService {
-    pub fn new(db: Arc<DbConnection>) -> Self {
-        let transaction_repository = TransactionRepository::new((*db).clone());
-        let child_service = ChildService::new(db.clone());
-        let allowance_service = AllowanceService::new(db.clone());
-        let balance_service = BalanceService::new(db);
+impl<C: Connection> TransactionService<C> {
+    pub fn new(connection: Arc<C>, child_service: ChildService, allowance_service: AllowanceService, balance_service: BalanceService<C>) -> Self {
+        let transaction_repository = connection.create_transaction_repository();
         Self { transaction_repository, child_service, allowance_service, balance_service }
     }
 
@@ -170,7 +167,7 @@ impl TransactionService {
         let query_limit = limit + 1;
 
         // Get transactions from database for the active child
-        let mut db_transactions = self.transaction_repository.list_transactions(&active_child.id, query_limit, request.after.as_deref()).await?;
+        let mut db_transactions = self.transaction_repository.list_transactions(&active_child.id, Some(query_limit), request.after).await?;
 
         // Generate future allowance transactions for the requested date range if specified
         let mut future_allowances = if let (Some(start_date_str), Some(end_date_str)) = (&request.start_date, &request.end_date) {
@@ -295,7 +292,7 @@ impl TransactionService {
         info!("Deleted {} transactions, {} not found", deleted_count, not_found_ids.len());
 
         Ok(DeleteTransactionsResponse {
-            deleted_count,
+            deleted_count: deleted_count as usize,
             success_message,
             not_found_ids,
         })

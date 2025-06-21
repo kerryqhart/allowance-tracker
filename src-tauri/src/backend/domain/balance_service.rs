@@ -7,23 +7,18 @@
 use anyhow::Result;
 use log::{info, warn};
 use std::sync::Arc;
-use crate::backend::storage::{connection::DbConnection, repositories::transaction_repository::TransactionRepository};
+use crate::backend::storage::{Connection, TransactionStorage};
 
 /// Service responsible for balance calculations and recalculations
 #[derive(Clone)]
-pub struct BalanceService {
-    transaction_repository: TransactionRepository,
+pub struct BalanceService<C: Connection> {
+    transaction_repository: C::TransactionRepository,
 }
 
-impl BalanceService {
-    pub fn new(db: Arc<DbConnection>) -> Self {
-        let transaction_repository = TransactionRepository::new((*db).clone());
+impl<C: Connection> BalanceService<C> {
+    pub fn new(connection: Arc<C>) -> Self {
+        let transaction_repository = connection.create_transaction_repository();
         Self { transaction_repository }
-    }
-
-    /// Get the underlying database connection for testing purposes
-    pub fn get_db_connection(&self) -> &DbConnection {
-        self.transaction_repository.get_db_connection()
     }
 
     /// Recalculate all balances from a specific date forward
@@ -126,7 +121,7 @@ impl BalanceService {
         info!("Validating all balances for child {}", child_id);
         
         let transactions = self.transaction_repository
-            .get_all_transactions_chronological(child_id)
+            .list_transactions_chronological(child_id, None, None)
             .await?;
 
         let mut errors = Vec::new();
@@ -162,12 +157,12 @@ mod tests {
     use shared::{Transaction, TransactionType};
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    async fn create_test_service() -> BalanceService {
-        let db = Arc::new(DbConnection::init_test().await.unwrap());
+    async fn create_test_service() -> BalanceService<crate::backend::storage::DbConnection> {
+        let db = Arc::new(crate::backend::storage::DbConnection::init_test().await.unwrap());
         BalanceService::new(db)
     }
 
-    async fn create_test_transaction(service: &BalanceService, child_id: &str, date: &str, description: &str, amount: f64, balance: f64) -> Transaction {
+    async fn create_test_transaction(service: &BalanceService<crate::backend::storage::DbConnection>, child_id: &str, date: &str, description: &str, amount: f64, balance: f64) -> Transaction {
         let now_millis = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -192,9 +187,8 @@ mod tests {
         let service = create_test_service().await;
         
         // Create a child first
-        let child_service = crate::backend::domain::child_service::ChildService::new(
-            Arc::new(service.get_db_connection().clone())
-        );
+        let db = Arc::new(crate::backend::storage::DbConnection::init_test().await.unwrap());
+        let child_service = crate::backend::domain::child_service::ChildService::new(db);
         let child_response = child_service.create_child(shared::CreateChildRequest {
             name: "Test Child".to_string(),
             birthdate: "2015-01-01".to_string(),

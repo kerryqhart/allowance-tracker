@@ -224,6 +224,74 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
         
         Ok(deleted_count)
     }
+    
+    /// Get the most recent transaction for a specific child (trait implementation)
+    async fn get_latest_transaction(&self, child_id: &str) -> Result<Option<Transaction>> {
+        let mut transactions = self.read_transactions(child_id).await?;
+        
+        // Sort by date descending (most recent first)
+        transactions.sort_by(|a, b| b.date.cmp(&a.date));
+        
+        Ok(transactions.into_iter().next())
+    }
+    
+    /// Get all transactions after a specific date (trait implementation)
+    async fn get_transactions_after_date(&self, child_id: &str, date: &str) -> Result<Vec<Transaction>> {
+        let mut transactions = self.read_transactions(child_id).await?;
+        
+        // Filter by date
+        transactions.retain(|t| t.date.as_str() >= date);
+        
+        // Sort chronologically (ascending)
+        transactions.sort_by(|a, b| a.date.cmp(&b.date));
+        
+        Ok(transactions)
+    }
+    
+    /// Get the most recent transaction before a specific date (trait implementation)
+    async fn get_latest_transaction_before_date(&self, child_id: &str, date: &str) -> Result<Option<Transaction>> {
+        let mut transactions = self.read_transactions(child_id).await?;
+        
+        // Filter transactions before the specified date
+        transactions.retain(|t| t.date.as_str() < date);
+        
+        // Sort by date descending (most recent first)
+        transactions.sort_by(|a, b| b.date.cmp(&a.date));
+        
+        Ok(transactions.into_iter().next())
+    }
+    
+    /// Update the balance of a specific transaction (trait implementation)
+    async fn update_transaction_balance(&self, transaction_id: &str, new_balance: f64) -> Result<()> {
+        // For CSV, we need to find the transaction across all child files
+        // This is inefficient but necessary for the current interface
+        warn!("CSV update_transaction_balance is inefficient - requires searching all child files");
+        
+        // For now, return an error suggesting a better approach
+        Err(anyhow::anyhow!("CSV storage requires child_id for efficient transaction updates. Use update_transaction instead."))
+    }
+    
+    /// Update multiple transaction balances atomically (trait implementation)
+    async fn update_transaction_balances(&self, updates: &[(String, f64)]) -> Result<()> {
+        // Similar issue - we need child_id for each transaction in CSV storage
+        warn!("CSV update_transaction_balances is not efficiently supported");
+        
+        // For now, return an error suggesting a better approach
+        Err(anyhow::anyhow!("CSV storage requires child_id for transaction updates. Consider using update_transaction for each item individually."))
+    }
+    
+    /// Check if transactions exist by their IDs for a specific child (trait implementation)
+    async fn check_transactions_exist(&self, child_id: &str, transaction_ids: &[String]) -> Result<Vec<String>> {
+        let transactions = self.read_transactions(child_id).await?;
+        
+        let existing_ids: Vec<String> = transactions
+            .iter()
+            .filter(|t| transaction_ids.contains(&t.id))
+            .map(|t| t.id.clone())
+            .collect();
+        
+        Ok(existing_ids)
+    }
 }
 
 #[cfg(test)]
@@ -257,7 +325,7 @@ mod tests {
             description: "Test transaction".to_string(),
             amount: 25.50,
             balance: 25.50,
-            created_at: "2024-01-15T10:30:00Z".to_string(),
+            transaction_type: shared::TransactionType::Income,
         };
         
         // Store transaction
@@ -288,7 +356,7 @@ mod tests {
                 description: format!("Transaction {}", i),
                 amount: i as f64 * 10.0,
                 balance: (i * (i + 1) / 2) as f64 * 10.0, // Cumulative sum
-                created_at: format!("2024-01-{:02}T10:30:00Z", i + 10),
+                transaction_type: shared::TransactionType::Income,
             };
             
             repo.store_transaction(&transaction).await.unwrap();
@@ -317,7 +385,7 @@ mod tests {
             description: "Will be deleted".to_string(),
             amount: 100.0,
             balance: 100.0,
-            created_at: "2024-01-15T10:30:00Z".to_string(),
+            transaction_type: shared::TransactionType::Income,
         };
         
         // Store transaction

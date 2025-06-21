@@ -38,6 +38,28 @@ pub trait TransactionStorage: Send + Sync {
     /// Delete multiple transactions
     /// Returns the number of transactions actually deleted
     async fn delete_transactions(&self, child_id: &str, transaction_ids: &[String]) -> Result<u32>;
+    
+    /// Get the most recent transaction for a specific child (for calculating next balance)
+    async fn get_latest_transaction(&self, child_id: &str) -> Result<Option<Transaction>>;
+    
+    /// Get all transactions after a specific date (inclusive) for balance recalculation
+    /// Returns transactions in chronological order (oldest first)
+    async fn get_transactions_after_date(&self, child_id: &str, date: &str) -> Result<Vec<Transaction>>;
+    
+    /// Get the most recent transaction before a specific date
+    /// This is useful for finding the starting balance when inserting backdated transactions
+    async fn get_latest_transaction_before_date(&self, child_id: &str, date: &str) -> Result<Option<Transaction>>;
+    
+    /// Update the balance of a specific transaction
+    /// Used during balance recalculation after backdated transactions
+    async fn update_transaction_balance(&self, transaction_id: &str, new_balance: f64) -> Result<()>;
+    
+    /// Update multiple transaction balances atomically
+    /// Used for bulk balance recalculation after backdated transactions
+    async fn update_transaction_balances(&self, updates: &[(String, f64)]) -> Result<()>;
+    
+    /// Check if transactions exist by their IDs for a specific child
+    async fn check_transactions_exist(&self, child_id: &str, transaction_ids: &[String]) -> Result<Vec<String>>;
 }
 
 /// Trait defining the interface for storage connections
