@@ -165,6 +165,7 @@ pub fn add_money_form(props: &AddMoneyFormProps) -> Html {
                         on_date_change={props.on_date_change.clone()}
                         disabled={props.creating_transaction}
                         label={"When did you get this money?"}
+                        on_debug={props.on_debug.clone()}
                     />
                 </div>
                 

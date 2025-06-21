@@ -13,6 +13,9 @@ pub struct DatePickerProps {
     pub disabled: bool,
     /// Optional label for the date picker
     pub label: Option<String>,
+    /// Optional debug callback
+    #[prop_or_default]
+    pub on_debug: Option<Callback<String>>,
 }
 
 #[function_component(DatePicker)]
@@ -44,8 +47,16 @@ pub fn date_picker(props: &DatePickerProps) -> Html {
     // Toggle calendar visibility
     let toggle_calendar = {
         let show_calendar = show_calendar.clone();
+        let calendar_ref = calendar_ref.clone();
+        let on_debug = props.on_debug.clone();
         Callback::from(move |_: MouseEvent| {
-            show_calendar.set(!*show_calendar);
+            let was_open = *show_calendar;
+            show_calendar.set(!was_open);
+            
+            // Debug logging
+            if let Some(debug_cb) = &on_debug {
+                debug_cb.emit(format!("📅 Calendar toggle: {} -> {}", was_open, !was_open));
+            }
         })
     };
     

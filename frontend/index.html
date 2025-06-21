@@ -524,6 +524,9 @@
             display: flex;
             flex-direction: column;
             flex: 1;
+            overflow: visible;
+            position: relative;
+            z-index: 1;
         }
 
         .spend-money-section {
@@ -535,6 +538,9 @@
             display: flex;
             flex-direction: column;
             flex: 1;
+            overflow: visible;
+            position: relative;
+            z-index: 1;
         }
 
         .spend-money-section h2 {
@@ -582,6 +588,8 @@
             gap: 2rem;
             margin-bottom: 1rem;
             align-items: stretch;
+            overflow: visible;
+            position: relative;
         }
 
         @media (max-width: 768px) {
@@ -1955,6 +1963,7 @@
         .date-picker {
             position: relative;
             width: 100%;
+            z-index: 1;
         }
 
         .date-picker-label {
@@ -2017,16 +2026,16 @@
         .date-picker .calendar-dropdown {
             position: absolute;
             top: 100%;
-            left: 0;
-            right: 0;
+            left: 50%;
+            transform: translateX(-50%);
             z-index: 1000;
             background: white;
             border: 1px solid #ddd;
             border-radius: 8px;
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
             margin-top: 4px;
-            max-width: 320px;
-            width: 100%;
+            width: 320px;
+            max-width: calc(100vw - 2rem);
         }
 
         .date-picker .calendar-header {
@@ -2061,6 +2070,8 @@
 
         .date-picker .calendar-grid {
             padding: 1rem;
+            display: flex;
+            flex-direction: column;
         }
 
         .date-picker .weekday-header {
@@ -2167,13 +2178,22 @@
         /* Mobile styles for date picker */
         @media (max-width: 768px) {
             .date-picker .calendar-dropdown {
+                width: calc(100vw - 4rem);
+                max-width: 280px;
+            }
+        }
+        
+        /* Alternative bottom sheet for very small screens */
+        @media (max-width: 480px) {
+            .date-picker .calendar-dropdown {
                 position: fixed;
                 top: auto;
                 bottom: 0;
-                left: 0;
-                right: 0;
+                left: 1rem;
+                right: 1rem;
+                transform: none;
                 max-width: none;
-                width: 100%;
+                width: auto;
                 border-radius: 16px 16px 0 0;
                 margin-top: 0;
                 box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.2);

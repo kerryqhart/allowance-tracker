@@ -1,34 +1,11 @@
-feat: Add backdated transaction support with date picker
+Fix calendar selector horizontal offset issue
 
-This commit implements comprehensive backdated transaction functionality:
+- Fixed CSS positioning for date picker calendar dropdown
+- Changed desktop positioning from left:0/right:0 to centered with transform
+- Added flex-direction: column to calendar-grid for proper layout
+- Added on_debug prop to DatePicker component for debugging
+- Updated forms to pass debug callback to DatePicker
+- Removed problematic DOM measurement code causing compilation errors
 
-Frontend Changes:
-- Add DatePicker component with calendar UI and mobile-responsive design
-- Integrate date selection into AddMoneyForm and SpendMoneyForm
-- Add date validation utilities (45-day limit, no future dates)
-- Update transaction hooks to handle optional dates
-- Add scoped CSS styling to prevent conflicts with main calendar
-
-Backend Changes:
-- Enhance money management APIs to accept optional date fields
-- Update validation to support both YYYY-MM-DD and RFC 3339 date formats
-- Fix transaction creation logic and restore proper error handling
-- Add comprehensive logging throughout the transaction flow
-- Remove child creation date validation (allow pre-creation backdating)
-
-Key Features:
-- Date picker shows "Today" by default with calendar icon
-- Dropdown calendar with month navigation and "Today" button
-- 45-day backdating limit with clear validation messages
-- Automatic balance recalculation for backdated transactions
-- Mobile-friendly bottom sheet design
-- Full integration with existing transaction system
-
-Technical Details:
-- Fixes date format compatibility between frontend (YYYY-MM-DD) and backend
-- Maintains backward compatibility with existing transaction creation
-- Proper error handling and user feedback for invalid dates
-- Comprehensive validation with business rule enforcement
-
-Resolves issues with transaction creation and improves user experience
-for managing historical allowance data. 
+The calendar dropdowns now properly center below their date picker buttons
+instead of being horizontally offset to span the full form width. 

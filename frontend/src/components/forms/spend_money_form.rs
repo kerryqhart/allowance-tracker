@@ -165,6 +165,7 @@ pub fn spend_money_form(props: &SpendMoneyFormProps) -> Html {
                         on_date_change={props.on_spend_date_change.clone()}
                         disabled={props.recording_spending}
                         label={"When did you spend this money?"}
+                        on_debug={props.on_debug.clone()}
                     />
                 </div>
                 
