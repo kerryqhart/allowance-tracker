@@ -120,9 +120,18 @@ async fn get_calendar_month(
     // Add the previous transaction if found (for balance calculation)
     if !previous_transaction_response.transactions.is_empty() {
         let prev_transaction = &previous_transaction_response.transactions[0];
-        info!("🗓️ STARTING BALANCE: Found previous transaction for {}/{}: {} on {} with balance ${:.2}", 
-              request.month, request.year, prev_transaction.id, prev_transaction.date, prev_transaction.balance);
-        all_transactions.push(prev_transaction.clone());
+        
+        // Check for duplicates before adding - prevent same transaction being added twice
+        let is_duplicate = all_transactions.iter().any(|t| t.id == prev_transaction.id);
+        
+        if !is_duplicate {
+            info!("🗓️ STARTING BALANCE: Adding previous transaction for {}/{}: {} on {} with balance ${:.2}", 
+                  request.month, request.year, prev_transaction.id, prev_transaction.date, prev_transaction.balance);
+            all_transactions.push(prev_transaction.clone());
+        } else {
+            info!("🗓️ STARTING BALANCE: Previous transaction {} already in month data, skipping duplicate", 
+                  prev_transaction.id);
+        }
     } else {
         info!("🗓️ STARTING BALANCE: No previous transactions found before {}/{}, starting balance will be $0.00", 
               request.month, request.year);
