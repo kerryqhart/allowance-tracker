@@ -2,7 +2,7 @@ use anyhow::Result;
 use sqlx::Row;
 use async_trait::async_trait;
 use shared::{Transaction, TransactionType};
-use crate::backend::storage::connection::DbConnection;
+use crate::backend::storage::sqlite::connection::DbConnection;
 use crate::backend::storage::traits::TransactionStorage;
 
 /// Repository for transaction operations

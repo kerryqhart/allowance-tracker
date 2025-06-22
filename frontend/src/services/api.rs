@@ -317,7 +317,7 @@ impl ApiClient {
 
     /// Update allowance configuration
     pub async fn update_allowance_config(&self, request: UpdateAllowanceConfigRequest) -> Result<UpdateAllowanceConfigResponse, String> {
-        let url = format!("{}/api/allowance/config", self.base_url);
+        let url = format!("{}/api/allowance", self.base_url);
         
         match Request::post(&url)
             .json(&request)

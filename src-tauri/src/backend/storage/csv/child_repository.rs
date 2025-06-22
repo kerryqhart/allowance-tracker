@@ -21,7 +21,7 @@ impl ChildRepository {
     
     /// Generate a safe filesystem identifier from a child name
     /// Converts "Emma Smith" -> "Emma_Smith", "José María" -> "Jose_Maria", etc.
-    fn generate_safe_directory_name(child_name: &str) -> String {
+    pub fn generate_safe_directory_name(child_name: &str) -> String {
         child_name
             .chars()
             .map(|c| {

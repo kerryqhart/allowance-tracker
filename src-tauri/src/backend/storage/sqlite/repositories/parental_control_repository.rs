@@ -1,7 +1,7 @@
 use anyhow::Result;
 use sqlx::Row;
 use shared::ParentalControlAttempt;
-use crate::backend::storage::connection::DbConnection;
+use crate::backend::storage::sqlite::connection::DbConnection;
 
 /// Repository for parental control operations
 #[derive(Clone)]

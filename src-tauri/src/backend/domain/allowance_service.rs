@@ -3,7 +3,8 @@ use chrono::{Utc, NaiveDate, Datelike, Local};
 use log::{info, warn};
 use std::sync::Arc;
 
-use crate::backend::storage::{DbConnection, AllowanceRepository};
+use crate::backend::storage::csv::{CsvConnection, AllowanceRepository};
+use crate::backend::storage::traits::AllowanceStorage;
 use crate::backend::domain::child_service::ChildService;
 use shared::{
     AllowanceConfig, GetAllowanceConfigRequest, GetAllowanceConfigResponse,
@@ -19,9 +20,9 @@ pub struct AllowanceService {
 
 impl AllowanceService {
     /// Create a new AllowanceService
-    pub fn new(db: Arc<DbConnection>) -> Self {
-        let allowance_repository = AllowanceRepository::new((*db).clone());
-        let child_service = ChildService::new(db);
+    pub fn new(csv_conn: Arc<CsvConnection>) -> Self {
+        let allowance_repository = AllowanceRepository::new((*csv_conn).clone());
+        let child_service = ChildService::new(csv_conn);
         Self {
             allowance_repository,
             child_service,

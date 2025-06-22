@@ -1,7 +1,7 @@
 use anyhow::Result;
 use sqlx::{migrate::MigrateDatabase, Row, Sqlite, SqlitePool};
 use std::sync::Arc;
-use shared::Transaction;
+use shared::{Transaction, TransactionType};
 
 // The database URL for the production database
 const DATABASE_URL: &str = "sqlite:keyvalue.db";
@@ -111,10 +111,12 @@ impl DbConnection {
         match row {
             Some(r) => Ok(Some(Transaction {
                 id: r.get("id"),
+                child_id: "legacy".to_string(), // Default for legacy SQLite transactions
                 date: r.get("date"),
                 description: r.get("description"),
                 amount: r.get("amount"),
                 balance: r.get("balance"),
+                transaction_type: if r.get::<f64, _>("amount") >= 0.0 { TransactionType::Income } else { TransactionType::Expense },
             })),
             None => Ok(None),
         }
@@ -158,10 +160,12 @@ impl DbConnection {
             .iter()
             .map(|row| Transaction {
                 id: row.get("id"),
+                child_id: "legacy".to_string(), // Default for legacy SQLite transactions
                 date: row.get("date"),
                 description: row.get("description"),
                 amount: row.get("amount"),
                 balance: row.get("balance"),
+                transaction_type: if row.get::<f64, _>("amount") >= 0.0 { TransactionType::Income } else { TransactionType::Expense },
             })
             .collect();
 
@@ -192,10 +196,12 @@ mod tests {
         // Create a test transaction
         let transaction = Transaction {
             id: "transaction::income::1234567890000".to_string(),
+            child_id: "test_child".to_string(),
             date: "2025-06-14T10:00:00-04:00".to_string(),
             description: "Test allowance".to_string(),
             amount: 10.0,
             balance: 10.0,
+            transaction_type: TransactionType::Income,
         };
 
         // Store the transaction
@@ -220,24 +226,30 @@ mod tests {
         let transactions = vec![
             Transaction {
                 id: "transaction::income::1234567890000".to_string(),
+                child_id: "test_child".to_string(),
                 date: "2025-06-14T10:00:00-04:00".to_string(),
                 description: "First transaction".to_string(),
                 amount: 10.0,
                 balance: 10.0,
+                transaction_type: TransactionType::Income,
             },
             Transaction {
                 id: "transaction::expense::1234567891000".to_string(),
+                child_id: "test_child".to_string(),
                 date: "2025-06-14T11:00:00-04:00".to_string(),
                 description: "Second transaction".to_string(),
                 amount: -5.0,
                 balance: 5.0,
+                transaction_type: TransactionType::Expense,
             },
             Transaction {
                 id: "transaction::income::1234567892000".to_string(),
+                child_id: "test_child".to_string(),
                 date: "2025-06-14T12:00:00-04:00".to_string(),
                 description: "Third transaction".to_string(),
                 amount: 15.0,
                 balance: 20.0,
+                transaction_type: TransactionType::Income,
             },
         ];
 
@@ -263,24 +275,30 @@ mod tests {
         let transactions = vec![
             Transaction {
                 id: "transaction::income::1234567890000".to_string(),
+                child_id: "test_child".to_string(),
                 date: "2025-06-14T10:00:00-04:00".to_string(),
                 description: "Transaction 1".to_string(),
                 amount: 10.0,
                 balance: 10.0,
+                transaction_type: TransactionType::Income,
             },
             Transaction {
                 id: "transaction::expense::1234567891000".to_string(),
+                child_id: "test_child".to_string(),
                 date: "2025-06-14T11:00:00-04:00".to_string(),
                 description: "Transaction 2".to_string(),
                 amount: -5.0,
                 balance: 5.0,
+                transaction_type: TransactionType::Expense,
             },
             Transaction {
                 id: "transaction::income::1234567892000".to_string(),
+                child_id: "test_child".to_string(),
                 date: "2025-06-14T12:00:00-04:00".to_string(),
                 description: "Transaction 3".to_string(),
                 amount: 15.0,
                 balance: 20.0,
+                transaction_type: TransactionType::Income,
             },
         ];
 

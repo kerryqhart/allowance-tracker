@@ -198,9 +198,9 @@ impl DbConnection {
 }
 
 impl Connection for DbConnection {
-    type TransactionRepository = crate::backend::storage::repositories::transaction_repository::TransactionRepository;
+    type TransactionRepository = crate::backend::storage::sqlite::repositories::transaction_repository::TransactionRepository;
     
     fn create_transaction_repository(&self) -> Self::TransactionRepository {
-        crate::backend::storage::repositories::transaction_repository::TransactionRepository::new(self.clone())
+        crate::backend::storage::sqlite::repositories::transaction_repository::TransactionRepository::new(self.clone())
     }
 } 

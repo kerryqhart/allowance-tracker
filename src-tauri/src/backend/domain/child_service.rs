@@ -3,7 +3,8 @@ use chrono::Utc;
 use log::{info, warn};
 use std::sync::Arc;
 
-use crate::backend::storage::{DbConnection, ChildRepository};
+use crate::backend::storage::csv::{CsvConnection, ChildRepository};
+use crate::backend::storage::traits::ChildStorage;
 use shared::{
     Child, CreateChildRequest, UpdateChildRequest, ChildResponse, ChildListResponse,
     SetActiveChildRequest, SetActiveChildResponse, ActiveChildResponse
@@ -17,8 +18,8 @@ pub struct ChildService {
 
 impl ChildService {
     /// Create a new ChildService
-    pub fn new(db: Arc<DbConnection>) -> Self {
-        let child_repository = ChildRepository::new((*db).clone());
+    pub fn new(csv_conn: Arc<CsvConnection>) -> Self {
+        let child_repository = ChildRepository::new((*csv_conn).clone());
         Self { child_repository }
     }
 

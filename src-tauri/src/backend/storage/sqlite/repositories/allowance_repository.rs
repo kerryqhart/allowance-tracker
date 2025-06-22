@@ -1,7 +1,7 @@
 use anyhow::Result;
 use sqlx::Row;
 use shared::AllowanceConfig;
-use crate::backend::storage::connection::DbConnection;
+use crate::backend::storage::sqlite::connection::DbConnection;
 
 /// Repository for allowance configuration operations
 #[derive(Clone)]

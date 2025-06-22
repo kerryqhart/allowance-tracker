@@ -46,7 +46,7 @@ use axum::{
 use tower_http::cors::{Any, CorsLayer};
 use anyhow::Result;
 use crate::backend::domain::{TransactionService, CalendarService, TransactionTableService, MoneyManagementService, child_service::ChildService, ParentalControlService, AllowanceService, BalanceService};
-use crate::backend::storage::{CsvConnection, DbConnection};
+use crate::backend::storage::CsvConnection;
 use log::info;
 
 // Re-exports removed to avoid unused import warnings
@@ -66,22 +66,19 @@ pub struct AppState {
 
 /// Initialize the backend with all required services
 pub async fn initialize_backend() -> Result<AppState> {
-    info!("Setting up CSV storage for transactions");
+    info!("Setting up CSV storage for all data");
     let csv_conn = std::sync::Arc::new(CsvConnection::new_default()?);
     
     // Log the data directory location for user reference
     info!("Allowance Tracker data directory: {:?}", csv_conn.base_directory());
-    
-    info!("Setting up database for other services");
-    let db_conn = std::sync::Arc::new(DbConnection::init().await?);
 
-    info!("Setting up domain model");
+    info!("Setting up domain model with CSV storage");
     let calendar_service = CalendarService::new();
     let transaction_table_service = TransactionTableService::new();
     let money_management_service = MoneyManagementService::new();
-    let child_service = ChildService::new(db_conn.clone());
-    let parental_control_service = ParentalControlService::new(db_conn.clone());
-    let allowance_service = AllowanceService::new(db_conn.clone());
+    let child_service = ChildService::new(csv_conn.clone());
+    let parental_control_service = ParentalControlService::new(csv_conn.clone());
+    let allowance_service = AllowanceService::new(csv_conn.clone());
     let balance_service = BalanceService::new(csv_conn.clone());
     let transaction_service = TransactionService::new(csv_conn, child_service.clone(), allowance_service.clone(), balance_service.clone());
 

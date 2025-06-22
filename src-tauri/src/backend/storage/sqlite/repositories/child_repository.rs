@@ -1,7 +1,7 @@
 use anyhow::Result;
 use sqlx::Row;
 use shared::Child;
-use crate::backend::storage::connection::DbConnection;
+use crate::backend::storage::sqlite::connection::DbConnection;
 
 /// Repository for child operations
 #[derive(Clone)]

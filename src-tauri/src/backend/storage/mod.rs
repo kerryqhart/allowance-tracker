@@ -18,18 +18,17 @@
 //!
 //! ## Current Implementation
 //!
-//! - **Primary Storage**: SQLite database with SQLx for type-safe queries
-//! - **CSV Storage**: Alternative file-based storage for development and testing
+//! - **Primary Storage**: CSV files in ~/Documents/Allowance Tracker
+//! - **SQLite Storage**: Available in sqlite sub-module for future use
 //! - **Development Mode**: Mock data for rapid prototyping
 //! - **Future Flexibility**: Designed to support multiple storage backends
 //!
 //! ## Storage Features
 //!
-//! - **ACID Compliance**: Atomicity, Consistency, Isolation, Durability (for DB)
-//! - **Type Safety**: Compile-time checked SQL queries with SQLx macros
-//! - **Async Operations**: Non-blocking database operations
-//! - **Connection Pooling**: Efficient database connection management
-//! - **Error Handling**: Graceful handling of storage failures
+//! - **File-based Storage**: Human-readable CSV and YAML files
+//! - **Cross-platform Compatibility**: Works on all platforms with Documents folder
+//! - **Easy Backup**: Simple file copying for data backup
+//! - **Version Control Friendly**: Text-based formats for easy diffing
 //! - **Storage Abstraction**: Common traits for different storage backends
 //!
 //! ## Design Principles
@@ -39,19 +38,14 @@
 //! - **Dependency Inversion**: Domain depends on storage abstractions, not implementations
 //! - **Testability**: Mock implementations for unit testing
 
-pub mod connection;
-pub mod repositories;
 pub mod traits;
 pub mod csv;
+pub mod sqlite;
 
 // Re-export the main types that other modules need
-pub use connection::DbConnection;
 pub use csv::CsvConnection;
 pub use traits::{Connection, TransactionStorage, ChildStorage, AllowanceStorage, ParentalControlStorage};
 pub use csv::{GlobalConfig, GlobalConfigStorage};
-pub use repositories::{
-    TransactionRepository,
-    ChildRepository, 
-    ParentalControlRepository,
-    AllowanceRepository
-}; 
+
+// SQLite components are available via the sqlite sub-module
+// Example: use crate::backend::storage::sqlite::DbConnection; 

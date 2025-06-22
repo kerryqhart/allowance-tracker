@@ -6,17 +6,24 @@ use std::fs::{File, OpenOptions};
 use std::io::{BufReader, BufWriter};
 use shared::Transaction;
 use super::connection::CsvConnection;
+use super::child_repository::ChildRepository;
+use crate::backend::storage::ChildStorage;
 
 /// CSV-based transaction repository
 #[derive(Clone)]
 pub struct TransactionRepository {
     connection: CsvConnection,
+    child_repository: ChildRepository,
 }
 
 impl TransactionRepository {
     /// Create a new CSV transaction repository
     pub fn new(connection: CsvConnection) -> Self {
-        Self { connection }
+        let child_repository = ChildRepository::new(connection.clone());
+        Self { 
+            connection,
+            child_repository,
+        }
     }
     
     /// Read all transactions for a child from their CSV file
@@ -95,20 +102,26 @@ impl TransactionRepository {
         Ok(())
     }
     
-    /// Helper method to get child name from child ID
-    /// This will need to be provided by the caller who has access to child information
-    fn extract_child_name_from_id(&self, child_id: &str) -> String {
-        // For now, let's create a simple mapping - this is temporary
-        // In practice, the caller should provide the child name
-        match child_id {
-            "child::1750206432329" => "TestChild".to_string(),
-            _ => {
-                // Extract a name from the ID as fallback
-                if child_id.starts_with("child::") {
-                    format!("Child_{}", &child_id[7..17]) // Use first 10 chars after "child::"
-                } else {
-                    child_id.to_string()
-                }
+    /// Helper method to get child directory name from child ID
+    /// This looks up the actual child and generates a safe directory name
+    async fn get_child_directory_name(&self, child_id: &str) -> Result<String> {
+        // Look up the child by ID to get their actual name
+        match self.child_repository.get_child(child_id).await? {
+            Some(child) => {
+                // Use the same safe directory name generation as the child repository
+                Ok(ChildRepository::generate_safe_directory_name(&child.name))
+            }
+            None => {
+                // Child not found - this shouldn't happen in normal operation
+                // Return a fallback, but log a warning
+                warn!("Child not found for ID: {}. Using fallback directory name.", child_id);
+                Ok(format!("unknown_child_{}", 
+                    child_id.chars()
+                        .filter(|c| c.is_alphanumeric())
+                        .take(10)
+                        .collect::<String>()
+                        .to_lowercase()
+                ))
             }
         }
     }
@@ -117,14 +130,14 @@ impl TransactionRepository {
 impl TransactionRepository {
     /// Read transactions using child_id, extracting child name
     pub async fn read_transactions_by_id(&self, child_id: &str) -> Result<Vec<Transaction>> {
-        let child_name = self.extract_child_name_from_id(child_id);
-        self.read_transactions(&child_name).await
+        let child_dir_name = self.get_child_directory_name(child_id).await?;
+        self.read_transactions(&child_dir_name).await
     }
     
     /// Write transactions using child_id, extracting child name
     pub async fn write_transactions_by_id(&self, child_id: &str, transactions: &[Transaction]) -> Result<()> {
-        let child_name = self.extract_child_name_from_id(child_id);
-        self.write_transactions(&child_name, transactions).await
+        let child_dir_name = self.get_child_directory_name(child_id).await?;
+        self.write_transactions(&child_dir_name, transactions).await
     }
     
     /// Store transaction with explicit child name (preferred method)
