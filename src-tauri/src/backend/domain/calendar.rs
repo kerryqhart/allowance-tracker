@@ -559,4 +559,70 @@ mod tests {
         assert_eq!(focus_date.month, 1);
         assert_eq!(focus_date.year, 2026);
     }
+
+    #[test]
+    fn test_cross_month_balance_forwarding_comprehensive() {
+        let service = CalendarService::new();
+        
+        // Create comprehensive test data that matches the user's scenario:
+        // - June 15: Income +$1 (balance = $1)
+        // - June 19: Spend -$1 (balance = $0)  
+        // - Allowance: Every Friday +$1
+        // - Expected: June 30th = $2, July 31st = $6, August 31st = $11
+        
+        let mut transactions = vec![
+            // Historical real transactions
+            create_test_transaction("2025-06-15T12:00:00Z", 1.0, 1.0, "Income"),
+            create_test_transaction("2025-06-19T12:00:00Z", -1.0, 0.0, "Spend"),
+            
+            // June future allowances (after June 19th)
+            create_test_transaction("2025-06-20T12:00:00Z", 1.0, 1.0, "Friday Allowance"), // June 20 (Friday)
+            create_test_transaction("2025-06-27T12:00:00Z", 1.0, 2.0, "Friday Allowance"), // June 27 (Friday)
+            
+            // July future allowances  
+            create_test_transaction("2025-07-04T12:00:00Z", 1.0, 3.0, "Friday Allowance"), // July 4 (Friday)
+            create_test_transaction("2025-07-11T12:00:00Z", 1.0, 4.0, "Friday Allowance"), // July 11 (Friday)
+            create_test_transaction("2025-07-18T12:00:00Z", 1.0, 5.0, "Friday Allowance"), // July 18 (Friday)
+            create_test_transaction("2025-07-25T12:00:00Z", 1.0, 6.0, "Friday Allowance"), // July 25 (Friday)
+            
+            // August future allowances
+            create_test_transaction("2025-08-01T12:00:00Z", 1.0, 7.0, "Friday Allowance"), // August 1 (Friday)
+            create_test_transaction("2025-08-08T12:00:00Z", 1.0, 8.0, "Friday Allowance"), // August 8 (Friday)
+            create_test_transaction("2025-08-15T12:00:00Z", 1.0, 9.0, "Friday Allowance"), // August 15 (Friday)
+            create_test_transaction("2025-08-22T12:00:00Z", 1.0, 10.0, "Friday Allowance"), // August 22 (Friday)
+            create_test_transaction("2025-08-29T12:00:00Z", 1.0, 11.0, "Friday Allowance"), // August 29 (Friday)
+        ];
+        
+        // Test July calendar generation (should start with June 30th ending balance)
+        let july_calendar = service.generate_calendar_month(7, 2025, transactions.clone());
+        
+        // July 1st should start with $2.0 (June ending balance)
+        assert_eq!(july_calendar.days[2].balance, 2.0, "July 1st should start with June 30th ending balance of $2.00");
+        
+        // July 31st should end with $6.0
+        assert_eq!(july_calendar.days[32].balance, 6.0, "July 31st should end with $6.00 after 4 Friday allowances");
+        
+        // Test August calendar generation (should start with July 31st ending balance)  
+        let august_calendar = service.generate_calendar_month(8, 2025, transactions.clone());
+        
+        // August 1st should start with $7.0 (July ending balance + August 1st allowance)
+        assert_eq!(august_calendar.days[5].balance, 7.0, "August 1st should show $7.00 (July end $6.00 + August 1st allowance $1.00)");
+        
+        // August 31st should end with $11.0
+        assert_eq!(august_calendar.days[35].balance, 11.0, "August 31st should end with $11.00 after 5 Friday allowances");
+        
+        // Verify proper balance progression within July
+        let july_4_day = july_calendar.days.iter().find(|d| d.day == 4).unwrap();
+        assert_eq!(july_4_day.balance, 3.0, "July 4th should show $3.00");
+        
+        let july_25_day = july_calendar.days.iter().find(|d| d.day == 25).unwrap();
+        assert_eq!(july_25_day.balance, 6.0, "July 25th should show $6.00");
+        
+        // Verify proper balance progression within August
+        let august_15_day = august_calendar.days.iter().find(|d| d.day == 15).unwrap();
+        assert_eq!(august_15_day.balance, 9.0, "August 15th should show $9.00");
+        
+        let august_29_day = august_calendar.days.iter().find(|d| d.day == 29).unwrap();
+        assert_eq!(august_29_day.balance, 11.0, "August 29th should show $11.00");
+    }
 } 

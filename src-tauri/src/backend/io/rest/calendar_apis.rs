@@ -35,44 +35,23 @@ pub fn router() -> Router<AppState> {
 /// Get calendar month data with transactions
 async fn get_calendar_month(
     State(state): State<AppState>,
-    Query(query): Query<CalendarMonthQuery>,
+    Query(request): Query<CalendarMonthQuery>,
 ) -> impl IntoResponse {
-    info!("GET /api/calendar/month - query: {:?}", query);
+    info!("GET /api/calendar - request: {:?}", request);
 
-    let request = CalendarMonthQuery {
-        month: query.month,
-        year: query.year,
-    };
+    let days_in_month = state.calendar_service.days_in_month(request.month, request.year);
 
-    // Calculate start and end dates for the requested month using chrono
-    let start_of_month = match NaiveDate::from_ymd_opt(request.year as i32, request.month, 1) {
-        Some(date) => date,
-        None => return (StatusCode::BAD_REQUEST, "Invalid month/year").into_response(),
-    };
-    
-    // Get the last day of the month by going to next month and subtracting 1 day
-    let next_month = if request.month == 12 {
-        NaiveDate::from_ymd_opt(request.year as i32 + 1, 1, 1)
-    } else {
-        NaiveDate::from_ymd_opt(request.year as i32, request.month + 1, 1)
-    };
-    
-    let end_of_month = match next_month {
-        Some(date) => date.pred_opt().unwrap(),
-        None => return (StatusCode::BAD_REQUEST, "Invalid month/year").into_response(),
-    };
-    
-    let start_date = start_of_month.and_time(NaiveTime::from_hms_opt(0, 0, 0).unwrap())
-        .format("%Y-%m-%dT%H:%M:%SZ").to_string();
-    let end_date = end_of_month.and_time(NaiveTime::from_hms_opt(23, 59, 59).unwrap())
-        .format("%Y-%m-%dT%H:%M:%SZ").to_string();
+    // Calculate end date for target month
+    let end_date = format!("{:04}-{:02}-{:02}T23:59:59Z", 
+                          request.year, request.month, days_in_month);
 
-    // Get transactions for this month (including future allowances)
+    // Single comprehensive call to get ALL transactions needed for proper balance calculation
+    // This includes: real transactions + future allowances from all previous months
     let transaction_request = TransactionListRequest {
         after: None,
-        limit: Some(1000),
-        start_date: Some(start_date),
-        end_date: Some(end_date),
+        limit: Some(10000), // Large limit to get comprehensive history
+        start_date: None, // From beginning of time
+        end_date: Some(end_date), // To end of target month
     };
 
     let transaction_response = match state.transaction_service.list_transactions(transaction_request).await {
@@ -83,65 +62,16 @@ async fn get_calendar_month(
         }
     };
 
-    let mut all_transactions = transaction_response.transactions;
+    info!("🗓️ SINGLE CALL: Fetched {} total transactions (real + future allowances) for {}/{}", 
+          transaction_response.transactions.len(), request.month, request.year);
 
-    // Also get the most recent transaction from before this month for starting balance calculation
-    // This is critical for proper balance calculation on days without transactions
-    let previous_month_end = if request.month == 1 {
-        format!("{:04}-12-31T23:59:59Z", request.year - 1)
-    } else {
-        let prev_month_days = state.calendar_service.days_in_month(request.month - 1, request.year);
-        format!("{:04}-{:02}-{:02}T23:59:59Z", request.year, request.month - 1, prev_month_days)
-    };
-
-    // Get the most recent transaction before this month (limit to 1, no date range start)
-    let previous_transaction_request = TransactionListRequest {
-        after: None,
-        limit: Some(1),
-        start_date: None, // No start date - get from all time
-        end_date: Some(previous_month_end), // Only transactions before this month
-    };
-
-    let previous_transaction_response = match state.transaction_service.list_transactions(previous_transaction_request).await {
-        Ok(response) => response,
-        Err(e) => {
-            warn!("Failed to get previous transactions for calendar starting balance: {}", e);
-            // Continue without previous transactions - starting balance will be 0
-            TransactionListResponse {
-                transactions: vec![],
-                pagination: PaginationInfo {
-                    has_more: false,
-                    next_cursor: None,
-                },
-            }
-        }
-    };
-
-    // Add the previous transaction if found (for balance calculation)
-    if !previous_transaction_response.transactions.is_empty() {
-        let prev_transaction = &previous_transaction_response.transactions[0];
-        
-        // Check for duplicates before adding - prevent same transaction being added twice
-        let is_duplicate = all_transactions.iter().any(|t| t.id == prev_transaction.id);
-        
-        if !is_duplicate {
-            info!("🗓️ STARTING BALANCE: Adding previous transaction for {}/{}: {} on {} with balance ${:.2}", 
-                  request.month, request.year, prev_transaction.id, prev_transaction.date, prev_transaction.balance);
-            all_transactions.push(prev_transaction.clone());
-        } else {
-            info!("🗓️ STARTING BALANCE: Previous transaction {} already in month data, skipping duplicate", 
-                  prev_transaction.id);
-        }
-    } else {
-        info!("🗓️ STARTING BALANCE: No previous transactions found before {}/{}, starting balance will be $0.00", 
-              request.month, request.year);
-    }
-
+    // Single call to domain layer with comprehensive transaction data
     let calendar_month = state.calendar_service.generate_calendar_month(
         request.month,
         request.year,
-        all_transactions,
+        transaction_response.transactions,
     );
+
     (StatusCode::OK, Json(calendar_month)).into_response()
 }
 
