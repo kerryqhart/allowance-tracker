@@ -1,7 +1,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use csv::{Reader, Writer};
-use log::{info, warn};
+use log::{info, warn, error};
 use std::fs::{File, OpenOptions};
 use std::io::{BufReader, BufWriter};
 use shared::Transaction;
@@ -125,6 +125,113 @@ impl TransactionRepository {
             }
         }
     }
+
+    /// Normalize a transaction date to RFC 3339 format with conflict resolution
+    /// 
+    /// This ensures all dates are stored in full RFC 3339 format and handles same-day conflicts
+    /// by incrementing the time component by 1-second intervals.
+    fn normalize_transaction_date(&self, date: &str, existing_transactions: &[Transaction]) -> Result<String> {
+        use chrono::{DateTime, FixedOffset, NaiveDate, TimeZone};
+        
+        info!("🕐 Normalizing transaction date: '{}'", date);
+        
+        // If already in RFC 3339 format, check for conflicts and increment if needed
+        if let Ok(_dt) = DateTime::parse_from_rfc3339(date) {
+            info!("📅 Date is already RFC 3339, checking for conflicts...");
+            return self.resolve_timestamp_conflict(date, existing_transactions);
+        }
+        
+        // If date-only format (YYYY-MM-DD), convert to RFC 3339
+        if let Ok(naive_date) = NaiveDate::parse_from_str(date, "%Y-%m-%d") {
+            info!("📅 Converting date-only format to RFC 3339...");
+            // Start at beginning of day in Eastern Time
+            let naive_datetime = naive_date.and_hms_opt(0, 0, 0).unwrap();
+            let eastern_offset = FixedOffset::west_opt(5 * 3600).unwrap(); // EST (UTC-5)
+            
+            if let Some(dt) = eastern_offset.from_local_datetime(&naive_datetime).single() {
+                // Use the same format as successful transactions: -0500 instead of -05:00
+                let original_timestamp = dt.format("%Y-%m-%dT%H:%M:%S%z").to_string();
+                info!("🕐 Original chrono timestamp: '{}'", original_timestamp);
+                
+                let mut base_timestamp = original_timestamp;
+                // Only remove colon from timezone offset (find colon after + or -)
+                if let Some(tz_start) = base_timestamp.rfind('+').or_else(|| base_timestamp.rfind('-')) {
+                    info!("🌍 Found timezone start at position: {}", tz_start);
+                    if let Some(colon_pos) = base_timestamp[tz_start..].find(':') {
+                        info!("🌍 Found colon in timezone at relative position: {}", colon_pos);
+                        base_timestamp.remove(tz_start + colon_pos);
+                        info!("🌍 Removed colon, result: '{}'", base_timestamp);
+                    }
+                }
+                info!("Generated base timestamp for date-only '{}': '{}'", date, base_timestamp);
+                return self.resolve_timestamp_conflict(&base_timestamp, existing_transactions);
+            }
+        }
+        
+        // If we can't parse the date, return it as-is (fallback)
+        warn!("Could not parse date '{}', storing as-is", date);
+        Ok(date.to_string())
+    }
+    
+    /// Resolve timestamp conflicts by incrementing seconds until we find a unique timestamp
+    fn resolve_timestamp_conflict(&self, base_timestamp: &str, existing_transactions: &[Transaction]) -> Result<String> {
+        use chrono::{DateTime, Duration};
+        
+        info!("🔄 Resolving timestamp conflict for: '{}'", base_timestamp);
+        
+        // Ensure the base timestamp has the colon for parsing
+        let parseable_timestamp = if base_timestamp.contains("T") && base_timestamp.len() > 5 {
+            let mut temp = base_timestamp.to_string();
+            // Add colon back to timezone if missing (e.g., -0500 -> -05:00)
+            if let Some(tz_start) = temp.rfind('+').or_else(|| temp.rfind('-')) {
+                let tz_part = &temp[tz_start..];
+                // Check if timezone part lacks colon (e.g., "-0500" instead of "-05:00")
+                if tz_part.len() == 5 && !tz_part.contains(':') {
+                    temp.insert(tz_start + 3, ':'); // Insert colon at position 3 in timezone
+                }
+            }
+            temp
+        } else {
+            base_timestamp.to_string()
+        };
+        
+        info!("🔧 Parseable timestamp: '{}'", parseable_timestamp);
+        let mut current_dt = DateTime::parse_from_rfc3339(&parseable_timestamp)?;
+        let mut attempts = 0;
+        const MAX_ATTEMPTS: i32 = 86400; // Max 1 day worth of seconds
+        
+        // Keep incrementing by 1 second until we find a unique timestamp
+        while attempts < MAX_ATTEMPTS {
+            let mut current_timestamp = current_dt.format("%Y-%m-%dT%H:%M:%S%z").to_string();
+            // Only remove colon from timezone offset (find colon after + or -)
+            if let Some(tz_start) = current_timestamp.rfind('+').or_else(|| current_timestamp.rfind('-')) {
+                if let Some(colon_pos) = current_timestamp[tz_start..].find(':') {
+                    current_timestamp.remove(tz_start + colon_pos);
+                }
+            }
+            
+            info!("Checking timestamp conflict for: '{}'", current_timestamp);
+            
+            // Check if this timestamp already exists
+            let conflict_exists = existing_transactions.iter().any(|tx| tx.date == current_timestamp);
+            
+            if !conflict_exists {
+                if attempts > 0 {
+                    info!("Resolved timestamp conflict: '{}' -> '{}' (incremented {} seconds)", 
+                          base_timestamp, current_timestamp, attempts);
+                }
+                return Ok(current_timestamp);
+            }
+            
+            // Increment by 1 second and try again
+            current_dt = current_dt + Duration::seconds(1);
+            attempts += 1;
+        }
+        
+        // If we somehow exhausted all attempts, return the original with a warning
+        warn!("Could not resolve timestamp conflict for '{}' after {} attempts", base_timestamp, MAX_ATTEMPTS);
+        Ok(base_timestamp.to_string())
+    }
 }
 
 impl TransactionRepository {
@@ -159,6 +266,14 @@ impl TransactionRepository {
         info!("Successfully stored transaction for child '{}': {}", child_name, transaction.id);
         Ok(())
     }
+    
+    /// Helper method to get all child IDs
+    async fn get_all_child_ids(&self) -> Result<Vec<String>> {
+        // Get all children from the child repository
+        let children = self.child_repository.list_children().await?;
+        let child_ids: Vec<String> = children.into_iter().map(|child| child.id).collect();
+        Ok(child_ids)
+    }
 }
 
 #[async_trait]
@@ -169,10 +284,16 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
         // Read existing transactions
         let mut transactions = self.read_transactions_by_id(&transaction.child_id).await?;
         
-        // Add new transaction
-        transactions.push(transaction.clone());
+        // Normalize the transaction date to RFC 3339 format with conflict resolution
+        let mut normalized_transaction = transaction.clone();
+        normalized_transaction.date = self.normalize_transaction_date(&transaction.date, &transactions)?;
         
-        // Sort by date to maintain chronological order
+        info!("Normalized transaction date from '{}' to '{}'", transaction.date, normalized_transaction.date);
+        
+        // Add new transaction with normalized date
+        transactions.push(normalized_transaction);
+        
+        // Sort by date to maintain chronological order (now all RFC 3339, so string sorting works)
         transactions.sort_by(|a, b| a.date.cmp(&b.date));
         
         // Write back to file
@@ -327,22 +448,78 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
     }
     
     /// Update the balance of a specific transaction (trait implementation)
-    async fn update_transaction_balance(&self, transaction_id: &str, new_balance: f64) -> Result<()> {
-        // For CSV, we need to find the transaction across all child files
-        // This is inefficient but necessary for the current interface
-        warn!("CSV update_transaction_balance is inefficient - requires searching all child files");
-        
-        // For now, return an error suggesting a better approach
-        Err(anyhow::anyhow!("CSV storage requires child_id for efficient transaction updates. Use update_transaction instead."))
+    async fn update_transaction_balance(&self, _transaction_id: &str, _new_balance: f64) -> Result<()> {
+        // CSV storage doesn't efficiently support updating individual transaction balances
+        // This would require reading the entire file, updating one record, and rewriting the file
+        // For now, return an error suggesting bulk updates or individual file operations
+        Err(anyhow::anyhow!("CSV storage requires child_id for transaction updates. Consider using update_transaction for each item individually."))
     }
     
     /// Update multiple transaction balances atomically (trait implementation)
     async fn update_transaction_balances(&self, updates: &[(String, f64)]) -> Result<()> {
-        // Similar issue - we need child_id for each transaction in CSV storage
-        warn!("CSV update_transaction_balances is not efficiently supported");
+        info!("🔄 CSV update_transaction_balances called with {} updates", updates.len());
         
-        // For now, return an error suggesting a better approach
-        Err(anyhow::anyhow!("CSV storage requires child_id for transaction updates. Consider using update_transaction for each item individually."))
+        // Log each update for debugging
+        for (i, (transaction_id, new_balance)) in updates.iter().enumerate() {
+            info!("  Update {}: transaction_id='{}', new_balance={:.2}", i + 1, transaction_id, new_balance);
+        }
+        
+        // The challenge with CSV storage is that we need to know which child each transaction belongs to
+        // But the trait method only gives us transaction IDs, not child IDs
+        
+        // We need to implement this properly by iterating through each update
+        for (transaction_id, new_balance) in updates {
+            info!("🔍 Processing balance update for transaction: {}", transaction_id);
+            
+            // We need to find which child this transaction belongs to
+            // This is inefficient but necessary for CSV storage
+            let child_ids = self.get_all_child_ids().await?;
+            info!("🔍 Found {} child IDs to search through", child_ids.len());
+            
+            let mut transaction_found = false;
+            
+            for child_id in &child_ids {
+                info!("🔍 Searching for transaction {} in child {}", transaction_id, child_id);
+                
+                match self.get_transaction(child_id, transaction_id).await {
+                    Ok(Some(mut transaction)) => {
+                        info!("✅ Found transaction {} in child {}, updating balance from {:.2} to {:.2}", 
+                              transaction_id, child_id, transaction.balance, new_balance);
+                        
+                        transaction.balance = *new_balance;
+                        
+                        match self.update_transaction(&transaction).await {
+                            Ok(()) => {
+                                info!("✅ Successfully updated balance for transaction {}", transaction_id);
+                                transaction_found = true;
+                                break;
+                            }
+                            Err(e) => {
+                                error!("❌ Failed to update transaction {}: {}", transaction_id, e);
+                                return Err(e);
+                            }
+                        }
+                    }
+                    Ok(None) => {
+                        // Transaction not found in this child, continue searching
+                        continue;
+                    }
+                    Err(e) => {
+                        error!("❌ Error searching for transaction {} in child {}: {}", transaction_id, child_id, e);
+                        return Err(e);
+                    }
+                }
+            }
+            
+            if !transaction_found {
+                let error_msg = format!("Transaction {} not found in any child", transaction_id);
+                error!("❌ {}", error_msg);
+                return Err(anyhow::anyhow!(error_msg));
+            }
+        }
+        
+        info!("✅ Successfully updated {} transaction balances", updates.len());
+        Ok(())
     }
     
     /// Check if transactions exist by their IDs for a specific child (trait implementation)

@@ -184,12 +184,12 @@ impl CalendarService {
         // For each day, find the latest transaction (chronologically) and use its balance
         for day in 1..=days_in_month {
             if let Some(day_transactions) = transactions_by_day.get(&day) {
-                // Find the transaction with the latest time on this day
-                let latest_transaction = day_transactions.iter()
-                    .max_by(|a, b| a.date.cmp(&b.date));
+                // Sort transactions by full timestamp (not just date) to get proper chronological order
+                let mut sorted_day_transactions = day_transactions.clone();
+                sorted_day_transactions.sort_by(|a, b| a.date.cmp(&b.date));
                 
-                if let Some(latest) = latest_transaction {
-                    // Use the stored balance from the latest transaction of the day
+                // Use the balance from the chronologically last transaction of the day
+                if let Some(latest) = sorted_day_transactions.last() {
                     daily_balances.insert(day, latest.balance);
                     previous_balance = latest.balance;
                     log::info!("🗓️ BALANCE DEBUG: Day {}: Using stored balance ${:.2} from transaction {}", 

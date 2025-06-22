@@ -92,13 +92,65 @@ impl<C: Connection> BalanceService<C> {
     /// Calculate the correct balance for a new transaction at a specific date
     /// This is used when inserting a backdated transaction to determine its balance
     pub async fn calculate_balance_for_new_transaction(&self, child_id: &str, transaction_date: &str, transaction_amount: f64) -> Result<f64> {
-        let starting_balance = self.calculate_starting_balance(child_id, transaction_date).await?;
-        let new_balance = starting_balance + transaction_amount;
+        // First, get the most recent transaction before this date (excluding same day)
+        let base_balance = match self.transaction_repository
+            .get_latest_transaction_before_date(child_id, transaction_date)
+            .await? 
+        {
+            Some(transaction) => transaction.balance,
+            None => 0.0,
+        };
+
+        // Then, get all transactions from the same day that occurred before this one
+        // by getting all transactions from that day and filtering by timestamp
+        let same_day_transactions = self.transaction_repository
+            .get_transactions_after_date(child_id, transaction_date)
+            .await?;
+
+        // Filter to only transactions from the exact same day that have a lower timestamp
+        let mut same_day_earlier_transactions = Vec::new();
         
-        info!("Calculated balance for new transaction: starting_balance={:.2} + amount={:.2} = {:.2}", 
-              starting_balance, transaction_amount, new_balance);
+        // Extract the date part from the transaction date (YYYY-MM-DD)
+        let target_date_part = if let Some(date_part) = transaction_date.split('T').next() {
+            date_part
+        } else {
+            transaction_date // Fallback if not RFC3339 format
+        };
+
+        for tx in same_day_transactions {
+            // Check if this transaction is from the same day
+            if let Some(tx_date_part) = tx.date.split('T').next() {
+                if tx_date_part == target_date_part {
+                    // Check if this transaction occurred before our new transaction
+                    // We'll use string comparison of the full timestamp since RFC3339 sorts lexicographically
+                    if tx.date.as_str() < transaction_date {
+                        same_day_earlier_transactions.push(tx);
+                    }
+                }
+            }
+        }
+
+        // Sort same-day transactions by date to ensure proper order
+        same_day_earlier_transactions.sort_by(|a, b| a.date.cmp(&b.date));
+
+        // Calculate the running balance including same-day transactions
+        let mut running_balance = base_balance;
+        for tx in &same_day_earlier_transactions {
+            running_balance += tx.amount;
+        }
+
+        let final_balance = running_balance + transaction_amount;
         
-        Ok(new_balance)
+        info!("Calculated balance for new transaction: base_balance={:.2} + same_day_adjustments={:.2} + amount={:.2} = {:.2}", 
+              base_balance, running_balance - base_balance, transaction_amount, final_balance);
+        if !same_day_earlier_transactions.is_empty() {
+            info!("  Found {} same-day earlier transactions", same_day_earlier_transactions.len());
+            for (i, tx) in same_day_earlier_transactions.iter().enumerate() {
+                info!("    {}: {} amount={:.2} at {}", i + 1, tx.id, tx.amount, tx.date);
+            }
+        }
+        
+        Ok(final_balance)
     }
 
     /// Check if inserting a transaction at a specific date would require balance recalculation

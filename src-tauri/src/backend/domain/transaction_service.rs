@@ -53,7 +53,7 @@ use shared::{
 use crate::backend::storage::{Connection, TransactionStorage};
 use crate::backend::domain::{child_service::ChildService, AllowanceService, BalanceService};
 use std::time::{SystemTime, UNIX_EPOCH};
-use chrono::{NaiveDate, Local, Datelike};
+use chrono::{NaiveDate, Local, Datelike, FixedOffset, DateTime, ParseError, TimeZone};
 use time;
 
 #[derive(Clone)]
@@ -218,7 +218,7 @@ impl<C: Connection> TransactionService<C> {
         // Combine database transactions with future allowances
         db_transactions.extend(future_allowances);
 
-        // Sort all transactions by date (newest first)
+        // Sort all transactions by date (newest first) - now simple string sorting works since all dates are RFC 3339
         db_transactions.sort_by(|a, b| b.date.cmp(&a.date));
 
         // Apply pagination to the combined list
