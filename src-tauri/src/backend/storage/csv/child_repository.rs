@@ -5,18 +5,23 @@ use std::fs;
 use std::path::PathBuf;
 use shared::Child;
 use super::connection::CsvConnection;
+use crate::backend::storage::GitManager;
 use serde_yaml;
 
 /// CSV-based child repository using filesystem discovery
 #[derive(Clone)]
 pub struct ChildRepository {
     connection: CsvConnection,
+    git_manager: GitManager,
 }
 
 impl ChildRepository {
     /// Create a new CSV child repository
     pub fn new(connection: CsvConnection) -> Self {
-        Self { connection }
+        Self { 
+            connection,
+            git_manager: GitManager::new(),
+        }
     }
     
     /// Generate a safe filesystem identifier from a child name
@@ -143,6 +148,17 @@ impl ChildRepository {
         fs::rename(&temp_path, &yaml_path)?;
         
         info!("Saved child {} to directory: {}", child.name, directory_name);
+        
+        // Git integration: commit the child.yaml change
+        let action_description = format!("Updated child configuration for {}", child.name);
+        
+        // This is non-blocking - git errors won't fail the child operation
+        let _ = self.git_manager.commit_file_change(
+            &child_dir,
+            "child.yaml", 
+            &action_description
+        ).await;
+        
         Ok(())
     }
     

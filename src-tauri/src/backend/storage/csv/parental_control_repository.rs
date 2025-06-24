@@ -43,6 +43,7 @@ use std::io::{BufReader, BufWriter};
 use std::path::PathBuf;
 use shared::ParentalControlAttempt;
 use super::connection::CsvConnection;
+use crate::backend::storage::GitManager;
 
 /// CSV record structure for parental control attempts
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -68,12 +69,16 @@ impl From<ParentalControlAttemptRecord> for ParentalControlAttempt {
 #[derive(Clone)]
 pub struct ParentalControlRepository {
     connection: CsvConnection,
+    git_manager: GitManager,
 }
 
 impl ParentalControlRepository {
     /// Create a new CSV parental control repository
     pub fn new(connection: CsvConnection) -> Self {
-        Self { connection }
+        Self { 
+            connection,
+            git_manager: GitManager::new(),
+        }
     }
     
     /// Get the parental control attempts CSV file path for a specific child directory
@@ -220,6 +225,17 @@ impl ParentalControlRepository {
         csv_writer.flush()?;
         
         debug!("Appended parental control attempt to {:?}: ID {}", csv_path, record.id);
+        
+        // Git integration: commit the parental_control_attempts.csv change
+        let action_description = format!("Added parental control attempt (success: {})", record.success);
+        
+        // This is non-blocking - git errors won't fail the parental control operation
+        let _ = self.git_manager.commit_file_change(
+            &child_dir,
+            "parental_control_attempts.csv", 
+            &action_description
+        ).await;
+        
         Ok(())
     }
     

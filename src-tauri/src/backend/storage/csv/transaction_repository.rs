@@ -7,22 +7,25 @@ use std::io::{BufReader, BufWriter};
 use shared::Transaction;
 use super::connection::CsvConnection;
 use super::child_repository::ChildRepository;
-use crate::backend::storage::ChildStorage;
+use crate::backend::storage::{ChildStorage, GitManager};
 
 /// CSV-based transaction repository
 #[derive(Clone)]
 pub struct TransactionRepository {
     connection: CsvConnection,
     child_repository: ChildRepository,
+    git_manager: GitManager,
 }
 
 impl TransactionRepository {
     /// Create a new CSV transaction repository
     pub fn new(connection: CsvConnection) -> Self {
         let child_repository = ChildRepository::new(connection.clone());
+        let git_manager = GitManager::new();
         Self { 
             connection,
             child_repository,
+            git_manager,
         }
     }
     
@@ -98,6 +101,17 @@ impl TransactionRepository {
         
         // Atomic move from temp to final file
         std::fs::rename(&temp_path, &file_path)?;
+        
+        // Git integration: commit the transactions.csv change
+        let child_directory = self.connection.get_child_directory(child_name);
+        let action_description = format!("Updated transactions (total: {})", transactions.len());
+        
+        // This is non-blocking - git errors won't fail the transaction operation
+        let _ = self.git_manager.commit_file_change(
+            &child_directory,
+            "transactions.csv", 
+            &action_description
+        ).await;
         
         Ok(())
     }

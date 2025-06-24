@@ -29,18 +29,23 @@ use std::fs;
 use std::path::PathBuf;
 use shared::AllowanceConfig;
 use super::connection::CsvConnection;
+use crate::backend::storage::GitManager;
 use serde_yaml;
 
 /// CSV-based allowance config repository using per-child YAML files
 #[derive(Clone)]
 pub struct AllowanceRepository {
     connection: CsvConnection,
+    git_manager: GitManager,
 }
 
 impl AllowanceRepository {
     /// Create a new CSV allowance config repository
     pub fn new(connection: CsvConnection) -> Self {
-        Self { connection }
+        Self { 
+            connection,
+            git_manager: GitManager::new(),
+        }
     }
     
     /// Get the allowance config file path for a specific child directory
@@ -69,6 +74,17 @@ impl AllowanceRepository {
         fs::rename(&temp_path, &yaml_path)?;
         
         debug!("Saved allowance config for child directory '{}' to {:?}", child_directory, yaml_path);
+        
+        // Git integration: commit the allowance_config.yaml change
+        let action_description = format!("Updated allowance configuration (amount: ${:.2})", config.amount);
+        
+        // This is non-blocking - git errors won't fail the allowance operation
+        let _ = self.git_manager.commit_file_change(
+            &child_dir,
+            "allowance_config.yaml", 
+            &action_description
+        ).await;
+        
         Ok(())
     }
     

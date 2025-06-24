@@ -41,11 +41,13 @@
 pub mod traits;
 pub mod csv;
 pub mod sqlite;
+pub mod git;
 
 // Re-export the main types that other modules need
 pub use csv::CsvConnection;
 pub use traits::{Connection, TransactionStorage, ChildStorage, AllowanceStorage, ParentalControlStorage};
 pub use csv::{GlobalConfig, GlobalConfigStorage};
+pub use git::GitManager;
 
 // SQLite components are available via the sqlite sub-module
 // Example: use crate::backend::storage::sqlite::DbConnection; 
