@@ -45,7 +45,7 @@ pub mod git;
 
 // Re-export the main types that other modules need
 pub use csv::CsvConnection;
-pub use traits::{Connection, TransactionStorage, ChildStorage, AllowanceStorage, ParentalControlStorage};
+pub use traits::{Connection, TransactionStorage, ChildStorage, AllowanceStorage, ParentalControlStorage, GoalStorage};
 pub use csv::{GlobalConfig, GlobalConfigStorage};
 pub use git::GitManager;
 

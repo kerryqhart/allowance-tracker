@@ -421,6 +421,138 @@ pub struct CurrentDateResponse {
     pub iso_date: String, // e.g., "2025-06-19"
 }
 
+// Goal-related types
+
+/// Goal state enumeration
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum GoalState {
+    Active,
+    Cancelled,
+    Completed,
+}
+
+impl GoalState {
+    /// Convert to string for CSV storage
+    pub fn to_string(&self) -> String {
+        match self {
+            GoalState::Active => "active".to_string(),
+            GoalState::Cancelled => "cancelled".to_string(),
+            GoalState::Completed => "completed".to_string(),
+        }
+    }
+
+    /// Parse from string for CSV loading
+    pub fn from_string(s: &str) -> Result<Self, String> {
+        match s.to_lowercase().as_str() {
+            "active" => Ok(GoalState::Active),
+            "cancelled" => Ok(GoalState::Cancelled),
+            "completed" => Ok(GoalState::Completed),
+            _ => Err(format!("Invalid goal state: {}", s)),
+        }
+    }
+}
+
+/// A savings goal with target amount and description
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Goal {
+    pub id: String,
+    pub child_id: String,
+    pub description: String,
+    pub target_amount: f64,
+    pub state: GoalState,
+    pub created_at: String, // RFC 3339 timestamp
+    pub updated_at: String, // RFC 3339 timestamp
+}
+
+impl Goal {
+    /// Generate a unique goal ID
+    pub fn generate_id(child_id: &str, timestamp_millis: u64) -> String {
+        format!("goal::{}::{}", child_id, timestamp_millis)
+    }
+}
+
+/// Goal completion projection calculations
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GoalCalculation {
+    pub current_balance: f64,
+    pub amount_needed: f64,
+    pub projected_completion_date: Option<String>, // RFC 3339 timestamp, None if not achievable
+    pub allowances_needed: u32,
+    pub is_achievable: bool,
+    pub exceeds_time_limit: bool, // true if takes > 1 year
+}
+
+/// Request to create a new goal
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CreateGoalRequest {
+    pub child_id: Option<String>, // If None, uses active child
+    pub description: String,
+    pub target_amount: f64,
+}
+
+/// Response after creating a goal
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CreateGoalResponse {
+    pub goal: Goal,
+    pub calculation: GoalCalculation,
+    pub success_message: String,
+}
+
+/// Request to update an existing goal
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct UpdateGoalRequest {
+    pub child_id: Option<String>, // If None, uses active child
+    pub description: Option<String>,
+    pub target_amount: Option<f64>,
+}
+
+/// Response after updating a goal
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct UpdateGoalResponse {
+    pub goal: Goal,
+    pub calculation: GoalCalculation,
+    pub success_message: String,
+}
+
+/// Request to get current goal information
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GetCurrentGoalRequest {
+    pub child_id: Option<String>, // If None, uses active child
+}
+
+/// Response containing current goal with calculations
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GetCurrentGoalResponse {
+    pub goal: Option<Goal>,
+    pub calculation: Option<GoalCalculation>,
+}
+
+/// Request to get goal history
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GetGoalHistoryRequest {
+    pub child_id: Option<String>, // If None, uses active child
+    pub limit: Option<u32>,
+}
+
+/// Response containing goal history
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GetGoalHistoryResponse {
+    pub goals: Vec<Goal>,
+}
+
+/// Request to cancel current goal
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CancelGoalRequest {
+    pub child_id: Option<String>, // If None, uses active child
+}
+
+/// Response after cancelling a goal
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CancelGoalResponse {
+    pub goal: Goal,
+    pub success_message: String,
+}
+
 impl Transaction {
     /// Generate transaction ID from amount and timestamp
     pub fn generate_id(amount: f64, epoch_millis: u64) -> String {

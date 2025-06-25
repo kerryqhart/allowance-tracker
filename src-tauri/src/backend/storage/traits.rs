@@ -5,7 +5,7 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use shared::{Transaction, Child, AllowanceConfig, ParentalControlAttempt};
+use shared::{Transaction, Child, AllowanceConfig, ParentalControlAttempt, Goal};
 
 /// Trait defining the interface for transaction storage operations
 /// 
@@ -117,6 +117,37 @@ pub trait ParentalControlStorage: Send + Sync {
     
     /// Get all parental control attempts across all children (for admin/debugging)
     async fn get_all_parental_control_attempts(&self, limit: Option<u32>) -> Result<Vec<ParentalControlAttempt>>;
+}
+
+/// Trait defining the interface for goal storage operations
+/// 
+/// This trait abstracts away the specific storage implementation details,
+/// allowing the domain layer to work with different storage backends
+/// (SQL databases, CSV files, etc.) without modification.
+#[async_trait]
+pub trait GoalStorage: Send + Sync {
+    /// Store a new goal (append-only - creates new record)
+    async fn store_goal(&self, goal: &Goal) -> Result<()>;
+    
+    /// Get the current active goal for a specific child
+    async fn get_current_goal(&self, child_id: &str) -> Result<Option<Goal>>;
+    
+    /// List all goals for a specific child (with optional limit)
+    /// Returns goals ordered by created_at descending (most recent first)
+    async fn list_goals(&self, child_id: &str, limit: Option<u32>) -> Result<Vec<Goal>>;
+    
+    /// Update an existing goal by creating a new record with updated fields
+    /// This maintains the append-only history while updating the current state
+    async fn update_goal(&self, goal: &Goal) -> Result<()>;
+    
+    /// Cancel the current active goal by setting its state to Cancelled
+    async fn cancel_current_goal(&self, child_id: &str) -> Result<Option<Goal>>;
+    
+    /// Mark the current active goal as completed
+    async fn complete_current_goal(&self, child_id: &str) -> Result<Option<Goal>>;
+    
+    /// Check if a child has an active goal
+    async fn has_active_goal(&self, child_id: &str) -> Result<bool>;
 }
 
 /// Trait defining the interface for storage connections

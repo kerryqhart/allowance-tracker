@@ -45,7 +45,7 @@ use axum::{
 };
 use tower_http::cors::{Any, CorsLayer};
 use anyhow::Result;
-use crate::backend::domain::{TransactionService, CalendarService, TransactionTableService, MoneyManagementService, child_service::ChildService, ParentalControlService, AllowanceService, BalanceService};
+use crate::backend::domain::{TransactionService, CalendarService, TransactionTableService, MoneyManagementService, child_service::ChildService, ParentalControlService, AllowanceService, BalanceService, GoalService};
 use crate::backend::storage::CsvConnection;
 use log::info;
 
@@ -62,6 +62,7 @@ pub struct AppState {
     pub parental_control_service: ParentalControlService,
     pub allowance_service: AllowanceService,
     pub balance_service: BalanceService<CsvConnection>,
+    pub goal_service: GoalService,
 }
 
 /// Initialize the backend with all required services
@@ -80,7 +81,8 @@ pub async fn initialize_backend() -> Result<AppState> {
     let parental_control_service = ParentalControlService::new(csv_conn.clone());
     let allowance_service = AllowanceService::new(csv_conn.clone());
     let balance_service = BalanceService::new(csv_conn.clone());
-    let transaction_service = TransactionService::new(csv_conn, child_service.clone(), allowance_service.clone(), balance_service.clone());
+    let transaction_service = TransactionService::new(csv_conn.clone(), child_service.clone(), allowance_service.clone(), balance_service.clone());
+    let goal_service = GoalService::new(csv_conn, child_service.clone(), allowance_service.clone(), transaction_service.clone(), balance_service.clone());
 
     info!("Setting up application state");
     let app_state = AppState {
@@ -92,6 +94,7 @@ pub async fn initialize_backend() -> Result<AppState> {
         parental_control_service,
         allowance_service,
         balance_service,
+        goal_service,
     };
 
     Ok(app_state)
@@ -117,6 +120,7 @@ pub fn create_router(app_state: AppState) -> Router {
         .route("/active-child", get(io::child_apis::get_active_child).post(io::child_apis::set_active_child))
         .nest("/parental-control", io::parental_control_apis::router())
         .nest("/allowance", io::allowance_apis::router())
+        .nest("/goals", io::goal_apis::router())
         .route("/logs", post(io::logging_apis::log_message));
 
     // Define our main application router
