@@ -5,6 +5,9 @@ use hooks::{
     use_transactions::use_transactions,
     use_active_child::use_active_child,
     use_allowance::use_allowance,
+    use_periodic_refresh::use_periodic_refresh_simple,
+    use_periodic_refresh::use_periodic_refresh_staggered,
+    use_interaction_detector::use_interaction_detector_simple,
 };
 
 mod services;
@@ -39,6 +42,9 @@ fn app() -> Html {
     // Calendar refresh trigger - increment when transactions change
     let calendar_refresh_trigger = use_state(|| 0u32);
     
+    // Interaction detector for pausing periodic refresh
+    let interaction_detector = use_interaction_detector_simple();
+    
     let refresh_all_data = {
         let refresh_transactions = transactions.actions.refresh_transactions.clone();
         let calendar_refresh_trigger = calendar_refresh_trigger.clone();
@@ -48,6 +54,37 @@ fn app() -> Html {
             calendar_refresh_trigger.set(*calendar_refresh_trigger + 1);
         })
     };
+    
+    // Periodic refresh setup - following the implementation plan
+    let refresh_calendar_periodic = {
+        let calendar_refresh_trigger = calendar_refresh_trigger.clone();
+        Callback::from(move |_: ()| {
+            gloo::console::debug!("🔄 Periodic calendar refresh triggered");
+            calendar_refresh_trigger.set(*calendar_refresh_trigger + 1);
+        })
+    };
+    
+    let refresh_transactions_periodic = {
+        let refresh_transactions = transactions.actions.refresh_transactions.clone();
+        Callback::from(move |_: ()| {
+            gloo::console::debug!("🔄 Periodic transactions refresh triggered");
+            refresh_transactions.emit(());
+        })
+    };
+    
+    // Set up periodic refreshing with staggered timing
+    // Calendar: Every 30 seconds
+    use_periodic_refresh_simple(
+        refresh_calendar_periodic,
+        interaction_detector.is_active,
+    );
+    
+    // Transactions: Every 30 seconds, offset by 15 seconds
+    use_periodic_refresh_staggered(
+        refresh_transactions_periodic,
+        interaction_detector.is_active,
+        15000, // 15 second stagger
+    );
     
     // Connection status for parent info
     let backend_connected = use_state(|| false);
