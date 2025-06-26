@@ -190,27 +190,19 @@ pub fn use_interaction_detector(
                 handle_click.as_ref().unchecked_ref()
             );
 
-            // Store closures to prevent them from being dropped
-            let closures = vec![handle_input, handle_focus, handle_mouseenter, handle_click];
+            // Store closures with their event types for proper cleanup
+            let event_listeners = vec![
+                ("input", handle_input),
+                ("focus", handle_focus),
+                ("mouseenter", handle_mouseenter),
+                ("click", handle_click),
+            ];
 
-            // Cleanup function
+            // Cleanup function - properly match each closure to its event type
             move || {
-                // Remove event listeners
-                for closure in closures.iter() {
+                for (event_type, closure) in event_listeners.iter() {
                     let _ = document.remove_event_listener_with_callback(
-                        "input",
-                        closure.as_ref().unchecked_ref()
-                    );
-                    let _ = document.remove_event_listener_with_callback(
-                        "focus", 
-                        closure.as_ref().unchecked_ref()
-                    );
-                    let _ = document.remove_event_listener_with_callback(
-                        "mouseenter",
-                        closure.as_ref().unchecked_ref()
-                    );
-                    let _ = document.remove_event_listener_with_callback(
-                        "click",
+                        event_type,
                         closure.as_ref().unchecked_ref()
                     );
                 }

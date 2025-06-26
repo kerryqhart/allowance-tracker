@@ -8,6 +8,7 @@ use hooks::{
     use_periodic_refresh::use_periodic_refresh_simple,
     use_periodic_refresh::use_periodic_refresh_staggered,
     use_interaction_detector::use_interaction_detector_simple,
+    use_interaction_detector::use_interaction_detector_debug,
 };
 
 mod services;
@@ -42,8 +43,8 @@ fn app() -> Html {
     // Calendar refresh trigger - increment when transactions change
     let calendar_refresh_trigger = use_state(|| 0u32);
     
-    // Interaction detector for pausing periodic refresh
-    let interaction_detector = use_interaction_detector_simple();
+    // Interaction detector for pausing periodic refresh (with debug logging)
+    let interaction_detector = use_interaction_detector_debug();
     
     let refresh_all_data = {
         let refresh_transactions = transactions.actions.refresh_transactions.clone();
