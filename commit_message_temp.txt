@@ -1,0 +1,60 @@
+fix: resolve interaction detector interference with input fields
+
+## Problem
+The interaction detector was using global DOM event listeners for 'input' 
+and 'focus' events, which interfered with normal form input functionality 
+in Yew applications. This caused:
+- Complete blocking of text input in description fields
+- Blocking of numbers in amount fields  
+- Blocking of text in password fields
+- Normal dropdown functionality (unaffected by input/focus events)
+
+## Root Cause
+Global event listeners for input/focus events were capturing ALL input 
+events on the page, interfering with Yew's natural event flow for form 
+handling.
+
+## Solution
+Implemented two approaches to fix the interference:
+
+### Approach 1: Exclude Input Fields (Improved Original)
+- Modified existing use_interaction_detector_simple() to skip input, 
+  textarea, and select elements
+- Maintains original functionality while preventing form interference
+
+### Approach 2: Targeted Detection (Implemented)
+- Created use_interaction_detector_targeted() that avoids global 
+  input/focus listeners entirely
+- Only monitors specific elements that matter for pausing refresh:
+  - Calendar chip hovers (mouseenter on .transaction-chip, .calendar-day, .tooltip)
+  - Menu interactions (click on .settings-menu, .modal, .dropdown, .date-picker)
+
+## Technical Changes
+- Enhanced frontend/src/hooks/use_interaction_detector.rs:
+  - Added input field exclusion logic to existing function
+  - Created new targeted detection function with focused event listeners
+  - Improved logging for debugging
+
+- Updated frontend/src/main.rs:
+  - Imported use_interaction_detector_targeted
+  - Re-enabled interaction detection (was disabled due to input blocking)
+  - Added pause status logging
+
+## Benefits
+✅ Input fields work perfectly - no more text input blocking
+✅ Calendar refresh pauses during chip hovers and tooltips  
+✅ Menu interactions pause refresh during settings/modals/dropdowns
+✅ Maintains all existing functionality - transaction refresh, calendar refresh, periodic timing
+✅ Better performance - targeted event listeners vs global capture
+✅ Cleaner architecture - explicit about monitored interactions
+
+## Testing Results
+- All input fields now accept text normally
+- Periodic refresh continues every 30 seconds when not interacting
+- Refresh pauses appropriately during calendar and menu interactions
+- Interaction status visible in logs for debugging
+
+This demonstrates how global DOM event listeners must be carefully 
+designed to avoid interfering with framework-specific event handling, 
+especially in complex applications where virtual DOM and event delegation 
+can create unexpected interactions. 

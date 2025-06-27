@@ -69,9 +69,11 @@ pub fn use_periodic_refresh(
         use_effect_with((config.clone(), pause_when), move |(config, is_paused)| {
             let cleanup = if *is_paused {
                 // When paused, mark as not running but don't start timer
+                crate::services::logging::Logger::info_with_component("periodic-refresh-hook", "🚨 PERIODIC REFRESH PAUSED due to user interaction");
                 is_running.set(false);
                 Box::new(move || {}) as Box<dyn FnOnce()>
             } else {
+                crate::services::logging::Logger::info_with_component("periodic-refresh-hook", "🚨 PERIODIC REFRESH ACTIVE - starting timer");
                 is_running.set(true);
                 
                 let config = config.clone();
@@ -102,6 +104,14 @@ pub fn use_periodic_refresh(
                         // Execute the refresh callback
                         let current_time = js_sys::Date::now();
                         
+                        // Use Logger instead of gloo::console for Tauri app
+                        crate::services::logging::Logger::debug_with_component(
+                            "periodic-refresh-hook", 
+                            &format!("🔄 About to execute periodic refresh at {}", 
+                                js_sys::Date::new(&js_sys::wasm_bindgen::JsValue::from(current_time)).to_iso_string()
+                            )
+                        );
+                        
                         // Try the refresh with error handling
                         let success = execute_refresh_with_retry(
                             &refresh_fn,
@@ -116,19 +126,23 @@ pub fn use_periodic_refresh(
                             retry_count.set(0);
                             last_refresh_time.set(Some(current_time));
                             
-                            gloo::console::debug!(&format!(
-                                "🔄 Periodic refresh successful at {}",
-                                js_sys::Date::new(&js_sys::wasm_bindgen::JsValue::from(current_time)).to_iso_string()
-                            ));
+                            crate::services::logging::Logger::debug_with_component(
+                                "periodic-refresh-hook",
+                                &format!("🔄 Periodic refresh successful at {}",
+                                    js_sys::Date::new(&js_sys::wasm_bindgen::JsValue::from(current_time)).to_iso_string()
+                                )
+                            );
                         } else {
                             // Increment error count on failure
                             let new_error_count = *error_count + 1;
                             error_count.set(new_error_count);
                             
-                            gloo::console::warn!(&format!(
-                                "⚠️ Periodic refresh failed (attempt {}/{})",
-                                new_error_count, config.max_retries + 1
-                            ));
+                            crate::services::logging::Logger::warn_with_component(
+                                "periodic-refresh-hook",
+                                &format!("⚠️ Periodic refresh failed (attempt {}/{})",
+                                    new_error_count, config.max_retries + 1
+                                )
+                            );
                         }
 
                         // Wait for the next interval
@@ -157,7 +171,7 @@ pub fn use_periodic_refresh(
             move || {
                 is_mounted.set(false);
                 is_running.set(false);
-                gloo::console::debug!("🧹 Periodic refresh hook cleaned up");
+                crate::services::logging::Logger::debug_with_component("periodic-refresh-hook", "🧹 Periodic refresh hook cleaned up");
             }
         });
     }
@@ -184,7 +198,7 @@ async fn execute_refresh_with_retry(
         // Calculate delay for this attempt (exponential backoff)
         if attempt > 0 {
             let delay = config.base_retry_delay_ms * (2_u32.pow(attempt - 1));
-            gloo::console::debug!(&format!("⏳ Retrying refresh in {}ms (attempt {})", delay, attempt));
+            crate::services::logging::Logger::debug_with_component("periodic-refresh-hook", &format!("⏳ Retrying refresh in {}ms (attempt {})", delay, attempt));
             TimeoutFuture::new(delay).await;
             
             // Check again if still mounted after delay

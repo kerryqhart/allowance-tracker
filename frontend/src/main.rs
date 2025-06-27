@@ -9,6 +9,7 @@ use hooks::{
     use_periodic_refresh::use_periodic_refresh_staggered,
     use_interaction_detector::use_interaction_detector_simple,
     use_interaction_detector::use_interaction_detector_debug,
+    use_interaction_detector::use_interaction_detector_targeted,
 };
 
 mod services;
@@ -43,8 +44,12 @@ fn app() -> Html {
     // Calendar refresh trigger - increment when transactions change
     let calendar_refresh_trigger = use_state(|| 0u32);
     
-    // Interaction detector for pausing periodic refresh (with debug logging)
-    let interaction_detector = use_interaction_detector_debug();
+    // Interaction detector for pausing periodic refresh during user input
+    // Option 1: Use the improved version that excludes input fields
+    // let interaction_detector = use_interaction_detector_simple();
+    
+    // Option 2: Use the targeted version that only monitors specific elements (RECOMMENDED)
+    let interaction_detector = use_interaction_detector_targeted(None);
     
     let refresh_all_data = {
         let refresh_transactions = transactions.actions.refresh_transactions.clone();
@@ -57,35 +62,46 @@ fn app() -> Html {
     };
     
     // Periodic refresh setup - following the implementation plan
+    
+    // APPROACH 1: Original prop-based refresh (EXISTING)
     let refresh_calendar_periodic = {
         let calendar_refresh_trigger = calendar_refresh_trigger.clone();
-        Callback::from(move |_: ()| {
-            gloo::console::debug!("🔄 Periodic calendar refresh triggered");
-            calendar_refresh_trigger.set(*calendar_refresh_trigger + 1);
+        use_callback((), move |_, _| {
+            // Generate a unique value without reading current state
+            let new_value = (js_sys::Date::now() as u64) as u32; // Use full timestamp precision
+            Logger::info_with_component("periodic-refresh", &format!("🔄 Calendar refresh triggered - setting trigger to: {}", new_value));
+            calendar_refresh_trigger.set(new_value);
         })
     };
+    
+    // APPROACH 2: Direct callback refresh (REMOVED - prop approach now works)
     
     let refresh_transactions_periodic = {
         let refresh_transactions = transactions.actions.refresh_transactions.clone();
         Callback::from(move |_: ()| {
-            gloo::console::debug!("🔄 Periodic transactions refresh triggered");
+            Logger::info_with_component("periodic-refresh", "🔄 Periodic transactions refresh triggered");
             refresh_transactions.emit(());
         })
     };
     
-    // Set up periodic refreshing with staggered timing
-    // Calendar: Every 30 seconds
-    use_periodic_refresh_simple(
+    // Set up periodic refreshing with staggered timing - WITH IMPROVED INTERACTION DETECTION
+    
+    // APPROACH 1: Calendar prop-based refresh (EXISTING)
+    let calendar_refresh_result = use_periodic_refresh_simple(
         refresh_calendar_periodic,
-        interaction_detector.is_active,
+        interaction_detector.is_active, // ENABLED - now works without blocking input
     );
+    Logger::info_with_component("periodic-refresh", &format!("PROP: Calendar refresh hook initialized - running: {}, paused: {}", calendar_refresh_result.is_running, interaction_detector.is_active));
+    
+    // APPROACH 2: Calendar direct callback refresh (REMOVED - prop approach now works)
     
     // Transactions: Every 30 seconds, offset by 15 seconds
-    use_periodic_refresh_staggered(
+    let transactions_refresh_result = use_periodic_refresh_staggered(
         refresh_transactions_periodic,
-        interaction_detector.is_active,
+        interaction_detector.is_active, // ENABLED - now works without blocking input
         15000, // 15 second stagger
     );
+    Logger::info_with_component("periodic-refresh", &format!("Transactions refresh hook initialized - running: {}", transactions_refresh_result.is_running));
     
     // Connection status for parent info
     let backend_connected = use_state(|| false);
@@ -235,6 +251,7 @@ fn app() -> Html {
                         selected_transactions={(*selected_transactions).clone()}
                         on_toggle_transaction_selection={toggle_transaction_selection.clone()}
                         on_delete_selected={delete_selected_transactions.clone()}
+                        // on_refresh prop removed - using prop-based refresh only
                     />
                     
                     // Legacy calendar section removed - now using SimpleCalendar above

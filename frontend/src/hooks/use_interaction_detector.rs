@@ -72,18 +72,15 @@ pub fn use_interaction_detector(
 
             let current_time = js_sys::Date::now();
             
+            // DETAILED LOGGING for interaction blocking diagnosis
+            crate::services::logging::Logger::info_with_component("interaction-detector", &format!("🚨 INTERACTION DETECTOR: Processing {} interaction (count: {})", event_type, *interaction_count + 1));
+            
             // Update interaction state
             is_active.set(true);
             last_interaction_time.set(Some(current_time));
             interaction_count.set(*interaction_count + 1);
-
-            if config.enable_logging {
-                gloo::console::debug!(&format!(
-                    "👆 User interaction detected: {} (count: {})",
-                    event_type,
-                    *interaction_count
-                ));
-            }
+            
+            crate::services::logging::Logger::info_with_component("interaction-detector", &format!("🚨 INTERACTION DETECTOR: Set is_active=true for {} interaction", event_type));
 
             // Start grace period timer if not already active
             if !*grace_timer_active {
@@ -123,14 +120,42 @@ pub fn use_interaction_detector(
             // Create closures for event handlers
             let handle_input = {
                 let handle_interaction = handle_interaction.clone();
-                Closure::wrap(Box::new(move |_event: web_sys::Event| {
+                Closure::wrap(Box::new(move |event: web_sys::Event| {
+                    // EXCLUDE input fields to prevent interference
+                    if let Some(target) = event.target() {
+                        if let Ok(element) = target.dyn_into::<HtmlElement>() {
+                            let tag_name = element.tag_name().to_lowercase();
+                            
+                            // Skip all form input elements to prevent interference
+                            if tag_name == "input" || tag_name == "textarea" || tag_name == "select" {
+                                return;
+                            }
+                            
+                            let class_name = element.class_name();
+                            crate::services::logging::Logger::info_with_component("interaction-detector", &format!("🚨 INTERACTION DETECTOR: Non-input event on {} class='{}'", tag_name, class_name));
+                        }
+                    }
                     handle_interaction.emit("input".to_string());
                 }) as Box<dyn FnMut(_)>)
             };
 
             let handle_focus = {
                 let handle_interaction = handle_interaction.clone();
-                Closure::wrap(Box::new(move |_event: web_sys::Event| {
+                Closure::wrap(Box::new(move |event: web_sys::Event| {
+                    // EXCLUDE input fields to prevent interference
+                    if let Some(target) = event.target() {
+                        if let Ok(element) = target.dyn_into::<HtmlElement>() {
+                            let tag_name = element.tag_name().to_lowercase();
+                            
+                            // Skip all form input elements to prevent interference
+                            if tag_name == "input" || tag_name == "textarea" || tag_name == "select" {
+                                return;
+                            }
+                            
+                            let class_name = element.class_name();
+                            crate::services::logging::Logger::info_with_component("interaction-detector", &format!("🚨 INTERACTION DETECTOR: Non-input focus on {} class='{}'", tag_name, class_name));
+                        }
+                    }
                     handle_interaction.emit("focus".to_string());
                 }) as Box<dyn FnMut(_)>)
             };
@@ -172,15 +197,21 @@ pub fn use_interaction_detector(
                 }) as Box<dyn FnMut(_)>)
             };
 
-            // Add event listeners
-            let _ = document.add_event_listener_with_callback(
+            // Add event listeners with logging
+            crate::services::logging::Logger::info_with_component("interaction-detector", "🚨 SETUP: Adding DOM event listeners");
+            
+            let input_result = document.add_event_listener_with_callback(
                 "input",
                 handle_input.as_ref().unchecked_ref()
             );
-            let _ = document.add_event_listener_with_callback(
+            crate::services::logging::Logger::info_with_component("interaction-detector", &format!("🚨 SETUP: Input listener result: {:?}", input_result));
+            
+            let focus_result = document.add_event_listener_with_callback(
                 "focus",
                 handle_focus.as_ref().unchecked_ref()
             );
+            crate::services::logging::Logger::info_with_component("interaction-detector", &format!("🚨 SETUP: Focus listener result: {:?}", focus_result));
+            
             let _ = document.add_event_listener_with_callback(
                 "mouseenter",
                 handle_mouseenter.as_ref().unchecked_ref()
@@ -245,6 +276,164 @@ pub fn use_interaction_detector_debug() -> UseInteractionDetectorResult {
         ..InteractionDetectorConfig::default()
     };
     use_interaction_detector(Some(config))
+}
+
+/// Alternative implementation: Use specific element targeting instead of global listeners
+/// This approach completely avoids global input/focus listeners that interfere with form inputs
+#[hook]
+pub fn use_interaction_detector_targeted(
+    config: Option<InteractionDetectorConfig>,
+) -> UseInteractionDetectorResult {
+    let config = config.unwrap_or_default();
+    
+    let is_active = use_state(|| false);
+    let last_interaction_time = use_state(|| Option::<f64>::None);
+    let interaction_count = use_state(|| 0u32);
+    let grace_timer_active = use_state(|| false);
+
+    // Track if component is mounted
+    let is_mounted = use_state(|| true);
+
+    // Event handler for interactions
+    let handle_interaction = {
+        let is_active = is_active.clone();
+        let last_interaction_time = last_interaction_time.clone();
+        let interaction_count = interaction_count.clone();
+        let grace_timer_active = grace_timer_active.clone();
+        let is_mounted = is_mounted.clone();
+        let config = config.clone();
+
+        Callback::from(move |event_type: String| {
+            if !*is_mounted {
+                return;
+            }
+
+            let current_time = js_sys::Date::now();
+            
+            crate::services::logging::Logger::info_with_component("interaction-detector", &format!("🎯 TARGETED INTERACTION: {} (count: {})", event_type, *interaction_count + 1));
+            
+            // Update interaction state
+            is_active.set(true);
+            last_interaction_time.set(Some(current_time));
+            interaction_count.set(*interaction_count + 1);
+
+            // Start grace period timer if not already active
+            if !*grace_timer_active {
+                grace_timer_active.set(true);
+                
+                let is_active = is_active.clone();
+                let grace_timer_active = grace_timer_active.clone();
+                let is_mounted = is_mounted.clone();
+                let grace_period = config.grace_period_ms;
+
+                spawn_local(async move {
+                    TimeoutFuture::new(grace_period).await;
+                    
+                    if *is_mounted {
+                        is_active.set(false);
+                        grace_timer_active.set(false);
+                        
+                        crate::services::logging::Logger::info_with_component("interaction-detector", "🎯 TARGETED: Grace period ended");
+                    }
+                });
+            }
+        })
+    };
+
+    // Set up TARGETED event listeners - only for specific interactions we care about
+    {
+        let handle_interaction = handle_interaction.clone();
+        let is_mounted = is_mounted.clone();
+        
+        use_effect_with((), move |_| {
+            let window = window().expect("should have window");
+            let document = window.document().expect("should have document");
+            
+            // Only listen for mouseenter on calendar elements (for tooltips/chips)
+            let handle_calendar_hover = {
+                let handle_interaction = handle_interaction.clone();
+                Closure::wrap(Box::new(move |event: web_sys::Event| {
+                    if let Some(target) = event.target() {
+                        if let Ok(element) = target.dyn_into::<HtmlElement>() {
+                            let class_name = element.class_name();
+                            // Only trigger for calendar-related elements
+                            if class_name.contains("transaction-chip") 
+                                || class_name.contains("calendar-day") 
+                                || class_name.contains("tooltip")
+                                || element.has_attribute("data-tooltip") {
+                                handle_interaction.emit("calendar_hover".to_string());
+                            }
+                        }
+                    }
+                }) as Box<dyn FnMut(_)>)
+            };
+
+            // Only listen for clicks on menus/modals/dropdowns
+            let handle_menu_click = {
+                let handle_interaction = handle_interaction.clone();
+                Closure::wrap(Box::new(move |event: web_sys::Event| {
+                    if let Some(target) = event.target() {
+                        if let Ok(element) = target.dyn_into::<HtmlElement>() {
+                            let class_name = element.class_name();
+                            // Only trigger for menu/modal elements
+                            if class_name.contains("settings-menu") 
+                                || class_name.contains("modal")
+                                || class_name.contains("dropdown")
+                                || class_name.contains("date-picker") {
+                                handle_interaction.emit("menu_interaction".to_string());
+                            }
+                        }
+                    }
+                }) as Box<dyn FnMut(_)>)
+            };
+
+            // Add ONLY the targeted listeners - NO global input/focus listeners
+            crate::services::logging::Logger::info_with_component("interaction-detector", "🎯 SETUP: Adding TARGETED event listeners (no input/focus)");
+            
+            document.add_event_listener_with_callback(
+                "mouseenter",
+                handle_calendar_hover.as_ref().unchecked_ref()
+            ).ok();
+            
+            document.add_event_listener_with_callback(
+                "click",
+                handle_menu_click.as_ref().unchecked_ref()
+            ).ok();
+
+            // Cleanup function
+            let cleanup_calendar_hover = handle_calendar_hover.clone();
+            let cleanup_menu_click = handle_menu_click.clone();
+            
+            move || {
+                is_mounted.set(false);
+                
+                let document = window().and_then(|w| w.document());
+                if let Some(doc) = document {
+                    doc.remove_event_listener_with_callback(
+                        "mouseenter",
+                        cleanup_calendar_hover.as_ref().unchecked_ref()
+                    ).ok();
+                    
+                    doc.remove_event_listener_with_callback(
+                        "click",
+                        cleanup_menu_click.as_ref().unchecked_ref()
+                    ).ok();
+                }
+                
+                // Prevent memory leaks
+                drop(cleanup_calendar_hover);
+                drop(cleanup_menu_click);
+                
+                crate::services::logging::Logger::info_with_component("interaction-detector", "🎯 CLEANUP: Removed targeted event listeners");
+            }
+        });
+    }
+
+    UseInteractionDetectorResult {
+        is_active: *is_active,
+        last_interaction_time: *last_interaction_time,
+        interaction_count: *interaction_count,
+    }
 }
 
 #[cfg(test)]

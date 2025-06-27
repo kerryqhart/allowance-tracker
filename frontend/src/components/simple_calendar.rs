@@ -16,10 +16,12 @@ pub struct SimpleCalendarProps {
     pub on_toggle_transaction_selection: Callback<String>,
     #[prop_or_default]
     pub on_delete_selected: Callback<()>,
+    // Direct refresh callback (REMOVED - using prop-based refresh only)
 }
 
 #[function_component(SimpleCalendar)]
 pub fn simple_calendar(props: &SimpleCalendarProps) -> Html {
+    // Log component render with refresh trigger value (debug logging removed)
     // State for current month/year from backend
     let calendar_state = use_state(|| Option::<CalendarFocusDate>::None);
     let current_date = use_state(|| Option::<CurrentDateResponse>::None);
@@ -56,20 +58,14 @@ pub fn simple_calendar(props: &SimpleCalendarProps) -> Html {
             
             spawn_local(async move {
                 if let Some(focus_date) = (*current_state).as_ref() {
-                    gloo::console::log!(&format!("Refreshing calendar for {}/{}", focus_date.month, focus_date.year));
                     match (*api_client).get_calendar_month(focus_date.month, focus_date.year).await {
                         Ok(calendar_month) => {
-                            gloo::console::log!(&format!("Refreshed calendar month data with {} days and {} total transactions", 
-                                calendar_month.days.len(),
-                                calendar_month.days.iter().map(|d| d.transactions.len()).sum::<usize>()));
                             calendar_month_data.set(Some(calendar_month));
                         }
                         Err(e) => {
-                            gloo::console::warn!(&format!("Failed to refresh calendar month data: {}", e));
+                            gloo::console::error!(&format!("Failed to refresh calendar month data: {}", e));
                         }
                     }
-                } else {
-                    gloo::console::warn!("No focus date available for calendar refresh");
                 }
             });
         })
@@ -144,19 +140,19 @@ pub fn simple_calendar(props: &SimpleCalendarProps) -> Html {
         });
     }
 
-    // Effect to refresh calendar month data when refresh_trigger changes
+    // APPROACH 1: Effect to refresh calendar month data when refresh_trigger changes (EXISTING)
     {
         let refresh_calendar_month_data = refresh_calendar_month_data.clone();
         let refresh_trigger = props.refresh_trigger;
         
-        use_effect_with(refresh_trigger, move |trigger| {
-            if *trigger > 0 {
-                gloo::console::log!(&format!("Calendar refresh triggered: {}", trigger));
-                refresh_calendar_month_data.emit(());
-            }
+        use_effect_with(refresh_trigger, move |_trigger| {
+            // Calendar refresh triggered by prop change
+            refresh_calendar_month_data.emit(());
             || ()
         });
     }
+
+    // APPROACH 2: Direct callback refresh (REMOVED - using prop-based refresh only)
 
     // Month names helper
     let month_name = |month: u32| -> &'static str {
