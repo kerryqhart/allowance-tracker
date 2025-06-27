@@ -1,5 +1,5 @@
 use yew::prelude::*;
-use shared::{CalendarFocusDate, CurrentDateResponse, AllowanceConfig, GetAllowanceConfigRequest, CalendarMonth, CalendarDayType, TransactionType};
+use shared::{CalendarFocusDate, CurrentDateResponse, AllowanceConfig, GetAllowanceConfigRequest, CalendarMonth, CalendarDayType, TransactionType, Goal, GoalCalculation, GetCurrentGoalRequest};
 use crate::services::api::ApiClient;
 use crate::services::logging::Logger;
 use wasm_bindgen_futures::spawn_local;
@@ -27,6 +27,8 @@ pub fn simple_calendar(props: &SimpleCalendarProps) -> Html {
     let current_date = use_state(|| Option::<CurrentDateResponse>::None);
     let allowance_config = use_state(|| Option::<AllowanceConfig>::None);
     let calendar_month_data = use_state(|| Option::<CalendarMonth>::None);
+    let current_goal = use_state(|| Option::<Goal>::None);
+    let goal_calculation = use_state(|| Option::<GoalCalculation>::None);
     let is_loading = use_state(|| true);
     let error_message = use_state(|| Option::<String>::None);
     
@@ -45,20 +47,47 @@ pub fn simple_calendar(props: &SimpleCalendarProps) -> Html {
         }
     };
 
-    // Helper function to refresh calendar month data
+    // Helper function to check if a goal chip should be shown on a specific day
+    let should_show_goal_chip = |day: u32, month: u32, year: u32, goal: &Option<Goal>, goal_calc: &Option<GoalCalculation>| -> bool {
+        if let (Some(_goal), Some(calc)) = (goal, goal_calc) {
+            if let Some(completion_date) = &calc.projected_completion_date {
+                // Parse the RFC 3339 date to check if it matches this day
+                if let Some(date_part) = completion_date.split('T').next() {
+                    if let Ok(parts) = date_part.split('-').collect::<Vec<_>>().try_into() as Result<[&str; 3], _> {
+                        let [goal_year, goal_month, goal_day] = parts;
+                        if let (Ok(goal_year_num), Ok(goal_month_num), Ok(goal_day_num)) = 
+                            (goal_year.parse::<u32>(), goal_month.parse::<u32>(), goal_day.parse::<u32>()) {
+                            return year == goal_year_num && month == goal_month_num && day == goal_day_num;
+                        }
+                    }
+                }
+            }
+        }
+        false
+    };
+
+    // Helper function to refresh calendar month data and goal data
     let refresh_calendar_month_data = {
         let calendar_state = calendar_state.clone();
         let calendar_month_data = calendar_month_data.clone();
+        let current_goal = current_goal.clone();
+        let goal_calculation = goal_calculation.clone();
         let api_client = api_client.clone();
         
         use_callback((calendar_state.clone(),), move |_, (current_calendar_state,)| {
             let calendar_month_data = calendar_month_data.clone();
+            let current_goal = current_goal.clone();
+            let goal_calculation = goal_calculation.clone();
             let api_client = api_client.clone();
             let current_state = current_calendar_state.clone();
             
             spawn_local(async move {
                 if let Some(focus_date) = (*current_state).as_ref() {
-                    match (*api_client).get_calendar_month(focus_date.month, focus_date.year).await {
+                    // Refresh both calendar month data and goal data
+                    let calendar_result = (*api_client).get_calendar_month(focus_date.month, focus_date.year).await;
+                    let goal_result = (*api_client).get_current_goal().await;
+                    
+                    match calendar_result {
                         Ok(calendar_month) => {
                             calendar_month_data.set(Some(calendar_month));
                         }
@@ -66,17 +95,29 @@ pub fn simple_calendar(props: &SimpleCalendarProps) -> Html {
                             gloo::console::error!(&format!("Failed to refresh calendar month data: {}", e));
                         }
                     }
+                    
+                    match goal_result {
+                        Ok(goal_response) => {
+                            current_goal.set(goal_response.goal);
+                            goal_calculation.set(goal_response.calculation);
+                        }
+                        Err(e) => {
+                            gloo::console::error!(&format!("Failed to refresh goal data: {}", e));
+                        }
+                    }
                 }
             });
         })
     };
 
-    // Load initial focus date, current date, allowance config, and calendar month data from backend
+    // Load initial focus date, current date, allowance config, calendar month data, and goal data from backend
     {
         let calendar_state = calendar_state.clone();
         let current_date = current_date.clone();
         let allowance_config = allowance_config.clone();
         let calendar_month_data = calendar_month_data.clone();
+        let current_goal = current_goal.clone();
+        let goal_calculation = goal_calculation.clone();
         let is_loading = is_loading.clone();
         let error_message = error_message.clone();
         let api_client = api_client.clone();
@@ -85,10 +126,11 @@ pub fn simple_calendar(props: &SimpleCalendarProps) -> Html {
             spawn_local(async move {
                 // Test log to verify frontend logging is working
                 Logger::info_with_component("calendar", "Calendar component initializing - TESTING FRONTEND LOGGING");
-                // Fetch focus date, current date, and allowance config first
+                // Fetch focus date, current date, allowance config, and goal data first
                 let focus_date_result = (*api_client).get_focus_date().await;
                 let current_date_result = (*api_client).get_current_date().await;
                 let allowance_result = (*api_client).get_allowance_config(GetAllowanceConfigRequest { child_id: None }).await;
+                let goal_result = (*api_client).get_current_goal().await;
                 
                 // If we got focus date, also fetch calendar month data
                 let calendar_month_result = if let Ok(ref focus_date) = focus_date_result {
@@ -97,13 +139,14 @@ pub fn simple_calendar(props: &SimpleCalendarProps) -> Html {
                     Err("No focus date available".to_string())
                 };
                 
-                // Handle all four API results
-                match (focus_date_result, current_date_result, allowance_result, calendar_month_result) {
-                    (Ok(focus_date), Ok(current_date_response), Ok(allowance_response), Ok(calendar_month)) => {
-                        gloo::console::log!(&format!("Loaded focus date: {}/{}, current date: {}/{}/{}, allowance: {:?}, calendar month with {} days", 
+                // Handle all five API results
+                match (focus_date_result, current_date_result, allowance_result, goal_result, calendar_month_result) {
+                    (Ok(focus_date), Ok(current_date_response), Ok(allowance_response), Ok(goal_response), Ok(calendar_month)) => {
+                        gloo::console::log!(&format!("Loaded focus date: {}/{}, current date: {}/{}/{}, allowance: {:?}, goal: {:?}, calendar month with {} days", 
                             focus_date.month, focus_date.year,
                             current_date_response.month, current_date_response.day, current_date_response.year,
                             allowance_response.allowance_config,
+                            goal_response.goal.is_some(),
                             calendar_month.days.len()));
                         
                         // Debug allowance config details
@@ -117,14 +160,18 @@ pub fn simple_calendar(props: &SimpleCalendarProps) -> Html {
                         calendar_state.set(Some(focus_date));
                         current_date.set(Some(current_date_response));
                         allowance_config.set(allowance_response.allowance_config);
+                        current_goal.set(goal_response.goal);
+                        goal_calculation.set(goal_response.calculation);
                         calendar_month_data.set(Some(calendar_month));
                         error_message.set(None);
                     }
-                    (Ok(focus_date), Ok(current_date_response), Ok(allowance_response), Err(calendar_error)) => {
+                    (Ok(focus_date), Ok(current_date_response), Ok(allowance_response), Ok(goal_response), Err(calendar_error)) => {
                         gloo::console::warn!(&format!("Failed to load calendar month data: {}", calendar_error));
                         calendar_state.set(Some(focus_date));
                         current_date.set(Some(current_date_response));
                         allowance_config.set(allowance_response.allowance_config);
+                        current_goal.set(goal_response.goal);
+                        goal_calculation.set(goal_response.calculation);
                         // Continue without calendar month data - just won't show transaction chips
                         error_message.set(None);
                     }
@@ -168,6 +215,8 @@ pub fn simple_calendar(props: &SimpleCalendarProps) -> Html {
     let on_previous = {
         let calendar_state = calendar_state.clone();
         let calendar_month_data = calendar_month_data.clone();
+        let current_goal = current_goal.clone();
+        let goal_calculation = goal_calculation.clone();
         let click_count = click_count.clone();
         let error_message = error_message.clone();
         let api_client = api_client.clone();
@@ -175,6 +224,8 @@ pub fn simple_calendar(props: &SimpleCalendarProps) -> Html {
         Callback::from(move |_: MouseEvent| {
             let calendar_state = calendar_state.clone();
             let calendar_month_data = calendar_month_data.clone();
+            let current_goal = current_goal.clone();
+            let goal_calculation = goal_calculation.clone();
             let click_count = click_count.clone();
             let error_message = error_message.clone();
             let api_client = api_client.clone();
@@ -190,14 +241,27 @@ pub fn simple_calendar(props: &SimpleCalendarProps) -> Html {
                         gloo::console::log!(&format!("Backend response: {}", response.success_message));
                         calendar_state.set(Some(response.focus_date.clone()));
                         
-                        // Also fetch calendar month data for the new month
-                        match (*api_client).get_calendar_month(response.focus_date.month, response.focus_date.year).await {
+                        // Also fetch calendar month data and goal data for the new month
+                        let calendar_result = (*api_client).get_calendar_month(response.focus_date.month, response.focus_date.year).await;
+                        let goal_result = (*api_client).get_current_goal().await;
+                        
+                        match calendar_result {
                             Ok(calendar_month) => {
                                 calendar_month_data.set(Some(calendar_month));
                             }
                             Err(e) => {
                                 gloo::console::warn!(&format!("Failed to load calendar month data: {}", e));
                                 calendar_month_data.set(None);
+                            }
+                        }
+                        
+                        match goal_result {
+                            Ok(goal_response) => {
+                                current_goal.set(goal_response.goal);
+                                goal_calculation.set(goal_response.calculation);
+                            }
+                            Err(e) => {
+                                gloo::console::warn!(&format!("Failed to load goal data: {}", e));
                             }
                         }
                         
@@ -216,6 +280,8 @@ pub fn simple_calendar(props: &SimpleCalendarProps) -> Html {
     let on_next = {
         let calendar_state = calendar_state.clone();
         let calendar_month_data = calendar_month_data.clone();
+        let current_goal = current_goal.clone();
+        let goal_calculation = goal_calculation.clone();
         let click_count = click_count.clone();
         let error_message = error_message.clone();
         let api_client = api_client.clone();
@@ -223,6 +289,8 @@ pub fn simple_calendar(props: &SimpleCalendarProps) -> Html {
         Callback::from(move |_: MouseEvent| {
             let calendar_state = calendar_state.clone();
             let calendar_month_data = calendar_month_data.clone();
+            let current_goal = current_goal.clone();
+            let goal_calculation = goal_calculation.clone();
             let click_count = click_count.clone();
             let error_message = error_message.clone();
             let api_client = api_client.clone();
@@ -238,14 +306,27 @@ pub fn simple_calendar(props: &SimpleCalendarProps) -> Html {
                         gloo::console::log!(&format!("Backend response: {}", response.success_message));
                         calendar_state.set(Some(response.focus_date.clone()));
                         
-                        // Also fetch calendar month data for the new month
-                        match (*api_client).get_calendar_month(response.focus_date.month, response.focus_date.year).await {
+                        // Also fetch calendar month data and goal data for the new month
+                        let calendar_result = (*api_client).get_calendar_month(response.focus_date.month, response.focus_date.year).await;
+                        let goal_result = (*api_client).get_current_goal().await;
+                        
+                        match calendar_result {
                             Ok(calendar_month) => {
                                 calendar_month_data.set(Some(calendar_month));
                             }
                             Err(e) => {
                                 gloo::console::warn!(&format!("Failed to load calendar month data: {}", e));
                                 calendar_month_data.set(None);
+                            }
+                        }
+                        
+                        match goal_result {
+                            Ok(goal_response) => {
+                                current_goal.set(goal_response.goal);
+                                goal_calculation.set(goal_response.calculation);
+                            }
+                            Err(e) => {
+                                gloo::console::warn!(&format!("Failed to load goal data: {}", e));
                             }
                         }
                         
@@ -406,6 +487,38 @@ pub fn simple_calendar(props: &SimpleCalendarProps) -> Html {
                                     </div>
                                 }
                             })}
+                            
+                            // Show goal chip if this day is the goal target date
+                            {if should_show_goal_chip(day_data.day, calendar_month.month, calendar_month.year, &current_goal, &goal_calculation) {
+                                if let (Some(goal), Some(calc)) = (current_goal.as_ref(), goal_calculation.as_ref()) {
+                                    html! {
+                                        <div class="transaction-tooltip">
+                                            <div class="simple-calendar-goal-chip">
+                                                {"Goal"}
+                                            </div>
+                                            <div class="custom-tooltip goal-border">
+                                                <div class="tooltip-header">
+                                                    {"Goal Target Date"}
+                                                </div>
+                                                <div class="tooltip-body">
+                                                    <div class="tooltip-row">
+                                                        <span class="tooltip-label">{"Target Amount:"}</span>
+                                                        <span class="tooltip-value positive">{format!("${:.2}", goal.target_amount)}</span>
+                                                    </div>
+                                                    <div class="tooltip-row">
+                                                        <span class="tooltip-label">{"Description:"}</span>
+                                                        <span class="tooltip-value">{&goal.description}</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    }
+                                } else {
+                                    html! {}
+                                }
+                            } else {
+                                html! {}
+                            }}
                             
                             // Show "+X more" indicator if there are remaining transactions
                             {if remaining_count > 0 {

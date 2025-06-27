@@ -910,6 +910,27 @@
             opacity: 0.7;
         }
 
+        .simple-calendar-goal-chip {
+            font-size: 0.7rem;
+            font-weight: 600;
+            padding: 0.15rem 0.3rem;
+            border-radius: 8px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            background: white;
+            border: 1.5px solid #f093fb;
+            color: #f093fb;
+            opacity: 0.9;
+            margin-bottom: 0.1rem;
+        }
+
+        .simple-calendar-goal-chip:hover {
+            transform: scale(1.05);
+            background: rgba(240, 147, 251, 0.05);
+            opacity: 1;
+        }
+
         .calendar-header-container {
             padding: 1rem 1rem 0.5rem 1rem;
             border-bottom: 1px solid rgba(0, 0, 0, 0.08);
@@ -1415,6 +1436,10 @@
             border: 1.5px solid #718096;
         }
 
+        .custom-tooltip.goal-border {
+            border: 1.5px solid #f093fb;
+        }
+
         .custom-tooltip::after {
             content: '';
             position: absolute;
@@ -1436,6 +1461,10 @@
 
         .custom-tooltip.spending-border::after {
             border-top-color: #718096;
+        }
+
+        .custom-tooltip.goal-border::after {
+            border-top-color: #f093fb;
         }
 
         .transaction-tooltip:hover .custom-tooltip {
