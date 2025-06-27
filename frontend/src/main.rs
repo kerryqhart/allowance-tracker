@@ -85,6 +85,8 @@ fn app() -> Html {
     };
     
     // Set up periodic refreshing with staggered timing - WITH IMPROVED INTERACTION DETECTION
+    // Calendar: Every 10 minutes for day changes and allowance updates
+    // Transactions: Every 10 minutes, offset by 5 minutes for load balancing
     
     // APPROACH 1: Calendar prop-based refresh (EXISTING)
     let calendar_refresh_result = use_periodic_refresh_simple(
@@ -95,11 +97,11 @@ fn app() -> Html {
     
     // APPROACH 2: Calendar direct callback refresh (REMOVED - prop approach now works)
     
-    // Transactions: Every 30 seconds, offset by 15 seconds
+    // Transactions: Every 10 minutes, offset by 5 minutes
     let transactions_refresh_result = use_periodic_refresh_staggered(
         refresh_transactions_periodic,
         interaction_detector.is_active, // ENABLED - now works without blocking input
-        15000, // 15 second stagger
+        300000, // 5 minute stagger (300 seconds)
     );
     Logger::info_with_component("periodic-refresh", &format!("Transactions refresh hook initialized - running: {}", transactions_refresh_result.is_running));
     

@@ -14,7 +14,7 @@ pub struct PeriodicRefreshConfig {
 impl Default for PeriodicRefreshConfig {
     fn default() -> Self {
         Self {
-            interval_ms: 30000,        // 30 seconds
+            interval_ms: 600000,       // 10 minutes (600 seconds)
             initial_delay_ms: None,    // No initial delay
             max_retries: 3,            // Max 3 retries on failure
             base_retry_delay_ms: 1000, // Start with 1 second retry delay
@@ -222,7 +222,7 @@ async fn execute_refresh_with_retry(
     false
 }
 
-/// Convenience function for standard 30-second refresh with no initial delay
+/// Convenience function for standard 10-minute refresh with no initial delay
 #[hook]
 pub fn use_periodic_refresh_simple(
     refresh_fn: Callback<()>,
@@ -260,7 +260,7 @@ mod tests {
     #[wasm_bindgen_test]
     fn test_config_default() {
         let config = PeriodicRefreshConfig::default();
-        assert_eq!(config.interval_ms, 30000);
+        assert_eq!(config.interval_ms, 600000); // 10 minutes
         assert_eq!(config.initial_delay_ms, None);
         assert_eq!(config.max_retries, 3);
         assert_eq!(config.base_retry_delay_ms, 1000);
