@@ -27,6 +27,7 @@ use components::{
         spend_money_form::SpendMoneyForm,
     },
     header::Header,
+    goal_card::GoalCard,
 };
 
 
@@ -298,6 +299,12 @@ fn app() -> Html {
 
 
                     </div>
+                    
+                    // Goal card at the end as requested
+                    <GoalCard 
+                        api_client={(*api_client).clone()}
+                        on_refresh={refresh_all_data.clone()}
+                    />
                 </div>
             </main>
             

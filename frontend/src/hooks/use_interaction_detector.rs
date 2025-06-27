@@ -245,11 +245,11 @@ pub fn use_interaction_detector(
 
     // Cleanup on component unmount
     {
-        let is_mounted = is_mounted.clone();
+        let _is_mounted = is_mounted.clone();
         
         use_effect_with((), move |_| {
             move || {
-                is_mounted.set(false);
+                _is_mounted.set(false);
                 gloo::console::debug!("🧹 Interaction detector hook cleaned up");
             }
         });
@@ -400,29 +400,30 @@ pub fn use_interaction_detector_targeted(
                 handle_menu_click.as_ref().unchecked_ref()
             ).ok();
 
-            // Cleanup function
-            let cleanup_calendar_hover = handle_calendar_hover.clone();
-            let cleanup_menu_click = handle_menu_click.clone();
+            // Store closures for cleanup
+            let calendar_hover_closure = handle_calendar_hover;
+            let menu_click_closure = handle_menu_click;
             
             move || {
                 is_mounted.set(false);
                 
-                let document = window().and_then(|w| w.document());
-                if let Some(doc) = document {
-                    doc.remove_event_listener_with_callback(
-                        "mouseenter",
-                        cleanup_calendar_hover.as_ref().unchecked_ref()
-                    ).ok();
-                    
-                    doc.remove_event_listener_with_callback(
-                        "click",
-                        cleanup_menu_click.as_ref().unchecked_ref()
-                    ).ok();
+                if let Some(window) = web_sys::window() {
+                    if let Some(document) = window.document() {
+                        document.remove_event_listener_with_callback(
+                            "mouseenter",
+                            calendar_hover_closure.as_ref().unchecked_ref()
+                        ).ok();
+                        
+                        document.remove_event_listener_with_callback(
+                            "click",
+                            menu_click_closure.as_ref().unchecked_ref()
+                        ).ok();
+                    }
                 }
                 
                 // Prevent memory leaks
-                drop(cleanup_calendar_hover);
-                drop(cleanup_menu_click);
+                drop(calendar_hover_closure);
+                drop(menu_click_closure);
                 
                 crate::services::logging::Logger::info_with_component("interaction-detector", "🎯 CLEANUP: Removed targeted event listeners");
             }

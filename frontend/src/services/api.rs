@@ -5,7 +5,8 @@ use shared::{
     ParentalControlRequest, ParentalControlResponse, CreateChildRequest, ChildResponse,
     SetActiveChildRequest, SetActiveChildResponse, ActiveChildResponse, ChildListResponse,
     GetAllowanceConfigRequest, GetAllowanceConfigResponse, UpdateAllowanceConfigRequest, UpdateAllowanceConfigResponse,
-    CurrentDateResponse, CalendarFocusDate, UpdateCalendarFocusRequest, UpdateCalendarFocusResponse
+    CurrentDateResponse, CalendarFocusDate, UpdateCalendarFocusRequest, UpdateCalendarFocusResponse,
+    CreateGoalRequest, CreateGoalResponse, GetCurrentGoalResponse, CancelGoalResponse,
 };
 
 /// API client for communicating with the backend server
@@ -433,6 +434,77 @@ impl ApiClient {
                     let error_text = response.text().await
                         .unwrap_or_else(|_| "Unknown error".to_string());
                     Err(error_text)
+                }
+            }
+            Err(e) => Err(format!("Network error: {}", e)),
+        }
+    }
+
+    /// Get current goal for the active child
+    pub async fn get_current_goal(&self) -> Result<GetCurrentGoalResponse, String> {
+        let url = format!("{}/api/goals/current", self.base_url);
+        
+        match Request::get(&url).send().await {
+            Ok(response) => {
+                if response.ok() {
+                    match response.json::<GetCurrentGoalResponse>().await {
+                        Ok(data) => Ok(data),
+                        Err(e) => Err(format!("Failed to parse current goal: {}", e)),
+                    }
+                } else {
+                    let status = response.status();
+                    let error_text = response.text().await
+                        .unwrap_or_else(|_| "Unknown error".to_string());
+                    Err(format!("Server error {}: {}", status, error_text))
+                }
+            }
+            Err(e) => Err(format!("Network error: {}", e)),
+        }
+    }
+
+    /// Create a new goal
+    pub async fn create_goal(&self, request: CreateGoalRequest) -> Result<CreateGoalResponse, String> {
+        let url = format!("{}/api/goals", self.base_url);
+        
+        match Request::post(&url)
+            .json(&request)
+            .map_err(|e| format!("Failed to serialize request: {}", e))?
+            .send()
+            .await
+        {
+            Ok(response) => {
+                if response.ok() {
+                    match response.json::<CreateGoalResponse>().await {
+                        Ok(data) => Ok(data),
+                        Err(e) => Err(format!("Failed to parse response: {}", e)),
+                    }
+                } else {
+                    let status = response.status();
+                    let error_text = response.text().await
+                        .unwrap_or_else(|_| "Unknown error".to_string());
+                    Err(format!("Server error {}: {}", status, error_text))
+                }
+            }
+            Err(e) => Err(format!("Network error: {}", e)),
+        }
+    }
+
+    /// Cancel the current goal
+    pub async fn cancel_goal(&self) -> Result<CancelGoalResponse, String> {
+        let url = format!("{}/api/goals", self.base_url);
+        
+        match Request::delete(&url).send().await {
+            Ok(response) => {
+                if response.ok() {
+                    match response.json::<CancelGoalResponse>().await {
+                        Ok(data) => Ok(data),
+                        Err(e) => Err(format!("Failed to parse response: {}", e)),
+                    }
+                } else {
+                    let status = response.status();
+                    let error_text = response.text().await
+                        .unwrap_or_else(|_| "Unknown error".to_string());
+                    Err(format!("Server error {}: {}", status, error_text))
                 }
             }
             Err(e) => Err(format!("Network error: {}", e)),
