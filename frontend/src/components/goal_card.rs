@@ -77,8 +77,15 @@ pub fn goal_card(props: &GoalCardProps) -> Html {
                 match api_client.get_current_goal().await {
                     Ok(response) => {
                         Logger::info_with_component("goal-card", &format!("🎯 Goal API response: goal={:?}, calculation={:?}", response.goal.is_some(), response.calculation.is_some()));
-                        current_goal.set(response.goal);
+                        current_goal.set(response.goal.clone());
                         goal_calculation.set(response.calculation);
+                        
+                        // Debug logging for state transitions
+                        if response.goal.is_none() {
+                            Logger::info_with_component("goal-card", "🎯 No current goal found - should show create goal form");
+                        } else {
+                            Logger::info_with_component("goal-card", "🎯 Current goal found - showing goal details");
+                        }
                     }
                     Err(e) => {
                         Logger::error_with_component("goal-card", &format!("Failed to load goal: {}", e));
@@ -195,6 +202,8 @@ pub fn goal_card(props: &GoalCardProps) -> Html {
         let on_refresh = props.on_refresh.clone();
         
         Callback::from(move |_: MouseEvent| {
+            Logger::info_with_component("goal-card", "🎯 CANCEL: Cancel Goal button clicked - starting cancellation process");
+            
             let api_client = api_client.clone();
             let loading = loading.clone();
             let error_message = error_message.clone();
@@ -207,15 +216,26 @@ pub fn goal_card(props: &GoalCardProps) -> Html {
                 error_message.set(None);
                 success_message.set(None);
                 
+                Logger::info_with_component("goal-card", "🎯 CANCEL: Making API call to cancel goal");
                 match api_client.cancel_goal().await {
                     Ok(response) => {
-                        Logger::info_with_component("goal-card", &format!("Goal cancelled: {}", response.success_message));
+                        Logger::info_with_component("goal-card", &format!("🎯 CANCEL: API success - {}", response.success_message));
                         success_message.set(Some(response.success_message));
+                        
+                        // Reload goal data to trigger state transition
+                        Logger::info_with_component("goal-card", "🎯 CANCEL: Reloading goal data after cancellation");
                         load_goal.emit(());
                         on_refresh.emit(());
+                        
+                        // Clear success message after 3 seconds to show the create goal form cleanly
+                        let success_message_clear = success_message.clone();
+                        spawn_local(async move {
+                            gloo::timers::future::TimeoutFuture::new(3000).await;
+                            success_message_clear.set(None);
+                        });
                     }
                     Err(e) => {
-                        Logger::error_with_component("goal-card", &format!("Failed to cancel goal: {}", e));
+                        Logger::error_with_component("goal-card", &format!("🎯 CANCEL: API error - {}", e));
                         error_message.set(Some(e));
                     }
                 }
@@ -253,6 +273,7 @@ pub fn goal_card(props: &GoalCardProps) -> Html {
                 }
             } else if let Some(goal) = current_goal.as_ref() {
                 // Show current goal
+                Logger::info_with_component("goal-card", "🎯 RENDER: Showing current goal display");
                 html! {
                     <div class="current-goal">
                         <div class="goal-header">
@@ -332,6 +353,7 @@ pub fn goal_card(props: &GoalCardProps) -> Html {
                 }
             } else {
                 // Show create goal form
+                Logger::info_with_component("goal-card", "🎯 RENDER: Showing create goal form");
                 html! {
                     <form class="goal-form" onsubmit={on_create_goal}>
                         <div class="form-fields-group">

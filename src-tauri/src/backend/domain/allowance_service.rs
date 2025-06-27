@@ -3,8 +3,8 @@ use chrono::{Utc, NaiveDate, Datelike, Local};
 use log::{info, warn};
 use std::sync::Arc;
 
-use crate::backend::storage::csv::{CsvConnection, AllowanceRepository};
-use crate::backend::storage::traits::AllowanceStorage;
+use crate::backend::storage::csv::{CsvConnection, AllowanceRepository, TransactionRepository};
+use crate::backend::storage::traits::{AllowanceStorage, TransactionStorage};
 use crate::backend::domain::child_service::ChildService;
 use shared::{
     AllowanceConfig, GetAllowanceConfigRequest, GetAllowanceConfigResponse,
@@ -15,6 +15,7 @@ use shared::{
 #[derive(Clone)]
 pub struct AllowanceService {
     allowance_repository: AllowanceRepository,
+    transaction_repository: TransactionRepository,
     child_service: ChildService,
 }
 
@@ -22,9 +23,11 @@ impl AllowanceService {
     /// Create a new AllowanceService
     pub fn new(csv_conn: Arc<CsvConnection>) -> Self {
         let allowance_repository = AllowanceRepository::new((*csv_conn).clone());
+        let transaction_repository = TransactionRepository::new((*csv_conn).clone());
         let child_service = ChildService::new(csv_conn);
         Self {
             allowance_repository,
+            transaction_repository,
             child_service,
         }
     }
@@ -258,6 +261,94 @@ impl AllowanceService {
 
         Ok(future_allowances)
     }
+
+    /// Check for pending allowances that need to be issued
+    /// Returns a list of dates for which allowances should be created
+    pub async fn get_pending_allowance_dates(
+        &self,
+        child_id: &str,
+        from_date: NaiveDate,
+        to_date: NaiveDate,
+    ) -> Result<Vec<(NaiveDate, f64)>> {
+        info!("Checking for pending allowances for child: {} from {} to {}", 
+              child_id, from_date, to_date);
+
+        // Get allowance config for the child
+        let allowance_config = self.allowance_repository.get_allowance_config(child_id).await?;
+        
+        let config = match allowance_config {
+            Some(config) if config.is_active => config,
+            _ => {
+                info!("No active allowance config found for child: {}", child_id);
+                return Ok(Vec::new());
+            }
+        };
+
+        let mut pending_dates = Vec::new();
+        let current_date = Local::now().date_naive();
+
+        // Iterate through each date in the range
+        let mut current = from_date;
+        while current <= to_date && current <= current_date {
+            let day_of_week = current.weekday().num_days_from_sunday() as u8;
+            
+            if day_of_week == config.day_of_week {
+                // This is an allowance day - check if allowance already exists
+                if !self.has_allowance_for_date(&config.child_id, current).await? {
+                    pending_dates.push((current, config.amount));
+                    info!("🎯 Found pending allowance for {} on {} (${:.2})", 
+                          child_id, current, config.amount);
+                }
+            }
+            
+            // Move to next day
+            current = current.succ_opt().unwrap_or(current);
+            if current == current.succ_opt().unwrap_or(current) {
+                // Prevent infinite loop if succ_opt fails
+                break;
+            }
+        }
+
+        info!("Found {} pending allowances for child: {}", 
+              pending_dates.len(), child_id);
+
+        Ok(pending_dates)
+    }
+
+    /// Check if an allowance already exists for a specific date
+    /// This is used to prevent duplicate allowances
+    async fn has_allowance_for_date(&self, child_id: &str, date: NaiveDate) -> Result<bool> {
+        // Get all transactions for the child
+        let transactions = self.transaction_repository.list_transactions(child_id, None, None).await?;
+        
+        // Format the date as string prefix (YYYY-MM-DD) to match
+        let date_prefix = date.format("%Y-%m-%d").to_string();
+        
+        // Check if any transaction for this date looks like an allowance
+        // We'll be more conservative: look for any positive income on allowance day
+        let mut allowance_count = 0;
+        for transaction in transactions {
+            // Check if transaction is on this date and has positive amount (indicating income/allowance)
+            if transaction.date.starts_with(&date_prefix) && transaction.amount > 0.0 {
+                // Check if the description suggests it's an allowance
+                let desc_lower = transaction.description.to_lowercase();
+                if desc_lower.contains("allowance") || desc_lower.contains("weekly") {
+                    allowance_count += 1;
+                    info!("Found existing allowance {} for {} on {}: {}", 
+                          allowance_count, child_id, date, transaction.description);
+                }
+            }
+        }
+        
+        // Return true if we found at least one allowance for this date
+        Ok(allowance_count > 0)
+    }
+
+    /// Utility method to check if a given date is an allowance day for a specific day of week
+    pub fn is_allowance_day(date: NaiveDate, allowance_day_of_week: u8) -> bool {
+        let day_of_week = date.weekday().num_days_from_sunday() as u8;
+        day_of_week == allowance_day_of_week
+    }
 }
 
 #[cfg(test)]
@@ -266,7 +357,7 @@ mod tests {
     use shared::{Child, CreateChildRequest};
 
     async fn setup_test() -> AllowanceService {
-        let db = Arc::new(DbConnection::init_test().await.expect("Failed to init test DB"));
+        let db = Arc::new(CsvConnection::new_default().expect("Failed to init test DB"));
         AllowanceService::new(db)
     }
 
@@ -557,11 +648,206 @@ mod tests {
 
     #[tokio::test]
     async fn test_generate_id() {
-        let id1 = AllowanceConfig::generate_id("child::123", 1000);
-        let id2 = AllowanceConfig::generate_id("child::456", 2000);
+        let child_id = "child123";
+        let timestamp = 1234567890u64;
+        let id = AllowanceConfig::generate_id(child_id, timestamp);
+        assert_eq!(id, "allowance::child123::1234567890");
+    }
 
-        assert_eq!(id1, "allowance::child::123::1000");
-        assert_eq!(id2, "allowance::child::456::2000");
-        assert_ne!(id1, id2);
+    #[tokio::test]
+    async fn test_get_pending_allowance_dates_no_config() {
+        let service = setup_test().await;
+        let child = create_test_child(&service).await;
+
+        let from_date = Local::now().date_naive() - chrono::Duration::days(7);
+        let to_date = Local::now().date_naive();
+
+        let pending = service
+            .get_pending_allowance_dates(&child.id, from_date, to_date)
+            .await
+            .expect("Failed to get pending allowances");
+
+        assert!(pending.is_empty(), "Should have no pending allowances without config");
+    }
+
+    #[tokio::test]
+    async fn test_get_pending_allowance_dates_inactive_config() {
+        let service = setup_test().await;
+        let child = create_test_child(&service).await;
+
+        // Create inactive allowance config
+        let request = UpdateAllowanceConfigRequest {
+            child_id: Some(child.id.clone()),
+            amount: 10.0,
+            day_of_week: 1, // Monday
+            is_active: false, // Inactive
+        };
+
+        service
+            .update_allowance_config(request)
+            .await
+            .expect("Failed to create allowance config");
+
+        let from_date = Local::now().date_naive() - chrono::Duration::days(7);
+        let to_date = Local::now().date_naive();
+
+        let pending = service
+            .get_pending_allowance_dates(&child.id, from_date, to_date)
+            .await
+            .expect("Failed to get pending allowances");
+
+        assert!(pending.is_empty(), "Should have no pending allowances with inactive config");
+    }
+
+    #[tokio::test]
+    async fn test_get_pending_allowance_dates_with_config() {
+        let service = setup_test().await;
+        let child = create_test_child(&service).await;
+
+        // Create active allowance config for every day (day_of_week: 0-6)
+        // We'll use Sunday (0) for testing
+        let request = UpdateAllowanceConfigRequest {
+            child_id: Some(child.id.clone()),
+            amount: 5.0,
+            day_of_week: 0, // Sunday
+            is_active: true,
+        };
+
+        service
+            .update_allowance_config(request)
+            .await
+            .expect("Failed to create allowance config");
+
+        // Test a 7-day range that includes at least one Sunday
+        let current_date = Local::now().date_naive();
+        let from_date = current_date - chrono::Duration::days(7);
+        let to_date = current_date;
+
+        let pending = service
+            .get_pending_allowance_dates(&child.id, from_date, to_date)
+            .await
+            .expect("Failed to get pending allowances");
+
+        // Count how many Sundays are in the range (should be at least 1)
+        let mut expected_sundays = 0;
+        let mut date = from_date;
+        while date <= to_date {
+            if date.weekday().num_days_from_sunday() as u8 == 0 {
+                expected_sundays += 1;
+            }
+            date = date.succ_opt().unwrap_or(date);
+            if date == date.succ_opt().unwrap_or(date) {
+                break;
+            }
+        }
+
+        assert!(expected_sundays > 0, "Test range should include at least one Sunday");
+        assert_eq!(pending.len(), expected_sundays, "Should find all Sundays in range as pending allowances");
+
+        // Verify the amount is correct
+        for (_, amount) in &pending {
+            assert_eq!(*amount, 5.0, "Pending allowance amount should match config");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_is_allowance_day() {
+        // Test different days of week
+        let monday = NaiveDate::from_ymd_opt(2025, 6, 30).unwrap(); // Known Monday
+        let tuesday = NaiveDate::from_ymd_opt(2025, 7, 1).unwrap(); // Known Tuesday
+        let sunday = NaiveDate::from_ymd_opt(2025, 7, 6).unwrap(); // Known Sunday
+
+        assert_eq!(monday.weekday().num_days_from_sunday() as u8, 1);
+        assert_eq!(tuesday.weekday().num_days_from_sunday() as u8, 2);
+        assert_eq!(sunday.weekday().num_days_from_sunday() as u8, 0);
+
+        // Test is_allowance_day function
+        assert!(AllowanceService::is_allowance_day(monday, 1)); // Monday = 1
+        assert!(AllowanceService::is_allowance_day(tuesday, 2)); // Tuesday = 2
+        assert!(AllowanceService::is_allowance_day(sunday, 0)); // Sunday = 0
+
+        assert!(!AllowanceService::is_allowance_day(monday, 0)); // Monday is not Sunday
+        assert!(!AllowanceService::is_allowance_day(tuesday, 1)); // Tuesday is not Monday
+        assert!(!AllowanceService::is_allowance_day(sunday, 6)); // Sunday is not Saturday
+    }
+
+    #[tokio::test]
+    async fn test_has_allowance_for_date_no_transactions() {
+        let service = setup_test().await;
+        let child = create_test_child(&service).await;
+
+        let test_date = Local::now().date_naive();
+        let has_allowance = service
+            .has_allowance_for_date(&child.id, test_date)
+            .await
+            .expect("Failed to check allowance for date");
+
+        assert!(!has_allowance, "Should not have allowance when no transactions exist");
+    }
+
+    #[tokio::test]
+    async fn test_has_allowance_for_date_with_allowance() {
+        let service = setup_test().await;
+        let child = create_test_child(&service).await;
+
+        let test_date = Local::now().date_naive();
+        
+        // Create a mock allowance transaction for today
+        let transaction = Transaction {
+            id: "test_allowance_123".to_string(),
+            child_id: child.id.clone(),
+            date: format!("{}T12:00:00-05:00", test_date.format("%Y-%m-%d")),
+            description: "Weekly allowance".to_string(),
+            amount: 5.0,
+            balance: 5.0,
+            transaction_type: TransactionType::Income,
+        };
+
+        // Store the transaction
+        service
+            .transaction_repository
+            .store_transaction(&transaction)
+            .await
+            .expect("Failed to store test transaction");
+
+        let has_allowance = service
+            .has_allowance_for_date(&child.id, test_date)
+            .await
+            .expect("Failed to check allowance for date");
+
+        assert!(has_allowance, "Should detect existing allowance transaction");
+    }
+
+    #[tokio::test]
+    async fn test_has_allowance_for_date_with_non_allowance_transaction() {
+        let service = setup_test().await;
+        let child = create_test_child(&service).await;
+
+        let test_date = Local::now().date_naive();
+        
+        // Create a non-allowance transaction for today
+        let transaction = Transaction {
+            id: "test_expense_123".to_string(),
+            child_id: child.id.clone(),
+            date: format!("{}T12:00:00-05:00", test_date.format("%Y-%m-%d")),
+            description: "Bought candy".to_string(),
+            amount: -2.0, // Negative amount (expense)
+            balance: 3.0,
+            transaction_type: TransactionType::Expense,
+        };
+
+        // Store the transaction
+        service
+            .transaction_repository
+            .store_transaction(&transaction)
+            .await
+            .expect("Failed to store test transaction");
+
+        let has_allowance = service
+            .has_allowance_for_date(&child.id, test_date)
+            .await
+            .expect("Failed to check allowance for date");
+
+        assert!(!has_allowance, "Should not detect allowance from non-allowance transaction");
     }
 } 

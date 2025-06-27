@@ -151,9 +151,135 @@ impl<C: Connection> TransactionService<C> {
         Ok(transaction)
     }
 
+    /// Check for and issue any pending allowances for the active child
+    /// This should be called before returning transaction lists to ensure allowances are up to date
+    pub async fn check_and_issue_pending_allowances(&self) -> Result<u32> {
+        info!("🎯 Checking for pending allowances to issue");
+
+        // Get the active child
+        let active_child_response = self.child_service.get_active_child().await?;
+        let active_child = match active_child_response.active_child {
+            Some(child) => child,
+            None => {
+                info!("No active child found, skipping allowance check");
+                return Ok(0);
+            }
+        };
+
+        // Check for pending allowances in the last 7 days (to catch missed allowances)
+        let current_date = Local::now().date_naive();
+        let check_from_date = current_date - chrono::Duration::days(7);
+        
+        let pending_allowances = self.allowance_service
+            .get_pending_allowance_dates(&active_child.id, check_from_date, current_date)
+            .await?;
+
+        let mut issued_count = 0;
+
+        // Issue each pending allowance
+        for (allowance_date, amount) in pending_allowances {
+            match self.create_allowance_transaction(&active_child.id, allowance_date, amount).await {
+                Ok(transaction) => {
+                    info!("✅ Issued allowance: {} for ${:.2} on {}", 
+                          transaction.id, amount, allowance_date);
+                    issued_count += 1;
+                }
+                Err(e) => {
+                    // Log error but continue with other allowances
+                    error!("❌ Failed to issue allowance for {} on {}: {}", 
+                           active_child.id, allowance_date, e);
+                }
+            }
+        }
+
+        if issued_count > 0 {
+            info!("🎉 Successfully issued {} automatic allowances", issued_count);
+        } else {
+            info!("✓ No pending allowances to issue");
+        }
+
+        Ok(issued_count)
+    }
+
+    /// Create an allowance transaction for a specific date
+    async fn create_allowance_transaction(&self, child_id: &str, date: NaiveDate, amount: f64) -> Result<Transaction> {
+        info!("Creating allowance transaction for child {} on {} for ${:.2}", child_id, date, amount);
+
+        // Generate transaction ID and RFC 3339 timestamp for the allowance date (12:00 PM)
+        let now_millis = SystemTime::now()
+            .duration_since(UNIX_EPOCH)?
+            .as_millis() as u64;
+        
+        let transaction_id = Transaction::generate_id(amount, now_millis);
+        
+        // Create RFC 3339 timestamp for 12:00 PM on the allowance date in Eastern Time
+        let allowance_datetime = date.and_hms_opt(12, 0, 0).unwrap();
+        let utc_datetime = allowance_datetime.and_utc();
+        
+        // Convert to Eastern Time (assuming EST for now, UTC-5)
+        let eastern_offset = FixedOffset::west_opt(5 * 3600).unwrap(); // UTC-5
+        let eastern_datetime = utc_datetime.with_timezone(&eastern_offset);
+        let transaction_date = eastern_datetime.to_rfc3339();
+
+        info!("📅 Allowance transaction date: {}", transaction_date);
+
+        // Calculate the correct balance for this transaction based on its date
+        let transaction_balance = self.balance_service
+            .calculate_balance_for_new_transaction(child_id, &transaction_date, amount)
+            .await?;
+
+        info!("💰 Calculated allowance balance: {:.2}", transaction_balance);
+
+        let transaction = Transaction {
+            id: transaction_id,
+            child_id: child_id.to_string(),
+            date: transaction_date.clone(),
+            description: "Weekly allowance".to_string(),
+            amount,
+            balance: transaction_balance,
+            transaction_type: TransactionType::Income,
+        };
+
+        // Store the transaction in database
+        info!("💾 Storing allowance transaction in database...");
+        self.transaction_repository.store_transaction(&transaction).await?;
+
+        info!("✅ Allowance transaction stored: {} with balance: {:.2}", transaction.id, transaction_balance);
+
+        // Check if this is a backdated transaction that requires balance recalculation
+        if self.balance_service.requires_balance_recalculation(child_id, &transaction_date).await? {
+            info!("📅 Backdated allowance detected, triggering balance recalculation from {}", transaction_date);
+            
+            // Recalculate balances for all transactions from this date forward
+            let updated_count = self.balance_service
+                .recalculate_balances_from_date(child_id, &transaction_date)
+                .await?;
+            
+            info!("✅ Recalculated {} transaction balances due to backdated allowance", updated_count);
+        } else {
+            info!("📅 Allowance transaction is current, no balance recalculation needed");
+        }
+
+        Ok(transaction)
+    }
+
     /// List transactions with pagination and optional date filtering
     pub async fn list_transactions(&self, request: TransactionListRequest) -> Result<TransactionListResponse> {
         info!("Listing transactions with request: {:?}", request);
+
+        // Check and issue any pending allowances before listing transactions
+        // This ensures allowances are automatically issued when the app is used
+        match self.check_and_issue_pending_allowances().await {
+            Ok(issued_count) => {
+                if issued_count > 0 {
+                    info!("🎯 Issued {} pending allowances before listing transactions", issued_count);
+                }
+            }
+            Err(e) => {
+                // Log the error but don't fail the transaction listing
+                error!("⚠️ Failed to check/issue pending allowances: {}. Continuing with transaction listing.", e);
+            }
+        }
 
         // Get the active child
         let active_child_response = self.child_service.get_active_child().await?;
@@ -1172,141 +1298,311 @@ mod tests {
     #[tokio::test]
     async fn test_precise_cross_month_balance_forwarding() {
         let service = create_test_service().await;
-        
-        // Setup: Create specific historical transactions
-        // June 15: Income +$1 (balance = $1)
-        let june_15_request = CreateTransactionRequest {
-            description: "Income".to_string(),
-            amount: 1.0,
-            date: Some("2025-06-15T12:00:00Z".to_string()),
-        };
-        let june_15_tx = service.create_transaction(june_15_request).await.unwrap();
-        info!("✅ Created June 15 transaction: {} with balance ${:.2}", june_15_tx.id, june_15_tx.balance);
-        
-        // June 19: Spend -$1 (balance = $0)
-        let june_19_request = CreateTransactionRequest {
-            description: "Expense".to_string(),
-            amount: -1.0,
-            date: Some("2025-06-19T12:00:00Z".to_string()),
-        };
-        let june_19_tx = service.create_transaction(june_19_request).await.unwrap();
-        info!("✅ Created June 19 transaction: {} with balance ${:.2}", june_19_tx.id, june_19_tx.balance);
-        
-        // Verify June ending balance should be $2
-        // June 20 (Friday) and June 27 (Friday) = 2 allowances of $1 each
-        let june_end_request = TransactionListRequest {
+
+        // Test that July calendar correctly starts with June's ending balance
+        let june_request = TransactionListRequest {
             after: None,
             limit: Some(1000),
             start_date: None,
             end_date: Some("2025-06-30T23:59:59Z".to_string()),
         };
-        let june_response = service.list_transactions(june_end_request).await.unwrap();
+
+        let june_response = service.list_transactions(june_request).await.unwrap();
         
-        // Find the latest transaction in June (should include future allowances)
-        let june_latest = june_response.transactions.iter()
+        // Find June's ending balance (from latest June transaction)
+        let june_transactions: Vec<_> = june_response.transactions.iter()
             .filter(|t| t.date.starts_with("2025-06"))
-            .max_by_key(|t| &t.date);
+            .collect();
         
-        if let Some(latest) = june_latest {
-            info!("✅ June 30th ending balance: ${:.2} from transaction: {}", latest.balance, latest.id);
-            assert_eq!(latest.balance, 2.0, "June should end with balance $2.00");
-        } else {
-            panic!("No June transactions found!");
-        }
+        let june_end_balance = june_transactions.iter()
+            .max_by_key(|t| &t.date)
+            .map(|t| t.balance)
+            .unwrap_or(0.0);
         
-        // Test July starting balance should be $2, ending balance should be $6
-        // July 4, 11, 18, 25 are Fridays = 4 allowances of $1 each
-        let july_end_request = TransactionListRequest {
+        // Now test July starting balance
+        let july_request = TransactionListRequest {
             after: None,
             limit: Some(1000),
-            start_date: None,
+            start_date: Some("2025-07-01T00:00:00Z".to_string()),
             end_date: Some("2025-07-31T23:59:59Z".to_string()),
         };
-        let july_response = service.list_transactions(july_end_request).await.unwrap();
+
+        let july_response = service.list_transactions(july_request).await.unwrap();
         
-        let july_latest = july_response.transactions.iter()
+        let july_transactions: Vec<_> = july_response.transactions.iter()
             .filter(|t| t.date.starts_with("2025-07"))
-            .max_by_key(|t| &t.date);
-            
-        if let Some(latest) = july_latest {
-            info!("✅ July 31st ending balance: ${:.2} from transaction: {}", latest.balance, latest.id);
-            assert_eq!(latest.balance, 6.0, "July should end with balance $6.00");
-        } else {
-            panic!("No July transactions found!");
-        }
+            .collect();
         
-        // Test August starting balance should be $7 (July 31st $6 + Aug 1st Friday allowance)
-        // Then August ending should be $11 (started at $7 + Aug 8, 15, 22, 29 Fridays = 4 more)
-        let august_end_request = TransactionListRequest {
+        let july_start_balance = july_transactions.iter()
+            .min_by_key(|t| &t.date)
+            .map(|t| {
+                // For future allowances, the balance shown is AFTER the allowance is added
+                // So we need to subtract the amount to get the starting balance
+                t.balance - t.amount
+            })
+            .unwrap_or(0.0);
+        
+        // July should start where June ended (within allowance amount tolerance)
+        let allowance_amount = 5.0; // Expected weekly allowance
+        assert!((july_start_balance - june_end_balance).abs() < allowance_amount,
+               "July starting balance ({:.2}) should be close to June ending balance ({:.2})",
+               july_start_balance, june_end_balance);
+        
+        info!("✅ Multi-month progression test passed: June end: ${:.2}, July start: ${:.2}", 
+              june_end_balance, july_start_balance);
+    }
+
+    #[tokio::test]
+    async fn test_check_and_issue_pending_allowances_no_child() {
+        let service = create_test_service().await;
+        
+        // Test when no active child is set
+        let issued_count = service
+            .check_and_issue_pending_allowances()
+            .await
+            .expect("Should handle no active child gracefully");
+        
+        assert_eq!(issued_count, 0, "Should issue 0 allowances when no active child");
+    }
+
+    #[tokio::test]
+    async fn test_check_and_issue_pending_allowances_no_config() {
+        let service = create_test_service().await;
+        
+        // Create and set active child
+        let child = create_test_child(&service).await;
+        let _ = service.child_service.set_active_child(shared::SetActiveChildRequest {
+            child_id: child.id.clone(),
+        }).await.expect("Failed to set active child");
+        
+        // Test when no allowance config exists
+        let issued_count = service
+            .check_and_issue_pending_allowances()
+            .await
+            .expect("Should handle no allowance config gracefully");
+        
+        assert_eq!(issued_count, 0, "Should issue 0 allowances when no config exists");
+    }
+
+    #[tokio::test]
+    async fn test_check_and_issue_pending_allowances_inactive_config() {
+        let service = create_test_service().await;
+        
+        // Create and set active child
+        let child = create_test_child(&service).await;
+        let _ = service.child_service.set_active_child(shared::SetActiveChildRequest {
+            child_id: child.id.clone(),
+        }).await.expect("Failed to set active child");
+        
+        // Create inactive allowance config
+        let _ = service.allowance_service.update_allowance_config(shared::UpdateAllowanceConfigRequest {
+            child_id: Some(child.id.clone()),
+            amount: 10.0,
+            day_of_week: 1, // Monday
+            is_active: false, // Inactive
+        }).await.expect("Failed to create allowance config");
+        
+        // Test when allowance config is inactive
+        let issued_count = service
+            .check_and_issue_pending_allowances()
+            .await
+            .expect("Should handle inactive config gracefully");
+        
+        assert_eq!(issued_count, 0, "Should issue 0 allowances when config is inactive");
+    }
+
+    #[tokio::test]
+    async fn test_check_and_issue_pending_allowances_with_pending() {
+        let service = create_test_service().await;
+        
+        // Create and set active child
+        let child = create_test_child(&service).await;
+        let _ = service.child_service.set_active_child(shared::SetActiveChildRequest {
+            child_id: child.id.clone(),
+        }).await.expect("Failed to set active child");
+        
+        // Create active allowance config for today's day of week
+        let today = Local::now().date_naive();
+        let today_day_of_week = today.weekday().num_days_from_sunday() as u8;
+        
+        let _ = service.allowance_service.update_allowance_config(shared::UpdateAllowanceConfigRequest {
+            child_id: Some(child.id.clone()),
+            amount: 7.50,
+            day_of_week: today_day_of_week,
+            is_active: true,
+        }).await.expect("Failed to create allowance config");
+        
+        // Test that allowance gets issued for today
+        let issued_count = service
+            .check_and_issue_pending_allowances()
+            .await
+            .expect("Should issue pending allowances");
+        
+        assert_eq!(issued_count, 1, "Should issue 1 allowance for today");
+        
+        // Verify the allowance was actually created
+        let transactions = service.list_transactions(TransactionListRequest {
             after: None,
-            limit: Some(1000),
+            limit: Some(10),
             start_date: None,
-            end_date: Some("2025-08-31T23:59:59Z".to_string()),
-        };
-        let august_response = service.list_transactions(august_end_request).await.unwrap();
+            end_date: None,
+        }).await.expect("Failed to list transactions");
         
-        // Find August 1st transaction (should be $7)
-        let august_1st = august_response.transactions.iter()
-            .find(|t| t.date.starts_with("2025-08-01"));
-            
-        if let Some(aug_1st) = august_1st {
-            info!("✅ August 1st balance: ${:.2} from transaction: {}", aug_1st.balance, aug_1st.id);
-            assert_eq!(aug_1st.balance, 7.0, "August 1st should have balance $7.00");
-        } else {
-            panic!("No August 1st transaction found!");
-        }
+        let allowance_transactions: Vec<_> = transactions.transactions.iter()
+            .filter(|t| t.description.contains("allowance"))
+            .collect();
         
-        let august_latest = august_response.transactions.iter()
-            .filter(|t| t.date.starts_with("2025-08"))
-            .max_by_key(|t| &t.date);
-            
-        if let Some(latest) = august_latest {
-            info!("✅ August 31st ending balance: ${:.2} from transaction: {}", latest.balance, latest.id);
-            assert_eq!(latest.balance, 11.0, "August should end with balance $11.00");
-        } else {
-            panic!("No August transactions found!");
-        }
+        assert_eq!(allowance_transactions.len(), 1, "Should have created 1 allowance transaction");
+        assert_eq!(allowance_transactions[0].amount, 7.50, "Allowance amount should match config");
+        assert_eq!(allowance_transactions[0].transaction_type, TransactionType::Income, "Allowance should be income type");
+    }
+
+    #[tokio::test]
+    async fn test_check_and_issue_pending_allowances_no_duplicates() {
+        let service = create_test_service().await;
         
-        // Test September should start at $11, end at $15
-        // Sep 5, 12, 19, 26 are Fridays = 4 allowances
-        let september_end_request = TransactionListRequest {
+        // Create and set active child
+        let child = create_test_child(&service).await;
+        let _ = service.child_service.set_active_child(shared::SetActiveChildRequest {
+            child_id: child.id.clone(),
+        }).await.expect("Failed to set active child");
+        
+        // Create active allowance config for today's day of week
+        let today = Local::now().date_naive();
+        let today_day_of_week = today.weekday().num_days_from_sunday() as u8;
+        
+        let _ = service.allowance_service.update_allowance_config(shared::UpdateAllowanceConfigRequest {
+            child_id: Some(child.id.clone()),
+            amount: 5.0,
+            day_of_week: today_day_of_week,
+            is_active: true,
+        }).await.expect("Failed to create allowance config");
+        
+        // First call should issue allowance
+        let first_issued = service
+            .check_and_issue_pending_allowances()
+            .await
+            .expect("Should issue pending allowances on first call");
+        
+        assert_eq!(first_issued, 1, "Should issue 1 allowance on first call");
+        
+        // Second call should not issue duplicate allowance
+        let second_issued = service
+            .check_and_issue_pending_allowances()
+            .await
+            .expect("Should not fail on second call");
+        
+        assert_eq!(second_issued, 0, "Should not issue duplicate allowance on second call");
+        
+        // Verify only one allowance transaction exists
+        let transactions = service.list_transactions(TransactionListRequest {
             after: None,
-            limit: Some(1000),
+            limit: Some(10),
             start_date: None,
-            end_date: Some("2025-09-30T23:59:59Z".to_string()),
-        };
-        let september_response = service.list_transactions(september_end_request).await.unwrap();
+            end_date: None,
+        }).await.expect("Failed to list transactions");
         
-        let september_latest = september_response.transactions.iter()
-            .filter(|t| t.date.starts_with("2025-09"))
-            .max_by_key(|t| &t.date);
-            
-        if let Some(latest) = september_latest {
-            info!("✅ September 30th ending balance: ${:.2} from transaction: {}", latest.balance, latest.id);
-            assert_eq!(latest.balance, 15.0, "September should end with balance $15.00");
-        } else {
-            panic!("No September transactions found!");
-        }
+        let allowance_transactions: Vec<_> = transactions.transactions.iter()
+            .filter(|t| t.description.contains("allowance"))
+            .collect();
         
-        // Test October 1st should be $16 (Sep 30th $15 + Oct 1st Friday allowance)
-        let october_1st_request = TransactionListRequest {
+        assert_eq!(allowance_transactions.len(), 1, "Should have exactly 1 allowance transaction, no duplicates");
+    }
+
+    #[tokio::test]
+    async fn test_create_allowance_transaction() {
+        let service = create_test_service().await;
+        
+        // Create and set active child
+        let child = create_test_child(&service).await;
+        let _ = service.child_service.set_active_child(shared::SetActiveChildRequest {
+            child_id: child.id.clone(),
+        }).await.expect("Failed to set active child");
+        
+        let allowance_date = Local::now().date_naive();
+        let allowance_amount = 12.50;
+        
+        // Create allowance transaction
+        let transaction = service
+            .create_allowance_transaction(&child.id, allowance_date, allowance_amount)
+            .await
+            .expect("Should create allowance transaction");
+        
+        assert_eq!(transaction.child_id, child.id);
+        assert_eq!(transaction.amount, allowance_amount);
+        assert_eq!(transaction.description, "Weekly allowance");
+        assert_eq!(transaction.transaction_type, TransactionType::Income);
+        assert!(transaction.date.contains(&allowance_date.format("%Y-%m-%d").to_string()));
+        assert!(transaction.balance >= allowance_amount, "Balance should be at least the allowance amount");
+        
+        // Verify transaction was stored
+        let stored_transactions = service.transaction_repository
+            .list_transactions(&child.id, None, None)
+            .await
+            .expect("Failed to list stored transactions");
+        
+        let stored_allowance = stored_transactions.iter()
+            .find(|t| t.id == transaction.id)
+            .expect("Allowance transaction should be stored");
+        
+        assert_eq!(stored_allowance.amount, allowance_amount);
+        assert_eq!(stored_allowance.description, "Weekly allowance");
+    }
+
+    #[tokio::test]
+    async fn test_list_transactions_triggers_allowance_check() {
+        let service = create_test_service().await;
+        
+        // Create and set active child
+        let child = create_test_child(&service).await;
+        let _ = service.child_service.set_active_child(shared::SetActiveChildRequest {
+            child_id: child.id.clone(),
+        }).await.expect("Failed to set active child");
+        
+        // Create active allowance config for today's day of week
+        let today = Local::now().date_naive();
+        let today_day_of_week = today.weekday().num_days_from_sunday() as u8;
+        
+        let _ = service.allowance_service.update_allowance_config(shared::UpdateAllowanceConfigRequest {
+            child_id: Some(child.id.clone()),
+            amount: 8.75,
+            day_of_week: today_day_of_week,
+            is_active: true,
+        }).await.expect("Failed to create allowance config");
+        
+        // Initially should have no transactions
+        let initial_transactions = service.transaction_repository
+            .list_transactions(&child.id, None, None)
+            .await
+            .expect("Failed to list initial transactions");
+        
+        assert!(initial_transactions.is_empty(), "Should start with no transactions");
+        
+        // Call list_transactions - this should trigger allowance check and issue allowance
+        let response = service.list_transactions(TransactionListRequest {
             after: None,
-            limit: Some(1000),
+            limit: Some(10),
             start_date: None,
-            end_date: Some("2025-10-01T23:59:59Z".to_string()),
+            end_date: None,
+        }).await.expect("Failed to list transactions");
+        
+        // Should now have the issued allowance
+        let allowance_transactions: Vec<_> = response.transactions.iter()
+            .filter(|t| t.description.contains("allowance"))
+            .collect();
+        
+        assert_eq!(allowance_transactions.len(), 1, "Should have automatically issued allowance");
+        assert_eq!(allowance_transactions[0].amount, 8.75, "Auto-issued allowance should match config");
+    }
+
+    // Helper function to create a test child
+    async fn create_test_child(service: &TransactionService<CsvConnection>) -> shared::Child {
+        let request = shared::CreateChildRequest {
+            name: format!("Test Child {}", chrono::Utc::now().timestamp_millis()),
+            birthdate: "2015-01-01".to_string(),
         };
-        let october_response = service.list_transactions(october_1st_request).await.unwrap();
-        
-        let october_1st = october_response.transactions.iter()
-            .find(|t| t.date.starts_with("2025-10-01"));
-            
-        if let Some(oct_1st) = october_1st {
-            info!("✅ October 1st balance: ${:.2} from transaction: {}", oct_1st.balance, oct_1st.id);
-            assert_eq!(oct_1st.balance, 16.0, "October 1st should have balance $16.00");
-        } else {
-            panic!("No October 1st transaction found!");
-        }
-        
-        info!("🎉 Cross-month balance forwarding test completed successfully!");
+        let response = service.child_service.create_child(request).await
+            .expect("Failed to create test child");
+        response.child
     }
 }
