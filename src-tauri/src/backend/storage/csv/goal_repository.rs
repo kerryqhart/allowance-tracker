@@ -280,15 +280,16 @@ impl crate::backend::storage::GoalStorage for GoalRepository {
             None => return Ok(None),
         };
         
-        let goals = self.read_goals(&child_directory).await?;
+        let mut goals = self.read_goals(&child_directory).await?;
         
-        // Find the most recent active goal
-        let active_goal = goals
-            .into_iter()
-            .filter(|g| g.state == GoalState::Active)
-            .max_by_key(|g| g.created_at.clone());
+        // Sort by updated_at descending (most recent first)
+        goals.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
         
-        Ok(active_goal)
+        // Get the most recent goal entry and check if it's active
+        match goals.first() {
+            Some(goal) if goal.state == GoalState::Active => Ok(Some(goal.clone())),
+            _ => Ok(None), // No goals or latest goal is cancelled/completed
+        }
     }
     
     /// List all goals for a specific child (with optional limit)
