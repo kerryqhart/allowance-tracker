@@ -234,8 +234,16 @@ impl GoalRepository {
             .open(&goals_file_path)?;
         
         let mut csv_writer = Writer::from_writer(file);
-        let record = GoalRecord::from(goal.clone());
-        csv_writer.serialize(record)?;
+        // Don't write headers when appending to existing file
+        csv_writer.write_record(&[
+            &goal.id,
+            &goal.child_id, 
+            &goal.description,
+            &goal.target_amount.to_string(),
+            &goal.state.to_string(),
+            &goal.created_at,
+            &goal.updated_at,
+        ])?;
         csv_writer.flush()?;
         
         // Git commit if enabled

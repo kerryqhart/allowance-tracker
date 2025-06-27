@@ -37,8 +37,8 @@ impl CalendarService {
         let days_in_month = self.days_in_month(month, year);
         let first_day = self.first_day_of_month(month, year);
         
-        log::info!("🗓️ CALENDAR DEBUG: Generating calendar for {}/{}", month, year);
-        log::info!("🗓️ CALENDAR DEBUG: Days in month: {}, First day of week: {}", days_in_month, first_day);
+        log::debug!("🗓️ CALENDAR DEBUG: Generating calendar for {}/{}", month, year);
+        log::debug!("🗓️ CALENDAR DEBUG: Days in month: {}, First day of week: {}", days_in_month, first_day);
         
         // Transactions already include future allowances from the transaction service
         let all_transactions = transactions;
@@ -53,9 +53,9 @@ impl CalendarService {
         let mut calendar_days = Vec::new();
         
         // Add empty cells for days before the first day of month
-        log::info!("🗓️ CALENDAR DEBUG: Adding {} padding days before month", first_day);
+        log::debug!("🗓️ CALENDAR DEBUG: Adding {} padding days before month", first_day);
         for i in 0..first_day {
-            log::info!("🗓️ CALENDAR DEBUG: Adding padding day {} with PaddingBefore", i);
+            log::debug!("🗓️ CALENDAR DEBUG: Adding padding day {} with PaddingBefore", i);
             calendar_days.push(CalendarDay {
                 day: 0,
                 balance: 0.0,
@@ -67,12 +67,12 @@ impl CalendarService {
         }
         
         // Add days of the month
-        log::info!("🗓️ CALENDAR DEBUG: Adding {} actual month days", days_in_month);
+        log::debug!("🗓️ CALENDAR DEBUG: Adding {} actual month days", days_in_month);
         for day in 1..=days_in_month {
             let day_transactions = transactions_by_day.get(&day).cloned().unwrap_or_default();
             let day_balance = daily_balances.get(&day).copied().unwrap_or(0.0);
             
-            log::info!("🗓️ CALENDAR DEBUG: Adding month day {} with {} transactions", day, day_transactions.len());
+            log::debug!("🗓️ CALENDAR DEBUG: Adding month day {} with {} transactions", day, day_transactions.len());
             calendar_days.push(CalendarDay {
                 day,
                 balance: day_balance,
@@ -83,7 +83,7 @@ impl CalendarService {
             });
         }
         
-        log::info!("🗓️ CALENDAR DEBUG: Total calendar days created: {}", calendar_days.len());
+        log::debug!("🗓️ CALENDAR DEBUG: Total calendar days created: {}", calendar_days.len());
         
         CalendarMonth {
             month,
@@ -179,7 +179,7 @@ impl CalendarService {
         let starting_balance = self.calculate_starting_balance_for_month(month, year, &sorted_transactions);
         let mut previous_balance = starting_balance;
         
-        log::info!("🗓️ BALANCE DEBUG: Starting balance for {}/{}: ${:.2}", month, year, starting_balance);
+        log::debug!("🗓️ BALANCE DEBUG: Starting balance for {}/{}: ${:.2}", month, year, starting_balance);
         
         // For each day, find the latest transaction (chronologically) and use its balance
         for day in 1..=days_in_month {
@@ -192,7 +192,7 @@ impl CalendarService {
                 if let Some(latest) = sorted_day_transactions.last() {
                     daily_balances.insert(day, latest.balance);
                     previous_balance = latest.balance;
-                    log::info!("🗓️ BALANCE DEBUG: Day {}: Using stored balance ${:.2} from transaction {}", 
+                    log::debug!("🗓️ BALANCE DEBUG: Day {}: Using stored balance ${:.2} from transaction {}", 
                               day, latest.balance, latest.id);
                 } else {
                     // No transactions on this day, carry forward previous balance
@@ -201,7 +201,7 @@ impl CalendarService {
             } else {
                 // No transactions on this day, carry forward previous balance
                 daily_balances.insert(day, previous_balance);
-                log::info!("🗓️ BALANCE DEBUG: Day {}: No transactions, using previous balance ${:.2}", 
+                log::debug!("🗓️ BALANCE DEBUG: Day {}: No transactions, using previous balance ${:.2}", 
                           day, previous_balance);
             }
         }
@@ -232,7 +232,7 @@ impl CalendarService {
                 if transaction_is_before_target {
                     // This is the most recent transaction before our target month
                     // Return its balance (which represents the account balance after this transaction)
-                    log::info!("🗓️ BALANCE DEBUG: Found starting balance for {}/{}: ${:.2} from transaction on {}/{}/{}", 
+                    log::debug!("🗓️ BALANCE DEBUG: Found starting balance for {}/{}: ${:.2} from transaction on {}/{}/{}", 
                               month, year, transaction.balance, t_month, t_year, transaction.id);
                     return transaction.balance;
                 }
@@ -240,7 +240,7 @@ impl CalendarService {
         }
         
         // No transactions found before this month, starting balance is 0
-        log::info!("🗓️ BALANCE DEBUG: No transactions found before {}/{}, starting balance: $0.00", month, year);
+        log::debug!("🗓️ BALANCE DEBUG: No transactions found before {}/{}, starting balance: $0.00", month, year);
         0.0
     }
 
