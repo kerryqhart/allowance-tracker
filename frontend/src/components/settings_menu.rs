@@ -3,6 +3,7 @@ use web_sys::MouseEvent;
 use super::challenge_modal::ChallengeModal;
 use super::create_child_modal::CreateChildModal;
 use super::allowance_config_modal::AllowanceConfigModal;
+use super::profile_modal::ProfileModal;
 use super::export_modal::ExportModal;
 use crate::services::api::ApiClient;
 use shared::Child;
@@ -21,6 +22,7 @@ pub fn settings_menu(props: &SettingsMenuProps) -> Html {
     let show_challenge = use_state(|| false);
     let show_create_child = use_state(|| false);
     let show_allowance_config = use_state(|| false);
+    let show_profile_modal = use_state(|| false);
     let show_export_modal = use_state(|| false);
     
     let toggle_menu = {
@@ -154,6 +156,14 @@ pub fn settings_menu(props: &SettingsMenuProps) -> Html {
         })
     };
 
+    // Profile modal callbacks
+    let on_profile_close = {
+        let show_profile_modal = show_profile_modal.clone();
+        Callback::from(move |_| {
+            show_profile_modal.set(false);
+        })
+    };
+
     html! {
         <div class="settings-menu">
             <button 
@@ -168,7 +178,14 @@ pub fn settings_menu(props: &SettingsMenuProps) -> Html {
                 <>
                     <div class="settings-backdrop" onclick={on_backdrop_click}></div>
                     <div class="settings-dropdown" onclick={on_menu_click}>
-                        <div class="settings-item" onclick={close_menu.clone()}>
+                        <div class="settings-item" onclick={{
+                            let close_menu = close_menu.clone();
+                            let show_profile_modal = show_profile_modal.clone();
+                            Callback::from(move |_: MouseEvent| {
+                                close_menu.emit(MouseEvent::new("click").unwrap());
+                                show_profile_modal.set(true);
+                            })
+                        }}>
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                                 <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" fill="currentColor"/>
                             </svg>
@@ -231,6 +248,12 @@ pub fn settings_menu(props: &SettingsMenuProps) -> Html {
                 is_open={*show_allowance_config}
                 on_success={on_allowance_config_success}
                 on_close={on_allowance_config_close}
+            />
+            
+            <ProfileModal 
+                is_open={*show_profile_modal}
+                on_close={on_profile_close}
+                active_child={props.active_child.clone()}
             />
             
             <ExportModal 

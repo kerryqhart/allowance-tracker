@@ -1764,6 +1764,98 @@
             text-align: center;
         }
 
+        /* Profile Modal Styles */
+        .profile-modal-backdrop {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(0, 0, 0, 0.7);
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            backdrop-filter: blur(8px);
+        }
+
+        .profile-modal {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 400px;
+            width: 90%;
+            max-height: 90vh;
+            overflow-y: auto;
+            position: relative;
+            animation: modalSlideIn 0.3s ease-out;
+        }
+
+        .profile-modal-content {
+            padding: 2rem;
+        }
+
+        .profile-title {
+            color: #667eea;
+            font-size: 1.5rem;
+            margin-bottom: 1.5rem;
+            font-weight: 600;
+            text-align: center;
+        }
+
+        .profile-info {
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .profile-field {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .profile-label {
+            font-weight: 600;
+            color: #333;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .profile-value {
+            font-size: 1.1rem;
+            color: #555;
+            padding: 0.75rem;
+            background-color: #f8f9fa;
+            border-radius: 10px;
+            border: 2px solid #e9ecef;
+        }
+
+        .profile-no-child {
+            text-align: center;
+            padding: 2rem 1rem;
+            color: #6c757d;
+        }
+
+        .profile-no-child p {
+            margin-bottom: 0.5rem;
+            font-size: 1.1rem;
+            color: #495057;
+        }
+
+        .profile-no-child small {
+            font-size: 0.9rem;
+            opacity: 0.8;
+        }
+
+        .profile-buttons {
+            display: flex;
+            justify-content: center;
+            margin-top: 1rem;
+        }
+
         /* Allowance Configuration Modal Styles */
         .allowance-config-modal-backdrop {
             position: fixed;

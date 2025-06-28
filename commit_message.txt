@@ -1,14 +1,11 @@
-feat: Implement clean export modal with path sanitization
+feat: Add profile modal to display child information
 
-- Create dedicated ExportModal component matching allowance config design
-- Add comprehensive path sanitization for user input handling:
-  * Remove surrounding quotes (single/double)
-  * Handle escaped spaces and trailing slashes
-  * Support tilde expansion for home directory
-  * Clean whitespace and common path issues
-- Replace cramped inline export UI with proper modal card overlay
-- Use consistent CSS classes with allowance config modal
-- Add proper loading states, error handling, and success messages
-- Clean up settings menu by removing debug artifacts and emojis
-- Maintain robust backend export API with sanitized path processing
-- Export functionality now matches app's design patterns perfectly 
+- Create ProfileModal component showing child name and formatted birthday
+- Wire up "Profile" option in settings menu to open modal
+- Add beautiful CSS styling consistent with existing modals
+- Format birthdate from YYYY-MM-DD to readable format (e.g., "June 15, 2015")
+- Handle case when no active child is selected
+- Include smooth animations, backdrop blur, and responsive design
+
+The profile modal provides a clean, read-only view of the active child's
+basic information with an intuitive user experience. 
