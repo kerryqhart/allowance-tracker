@@ -3,10 +3,15 @@ use web_sys::MouseEvent;
 use super::challenge_modal::ChallengeModal;
 use super::create_child_modal::CreateChildModal;
 use super::allowance_config_modal::AllowanceConfigModal;
+use super::export_modal::ExportModal;
+use crate::services::api::ApiClient;
+use shared::Child;
 
 #[derive(Properties, PartialEq)]
 pub struct SettingsMenuProps {
     pub on_toggle_delete_mode: Callback<()>,
+    pub api_client: ApiClient,
+    pub active_child: Option<Child>,
 }
 
 #[function_component(SettingsMenu)]
@@ -16,6 +21,7 @@ pub fn settings_menu(props: &SettingsMenuProps) -> Html {
     let show_challenge = use_state(|| false);
     let show_create_child = use_state(|| false);
     let show_allowance_config = use_state(|| false);
+    let show_export_modal = use_state(|| false);
     
     let toggle_menu = {
         let is_open = is_open.clone();
@@ -121,6 +127,33 @@ pub fn settings_menu(props: &SettingsMenuProps) -> Html {
         })
     };
 
+    // Export data functionality - show modal
+    let on_export_data_click = {
+        let close_menu = close_menu.clone();
+        let show_export_modal = show_export_modal.clone();
+        
+        Callback::from(move |_: MouseEvent| {
+            close_menu.emit(MouseEvent::new("click").unwrap());
+            show_export_modal.set(true);
+        })
+    };
+
+    // Export modal callbacks
+    let on_export_success = {
+        let show_export_modal = show_export_modal.clone();
+        Callback::from(move |_| {
+            show_export_modal.set(false);
+            // TODO: Show success notification
+        })
+    };
+
+    let on_export_close = {
+        let show_export_modal = show_export_modal.clone();
+        Callback::from(move |_| {
+            show_export_modal.set(false);
+        })
+    };
+
     html! {
         <div class="settings-menu">
             <button 
@@ -172,7 +205,7 @@ pub fn settings_menu(props: &SettingsMenuProps) -> Html {
                             <span>{"Delete transactions"}</span>
                         </div>
                         
-                        <div class="settings-item" onclick={close_menu.clone()}>
+                        <div class="settings-item" onclick={on_export_data_click}>
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                                 <path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 2 2h10c1.1 0 2-.9 2-2V8l-6-6zm4 18H6V4h7v5h5v11z" fill="currentColor"/>
                             </svg>
@@ -198,6 +231,14 @@ pub fn settings_menu(props: &SettingsMenuProps) -> Html {
                 is_open={*show_allowance_config}
                 on_success={on_allowance_config_success}
                 on_close={on_allowance_config_close}
+            />
+            
+            <ExportModal 
+                is_open={*show_export_modal}
+                on_success={on_export_success}
+                on_close={on_export_close}
+                api_client={props.api_client.clone()}
+                active_child={props.active_child.clone()}
             />
         </div>
     }

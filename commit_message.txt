@@ -1,18 +1,14 @@
-feat: Add automatic allowance issuing system
+feat: Implement clean export modal with path sanitization
 
-- Add automatic allowance checking and issuing logic to prevent missed allowances
-- New AllowanceService methods:
-  - get_pending_allowance_dates(): Identifies dates needing allowances
-  - has_allowance_for_date(): Prevents duplicate allowances with robust detection
-  - is_allowance_day(): Utility to check if date matches allowance schedule
-- Integrate allowance checking into TransactionService.list_transactions()
-- Add comprehensive unit tests for allowance checking logic
-- Fix race condition that caused duplicate allowances by improving detection
-- Logs show system correctly identifies existing allowances and prevents duplicates
-
-The system now automatically issues allowances when:
-1. Today matches the configured allowance day of week
-2. No existing allowance transaction exists for that date
-3. Child has an active allowance configuration
-
-This ensures allowances are never missed when the app is used on allowance day. 
+- Create dedicated ExportModal component matching allowance config design
+- Add comprehensive path sanitization for user input handling:
+  * Remove surrounding quotes (single/double)
+  * Handle escaped spaces and trailing slashes
+  * Support tilde expansion for home directory
+  * Clean whitespace and common path issues
+- Replace cramped inline export UI with proper modal card overlay
+- Use consistent CSS classes with allowance config modal
+- Add proper loading states, error handling, and success messages
+- Clean up settings menu by removing debug artifacts and emojis
+- Maintain robust backend export API with sanitized path processing
+- Export functionality now matches app's design patterns perfectly 

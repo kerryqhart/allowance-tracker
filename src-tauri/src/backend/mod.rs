@@ -121,6 +121,7 @@ pub fn create_router(app_state: AppState) -> Router {
         .nest("/parental-control", io::parental_control_apis::router())
         .nest("/allowance", io::allowance_apis::router())
         .nest("/goals", io::goal_apis::router())
+        .nest("/export", io::export_apis::router())
         .route("/logs", post(io::logging_apis::log_message));
 
     // Define our main application router

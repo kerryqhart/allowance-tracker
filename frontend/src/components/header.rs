@@ -44,7 +44,11 @@ pub fn header(props: &HeaderProps) -> Html {
                             child_loading={props.child_loading}
                             active_child_actions={props.active_child_actions.clone()}
                         />
-                        <SettingsMenu on_toggle_delete_mode={props.on_toggle_delete_mode.clone()} />
+                        <SettingsMenu 
+                            on_toggle_delete_mode={props.on_toggle_delete_mode.clone()}
+                            api_client={props.api_client.clone()}
+                            active_child={props.active_child.clone()}
+                        />
                     </div>
                 </div>
             </div>

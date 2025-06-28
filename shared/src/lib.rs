@@ -604,6 +604,48 @@ impl fmt::Display for TransactionIdError {
 
 impl std::error::Error for TransactionIdError {}
 
+/// Request to export transaction data as CSV
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ExportDataRequest {
+    /// Optional child ID - if None, uses active child
+    pub child_id: Option<String>,
+}
+
+/// Response containing CSV data for export
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ExportDataResponse {
+    /// CSV content as a string
+    pub csv_content: String,
+    /// Suggested filename for the export
+    pub filename: String,
+    /// Number of transactions exported
+    pub transaction_count: usize,
+    /// Child name for the exported data
+    pub child_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ExportToPathRequest {
+    /// Optional child ID - if None, uses active child
+    pub child_id: Option<String>,
+    /// Optional custom directory path - if None, uses Documents folder
+    pub custom_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ExportToPathResponse {
+    /// Whether the export was successful
+    pub success: bool,
+    /// Success or error message
+    pub message: String,
+    /// Full path where the file was written
+    pub file_path: String,
+    /// Number of transactions exported
+    pub transaction_count: usize,
+    /// Child name for the exported data
+    pub child_name: String,
+}
+
 impl AllowanceConfig {
     /// Generate an allowance config ID based on child ID and timestamp
     pub fn generate_id(child_id: &str, epoch_millis: u64) -> String {

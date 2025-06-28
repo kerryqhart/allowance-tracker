@@ -7,6 +7,7 @@ use shared::{
     GetAllowanceConfigRequest, GetAllowanceConfigResponse, UpdateAllowanceConfigRequest, UpdateAllowanceConfigResponse,
     CurrentDateResponse, CalendarFocusDate, UpdateCalendarFocusRequest, UpdateCalendarFocusResponse,
     CreateGoalRequest, CreateGoalResponse, GetCurrentGoalResponse, CancelGoalResponse,
+    ExportDataRequest, ExportDataResponse, ExportToPathRequest, ExportToPathResponse,
 };
 
 /// API client for communicating with the backend server
@@ -497,6 +498,89 @@ impl ApiClient {
             Ok(response) => {
                 if response.ok() {
                     match response.json::<CancelGoalResponse>().await {
+                        Ok(data) => Ok(data),
+                        Err(e) => Err(format!("Failed to parse response: {}", e)),
+                    }
+                } else {
+                    let status = response.status();
+                    let error_text = response.text().await
+                        .unwrap_or_else(|_| "Unknown error".to_string());
+                    Err(format!("Server error {}: {}", status, error_text))
+                }
+            }
+            Err(e) => Err(format!("Network error: {}", e)),
+        }
+    }
+
+    /// Export transaction data as CSV
+    pub async fn export_data(&self, request: ExportDataRequest) -> Result<ExportDataResponse, String> {
+        let url = format!("{}/api/export/csv", self.base_url);
+        
+        match Request::post(&url)
+            .json(&request)
+            .map_err(|e| format!("Failed to serialize request: {}", e))?
+            .send()
+            .await
+        {
+            Ok(response) => {
+                if response.ok() {
+                    match response.json::<ExportDataResponse>().await {
+                        Ok(data) => Ok(data),
+                        Err(e) => Err(format!("Failed to parse response: {}", e)),
+                    }
+                } else {
+                    let status = response.status();
+                    let error_text = response.text().await
+                        .unwrap_or_else(|_| "Unknown error".to_string());
+                    Err(format!("Server error {}: {}", status, error_text))
+                }
+            }
+            Err(e) => Err(format!("Network error: {}", e)),
+        }
+    }
+
+    /// Write exported data to a file (using backend file writing)
+    pub async fn write_export_file(&self, file_path: &str, content: &str) -> Result<(), String> {
+        let url = format!("{}/api/export/write-file", self.base_url);
+        
+        let request_body = serde_json::json!({
+            "file_path": file_path,
+            "content": content
+        });
+        
+        match Request::post(&url)
+            .json(&request_body)
+            .map_err(|e| format!("Failed to serialize request: {}", e))?
+            .send()
+            .await
+        {
+            Ok(response) => {
+                if response.ok() {
+                    Ok(())
+                } else {
+                    let status = response.status();
+                    let error_text = response.text().await
+                        .unwrap_or_else(|_| "Unknown error".to_string());
+                    Err(format!("Server error {}: {}", status, error_text))
+                }
+            }
+            Err(e) => Err(format!("Network error: {}", e)),
+        }
+    }
+
+    /// Export data directly to a path (with optional custom directory)
+    pub async fn export_to_path(&self, request: ExportToPathRequest) -> Result<ExportToPathResponse, String> {
+        let url = format!("{}/api/export/to-path", self.base_url);
+        
+        match Request::post(&url)
+            .json(&request)
+            .map_err(|e| format!("Failed to serialize request: {}", e))?
+            .send()
+            .await
+        {
+            Ok(response) => {
+                if response.ok() {
+                    match response.json::<ExportToPathResponse>().await {
                         Ok(data) => Ok(data),
                         Err(e) => Err(format!("Failed to parse response: {}", e)),
                     }
