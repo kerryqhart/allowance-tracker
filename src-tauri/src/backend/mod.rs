@@ -45,7 +45,7 @@ use axum::{
 };
 use tower_http::cors::{Any, CorsLayer};
 use anyhow::Result;
-use crate::backend::domain::{TransactionService, CalendarService, TransactionTableService, MoneyManagementService, child_service::ChildService, ParentalControlService, AllowanceService, BalanceService, GoalService};
+use crate::backend::domain::{TransactionService, CalendarService, TransactionTableService, MoneyManagementService, child_service::ChildService, ParentalControlService, AllowanceService, BalanceService, GoalService, DataDirectoryService};
 use crate::backend::storage::CsvConnection;
 use log::info;
 
@@ -63,6 +63,7 @@ pub struct AppState {
     pub allowance_service: AllowanceService,
     pub balance_service: BalanceService<CsvConnection>,
     pub goal_service: GoalService,
+    pub data_directory_service: DataDirectoryService,
 }
 
 /// Initialize the backend with all required services
@@ -82,7 +83,8 @@ pub async fn initialize_backend() -> Result<AppState> {
     let allowance_service = AllowanceService::new(csv_conn.clone());
     let balance_service = BalanceService::new(csv_conn.clone());
     let transaction_service = TransactionService::new(csv_conn.clone(), child_service.clone(), allowance_service.clone(), balance_service.clone());
-    let goal_service = GoalService::new(csv_conn, child_service.clone(), allowance_service.clone(), transaction_service.clone(), balance_service.clone());
+    let goal_service = GoalService::new(csv_conn.clone(), child_service.clone(), allowance_service.clone(), transaction_service.clone(), balance_service.clone());
+    let data_directory_service = DataDirectoryService::new(csv_conn, std::sync::Arc::new(child_service.clone()));
 
     info!("Setting up application state");
     let app_state = AppState {
@@ -95,6 +97,7 @@ pub async fn initialize_backend() -> Result<AppState> {
         allowance_service,
         balance_service,
         goal_service,
+        data_directory_service,
     };
 
     Ok(app_state)
@@ -122,6 +125,7 @@ pub fn create_router(app_state: AppState) -> Router {
         .nest("/allowance", io::allowance_apis::router())
         .nest("/goals", io::goal_apis::router())
         .nest("/export", io::export_apis::router())
+        .nest("/data-directory", io::data_directory_apis::create_data_directory_routes())
         .route("/logs", post(io::logging_apis::log_message));
 
     // Define our main application router

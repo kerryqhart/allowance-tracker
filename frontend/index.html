@@ -1856,6 +1856,332 @@
             margin-top: 1rem;
         }
 
+        .profile-divider {
+            height: 1px;
+            background: linear-gradient(90deg, transparent, #e5e7eb, transparent);
+            margin: 20px 0;
+        }
+
+        .profile-value.data-directory {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: #f8fafc;
+            padding: 8px 12px;
+            border-radius: 6px;
+            border: 1px solid #e2e8f0;
+            margin-bottom: 8px;
+        }
+
+        .profile-value.data-directory svg {
+            color: #64748b;
+            flex-shrink: 0;
+        }
+
+        .profile-value .directory-path {
+            font-family: 'SF Mono', 'Monaco', monospace;
+            font-size: 13px;
+            color: #475569;
+            word-break: break-all;
+        }
+
+        .change-location-button {
+            background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+        }
+
+        .change-location-button:hover {
+            background: linear-gradient(135deg, #2563eb, #1e40af);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(59, 130, 246, 0.3);
+        }
+
+        /* Data Directory Modal Styles */
+        .data-directory-modal-backdrop {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(0, 0, 0, 0.7);
+            z-index: 1100;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            backdrop-filter: blur(8px);
+        }
+
+        .data-directory-modal {
+            background: white;
+            border-radius: 16px;
+            width: 90%;
+            max-width: 600px;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            position: relative;
+        }
+
+        .data-directory-modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 24px;
+            border-bottom: 1px solid #e5e7eb;
+            background: linear-gradient(135deg, #f8fafc, #f1f5f9);
+            border-radius: 16px 16px 0 0;
+        }
+
+        .data-directory-modal-title {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 18px;
+            font-weight: 600;
+            color: #1f2937;
+        }
+
+        .data-directory-modal-title svg {
+            color: #3b82f6;
+        }
+
+        .data-directory-modal-content {
+            padding: 24px;
+            min-height: 200px;
+        }
+
+        .data-directory-loading,
+        .data-directory-selecting {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 16px;
+            padding: 40px 20px;
+            text-align: center;
+        }
+
+        .data-directory-ready {
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+        }
+
+        .current-directory-section h3 {
+            margin: 0 0 16px 0;
+            color: #374151;
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        .directory-path-display {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            background: #f8fafc;
+            padding: 16px;
+            border-radius: 8px;
+            border: 1px solid #e2e8f0;
+        }
+
+        .directory-path-display svg {
+            color: #64748b;
+            flex-shrink: 0;
+        }
+
+        .directory-path-display .directory-path {
+            font-family: 'SF Mono', 'Monaco', monospace;
+            font-size: 14px;
+            color: #475569;
+            word-break: break-all;
+            flex: 1;
+        }
+
+        .directory-path-display.new-path {
+            background: #f0f9ff;
+            border-color: #0ea5e9;
+        }
+
+        .directory-path-display.new-path .directory-path {
+            color: #0369a1;
+            font-weight: 500;
+        }
+
+        .action-section .help-text {
+            margin: 0 0 20px 0;
+            color: #6b7280;
+            line-height: 1.5;
+        }
+
+        .data-directory-confirming {
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+        }
+
+        .confirmation-section h3 {
+            margin: 0 0 16px 0;
+            color: #374151;
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        .confirmation-section p {
+            margin: 0 0 12px 0;
+            color: #6b7280;
+        }
+
+        .warning-text {
+            background: #fef3c7;
+            border: 1px solid #f59e0b;
+            color: #92400e;
+            padding: 12px;
+            border-radius: 6px;
+            font-size: 14px;
+            margin-top: 16px !important;
+        }
+
+        .confirmation-buttons {
+            display: flex;
+            gap: 12px;
+            justify-content: flex-end;
+        }
+
+        .cancel-button {
+            background: #f3f4f6;
+            color: #374151;
+            border: 1px solid #d1d5db;
+            padding: 10px 20px;
+            border-radius: 6px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .cancel-button:hover {
+            background: #e5e7eb;
+        }
+
+        .confirm-button {
+            background: linear-gradient(135deg, #dc2626, #b91c1c);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .confirm-button:hover {
+            background: linear-gradient(135deg, #b91c1c, #991b1b);
+        }
+
+        .data-directory-processing {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 20px;
+            padding: 40px 20px;
+            text-align: center;
+        }
+
+        .data-directory-processing h3 {
+            margin: 0;
+            color: #374151;
+            font-size: 18px;
+        }
+
+        .data-directory-processing p {
+            margin: 0;
+            color: #6b7280;
+            max-width: 400px;
+        }
+
+        .processing-steps {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            align-items: flex-start;
+            margin-top: 20px;
+        }
+
+        .processing-steps .step {
+            padding: 8px 12px;
+            background: #f3f4f6;
+            border-radius: 6px;
+            color: #6b7280;
+            font-size: 14px;
+        }
+
+        .processing-steps .step.active {
+            background: #dbeafe;
+            color: #1e40af;
+        }
+
+        .data-directory-success,
+        .data-directory-error {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 20px;
+            padding: 40px 20px;
+            text-align: center;
+        }
+
+        .success-icon,
+        .error-icon {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .data-directory-success h3,
+        .data-directory-error h3 {
+            margin: 0;
+            font-size: 20px;
+        }
+
+        .data-directory-success h3 {
+            color: #065f46;
+        }
+
+        .data-directory-error h3 {
+            color: #991b1b;
+        }
+
+        .success-message,
+        .error-message {
+            margin: 0;
+            color: #6b7280;
+            max-width: 400px;
+            line-height: 1.5;
+        }
+
+        .close-button {
+            background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .close-button:hover {
+            background: linear-gradient(135deg, #2563eb, #1e40af);
+        }
+
         /* Allowance Configuration Modal Styles */
         .allowance-config-modal-backdrop {
             position: fixed;

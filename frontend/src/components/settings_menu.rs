@@ -5,6 +5,7 @@ use super::create_child_modal::CreateChildModal;
 use super::allowance_config_modal::AllowanceConfigModal;
 use super::profile_modal::ProfileModal;
 use super::export_modal::ExportModal;
+use super::data_directory_modal::DataDirectoryModal;
 use crate::services::api::ApiClient;
 use shared::Child;
 
@@ -24,6 +25,7 @@ pub fn settings_menu(props: &SettingsMenuProps) -> Html {
     let show_allowance_config = use_state(|| false);
     let show_profile_modal = use_state(|| false);
     let show_export_modal = use_state(|| false);
+    let show_data_directory_modal = use_state(|| false);
     
     let toggle_menu = {
         let is_open = is_open.clone();
@@ -164,6 +166,23 @@ pub fn settings_menu(props: &SettingsMenuProps) -> Html {
         })
     };
 
+    // Data directory modal callbacks
+    let on_data_directory_click = {
+        let close_menu = close_menu.clone();
+        let show_data_directory_modal = show_data_directory_modal.clone();
+        Callback::from(move |_: MouseEvent| {
+            close_menu.emit(MouseEvent::new("click").unwrap());
+            show_data_directory_modal.set(true);
+        })
+    };
+
+    let on_data_directory_close = {
+        let show_data_directory_modal = show_data_directory_modal.clone();
+        Callback::from(move |_| {
+            show_data_directory_modal.set(false);
+        })
+    };
+
     html! {
         <div class="settings-menu">
             <button 
@@ -228,6 +247,13 @@ pub fn settings_menu(props: &SettingsMenuProps) -> Html {
                             </svg>
                             <span>{"Export data"}</span>
                         </div>
+                        
+                        <div class="settings-item" onclick={on_data_directory_click}>
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M10 4H4c-1.11 0-2 .89-2 2v12c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V8c0-1.11-.89-2-2-2h-8l-2-2z" fill="currentColor"/>
+                            </svg>
+                            <span>{"Data directory"}</span>
+                        </div>
                     </div>
                 </>
             }
@@ -260,6 +286,13 @@ pub fn settings_menu(props: &SettingsMenuProps) -> Html {
                 is_open={*show_export_modal}
                 on_success={on_export_success}
                 on_close={on_export_close}
+                api_client={props.api_client.clone()}
+                active_child={props.active_child.clone()}
+            />
+            
+            <DataDirectoryModal 
+                is_open={*show_data_directory_modal}
+                on_close={on_data_directory_close}
                 api_client={props.api_client.clone()}
                 active_child={props.active_child.clone()}
             />

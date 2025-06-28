@@ -8,6 +8,8 @@ use shared::{
     CurrentDateResponse, CalendarFocusDate, UpdateCalendarFocusRequest, UpdateCalendarFocusResponse,
     CreateGoalRequest, CreateGoalResponse, GetCurrentGoalResponse, CancelGoalResponse,
     ExportDataRequest, ExportDataResponse, ExportToPathRequest, ExportToPathResponse,
+    GetDataDirectoryResponse, RelocateDataDirectoryRequest, RelocateDataDirectoryResponse,
+    RevertDataDirectoryRequest, RevertDataDirectoryResponse,
 };
 
 /// API client for communicating with the backend server
@@ -581,6 +583,92 @@ impl ApiClient {
             Ok(response) => {
                 if response.ok() {
                     match response.json::<ExportToPathResponse>().await {
+                        Ok(data) => Ok(data),
+                        Err(e) => Err(format!("Failed to parse response: {}", e)),
+                    }
+                } else {
+                    let status = response.status();
+                    let error_text = response.text().await
+                        .unwrap_or_else(|_| "Unknown error".to_string());
+                    Err(format!("Server error {}: {}", status, error_text))
+                }
+            }
+            Err(e) => Err(format!("Network error: {}", e)),
+        }
+    }
+
+    /// Get current data directory path for a child
+    pub async fn get_current_data_directory(&self, child_id: Option<String>) -> Result<GetDataDirectoryResponse, String> {
+        let mut url = format!("{}/api/data-directory/current", self.base_url);
+        
+        // Add child_id as query parameter if provided
+        if let Some(id) = child_id {
+            url = format!("{}?child_id={}", url, id);
+        }
+        
+        match Request::get(&url).send().await {
+            Ok(response) => {
+                if response.ok() {
+                    match response.json::<GetDataDirectoryResponse>().await {
+                        Ok(data) => Ok(data),
+                        Err(e) => Err(format!("Failed to parse data directory response: {}", e)),
+                    }
+                } else {
+                    let status = response.status();
+                    let error_text = response.text().await
+                        .unwrap_or_else(|_| "Unknown error".to_string());
+                    Err(format!("Server error {}: {}", status, error_text))
+                }
+            }
+            Err(e) => Err(format!("Network error: {}", e)),
+        }
+    }
+
+    /// Relocate child's data directory to a new location
+    pub async fn relocate_data_directory(&self, child_id: Option<String>, new_path: String) -> Result<RelocateDataDirectoryResponse, String> {
+        let url = format!("{}/api/data-directory/relocate", self.base_url);
+        
+        let request = RelocateDataDirectoryRequest { child_id, new_path };
+
+        match Request::post(&url)
+            .json(&request)
+            .map_err(|e| format!("Failed to serialize request: {}", e))?
+            .send()
+            .await
+        {
+            Ok(response) => {
+                if response.ok() {
+                    match response.json::<RelocateDataDirectoryResponse>().await {
+                        Ok(data) => Ok(data),
+                        Err(e) => Err(format!("Failed to parse response: {}", e)),
+                    }
+                } else {
+                    let status = response.status();
+                    let error_text = response.text().await
+                        .unwrap_or_else(|_| "Unknown error".to_string());
+                    Err(format!("Server error {}: {}", status, error_text))
+                }
+            }
+            Err(e) => Err(format!("Network error: {}", e)),
+        }
+    }
+
+    pub async fn revert_data_directory(&self, child_id: Option<String>) -> Result<RevertDataDirectoryResponse, String> {
+        let url = format!("{}/api/data-directory/revert", self.base_url);
+        
+        let request = RevertDataDirectoryRequest {
+            child_id,
+        };
+        
+        match Request::post(&url)
+            .json(&request)
+            .map_err(|e| format!("Failed to serialize request: {}", e))?
+            .send()
+            .await
+        {
+            Ok(response) => {
+                if response.ok() {
+                    match response.json::<RevertDataDirectoryResponse>().await {
                         Ok(data) => Ok(data),
                         Err(e) => Err(format!("Failed to parse response: {}", e)),
                     }

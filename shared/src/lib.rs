@@ -347,6 +347,41 @@ pub struct ActiveChildResponse {
     pub active_child: Option<Child>,
 }
 
+/// Response containing current data directory information
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GetDataDirectoryResponse {
+    pub current_path: String,
+}
+
+/// Request to relocate data directory
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RelocateDataDirectoryRequest {
+    pub child_id: Option<String>, // If None, uses active child
+    pub new_path: String,
+}
+
+/// Response after relocating data directory
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RelocateDataDirectoryResponse {
+    pub success: bool,
+    pub message: String,
+    pub new_path: String,
+}
+
+/// Request to revert data directory
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RevertDataDirectoryRequest {
+    pub child_id: Option<String>, // If None, uses active child
+}
+
+/// Response after reverting data directory
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RevertDataDirectoryResponse {
+    pub success: bool,
+    pub message: String,
+    pub was_redirected: bool, // Whether there was actually a redirect to revert
+}
+
 /// Configuration for money management forms
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MoneyManagementConfig {

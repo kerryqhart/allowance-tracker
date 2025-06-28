@@ -30,6 +30,8 @@ pub fn profile_modal(props: &ProfileModalProps) -> Html {
         })
     };
 
+
+
     // Format birthdate from YYYY-MM-DD to a more readable format
     let format_birthdate = |birthdate: &str| -> String {
         if let Ok(parts) = parse_date(birthdate) {
@@ -77,6 +79,8 @@ pub fn profile_modal(props: &ProfileModalProps) -> Html {
                                     <label class="profile-label">{"Birthday"}</label>
                                     <div class="profile-value">{format_birthdate(&child.birthdate)}</div>
                                 </div>
+                                
+
                             </div>
                         }
                     } else {

@@ -120,7 +120,7 @@ impl GlobalConfigRepository {
         
         // Ensure base directory exists
         if !base_dir.exists() {
-            fs::create_dir_all(base_dir)?;
+            fs::create_dir_all(&base_dir)?;
             info!("Created base data directory: {:?}", base_dir);
         }
         
