@@ -145,6 +145,7 @@ pub struct FormattedTransaction {
     pub formatted_balance: String,
     pub raw_amount: f64,
     pub raw_balance: f64,
+    pub raw_date: String, // Original RFC 3339 date for chart parsing
 }
 
 /// Type of transaction amount for styling and display

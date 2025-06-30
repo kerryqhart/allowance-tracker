@@ -515,6 +515,264 @@
             min-width: 100px;
         }
 
+        /* Transaction View Container Styles */
+        .transaction-view-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.5rem;
+        }
+
+        .transaction-view-header h2 {
+            color: #667eea;
+            font-size: 1.8rem;
+            margin: 0;
+        }
+
+        /* View Toggle Buttons */
+        .view-toggle-buttons {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+            background: rgba(102, 126, 234, 0.1);
+            border-radius: 12px;
+            padding: 4px;
+        }
+
+        .view-toggle-btn {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.75rem 1rem;
+            border: none;
+            border-radius: 8px;
+            background: transparent;
+            color: #667eea;
+            font-size: 0.9rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            white-space: nowrap;
+        }
+
+        .view-toggle-btn:hover:not(.active) {
+            background: rgba(102, 126, 234, 0.1);
+            color: #5a67d8;
+        }
+
+        .view-toggle-btn.active {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+        }
+
+        .view-toggle-btn i {
+            font-size: 1rem;
+        }
+
+        .btn-label {
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+
+        .transaction-view-content {
+            position: relative;
+            min-height: 400px;
+        }
+
+        /* View Content Switching */
+        .transaction-views {
+            position: relative;
+            min-height: 400px;
+        }
+
+        .view-content {
+            width: 100%;
+            opacity: 0;
+            visibility: hidden;
+            transition: all 0.3s ease;
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+
+        .view-content.active {
+            opacity: 1;
+            visibility: visible;
+            position: relative;
+        }
+
+        .view-slide {
+            width: 100%;
+            opacity: 0;
+            visibility: hidden;
+            transition: all 0.3s ease;
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+
+        .view-slide.active {
+            opacity: 1;
+            visibility: visible;
+            position: relative;
+        }
+
+
+
+        /* Chart Loading and Empty States */
+        .chart-loading {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: #666;
+        }
+
+        .chart-loading p {
+            margin: 1rem 0 0 0;
+            font-size: 1rem;
+        }
+
+        .loading-spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid #f3f4f6;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        .chart-empty {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: #666;
+        }
+
+        .chart-empty-icon {
+            font-size: 4rem;
+            color: #e9ecef;
+            margin-bottom: 1rem;
+        }
+
+        .chart-empty p {
+            margin: 0;
+            font-size: 1.1rem;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Transaction View Container - White Background for Both Views */
+        .transaction-view-container {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 8px 32px rgba(102, 126, 234, 0.2);
+        }
+
+        /* Enhanced Chart Styles */
+        .rust-chart-container {
+            width: 100%;
+            background: white;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Chart Title with Beautiful Gradient (matching table header) - PRIORITY STYLES */
+        .rust-chart-container .chart-title-header {
+            background: linear-gradient(135deg, #ff9a9e, #f093fb, #c471ed) !important;
+            padding: 1rem 1.5rem !important;
+            margin: 0 !important;
+            border-radius: 10px 10px 0 0 !important;
+        }
+
+        .rust-chart-container .chart-title-header .chart-title {
+            color: white !important;
+            font-size: 1.1rem !important;
+            font-weight: 600 !important;
+            text-transform: uppercase !important;
+            letter-spacing: 0.5px !important;
+            margin: 0 !important;
+            text-align: center !important;
+        }
+
+        .rust-chart-container .chart-title-header h3 {
+            color: white !important;
+            font-size: 1.1rem !important;
+            font-weight: 600 !important;
+            text-transform: uppercase !important;
+            letter-spacing: 0.5px !important;
+            margin: 0 !important;
+            text-align: center !important;
+        }
+
+        /* Chart Content Area */
+        .chart-content {
+            padding: 1rem;
+            background: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 350px;
+        }
+
+        .rust-chart-canvas {
+            border: none;
+            border-radius: 6px;
+            background: white;
+            max-width: 100%;
+            height: auto;
+        }
+
+        /* Remove old duplicate styles - using new view-toggle-btn styles above */
+
+        @media (max-width: 768px) {
+            .transaction-view-header {
+                flex-direction: column;
+                gap: 1rem;
+                text-align: center;
+            }
+            
+            .chart-content {
+                padding: 0.5rem;
+                min-height: 280px;
+            }
+            
+            .chart-title-header {
+                padding: 0.75rem 1rem;
+            }
+            
+            .chart-title {
+                font-size: 1rem;
+            }
+            
+            .rust-chart-canvas {
+                width: 100%;
+                max-width: none;
+            }
+            
+            .view-toggle-buttons {
+                order: -1;
+                justify-self: center;
+            }
+            
+            .btn-label {
+                display: none;
+            }
+        }
+
         .add-money-section {
             background: rgba(255, 255, 255, 0.95);
             backdrop-filter: blur(10px);

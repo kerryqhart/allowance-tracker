@@ -21,7 +21,7 @@ use services::{
 };
 use components::{
     simple_calendar::SimpleCalendar,
-    transactions::transaction_table::TransactionTable,
+    transactions::TransactionViewContainer,
     forms::{
         add_money_form::AddMoneyForm,
         spend_money_form::SpendMoneyForm,
@@ -259,7 +259,7 @@ fn app() -> Html {
                     
                     // Legacy calendar section removed - now using SimpleCalendar above
 
-                    <TransactionTable 
+                    <TransactionViewContainer 
                         transactions={transactions.state.formatted_transactions.clone()} 
                         loading={transactions.state.loading}
                     />

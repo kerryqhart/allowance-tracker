@@ -10,9 +10,7 @@ pub struct TransactionTableProps {
 #[function_component(TransactionTable)]
 pub fn transaction_table(props: &TransactionTableProps) -> Html {
     html! {
-        <section class="transactions-section">
-            <h2>{"Recent Transactions"}</h2>
-            
+        <>
             {if props.loading {
                 html! { <div class="loading">{"Loading transactions..."}</div> }
             } else {
@@ -52,6 +50,6 @@ pub fn transaction_table(props: &TransactionTableProps) -> Html {
                     </div>
                 }
             }}
-        </section>
+        </>
     }
 } 

@@ -1,0 +1,33 @@
+Implement data directory relocation feature
+
+This commit implements the complete data directory relocation functionality that allows users to move child data directories to custom locations while preserving git history and maintaining redirect files for seamless operation.
+
+Backend Changes:
+- Enhanced CsvConnection with path unescaping logic to handle shell-escaped paths from user input
+- Added relocate_child_data_directory() method with comprehensive error handling and validation
+- Added revert_child_data_directory() method to restore data to default location
+- Implemented redirect file system (.allowance_redirect) for transparent path resolution
+- Added git integration to commit redirect files for recovery purposes
+- Enhanced copy operations to preserve complete directory structure including .git folders
+- Added comprehensive logging throughout relocation operations
+
+New Components:
+- DataDirectoryModal: Complete UI for directory selection and relocation
+- DataDirectoryService: Backend service layer for directory operations
+- DataDirectoryApis: REST endpoints for directory management
+
+Key Features:
+- Perfect git history preservation during moves
+- Shell escape sequence handling (spaces, tildes, quotes)
+- No-op detection for same-path operations
+- Empty directory validation before relocation
+- Hot-swap capability via redirect file system
+- Comprehensive error handling with user-friendly messages
+- Full revert capability to restore default locations
+
+API Endpoints:
+- GET /api/data-directory/current/{child_name} - Get current directory path
+- POST /api/data-directory/relocate - Relocate child data directory
+- POST /api/data-directory/revert - Revert to default location
+
+The implementation handles complex real-world scenarios including paths with spaces, special characters, and iCloud Drive locations. All operations maintain data integrity and provide clear feedback to users. 

@@ -95,6 +95,7 @@ impl TransactionTableService {
             formatted_balance: self.format_balance(transaction.balance),
             raw_amount: transaction.amount,
             raw_balance: transaction.balance,
+            raw_date: transaction.date.clone(),
         }
     }
 
