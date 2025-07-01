@@ -51,7 +51,6 @@ impl Component for RustChart {
     type Properties = RustChartProps;
 
     fn create(_ctx: &Context<Self>) -> Self {
-        crate::services::logging::Logger::info_with_component("RustChart", "🔧 RustChart component created");
         Self {
             chart_ref: NodeRef::default(),
             selected_range: DateRange::Last30Days, // Default to 30 days
@@ -59,7 +58,6 @@ impl Component for RustChart {
     }
 
     fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
-        crate::services::logging::Logger::debug_with_component("RustChart", &format!("📨 RustChart update message: {:?}", msg));
         match msg {
             Msg::DrawChart => {
                 // Pass full transaction list to draw_chart, it will do its own filtering
@@ -67,7 +65,6 @@ impl Component for RustChart {
                 false
             }
             Msg::SetDateRange(range) => {
-                crate::services::logging::Logger::debug_with_component("RustChart", &format!("📅 Setting date range to: {:?}", range));
                 self.selected_range = range;
                 // Redraw chart with new range, pass full transaction list
                 self.draw_chart(&ctx.props().transactions);
@@ -77,23 +74,17 @@ impl Component for RustChart {
     }
 
     fn changed(&mut self, ctx: &Context<Self>, old_props: &Self::Properties) -> bool {
-        crate::services::logging::Logger::debug_with_component("RustChart", &format!("🔄 RustChart props changed - old transactions: {}, new transactions: {}", old_props.transactions.len(), ctx.props().transactions.len()));
         // Redraw chart if transactions changed
         if ctx.props().transactions != old_props.transactions {
-            crate::services::logging::Logger::debug_with_component("RustChart", "🔄 Transactions changed, calling draw_chart");
             self.draw_chart(&ctx.props().transactions);
         }
         true
     }
 
-    fn rendered(&mut self, ctx: &Context<Self>, first_render: bool) {
-        crate::services::logging::Logger::info_with_component("RustChart", &format!("🎨 RustChart rendered - first_render: {}, transactions: {}", first_render, ctx.props().transactions.len()));
+    fn rendered(&mut self, ctx: &Context<Self>, _first_render: bool) {
         // Draw chart when component is rendered
         if !ctx.props().transactions.is_empty() {
-            crate::services::logging::Logger::info_with_component("RustChart", "🎨 Transactions not empty, calling draw_chart");
             self.draw_chart(&ctx.props().transactions);
-        } else {
-            crate::services::logging::Logger::debug_with_component("RustChart", "❌ No transactions available for chart");
         }
     }
 
@@ -166,29 +157,17 @@ impl Component for RustChart {
 
 impl RustChart {
     fn draw_chart(&self, all_transactions: &[FormattedTransaction]) {
-        crate::services::logging::Logger::info_with_component("RustChart", &format!("🎯 draw_chart called with {} transactions", all_transactions.len()));
-        
         if all_transactions.is_empty() {
-            crate::services::logging::Logger::debug_with_component("RustChart", "❌ No transactions, skipping chart generation");
             return;
         }
 
         let chart_div = match self.chart_ref.cast::<HtmlElement>() {
-            Some(div) => {
-                crate::services::logging::Logger::info_with_component("RustChart", "✅ Chart div element found");
-                div
-            },
-            None => {
-                crate::services::logging::Logger::info_with_component("RustChart", "❌ Chart div element not found, cannot render chart");
-                return;
-            }
+            Some(div) => div,
+            None => return,
         };
-
-        crate::services::logging::Logger::info_with_component("RustChart", "🔄 Starting manual SVG generation...");
 
         // Filter transactions for the selected range
         let filtered_transactions = self.filter_transactions_by_range(all_transactions);
-        crate::services::logging::Logger::info_with_component("RustChart", &format!("📊 Filtered to {} transactions for range {:?}", filtered_transactions.len(), self.selected_range));
         
         // Find the first transaction date from the ENTIRE dataset (for zero-balance logic)
         let all_sorted_transactions = {
@@ -219,25 +198,18 @@ impl RustChart {
             }
         }
         
-        crate::services::logging::Logger::debug_with_component("RustChart", &format!("📊 Created daily balances for {} days", daily_balances.len()));
-        
         // Calculate date range based on selected time period, not transactions
         let now = js_sys::Date::new_0();
         let current_timestamp = now.get_time() / 1000.0;
         let current_date = match chrono::DateTime::from_timestamp(current_timestamp as i64, 0) {
             Some(dt) => dt.with_timezone(&chrono::FixedOffset::east_opt(0).unwrap()),
-            None => {
-                crate::services::logging::Logger::debug_with_component("RustChart", "❌ Failed to determine current date");
-                return;
-            }
+            None => return,
         };
         
         // Calculate start date based on selected range
         let days_back = self.selected_range.to_days();
         let start_date = current_date - chrono::Duration::days(days_back);
         let end_date = current_date;
-        
-        crate::services::logging::Logger::debug_with_component("RustChart", &format!("📅 Chart date range: {} to {} ({} days)", start_date.format("%Y-%m-%d"), end_date.format("%Y-%m-%d"), days_back));
 
         // Create chart data for every day in the range
         let mut chart_data: Vec<(DateTime<FixedOffset>, f64)> = Vec::new();
@@ -277,11 +249,8 @@ impl RustChart {
         }
 
         if chart_data.is_empty() {
-            crate::services::logging::Logger::info_with_component("RustChart", "❌ No chart data generated");
             return;
         }
-        
-        crate::services::logging::Logger::info_with_component("RustChart", &format!("📊 Generated {} data points for chart", chart_data.len()));
 
         // Sort by date (should already be sorted, but just to be sure)
         chart_data.sort_by_key(|&(dt, _)| dt);
@@ -296,21 +265,15 @@ impl RustChart {
         let y_min = 0.0_f64.min(min_balance - padding); // Start from 0 or lower if needed
         let y_max = max_balance + padding;
 
-        crate::services::logging::Logger::info_with_component("RustChart", &format!("📊 Chart bounds: y: {:.2} to {:.2}", y_min, y_max));
-
         // Generate manual SVG
         let svg_output = self.generate_svg_chart(&chart_data, y_min, y_max);
         
         if svg_output.is_empty() {
-            crate::services::logging::Logger::info_with_component("RustChart", "❌ SVG generation failed!");
             return;
         }
         
-        crate::services::logging::Logger::info_with_component("RustChart", &format!("📝 Generated SVG length: {} characters", svg_output.len()));
-        
         // Inject the generated SVG into the DOM
         chart_div.set_inner_html(&svg_output);
-        crate::services::logging::Logger::info_with_component("RustChart", "✅ SVG injected into DOM");
     }
 
     fn generate_svg_chart(&self, chart_data: &[(DateTime<FixedOffset>, f64)], y_min: f64, y_max: f64) -> String {
@@ -449,7 +412,6 @@ impl RustChart {
         
         svg.push_str("</svg>");
         
-        crate::services::logging::Logger::info_with_component("RustChart", "✅ Manual SVG generation completed");
         svg
     }
 
