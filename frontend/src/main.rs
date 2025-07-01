@@ -70,7 +70,7 @@ fn app() -> Html {
         use_callback((), move |_, _| {
             // Generate a unique value without reading current state
             let new_value = (js_sys::Date::now() as u64) as u32; // Use full timestamp precision
-            Logger::info_with_component("periodic-refresh", &format!("🔄 Calendar refresh triggered - setting trigger to: {}", new_value));
+            // Logger::debug_with_component("periodic-refresh", &format!("🔄 Calendar refresh triggered - setting trigger to: {}", new_value));
             calendar_refresh_trigger.set(new_value);
         })
     };
@@ -80,7 +80,7 @@ fn app() -> Html {
     let refresh_transactions_periodic = {
         let refresh_transactions = transactions.actions.refresh_transactions.clone();
         Callback::from(move |_: ()| {
-            Logger::info_with_component("periodic-refresh", "🔄 Periodic transactions refresh triggered");
+            // Logger::debug_with_component("periodic-refresh", "🔄 Periodic transactions refresh triggered");
             refresh_transactions.emit(());
         })
     };
@@ -94,7 +94,7 @@ fn app() -> Html {
         refresh_calendar_periodic,
         interaction_detector.is_active, // ENABLED - now works without blocking input
     );
-    Logger::info_with_component("periodic-refresh", &format!("PROP: Calendar refresh hook initialized - running: {}, paused: {}", calendar_refresh_result.is_running, interaction_detector.is_active));
+          // Logger::debug_with_component("periodic-refresh", &format!("PROP: Calendar refresh hook initialized - running: {}, paused: {}", calendar_refresh_result.is_running, interaction_detector.is_active));
     
     // APPROACH 2: Calendar direct callback refresh (REMOVED - prop approach now works)
     
@@ -104,7 +104,7 @@ fn app() -> Html {
         interaction_detector.is_active, // ENABLED - now works without blocking input
         300000, // 5 minute stagger (300 seconds)
     );
-    Logger::info_with_component("periodic-refresh", &format!("Transactions refresh hook initialized - running: {}", transactions_refresh_result.is_running));
+          // Logger::debug_with_component("periodic-refresh", &format!("Transactions refresh hook initialized - running: {}", transactions_refresh_result.is_running));
     
     // Connection status for parent info
     let backend_connected = use_state(|| false);

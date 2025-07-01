@@ -62,8 +62,8 @@ async fn get_calendar_month(
         }
     };
 
-    info!("🗓️ SINGLE CALL: Fetched {} total transactions (real + future allowances) for {}/{}", 
-          transaction_response.transactions.len(), request.month, request.year);
+    // debug!("🗓️ SINGLE CALL: Fetched {} total transactions (real + future allowances) for {}/{}", 
+    //       transaction_response.transactions.len(), request.month, request.year);
 
     // Single call to domain layer with comprehensive transaction data
     let calendar_month = state.calendar_service.generate_calendar_month(

@@ -9,7 +9,7 @@ pub struct TransactionViewContainerProps {
     pub loading: bool,
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Debug)]
 pub enum ViewType {
     Table,
     Chart,
@@ -49,6 +49,14 @@ impl Component for TransactionViewContainer {
 
     fn view(&self, ctx: &Context<Self>) -> Html {
         let loading = ctx.props().loading;
+        
+        // Debug logging - always log to see if container is rendering
+        crate::services::logging::Logger::debug_with_component("TransactionViewContainer", &format!("🏗️ TransactionViewContainer rendering - current_view: {:?}, transactions: {}", self.current_view, ctx.props().transactions.len()));
+        
+        // Debug logging for chart view specifically
+        if matches!(self.current_view, ViewType::Chart) {
+            crate::services::logging::Logger::debug_with_component("TransactionViewContainer", &format!("📊 Chart view is ACTIVE - rendering chart component"));
+        }
 
         html! {
             <div class="transaction-view-container">
@@ -94,10 +102,25 @@ impl Component for TransactionViewContainer {
                     // Chart view
                     <div class={classes!("view-content", "chart-view", 
                         if matches!(self.current_view, ViewType::Chart) { Some("active") } else { None })}>
-                        <RustChart 
-                            transactions={ctx.props().transactions.clone()}
-                            loading={loading}
-                        />
+                        {
+                            // Temporary debugging - show simple text instead of RustChart
+                            if matches!(self.current_view, ViewType::Chart) {
+                                crate::services::logging::Logger::debug_with_component("TransactionViewContainer", "🎯 About to render RustChart component");
+                                html! {
+                                    <div>
+                                        <h3>{"Chart View (Debug)"}</h3>
+                                        <p>{format!("Transactions: {}", ctx.props().transactions.len())}</p>
+                                        <p>{"Chart component would go here"}</p>
+                                        <RustChart 
+                                            transactions={ctx.props().transactions.clone()}
+                                            loading={loading}
+                                        />
+                                    </div>
+                                }
+                            } else {
+                                html! { <div>{"Chart view not active"}</div> }
+                            }
+                        }
                     </div>
                 </div>
             </div>

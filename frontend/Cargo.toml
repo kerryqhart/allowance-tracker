@@ -29,8 +29,6 @@ time.workspace = true
 anyhow.workspace = true
 chrono.workspace = true
 js-sys = "0.3"
-plotters = "0.3"
-plotters-canvas = "0.3"
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3"

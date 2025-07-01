@@ -381,11 +381,11 @@ impl<C: Connection> TransactionService<C> {
         };
 
         // Debug log the transactions being returned
-        info!("🔍 TRANSACTION DEBUG: Returning {} transactions (including future allowances), has_more: {}", response.transactions.len(), has_more);
-        for (i, transaction) in response.transactions.iter().enumerate() {
-            info!("🔍 Transaction {}: id={}, date={}, description={}, amount={}, type={:?}", 
-                  i + 1, transaction.id, transaction.date, transaction.description, transaction.amount, transaction.transaction_type);
-        }
+                // debug!("🔍 TRANSACTION DEBUG: Returning {} transactions (including future allowances), has_more: {}", response.transactions.len(), has_more);
+        // for (i, transaction) in response.transactions.iter().enumerate() {
+        //     debug!("🔍 Transaction {}: id={}, date={}, description={}, amount={}, type={:?}",
+        //         i + 1, transaction.id, transaction.date, transaction.description, transaction.amount, transaction.transaction_type);
+        // }
         
         Ok(response)
     }

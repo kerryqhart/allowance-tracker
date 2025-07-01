@@ -42,7 +42,7 @@ pub struct GoalCardProps {
 
 #[function_component(GoalCard)]
 pub fn goal_card(props: &GoalCardProps) -> Html {
-    Logger::info_with_component("goal-card", "🎯 Goal card render function called");
+            // Logger::debug_with_component("goal-card", "🎯 Goal card render function called");
     
     let current_goal = use_state(|| Option::<Goal>::None);
     let goal_calculation = use_state(|| Option::<GoalCalculation>::None);
@@ -273,7 +273,7 @@ pub fn goal_card(props: &GoalCardProps) -> Html {
                 }
             } else if let Some(goal) = current_goal.as_ref() {
                 // Show current goal
-                Logger::info_with_component("goal-card", "🎯 RENDER: Showing current goal display");
+                // Logger::debug_with_component("goal-card", "🎯 RENDER: Showing current goal display");
                 html! {
                     <div class="current-goal">
                         <div class="goal-header">
@@ -353,7 +353,7 @@ pub fn goal_card(props: &GoalCardProps) -> Html {
                 }
             } else {
                 // Show create goal form
-                Logger::info_with_component("goal-card", "🎯 RENDER: Showing create goal form");
+                // Logger::debug_with_component("goal-card", "🎯 RENDER: Showing create goal form");
                 html! {
                     <form class="goal-form" onsubmit={on_create_goal}>
                         <div class="form-fields-group">
