@@ -28,6 +28,7 @@ use components::{
     },
     header::Header,
     goal_card::GoalCard,
+    setup_wizard_modal::SetupWizardModal,
 };
 
 
@@ -114,6 +115,11 @@ fn app() -> Html {
     let delete_mode = use_state(|| false);
     let selected_transactions = use_state(|| Vec::<String>::new());
     
+    // Setup wizard state
+    let is_first_run = use_state(|| true); // Assume first run until checked
+    let show_setup_wizard = use_state(|| false);
+    let setup_check_complete = use_state(|| false);
+    
     // Delete mode callbacks
     let toggle_delete_mode = {
         let delete_mode = delete_mode.clone();
@@ -187,10 +193,48 @@ fn app() -> Html {
             });
         })
     };
-    
 
+    // Setup wizard completion handler
+    let on_setup_complete = {
+        let show_setup_wizard = show_setup_wizard.clone();
+        let is_first_run = is_first_run.clone();
+        let refresh_transactions = transactions.actions.refresh_transactions.clone();
+        let calendar_refresh_trigger = calendar_refresh_trigger.clone();
+        
+        Callback::from(move |_| {
+            show_setup_wizard.set(false);
+            is_first_run.set(false);
+            
+            // Refresh all data after setup is complete
+            refresh_transactions.emit(());
+            calendar_refresh_trigger.set(*calendar_refresh_trigger + 1);
+        })
+    };
 
-
+    // Check for first run when component loads
+    use_effect_with((), {
+        let api_client = api_client.clone();
+        let is_first_run = is_first_run.clone();
+        let show_setup_wizard = show_setup_wizard.clone();
+        let setup_check_complete = setup_check_complete.clone();
+        
+        move |_| {
+            let api_client = api_client.clone();
+            let is_first_run = is_first_run.clone();
+            let show_setup_wizard = show_setup_wizard.clone();
+            let setup_check_complete = setup_check_complete.clone();
+            
+            spawn_local(async move {
+                Logger::debug_with_component("App", "Checking if this is first run");
+                
+                // For testing, always show the setup wizard
+                // TODO: Replace with actual backend check
+                is_first_run.set(true);
+                show_setup_wizard.set(true);
+                setup_check_complete.set(true);
+            });
+        }
+    });
 
     // Load initial data
     use_effect_with((), {
@@ -234,18 +278,27 @@ fn app() -> Html {
 
     html! {
         <>
-            <Header 
-                current_balance={transactions.state.current_balance} 
-                on_toggle_delete_mode={toggle_delete_mode.clone()}
+            // Setup wizard - shown on first run
+            <SetupWizardModal 
+                is_open={*show_setup_wizard}
+                on_complete={on_setup_complete}
                 api_client={(*api_client).clone()}
-                active_child={active_child.state.active_child.clone()}
-                child_loading={active_child.state.loading}
-                active_child_actions={active_child.actions.clone()}
             />
+            
+            // Main app - hidden during setup
+            {if !*show_setup_wizard && *setup_check_complete {
+                html! {
+                    <>
+                        <Header 
+                            current_balance={transactions.state.current_balance} 
+                            on_toggle_delete_mode={toggle_delete_mode.clone()}
+                            api_client={(*api_client).clone()}
+                            active_child={active_child.state.active_child.clone()}
+                            child_loading={active_child.state.loading}
+                            active_child_actions={active_child.actions.clone()}
+                        />
 
-
-
-            <main class="main">
+                        <main class="main">
                 <div class="container">
                     // Calendar with transaction chips and allowance indicators
                     <SimpleCalendar 
@@ -308,13 +361,25 @@ fn app() -> Html {
                 </div>
             </main>
             
-            <div class="connection-status">
-                {if *backend_connected {
-                    format!("Connected to {}", *backend_endpoint)
-                } else {
-                    (*backend_endpoint).clone()
-                }}
-            </div>
+                        <div class="connection-status">
+                            {if *backend_connected {
+                                format!("Connected to {}", *backend_endpoint)
+                            } else {
+                                (*backend_endpoint).clone()
+                            }}
+                        </div>
+                    </>
+                }
+            } else if !*setup_check_complete {
+                html! {
+                    <div class="loading-screen">
+                        <div class="spinner"></div>
+                        <p>{"Loading..."}</p>
+                    </div>
+                }
+            } else {
+                html! {}
+            }}
         </>
     }
 }

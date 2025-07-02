@@ -11,4 +11,5 @@ pub mod data_directory_modal;
 pub mod export_modal;
 pub mod simple_calendar;
 pub mod date_picker;
-pub mod goal_card; 
+pub mod goal_card;
+pub mod setup_wizard_modal; 
