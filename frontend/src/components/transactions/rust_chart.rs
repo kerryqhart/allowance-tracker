@@ -4,6 +4,7 @@ use web_sys::HtmlElement;
 use chrono::{DateTime, FixedOffset, Duration};
 use crate::services::DateUtils;
 
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum DateRange {
     Last30Days,
@@ -37,7 +38,6 @@ pub struct RustChartProps {
 
 #[derive(Debug)]
 pub enum Msg {
-    DrawChart,
     SetDateRange(DateRange),
 }
 
@@ -59,11 +59,6 @@ impl Component for RustChart {
 
     fn update(&mut self, ctx: &Context<Self>, msg: Self::Message) -> bool {
         match msg {
-            Msg::DrawChart => {
-                // Pass full transaction list to draw_chart, it will do its own filtering
-                self.draw_chart(&ctx.props().transactions);
-                false
-            }
             Msg::SetDateRange(range) => {
                 self.selected_range = range;
                 // Redraw chart with new range, pass full transaction list
@@ -141,7 +136,7 @@ impl Component for RustChart {
                     }
                 } else {
                     html! {
-                        <div class="chart-content">
+                        <div class="chart-content" style="position: relative;">
                             <div 
                                 ref={self.chart_ref.clone()}
                                 class="rust-chart-svg"
@@ -381,12 +376,14 @@ impl RustChart {
             path_data
         ));
         
-        // Draw individual points
-        for (i, (_, balance)) in chart_data.iter().enumerate() {
+        // Draw individual points with SVG-native tooltips (skip for 1-year view)
+        let show_tooltips = !matches!(self.selected_range, DateRange::LastYear);
+        
+        for (i, (date, balance)) in chart_data.iter().enumerate() {
             let svg_x = data_to_svg_x(i);
             let svg_y = data_to_svg_y(*balance);
             
-            // White border circle
+            // White border circle 
             svg.push_str(&format!(
                 "<circle cx=\"{}\" cy=\"{}\" r=\"5\" fill=\"white\" stroke=\"#667eea\" stroke-width=\"2\"/>",
                 svg_x, svg_y
@@ -397,6 +394,37 @@ impl RustChart {
                 "<circle cx=\"{}\" cy=\"{}\" r=\"3\" fill=\"#667eea\"/>",
                 svg_x, svg_y
             ));
+            
+            if show_tooltips {
+                // Format tooltip content
+                let formatted_date = date.format("%B %d, %Y (%A)").to_string();
+                let formatted_balance = format!("${:.2}", balance);
+                let tooltip_text = format!("{} - Balance: {}", formatted_date, formatted_balance);
+                
+                // Tooltip background (rounded rectangle)
+                let text_width = tooltip_text.len() as f64 * 6.5; // Approximate character width
+                let text_height = 20.0;
+                let padding = 8.0;
+                let tooltip_x = svg_x - (text_width / 2.0) - padding;
+                let tooltip_y = svg_y - 40.0;
+                
+                svg.push_str(&format!(
+                    "<g class=\"tooltip-group\" style=\"opacity: 0; pointer-events: none; transition: opacity 0.2s ease;\">
+                        <rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" rx=\"4\" fill=\"rgba(0,0,0,0.9)\" stroke=\"none\"/>
+                        <text x=\"{}\" y=\"{}\" fill=\"white\" font-size=\"12\" font-family=\"sans-serif\" text-anchor=\"middle\">{}</text>
+                    </g>",
+                    tooltip_x, tooltip_y, text_width + (padding * 2.0), text_height + (padding * 2.0),
+                    svg_x, tooltip_y + 15.0, tooltip_text
+                ));
+                
+                // Invisible hover area with hover events
+                svg.push_str(&format!(
+                    "<circle cx=\"{}\" cy=\"{}\" r=\"12\" fill=\"transparent\" stroke=\"none\" style=\"cursor: pointer;\" 
+                        onmouseenter=\"evt.target.previousElementSibling.style.opacity='1'\" 
+                        onmouseleave=\"evt.target.previousElementSibling.style.opacity='0'\"/>",
+                    svg_x, svg_y
+                ));
+            }
         }
         
         // Axis labels
@@ -414,6 +442,8 @@ impl RustChart {
         
         svg
     }
+    
+
 
     fn filter_transactions_by_range(&self, transactions: &[FormattedTransaction]) -> Vec<FormattedTransaction> {
         if transactions.is_empty() {
