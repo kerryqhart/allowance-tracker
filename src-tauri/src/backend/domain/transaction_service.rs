@@ -55,6 +55,7 @@ use crate::backend::domain::{child_service::ChildService, AllowanceService, Bala
 use std::time::{SystemTime, UNIX_EPOCH};
 use chrono::{NaiveDate, Local, Datelike, FixedOffset, DateTime, ParseError, TimeZone};
 use time;
+use crate::backend::domain::models::child::Child as DomainChild;
 
 #[derive(Clone)]
 pub struct TransactionService<C: Connection> {
@@ -80,9 +81,7 @@ impl<C: Connection> TransactionService<C> {
         }
 
         // Get the active child
-        let active_child_response = self.child_service.get_active_child().await?;
-        let active_child = active_child_response.active_child
-            .ok_or_else(|| anyhow::anyhow!("No active child found"))?;
+        let active_child = self.get_active_child().await?;
 
         info!("✅ Active child for transaction: {}", active_child.id);
 
@@ -157,14 +156,7 @@ impl<C: Connection> TransactionService<C> {
         info!("🎯 Checking for pending allowances to issue");
 
         // Get the active child
-        let active_child_response = self.child_service.get_active_child().await?;
-        let active_child = match active_child_response.active_child {
-            Some(child) => child,
-            None => {
-                info!("No active child found, skipping allowance check");
-                return Ok(0);
-            }
-        };
+        let active_child = self.get_active_child().await?;
 
         // Check for pending allowances in the last 7 days (to catch missed allowances)
         let current_date = Local::now().date_naive();
@@ -282,9 +274,7 @@ impl<C: Connection> TransactionService<C> {
         }
 
         // Get the active child
-        let active_child_response = self.child_service.get_active_child().await?;
-        let active_child = active_child_response.active_child
-            .ok_or_else(|| anyhow::anyhow!("No active child found"))?;
+        let active_child = self.get_active_child().await?;
 
         // Set default limit if not provided (max 100)
         let limit = request.limit.unwrap_or(20).min(100);
@@ -403,9 +393,7 @@ impl<C: Connection> TransactionService<C> {
         }
 
         // Get the active child
-        let active_child_response = self.child_service.get_active_child().await?;
-        let active_child = active_child_response.active_child
-            .ok_or_else(|| anyhow::anyhow!("No active child found"))?;
+        let active_child = self.get_active_child().await?;
 
         // Check which transactions actually exist for this child
         let existing_ids = self.transaction_repository.check_transactions_exist(&active_child.id, &request.transaction_ids).await?;
@@ -435,6 +423,27 @@ impl<C: Connection> TransactionService<C> {
             success_message,
             not_found_ids,
         })
+    }
+
+    async fn get_active_child(&self) -> Result<DomainChild> {
+        let active_child_response = self.child_service.get_active_child().await?;
+        let active_child = active_child_response.child
+            .ok_or_else(|| anyhow::anyhow!("No active child found. Please select a child first."))?;
+        Ok(active_child)
+    }
+
+    async fn get_active_child_for_allowance(&self) -> Result<DomainChild> {
+        let active_child_response = self.child_service.get_active_child().await?;
+        let active_child = active_child_response.child
+            .ok_or_else(|| anyhow::anyhow!("No active child found for allowance generation."))?;
+        Ok(active_child)
+    }
+
+    async fn get_active_child_for_recalculation(&self) -> Result<DomainChild> {
+        let active_child_response = self.child_service.get_active_child().await?;
+        let active_child = active_child_response.child
+            .ok_or_else(|| anyhow::anyhow!("No active child found for balance recalculation."))?;
+        Ok(active_child)
     }
 }
 

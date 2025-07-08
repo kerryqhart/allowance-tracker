@@ -44,15 +44,16 @@ impl AllowanceService {
             None => {
                 // Use active child if no child_id provided
                 let active_child_response = self.child_service.get_active_child().await?;
-                match active_child_response.active_child {
-                    Some(child) => child.id,
+                let child = match active_child_response.child {
+                    Some(c) => c.id,
                     None => {
                         warn!("No active child found for allowance config request");
                         return Ok(GetAllowanceConfigResponse {
                             allowance_config: None,
                         });
                     }
-                }
+                };
+                child
             }
         };
 
@@ -107,14 +108,11 @@ impl AllowanceService {
             None => {
                 // Use active child if no child_id provided
                 let active_child_response = self.child_service.get_active_child().await?;
-                match active_child_response.active_child {
-                    Some(child) => child.id,
-                    None => {
-                        return Err(anyhow::anyhow!(
-                            "No active child found. Please select a child first."
-                        ));
-                    }
-                }
+                let child = match active_child_response.child {
+                    Some(c) => c.id,
+                    None => return Err(anyhow::anyhow!("No active child found to update allowance config")),
+                };
+                child
             }
         };
 

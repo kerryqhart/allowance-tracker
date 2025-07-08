@@ -17,3 +17,14 @@ The chart now displays cleanly without any debug artifacts:
 - All chart generation and SVG rendering still works perfectly
 
 Chart remains fully functional with manual SVG generation. 
+
+refactor(child): Migrate to domain models
+
+Completes the first phase of the shared DTO to domain model migration.
+
+- Creates `Child` and `ActiveChild` domain models.
+- Implements `ChildMapper` for DTO-domain translation.
+- Refactors `ChildService`, `ChildRepository`, and `child_apis` to use domain models exclusively.
+- Fixes numerous compilation errors in `lib.rs` and other services that arose from the changed `ChildService` API.
+- The `shared::Child` DTO is no longer used in the domain or storage layers.
+- Comments out the automatic opening of devtools on startup. 

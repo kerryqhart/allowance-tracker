@@ -13,6 +13,7 @@ use crate::backend::AppState;
 use shared::{
     CreateChildRequest, UpdateChildRequest, SetActiveChildRequest,
 };
+use crate::backend::io::rest::mappers::child_mapper::ChildMapper;
 
 
 /// Create a new child
@@ -23,7 +24,10 @@ pub async fn create_child(
     info!("POST /api/children - request: {:?}", request);
 
     match state.child_service.create_child(request).await {
-        Ok(response) => (StatusCode::CREATED, Json(response)).into_response(),
+        Ok(domain_child) => {
+            let response = ChildMapper::to_child_response_dto(domain_child, "Child created successfully");
+            (StatusCode::CREATED, Json(response)).into_response()
+        },
         Err(e) => {
             error!("Failed to create child: {}", e);
             (StatusCode::BAD_REQUEST, e.to_string()).into_response()
@@ -39,7 +43,10 @@ pub async fn get_child(
     info!("GET /api/children/{}", child_id);
 
     match state.child_service.get_child(&child_id).await {
-        Ok(Some(child)) => (StatusCode::OK, Json(child)).into_response(),
+        Ok(Some(domain_child)) => {
+            let response = ChildMapper::to_dto(domain_child);
+            (StatusCode::OK, Json(response)).into_response()
+        },
         Ok(None) => (StatusCode::NOT_FOUND, "Child not found").into_response(),
         Err(e) => {
             error!("Failed to get child: {}", e);
@@ -55,7 +62,10 @@ pub async fn list_children(
     info!("GET /api/children");
 
     match state.child_service.list_children().await {
-        Ok(response) => (StatusCode::OK, Json(response)).into_response(),
+        Ok(domain_children) => {
+            let response = ChildMapper::to_child_list_dto(domain_children);
+            (StatusCode::OK, Json(response)).into_response()
+        },
         Err(e) => {
             error!("Failed to list children: {}", e);
             (StatusCode::INTERNAL_SERVER_ERROR, "Error listing children").into_response()
@@ -72,7 +82,10 @@ pub async fn update_child(
     info!("PUT /api/children/{} - request: {:?}", child_id, request);
 
     match state.child_service.update_child(&child_id, request).await {
-        Ok(response) => (StatusCode::OK, Json(response)).into_response(),
+        Ok(domain_child) => {
+            let response = ChildMapper::to_child_response_dto(domain_child, "Child updated successfully");
+            (StatusCode::OK, Json(response)).into_response()
+        },
         Err(e) => {
             error!("Failed to update child: {}", e);
             let status = if e.to_string().contains("not found") {
@@ -113,7 +126,10 @@ pub async fn get_active_child(
     info!("GET /api/active-child");
 
     match state.child_service.get_active_child().await {
-        Ok(response) => (StatusCode::OK, Json(response)).into_response(),
+        Ok(domain_active_child) => {
+            let response = ChildMapper::to_active_child_dto(domain_active_child);
+            (StatusCode::OK, Json(response)).into_response()
+        },
         Err(e) => {
             error!("Failed to get active child: {}", e);
             (StatusCode::INTERNAL_SERVER_ERROR, "Error retrieving active child").into_response()
@@ -128,8 +144,11 @@ pub async fn set_active_child(
 ) -> impl IntoResponse {
     info!("POST /api/active-child - request: {:?}", request);
 
-    match state.child_service.set_active_child(request).await {
-        Ok(response) => (StatusCode::OK, Json(response)).into_response(),
+    match state.child_service.set_active_child(&request.child_id).await {
+        Ok(domain_child) => {
+            let response = ChildMapper::to_set_active_child_dto(domain_child);
+            (StatusCode::OK, Json(response)).into_response()
+        },
         Err(e) => {
             error!("Failed to set active child: {}", e);
             let status = if e.to_string().contains("not found") {

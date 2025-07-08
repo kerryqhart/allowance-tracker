@@ -24,17 +24,13 @@ pub async fn add_money(
     // Check for active child first
     info!("🔍 Checking for active child...");
     let active_child_response = match state.child_service.get_active_child().await {
-        Ok(response) => {
-            info!("✅ Got active child response: {:?}", response);
-            response
-        },
+        Ok(res) => res,
         Err(e) => {
-            error!("❌ Failed to get active child: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to get active child").into_response();
+            error!("Failed to get active child: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Error retrieving active child").into_response();
         }
     };
-
-    let active_child = match active_child_response.active_child {
+    let active_child = match active_child_response.child {
         Some(child) => {
             info!("✅ Active child found: {}", child.id);
             child
@@ -52,7 +48,7 @@ pub async fn add_money(
             &request.description, 
             &request.amount.to_string(),
             request.date.as_deref(),
-            Some(&active_child.created_at)
+            Some(&active_child.created_at.to_rfc3339())
         );
 
     info!("🔍 Validation result - is_valid: {}, errors: {:?}", validation.is_valid, validation.errors);
@@ -127,17 +123,13 @@ pub async fn spend_money(
     // Check for active child first
     info!("🔍 Checking for active child...");
     let active_child_response = match state.child_service.get_active_child().await {
-        Ok(response) => {
-            info!("✅ Got active child response: {:?}", response);
-            response
-        },
+        Ok(res) => res,
         Err(e) => {
-            error!("❌ Failed to get active child: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to get active child").into_response();
+            error!("Failed to get active child: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Error retrieving active child").into_response();
         }
     };
-
-    let active_child = match active_child_response.active_child {
+    let active_child = match active_child_response.child {
         Some(child) => {
             info!("✅ Active child found: {}", child.id);
             child
@@ -155,7 +147,7 @@ pub async fn spend_money(
             &request.description, 
             &request.amount.to_string(),
             request.date.as_deref(),
-            Some(&active_child.created_at)
+            Some(&active_child.created_at.to_rfc3339())
         );
 
     info!("🔍 Validation result - is_valid: {}, errors: {:?}", validation.is_valid, validation.errors);
@@ -258,36 +250,32 @@ mod tests {
         child_service.set_active_child(set_active_request).await.expect("Failed to set active child");
         
         AppState {
-            transaction_service,
-            calendar_service,
-            transaction_table_service,
-            money_management_service,
-            child_service,
-            parental_control_service,
-            allowance_service,
-            balance_service,
+            transaction_service: Arc::new(transaction_service),
+            calendar_service: Arc::new(calendar_service),
+            transaction_table_service: Arc::new(transaction_table_service),
+            money_management_service: Arc::new(money_management_service),
+            child_service: Arc::new(child_service),
+            parental_control_service: Arc::new(parental_control_service),
+            allowance_service: Arc::new(allowance_service),
+            balance_service: Arc::new(balance_service),
         }
     }
 
     #[tokio::test]
     async fn test_add_money_success() {
         let state = setup_test_state().await;
-        
         let request = AddMoneyRequest {
-            description: "Birthday gift".to_string(),
-            amount: 25.0,
+            amount: 50.0,
+            description: "Test deposit".to_string(),
             date: None,
         };
-
-        let response = add_money(State(state), Json(request)).await;
-        
-        // Should return CREATED status
-        // Note: Testing the actual response in integration tests is complex due to IntoResponse trait
-        // This test mainly ensures the function doesn't panic and returns a response
+        let response = add_money(State(state), Json(request)).await.into_response();
+        assert_eq!(response.status(), StatusCode::CREATED);
     }
 
     #[tokio::test]
     async fn test_add_money_no_active_child() {
+        // Create an app state without an active child
         let db = Arc::new(DbConnection::init_test().await.unwrap());
         let transaction_service = TransactionService::new(db.clone());
         let calendar_service = CalendarService::new();
@@ -297,49 +285,41 @@ mod tests {
         let parental_control_service = crate::backend::domain::ParentalControlService::new(db.clone());
         let allowance_service = crate::backend::domain::AllowanceService::new(db.clone());
         let balance_service = crate::backend::domain::BalanceService::new(db);
-        
         let state = AppState {
-            transaction_service,
-            calendar_service,
-            transaction_table_service,
-            money_management_service,
-            child_service,
-            parental_control_service,
-            allowance_service,
-            balance_service,
-        };
-        
-        let request = AddMoneyRequest {
-            description: "Birthday gift".to_string(),
-            amount: 25.0,
-            date: None,
+            transaction_service: Arc::new(transaction_service),
+            calendar_service: Arc::new(calendar_service),
+            transaction_table_service: Arc::new(transaction_table_service),
+            money_management_service: Arc::new(money_management_service),
+            child_service: Arc::new(child_service),
+            parental_control_service: Arc::new(parental_control_service),
+            allowance_service: Arc::new(allowance_service),
+            balance_service: Arc::new(balance_service),
         };
 
-        let _response = add_money(State(state), Json(request)).await;
-        
-        // Should handle no active child gracefully
-        // The function should return a response (not panic)
+        let request = AddMoneyRequest {
+            amount: 50.0,
+            description: "Test deposit".to_string(),
+            date: None,
+        };
+        let response = add_money(State(state), Json(request)).await.into_response();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]
     async fn test_spend_money_success() {
         let state = setup_test_state().await;
-        
         let request = SpendMoneyRequest {
-            description: "Toy purchase".to_string(),
-            amount: 15.0,
+            amount: 20.0,
+            description: "Test withdrawal".to_string(),
             date: None,
         };
-
-        let response = spend_money(State(state), Json(request)).await;
-        
-        // Should return CREATED status
-        // Note: Testing the actual response in integration tests is complex due to IntoResponse trait
-        // This test mainly ensures the function doesn't panic and returns a response
+        let response = spend_money(State(state), Json(request)).await.into_response();
+        assert_eq!(response.status(), StatusCode::CREATED);
     }
 
     #[tokio::test]
     async fn test_spend_money_no_active_child() {
+        // Create an app state without an active child
         let db = Arc::new(DbConnection::init_test().await.unwrap());
         let transaction_service = TransactionService::new(db.clone());
         let calendar_service = CalendarService::new();
@@ -349,59 +329,47 @@ mod tests {
         let parental_control_service = crate::backend::domain::ParentalControlService::new(db.clone());
         let allowance_service = crate::backend::domain::AllowanceService::new(db.clone());
         let balance_service = crate::backend::domain::BalanceService::new(db);
-        
         let state = AppState {
-            transaction_service,
-            calendar_service,
-            transaction_table_service,
-            money_management_service,
-            child_service,
-            parental_control_service,
-            allowance_service,
-            balance_service,
+            transaction_service: Arc::new(transaction_service),
+            calendar_service: Arc::new(calendar_service),
+            transaction_table_service: Arc::new(transaction_table_service),
+            money_management_service: Arc::new(money_management_service),
+            child_service: Arc::new(child_service),
+            parental_control_service: Arc::new(parental_control_service),
+            allowance_service: Arc::new(allowance_service),
+            balance_service: Arc::new(balance_service),
         };
-        
+
         let request = SpendMoneyRequest {
-            description: "Toy purchase".to_string(),
-            amount: 15.0,
+            amount: 20.0,
+            description: "Test withdrawal".to_string(),
             date: None,
         };
-
-        let _response = spend_money(State(state), Json(request)).await;
-        
-        // Should handle no active child gracefully
-        // The function should return a response (not panic)
+        let response = spend_money(State(state), Json(request)).await.into_response();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
-
+    
     #[tokio::test]
     async fn test_add_money_invalid_input() {
         let state = setup_test_state().await;
-        
         let request = AddMoneyRequest {
-            description: "".to_string(), // Empty description should fail validation
-            amount: 25.0,
+            amount: -10.0, // Invalid amount
+            description: "".to_string(), // Invalid description
             date: None,
         };
-
-        let response = add_money(State(state), Json(request)).await;
-        
-        // Should handle validation errors gracefully
-        // The function should return a response (not panic)
+        let response = add_money(State(state), Json(request)).await.into_response();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]
     async fn test_spend_money_invalid_input() {
         let state = setup_test_state().await;
-        
         let request = SpendMoneyRequest {
-            description: "Valid description".to_string(),
-            amount: -15.0, // Negative amount should fail validation
+            amount: 0.0, // Invalid amount
+            description: " ".to_string(), // Invalid description
             date: None,
         };
-
-        let response = spend_money(State(state), Json(request)).await;
-        
-        // Should handle validation errors gracefully  
-        // The function should return a response (not panic)
+        let response = spend_money(State(state), Json(request)).await.into_response();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     }
 } 

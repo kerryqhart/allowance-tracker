@@ -95,19 +95,17 @@ pub async fn export_transactions_csv(
 ) -> impl IntoResponse {
     info!("POST /api/export/csv - request: {:?}", request);
 
-    // Get the active child if no child_id specified
-    let child_id = if let Some(child_id) = request.child_id {
-        child_id
+    let child_id_to_use = if let Some(id) = request.child_id {
+        id
     } else {
         match state.child_service.get_active_child().await {
             Ok(response) => {
-                if let Some(child) = response.active_child {
+                if let Some(child) = response.child {
                     child.id
                 } else {
-                    error!("No active child found for export");
-                    return (StatusCode::BAD_REQUEST, "No active child found. Please select a child first.").into_response();
+                    return (StatusCode::BAD_REQUEST, Json("No active child set and no child_id provided")).into_response();
                 }
-            }
+            },
             Err(e) => {
                 error!("Failed to get active child for export: {}", e);
                 return (StatusCode::INTERNAL_SERVER_ERROR, "Error retrieving active child").into_response();
@@ -116,10 +114,10 @@ pub async fn export_transactions_csv(
     };
 
     // Get the child details for the filename
-    let child = match state.child_service.get_child(&child_id).await {
+    let child = match state.child_service.get_child(&child_id_to_use).await {
         Ok(Some(child)) => child,
         Ok(None) => {
-            error!("Child not found: {}", child_id);
+            error!("Child not found: {}", child_id_to_use);
             return (StatusCode::NOT_FOUND, "Child not found").into_response();
         }
         Err(e) => {
@@ -328,26 +326,25 @@ async fn export_transactions_csv_internal(
     state: AppState,
     request: ExportDataRequest,
 ) -> Result<ExportDataResponse, String> {
-    // Get the active child if no child_id specified
-    let child_id = if let Some(child_id) = request.child_id {
-        child_id
+    let child_id_to_use = if let Some(id) = request.child_id {
+        id
     } else {
         match state.child_service.get_active_child().await {
             Ok(response) => {
-                if let Some(child) = response.active_child {
+                if let Some(child) = response.child {
                     child.id
                 } else {
                     return Err("No active child found".to_string());
                 }
-            }
+            },
             Err(e) => return Err(format!("Failed to get active child: {}", e)),
         }
     };
 
     // Get the child details for the filename
-    let child = match state.child_service.get_child(&child_id).await {
+    let child = match state.child_service.get_child(&child_id_to_use).await {
         Ok(Some(child)) => child,
-        Ok(None) => return Err(format!("Child not found: {}", child_id)),
+        Ok(None) => return Err(format!("Child not found: {}", child_id_to_use)),
         Err(e) => return Err(format!("Failed to get child details: {}", e)),
     };
 

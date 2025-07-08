@@ -35,3 +35,4 @@ pub mod data_directory_apis;
 pub mod logging_apis;
 pub mod goal_apis;
 pub mod export_apis;
+pub mod mappers;

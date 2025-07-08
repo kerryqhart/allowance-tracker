@@ -62,6 +62,7 @@ pub mod allowance_service;
 pub mod balance_service;
 pub mod goal_service;
 pub mod data_directory_service;
+pub mod models;
 
 pub use transaction_service::*;
 pub use transaction_table::*;

@@ -682,6 +682,13 @@ pub struct ExportToPathResponse {
     pub child_name: String,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct LogEntry {
+    pub level: String,
+    pub message: String,
+    pub component: Option<String>,
+}
+
 impl AllowanceConfig {
     /// Generate an allowance config ID based on child ID and timestamp
     pub fn generate_id(child_id: &str, epoch_millis: u64) -> String {

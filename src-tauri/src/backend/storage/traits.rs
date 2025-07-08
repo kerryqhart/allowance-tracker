@@ -5,7 +5,8 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use shared::{Transaction, Child, AllowanceConfig, ParentalControlAttempt, Goal};
+use crate::backend::domain::models::child::Child as DomainChild;
+use shared::{Transaction, AllowanceConfig, ParentalControlAttempt, Goal};
 
 /// Trait defining the interface for transaction storage operations
 /// 
@@ -66,16 +67,16 @@ pub trait TransactionStorage: Send + Sync {
 #[async_trait]
 pub trait ChildStorage: Send + Sync {
     /// Store a new child
-    async fn store_child(&self, child: &Child) -> Result<()>;
+    async fn store_child(&self, child: &DomainChild) -> Result<()>;
     
     /// Retrieve a specific child by ID
-    async fn get_child(&self, child_id: &str) -> Result<Option<Child>>;
+    async fn get_child(&self, child_id: &str) -> Result<Option<DomainChild>>;
     
     /// List all children ordered by name
-    async fn list_children(&self) -> Result<Vec<Child>>;
+    async fn list_children(&self) -> Result<Vec<DomainChild>>;
     
     /// Update an existing child
-    async fn update_child(&self, child: &Child) -> Result<()>;
+    async fn update_child(&self, child: &DomainChild) -> Result<()>;
     
     /// Delete a child by ID
     async fn delete_child(&self, child_id: &str) -> Result<()>;

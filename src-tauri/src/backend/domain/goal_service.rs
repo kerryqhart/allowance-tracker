@@ -87,10 +87,11 @@ impl GoalService {
             Some(id) => id,
             None => {
                 let active_child_response = self.child_service.get_active_child().await?;
-                match active_child_response.active_child {
-                    Some(child) => child.id,
+                let child = match active_child_response.child {
+                    Some(c) => c.id,
                     None => return Err(anyhow::anyhow!("No active child found")),
-                }
+                };
+                child
             }
         };
 
@@ -148,8 +149,8 @@ impl GoalService {
             Some(id) => id,
             None => {
                 let active_child_response = self.child_service.get_active_child().await?;
-                match active_child_response.active_child {
-                    Some(child) => child.id,
+                let child = match active_child_response.child {
+                    Some(c) => c.id,
                     None => {
                         info!("No active child found for goal request");
                         return Ok(GetCurrentGoalResponse {
@@ -157,7 +158,8 @@ impl GoalService {
                             calculation: None,
                         });
                     }
-                }
+                };
+                child
             }
         };
 
@@ -186,10 +188,11 @@ impl GoalService {
             Some(id) => id,
             None => {
                 let active_child_response = self.child_service.get_active_child().await?;
-                match active_child_response.active_child {
-                    Some(child) => child.id,
-                    None => return Err(anyhow::anyhow!("No active child found")),
-                }
+                let child = match active_child_response.child {
+                    Some(c) => c.id,
+                    None => return Err(anyhow::anyhow!("No active child found to update goal")),
+                };
+                child
             }
         };
 
@@ -252,10 +255,11 @@ impl GoalService {
             Some(id) => id,
             None => {
                 let active_child_response = self.child_service.get_active_child().await?;
-                match active_child_response.active_child {
-                    Some(child) => child.id,
-                    None => return Err(anyhow::anyhow!("No active child found")),
-                }
+                let child = match active_child_response.child {
+                    Some(c) => c.id,
+                    None => return Err(anyhow::anyhow!("No active child found to cancel goal")),
+                };
+                child
             }
         };
 
@@ -282,15 +286,16 @@ impl GoalService {
             Some(id) => id,
             None => {
                 let active_child_response = self.child_service.get_active_child().await?;
-                match active_child_response.active_child {
-                    Some(child) => child.id,
+                let child = match active_child_response.child {
+                    Some(c) => c.id,
                     None => {
                         info!("No active child found for goal history request");
                         return Ok(GetGoalHistoryResponse {
                             goals: Vec::new(),
                         });
                     }
-                }
+                };
+                child
             }
         };
 
