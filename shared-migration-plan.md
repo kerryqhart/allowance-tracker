@@ -48,14 +48,14 @@ This phase will be executed iteratively for each bounded context (e.g., Child, T
 
 We will migrate one bounded context at a time to keep the application in a working state.
 
-1.  **Child Bounded Context (START HERE)**
+1.  **Child Bounded Context (DONE)**
     -   `shared::Child` -> `domain::Child`
     -   `shared::ActiveChildResponse` -> `domain::ActiveChild` (or similar)
     -   Refactor `child_service.rs`, `child_apis.rs`, and `child_repository.rs`.
     -   Update or create unit tests.
     -   Verify with `cargo check` and `cargo tauri dev`.
 
-2.  **Transaction Bounded Context**
+2.  **Transaction Bounded Context (IN PROGRESS)**
     -   `shared::Transaction` -> `domain::Transaction`
     -   Refactor `transaction_service.rs`, `transaction_apis.rs`, etc.
 

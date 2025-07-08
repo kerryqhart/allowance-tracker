@@ -34,7 +34,7 @@ impl<C: Connection> BalanceService<C> {
 
         // Get all transactions from the specified date forward (chronological order)
         let transactions = self.transaction_repository
-            .get_transactions_after_date(child_id, from_date)
+            .get_transactions_since(child_id, from_date)
             .await?;
 
         if transactions.is_empty() {
@@ -104,7 +104,7 @@ impl<C: Connection> BalanceService<C> {
         // Then, get all transactions from the same day that occurred before this one
         // by getting all transactions from that day and filtering by timestamp
         let same_day_transactions = self.transaction_repository
-            .get_transactions_after_date(child_id, transaction_date)
+            .get_transactions_since(child_id, transaction_date)
             .await?;
 
         // Filter to only transactions from the exact same day that have a lower timestamp
@@ -157,7 +157,7 @@ impl<C: Connection> BalanceService<C> {
     /// Returns true if there are any transactions after the specified date
     pub async fn requires_balance_recalculation(&self, child_id: &str, transaction_date: &str) -> Result<bool> {
         let transactions_after = self.transaction_repository
-            .get_transactions_after_date(child_id, transaction_date)
+            .get_transactions_since(child_id, transaction_date)
             .await?;
 
         // If there are transactions after this date (excluding exact matches), we need recalculation

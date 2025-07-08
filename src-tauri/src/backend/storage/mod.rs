@@ -40,7 +40,6 @@
 
 pub mod traits;
 pub mod csv;
-pub mod sqlite;
 pub mod git;
 
 // Re-export the main types that other modules need

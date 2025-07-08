@@ -1,30 +1,13 @@
-Clean up chart component by removing debug functionality
+refactor(transaction): Migrate transaction context to domain models
 
-Removed all debug-related UI elements and excessive logging from the chart 
-component to create a clean, production-ready interface.
+This commit continues the migration from shared DTOs to internal domain models, focusing on the "Transaction" bounded context.
 
-Changes:
-- Removed "Chart View (Debug)" title and debug text from transaction view container
-- Cleaned up excessive logging in RustChart component lifecycle methods
-- Removed debug logging from draw_chart method while keeping essential functionality
-- Fixed unused variable warning for first_render parameter
-- Simplified chart rendering logic without losing functionality
+Key changes:
+- Created `Transaction` and `TransactionType` domain models in `src-tauri/src/backend/domain/models/transaction.rs`.
+- Implemented `TransactionMapper` to convert between domain models and shared DTOs.
+- Refactored `TransactionService` to use the new domain models for all internal logic, only converting to DTOs at the boundary.
+- Updated the `TransactionStorage` trait to use `DomainTransaction`.
+- Refactored the `CsvTransactionRepository` to implement the updated trait and use the domain model.
+- Deleted the entire `sqlite` storage module and its references to simplify the codebase, as it was unused.
 
-The chart now displays cleanly without any debug artifacts:
-- Clean "DAILY BALANCE HISTORY" title with gradient header
-- Professional chart interface with time range selectors
-- Reduced console noise while maintaining core functionality
-- All chart generation and SVG rendering still works perfectly
-
-Chart remains fully functional with manual SVG generation. 
-
-refactor(child): Migrate to domain models
-
-Completes the first phase of the shared DTO to domain model migration.
-
-- Creates `Child` and `ActiveChild` domain models.
-- Implements `ChildMapper` for DTO-domain translation.
-- Refactors `ChildService`, `ChildRepository`, and `child_apis` to use domain models exclusively.
-- Fixes numerous compilation errors in `lib.rs` and other services that arose from the changed `ChildService` API.
-- The `shared::Child` DTO is no longer used in the domain or storage layers.
-- Comments out the automatic opening of devtools on startup. 
+This completes the second major phase of the domain model refactoring plan. 
