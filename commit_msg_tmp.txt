@@ -1,0 +1,9 @@
+feat(domain): introduce domain commands and refactor TransactionService
+
+- Add `backend/domain/commands.rs` defining internal command/query/result structs for the transaction context.
+- Expose the new module via `backend/domain/mod.rs`.
+- Refactor `TransactionService`:
+  • New `create_transaction_domain` takes `CreateTransactionCommand` and returns a domain `Transaction`.
+  • DTO-based `create_transaction` now converts the DTO to the command and maps the domain result back to a DTO.
+
+These changes start decoupling the domain layer from shared DTOs as part of the transactions migration (#shared-migration-plan). 

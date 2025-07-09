@@ -12,6 +12,7 @@ use crate::backend::{
     io::rest::mappers::transaction_mapper::TransactionMapper,
     storage::{Connection, TransactionStorage},
 };
+use crate::backend::domain::commands::transactions::{CreateTransactionCommand};
 use anyhow::{anyhow, Result};
 use chrono::{Local, NaiveDate};
 use log::{error, info};
@@ -47,20 +48,21 @@ impl<C: Connection> TransactionService<C> {
         }
     }
 
-    pub async fn create_transaction(
+    pub async fn create_transaction_domain(
         &self,
-        request: CreateTransactionRequest,
-    ) -> Result<SharedTransaction> {
-        if request.description.is_empty() || request.description.len() > 256 {
+        command: CreateTransactionCommand,
+    ) -> Result<DomainTransaction> {
+        // Validate description length here (moving logic from DTO layer)
+        if command.description.is_empty() || command.description.len() > 256 {
             return Err(anyhow!("Description must be between 1 and 256 characters"));
         }
 
         let active_child = self.get_active_child().await?;
         let now_millis = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64;
-        let transaction_id = DomainTransaction::generate_id(request.amount, now_millis);
+        let transaction_id = DomainTransaction::generate_id(command.amount, now_millis);
 
-        let transaction_date = match request.date {
-            Some(date) => date,
+        let transaction_date = match command.date {
+            Some(d) => d,
             None => {
                 let now = time::OffsetDateTime::from(SystemTime::now());
                 let eastern_offset = time::UtcOffset::from_hms(-5, 0, 0)?;
@@ -73,7 +75,7 @@ impl<C: Connection> TransactionService<C> {
             .calculate_balance_for_new_transaction(
                 &active_child.id,
                 &transaction_date,
-                request.amount,
+                command.amount,
             )
             .await?;
 
@@ -81,10 +83,10 @@ impl<C: Connection> TransactionService<C> {
             id: transaction_id,
             child_id: active_child.id.clone(),
             date: transaction_date.clone(),
-            description: request.description,
-            amount: request.amount,
+            description: command.description,
+            amount: command.amount,
             balance: transaction_balance,
-            transaction_type: if request.amount >= 0.0 {
+            transaction_type: if command.amount >= 0.0 {
                 DomainTransactionType::Income
             } else {
                 DomainTransactionType::Expense
@@ -105,7 +107,21 @@ impl<C: Connection> TransactionService<C> {
                 .await?;
         }
 
-        Ok(TransactionMapper::to_dto(domain_transaction))
+        Ok(domain_transaction)
+    }
+
+    pub async fn create_transaction(
+        &self,
+        request: CreateTransactionRequest,
+    ) -> Result<SharedTransaction> {
+        let cmd = CreateTransactionCommand {
+            description: request.description,
+            amount: request.amount,
+            date: request.date,
+        };
+
+        let domain_tx = self.create_transaction_domain(cmd).await?;
+        Ok(TransactionMapper::to_dto(domain_tx))
     }
 
     pub async fn list_transactions(
