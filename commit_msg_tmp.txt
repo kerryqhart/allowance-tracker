@@ -1,7 +1,5 @@
-feat(domain): add domain-level list & delete transaction operations
+refactor(goal): use domain-level transaction listing
 
-• Added `list_transactions_domain` and `delete_transactions_domain` to `TransactionService`, using the new `TransactionListQuery` and `DeleteTransactionsCommand` types.
-• Existing DTO methods now delegate to the domain methods, preserving external API while advancing the migration off shared DTOs.
-• Updated imports accordingly.
+GoalService now queries TransactionService via the new `list_transactions_domain` and internal `TransactionListQuery`, removing its dependency on shared DTOs.
 
-Part of the ongoing transactions migration described in shared-migration-plan.md. 
+This pushes the DTO-to-domain boundary further outward in the transactions migration. 

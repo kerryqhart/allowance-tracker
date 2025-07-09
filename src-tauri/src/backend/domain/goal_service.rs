@@ -33,8 +33,8 @@ use shared::{
     Goal, GoalState, GoalCalculation, CreateGoalRequest, CreateGoalResponse,
     UpdateGoalRequest, UpdateGoalResponse, GetCurrentGoalRequest, GetCurrentGoalResponse,
     GetGoalHistoryRequest, GetGoalHistoryResponse, CancelGoalRequest, CancelGoalResponse,
-    TransactionListRequest,
 };
+use crate::backend::domain::commands::transactions::{TransactionListQuery};
 
 /// Service for managing goals and goal-related calculations
 #[derive(Clone)]
@@ -434,18 +434,18 @@ impl GoalService {
     /// Get current balance for a child
     async fn get_current_balance(&self, _child_id: &str) -> Result<f64> {
         // Get the latest transaction to get current balance
-        let transaction_request = TransactionListRequest {
+        let query = TransactionListQuery {
             after: None,
             limit: Some(1),
             start_date: None,
             end_date: None,
         };
 
-        let transaction_response = self.transaction_service.list_transactions(transaction_request).await?;
-        
-        match transaction_response.transactions.first() {
-            Some(transaction) => Ok(transaction.balance),
-            None => Ok(0.0), // No transactions, balance is 0
+        let result = self.transaction_service.list_transactions_domain(query).await?;
+
+        match result.transactions.first() {
+            Some(tx) => Ok(tx.balance),
+            None => Ok(0.0),
         }
     }
 }
