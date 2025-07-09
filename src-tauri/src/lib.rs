@@ -21,6 +21,9 @@ use backend::{
     initialize_backend, AppState,
 };
 use log::{error, info};
+use axum::serve;
+use tokio::net::TcpListener;
+use std::net::SocketAddr;
 use tauri::Manager;
 
 // Real Tauri commands that use backend services
@@ -419,6 +422,26 @@ pub fn run() {
             .await
             .expect("Failed to initialize backend")
     });
+
+    // Start the embedded Axum REST API server so the Yew frontend can
+    // continue to use HTTP endpoints (http://localhost:3000) during the
+    // transition phase to full native bindings.
+    {
+        let router = backend::create_router(app_state.clone());
+        // Launch the server in a background task so it doesn't block the UI.
+        tauri::async_runtime::spawn(async move {
+            let addr: SocketAddr = "0.0.0.0:3000".parse().expect("Invalid bind address");
+            info!("🌐 Starting embedded Axum REST API server at {}", addr);
+            match TcpListener::bind(addr).await {
+                Ok(listener) => {
+                    if let Err(e) = serve(listener, router).await {
+                        error!("Axum server error: {}", e);
+                    }
+                }
+                Err(e) => error!("Failed to bind Axum listener: {}", e),
+            }
+        });
+    }
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
