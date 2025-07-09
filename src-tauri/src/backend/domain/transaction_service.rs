@@ -12,7 +12,7 @@ use crate::backend::{
     io::rest::mappers::transaction_mapper::TransactionMapper,
     storage::{Connection, TransactionStorage},
 };
-use crate::backend::domain::commands::transactions::{CreateTransactionCommand};
+use crate::backend::domain::commands::transactions::{CreateTransactionCommand, TransactionListQuery, TransactionListResult, DeleteTransactionsCommand, DeleteTransactionsResult, PaginationInfo as DomainPagination};
 use anyhow::{anyhow, Result};
 use chrono::{Local, NaiveDate};
 use log::{error, info};
@@ -124,39 +124,22 @@ impl<C: Connection> TransactionService<C> {
         Ok(TransactionMapper::to_dto(domain_tx))
     }
 
-    pub async fn list_transactions(
+    pub async fn list_transactions_domain(
         &self,
-        request: TransactionListRequest,
-    ) -> Result<TransactionListResponse> {
+        query: TransactionListQuery,
+    ) -> Result<TransactionListResult> {
         self.check_and_issue_pending_allowances().await?;
         let active_child = self.get_active_child().await?;
 
-        let limit = request.limit.unwrap_or(20);
+        let limit = query.limit.unwrap_or(20);
         let query_limit = limit + 1;
 
         let mut db_transactions = self
             .transaction_repository
-            .list_transactions(&active_child.id, Some(query_limit), request.after)
+            .list_transactions(&active_child.id, Some(query_limit), query.after)
             .await?;
 
-        // FIXME: This is a temporary fix to get the code to compile.
-        // We need to figure out how to handle future allowances correctly.
-        // let future_allowances = self
-        //     .allowance_service
-        //     .generate_future_allowance_transactions(
-        //         &active_child.id,
-        //         request
-        //             .start_date
-        //             .and_then(|d| NaiveDate::parse_from_str(&d, "%Y-%m-%d").ok())
-        //             .unwrap_or_else(|| Local::now().naive_local().date()),
-        //         request
-        //             .end_date
-        //             .and_then(|d| NaiveDate::parse_from_str(&d, "%Y-%m-%d").ok())
-        //             .unwrap_or_else(|| (Local::now() + chrono::Duration::days(30)).naive_local().date()),
-        //     )
-        //     .await?;
-
-        // db_transactions.extend(future_allowances);
+        // TODO: reintegrate future allowances generation once domain models are finished
         db_transactions.sort_by(|a, b| b.date.cmp(&a.date));
 
         let has_more = db_transactions.len() > limit as usize;
@@ -170,30 +153,48 @@ impl<C: Connection> TransactionService<C> {
             None
         };
 
-        let dto_transactions = db_transactions
-            .into_iter()
-            .map(TransactionMapper::to_dto)
-            .collect();
+        Ok(TransactionListResult {
+            transactions: db_transactions,
+            pagination: DomainPagination { has_more, next_cursor },
+        })
+    }
+
+    pub async fn list_transactions(
+        &self,
+        request: TransactionListRequest,
+    ) -> Result<TransactionListResponse> {
+        let query = TransactionListQuery {
+            after: request.after,
+            limit: request.limit,
+            start_date: request.start_date,
+            end_date: request.end_date,
+        };
+
+        let domain_result = self.list_transactions_domain(query).await?;
 
         Ok(TransactionListResponse {
-            transactions: dto_transactions,
+            transactions: domain_result
+                .transactions
+                .into_iter()
+                .map(TransactionMapper::to_dto)
+                .collect(),
             pagination: PaginationInfo {
-                has_more,
-                next_cursor,
+                has_more: domain_result.pagination.has_more,
+                next_cursor: domain_result.pagination.next_cursor,
             },
         })
     }
 
-    pub async fn delete_transactions(
+    pub async fn delete_transactions_domain(
         &self,
-        request: DeleteTransactionsRequest,
-    ) -> Result<DeleteTransactionsResponse> {
+        cmd: DeleteTransactionsCommand,
+    ) -> Result<DeleteTransactionsResult> {
         let active_child = self.get_active_child().await?;
         let existing_ids = self
             .transaction_repository
-            .check_transactions_exist(&active_child.id, &request.transaction_ids)
+            .check_transactions_exist(&active_child.id, &cmd.transaction_ids)
             .await?;
-        let not_found_ids: Vec<String> = request
+        let not_found_ids: Vec<String> = cmd
             .transaction_ids
             .iter()
             .filter(|id| !existing_ids.contains(id))
@@ -220,10 +221,26 @@ impl<C: Connection> TransactionService<C> {
             n => format!("{} transactions deleted successfully", n),
         };
 
-        Ok(DeleteTransactionsResponse {
+        Ok(DeleteTransactionsResult {
             deleted_count: deleted_count as usize,
             success_message,
             not_found_ids,
+        })
+    }
+
+    pub async fn delete_transactions(
+        &self,
+        request: DeleteTransactionsRequest,
+    ) -> Result<DeleteTransactionsResponse> {
+        let cmd = DeleteTransactionsCommand {
+            transaction_ids: request.transaction_ids,
+        };
+        let res = self.delete_transactions_domain(cmd).await?;
+
+        Ok(DeleteTransactionsResponse {
+            deleted_count: res.deleted_count,
+            success_message: res.success_message,
+            not_found_ids: res.not_found_ids,
         })
     }
 

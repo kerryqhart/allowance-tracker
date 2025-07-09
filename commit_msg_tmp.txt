@@ -1,9 +1,7 @@
-feat(domain): introduce domain commands and refactor TransactionService
+feat(domain): add domain-level list & delete transaction operations
 
-- Add `backend/domain/commands.rs` defining internal command/query/result structs for the transaction context.
-- Expose the new module via `backend/domain/mod.rs`.
-- Refactor `TransactionService`:
-  • New `create_transaction_domain` takes `CreateTransactionCommand` and returns a domain `Transaction`.
-  • DTO-based `create_transaction` now converts the DTO to the command and maps the domain result back to a DTO.
+• Added `list_transactions_domain` and `delete_transactions_domain` to `TransactionService`, using the new `TransactionListQuery` and `DeleteTransactionsCommand` types.
+• Existing DTO methods now delegate to the domain methods, preserving external API while advancing the migration off shared DTOs.
+• Updated imports accordingly.
 
-These changes start decoupling the domain layer from shared DTOs as part of the transactions migration (#shared-migration-plan). 
+Part of the ongoing transactions migration described in shared-migration-plan.md. 
