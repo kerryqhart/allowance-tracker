@@ -1,5 +1,7 @@
-refactor(goal): use domain-level transaction listing
+refactor(api): map transaction REST handlers to domain commands
 
-GoalService now queries TransactionService via the new `list_transactions_domain` and internal `TransactionListQuery`, removing its dependency on shared DTOs.
+• Replaced DTO-direct calls in `transaction_apis.rs` with domain-level commands/queries.
+• Introduced `ListTransactionsQueryParams` to avoid name collision.
+• Added mapping with `TransactionMapper` to convert between domain models and shared DTOs.
 
-This pushes the DTO-to-domain boundary further outward in the transactions migration. 
+This removes remaining shared DTO usage from the transaction REST layer as part of the migration. 

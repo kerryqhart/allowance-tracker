@@ -13,13 +13,19 @@ use log::{info, error};
 use crate::backend::AppState;
 use shared::{
     CreateTransactionRequest,
-    TransactionListRequest,
     DeleteTransactionsRequest,
+    TransactionListResponse,
 };
+
+use crate::backend::domain::commands::transactions::{
+    CreateTransactionCommand, TransactionListQuery, DeleteTransactionsCommand,
+};
+
+use crate::backend::io::rest::mappers::transaction_mapper::TransactionMapper;
 
 // Query parameters for transaction listing API
 #[derive(Debug, Deserialize)]
-pub struct TransactionListQuery {
+pub struct ListTransactionsQueryParams {
     pub after: Option<String>,
     pub limit: Option<u32>,
     pub start_date: Option<String>,
@@ -29,19 +35,32 @@ pub struct TransactionListQuery {
 /// List transactions with optional filtering and pagination
 pub async fn list_transactions(
     State(state): State<AppState>,
-    Query(query): Query<TransactionListQuery>,
+    Query(query): Query<ListTransactionsQueryParams>,
 ) -> impl IntoResponse {
     info!("GET /api/transactions - query: {:?}", query);
 
-    let request = TransactionListRequest {
-        after: query.after,
+    let domain_query = TransactionListQuery {
+        after: query.after.clone(),
         limit: query.limit,
-        start_date: query.start_date,
-        end_date: query.end_date,
+        start_date: query.start_date.clone(),
+        end_date: query.end_date.clone(),
     };
 
-    match state.transaction_service.list_transactions(request).await {
-        Ok(response) => (StatusCode::OK, Json(response)).into_response(),
+    match state.transaction_service.list_transactions_domain(domain_query).await {
+        Ok(result) => {
+            let dto_response = TransactionListResponse {
+                transactions: result
+                    .transactions
+                    .into_iter()
+                    .map(TransactionMapper::to_dto)
+                    .collect(),
+                pagination: shared::PaginationInfo {
+                    has_more: result.pagination.has_more,
+                    next_cursor: result.pagination.next_cursor,
+                },
+            };
+            (StatusCode::OK, Json(dto_response)).into_response()
+        },
         Err(e) => {
             error!("Failed to list transactions: {}", e);
             (StatusCode::INTERNAL_SERVER_ERROR, "Error listing transactions").into_response()
@@ -56,8 +75,17 @@ pub async fn create_transaction(
 ) -> impl IntoResponse {
     info!("POST /api/transactions - request: {:?}", request);
 
-    match state.transaction_service.create_transaction(request).await {
-        Ok(transaction) => (StatusCode::CREATED, Json(transaction)).into_response(),
+    let cmd = CreateTransactionCommand {
+        description: request.description,
+        amount: request.amount,
+        date: request.date,
+    };
+
+    match state.transaction_service.create_transaction_domain(cmd).await {
+        Ok(domain_tx) => {
+            let dto = TransactionMapper::to_dto(domain_tx);
+            (StatusCode::CREATED, Json(dto)).into_response()
+        },
         Err(e) => {
             error!("Failed to create transaction: {}", e);
             (StatusCode::BAD_REQUEST, e.to_string()).into_response()
@@ -72,8 +100,19 @@ pub async fn delete_transactions(
 ) -> impl IntoResponse {
     info!("DELETE /api/transactions - request: {:?}", request);
 
-    match state.transaction_service.delete_transactions(request).await {
-        Ok(response) => (StatusCode::OK, Json(response)).into_response(),
+    let cmd = DeleteTransactionsCommand {
+        transaction_ids: request.transaction_ids,
+    };
+
+    match state.transaction_service.delete_transactions_domain(cmd).await {
+        Ok(res) => {
+            let dto = shared::DeleteTransactionsResponse {
+                deleted_count: res.deleted_count,
+                success_message: res.success_message,
+                not_found_ids: res.not_found_ids,
+            };
+            (StatusCode::OK, Json(dto)).into_response()
+        },
         Err(e) => {
             error!("Failed to delete transactions: {}", e);
             (StatusCode::INTERNAL_SERVER_ERROR, "Error deleting transactions").into_response()
@@ -99,7 +138,7 @@ mod tests {
         let money_management_service = MoneyManagementService::new();
         let child_service = ChildService::new(db.clone());
         let parental_control_service = crate::backend::domain::ParentalControlService::new(db.clone());
-        let allowance_service = crate::backend::domain::AllowanceService::new(db.clone());
+        let allowance_service = crate::backend::domain::AllowanceService::new(db);
         let balance_service = crate::backend::domain::BalanceService::new(db);
         
         // Create a test child and set as active using ChildService
