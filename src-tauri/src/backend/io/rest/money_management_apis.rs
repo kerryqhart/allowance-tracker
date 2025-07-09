@@ -14,6 +14,9 @@ use shared::{
     AddMoneyRequest, AddMoneyResponse, SpendMoneyRequest, SpendMoneyResponse,
 };
 
+use crate::backend::domain::commands::transactions::CreateTransactionCommand;
+use crate::backend::io::rest::mappers::transaction_mapper::TransactionMapper;
+
 /// Add money (create a positive transaction)
 pub async fn add_money(
     State(state): State<AppState>,
@@ -67,11 +70,17 @@ pub async fn add_money(
         .to_create_transaction_request(request.clone());
     info!("✅ CreateTransactionRequest: {:?}", create_request);
 
-    // Create the transaction (automatically scoped to active child)
-    // The TransactionService will handle backdated transaction logic
+    // Convert DTO to domain command and create transaction
+    let cmd = CreateTransactionCommand {
+        description: create_request.description.clone(),
+        amount: create_request.amount,
+        date: create_request.date.clone(),
+    };
+
     info!("🚀 Creating transaction via TransactionService...");
-    match state.transaction_service.create_transaction(create_request).await {
-        Ok(transaction) => {
+    match state.transaction_service.create_transaction_domain(cmd).await {
+        Ok(domain_tx) => {
+            let transaction = TransactionMapper::to_dto(domain_tx);
             info!("✅ Transaction created successfully: {:?}", transaction);
             
             let success_message = if let Some(date) = &request.date {
@@ -166,11 +175,16 @@ pub async fn spend_money(
         .spend_to_create_transaction_request(request.clone());
     info!("✅ CreateTransactionRequest: {:?}", create_request);
 
-    // Create the transaction (automatically scoped to active child)
-    // The TransactionService will handle backdated transaction logic
+    let cmd = CreateTransactionCommand {
+        description: create_request.description.clone(),
+        amount: create_request.amount,
+        date: create_request.date.clone(),
+    };
+
     info!("🚀 Creating transaction via TransactionService...");
-    match state.transaction_service.create_transaction(create_request).await {
-        Ok(transaction) => {
+    match state.transaction_service.create_transaction_domain(cmd).await {
+        Ok(domain_tx) => {
+            let transaction = TransactionMapper::to_dto(domain_tx);
             info!("✅ Transaction created successfully: {:?}", transaction);
             
             let success_message = if let Some(date) = &request.date {

@@ -1,7 +1,6 @@
-refactor(api): map transaction REST handlers to domain commands
+refactor(api): migrate money management endpoints to domain commands
 
-• Replaced DTO-direct calls in `transaction_apis.rs` with domain-level commands/queries.
-• Introduced `ListTransactionsQueryParams` to avoid name collision.
-• Added mapping with `TransactionMapper` to convert between domain models and shared DTOs.
+• `money_management_apis.rs` now constructs `CreateTransactionCommand` and calls `create_transaction_domain`.
+• Uses `TransactionMapper` to convert domain Transaction back to DTO.
 
-This removes remaining shared DTO usage from the transaction REST layer as part of the migration. 
+This completes REST-layer migration off shared DTOs for transaction creation pathways. 
