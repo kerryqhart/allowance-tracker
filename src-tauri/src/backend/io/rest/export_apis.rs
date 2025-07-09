@@ -16,7 +16,10 @@ use std::fs;
 use std::path::{Path, PathBuf, Component};
 
 use crate::backend::AppState;
-use shared::{ExportDataRequest, ExportDataResponse, TransactionListRequest};
+use shared::{ExportDataRequest, ExportDataResponse, ExportToPathRequest, ExportToPathResponse, Transaction};
+
+use crate::backend::domain::commands::transactions::TransactionListQuery;
+use crate::backend::io::rest::mappers::transaction_mapper::TransactionMapper;
 
 #[derive(Debug, Deserialize)]
 pub struct WriteFileRequest {
@@ -24,25 +27,10 @@ pub struct WriteFileRequest {
     content: String,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct ExportToPathRequest {
-    child_id: Option<String>,
-    custom_path: Option<String>, // Optional custom directory path
-}
-
 #[derive(Debug, Serialize)]
 pub struct WriteFileResponse {
     success: bool,
     message: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct ExportToPathResponse {
-    success: bool,
-    message: String,
-    file_path: String,
-    transaction_count: usize,
-    child_name: String,
 }
 
 /// Basic path sanitization to handle common user input issues
@@ -127,30 +115,34 @@ pub async fn export_transactions_csv(
     };
 
     // Get all transactions for the child (no pagination for export)
-    let transaction_request = TransactionListRequest {
+    let domain_query = TransactionListQuery {
         after: None,
-        limit: Some(10000), // Large limit to get all transactions
+        limit: Some(10000),
         start_date: None,
         end_date: None,
     };
 
-    let transactions = match state.transaction_service.list_transactions(transaction_request).await {
-        Ok(response) => response.transactions,
+    let domain_res = match state.transaction_service.list_transactions_domain(domain_query).await {
+        Ok(res) => res,
         Err(e) => {
             error!("Failed to get transactions for export: {}", e);
             return (StatusCode::INTERNAL_SERVER_ERROR, "Error retrieving transactions").into_response();
         }
     };
 
-    // Sort transactions chronologically (oldest first) for CSV export
-    let mut sorted_transactions = transactions;
-    sorted_transactions.sort_by(|a, b| a.date.cmp(&b.date));
+    let mut transactions: Vec<Transaction> = domain_res
+        .transactions
+        .into_iter()
+        .map(TransactionMapper::to_dto)
+        .collect();
+    // Sort chronologically (oldest first)
+    transactions.sort_by(|a, b| a.date.cmp(&b.date));
 
     // Generate CSV content
     let mut csv_content = String::new();
     csv_content.push_str("transaction_id,transaction_date,description,amount\n");
 
-    for (index, transaction) in sorted_transactions.iter().enumerate() {
+    for (index, transaction) in transactions.iter().enumerate() {
         // Parse the date and format as yyyy/mm/dd
         let formatted_date = match DateTime::parse_from_rfc3339(&transaction.date) {
             Ok(dt) => dt.format("%Y/%m/%d").to_string(),
@@ -182,7 +174,7 @@ pub async fn export_transactions_csv(
     let response = ExportDataResponse {
         csv_content,
         filename,
-        transaction_count: sorted_transactions.len(),
+        transaction_count: transactions.len(),
         child_name: child.name,
     };
 
@@ -226,7 +218,7 @@ pub async fn export_to_path(
 
     // First, get the export data
     let export_request = ExportDataRequest {
-        child_id: request.child_id,
+        child_id: request.child_id.clone(),
     };
 
     // Generate the CSV content using existing logic
@@ -245,7 +237,7 @@ pub async fn export_to_path(
     };
 
     // Determine the export directory
-    let export_dir = match request.custom_path {
+    let export_dir = match request.custom_path.clone() {
         Some(custom_path) if !custom_path.trim().is_empty() => {
             // Basic path sanitization: remove quotes, trim whitespace, handle common issues
             let cleaned_path = sanitize_path(&custom_path);
@@ -263,7 +255,7 @@ pub async fn export_to_path(
                             error!("Could not determine default export directory");
                             return (StatusCode::INTERNAL_SERVER_ERROR, Json(ExportToPathResponse {
                                 success: false,
-                                message: "Could not determine default export directory".to_string(),
+                                message: "Failed to determine export directory".to_string(),
                                 file_path: String::new(),
                                 transaction_count: 0,
                                 child_name: String::new(),
@@ -285,7 +277,7 @@ pub async fn export_to_path(
             return (StatusCode::INTERNAL_SERVER_ERROR, Json(ExportToPathResponse {
                 success: false,
                 message: format!("Failed to create export directory: {}", e),
-                file_path: String::new(),
+                file_path: parent_dir.to_string_lossy().to_string(),
                 transaction_count: 0,
                 child_name: String::new(),
             })).into_response();
@@ -301,8 +293,7 @@ pub async fn export_to_path(
             
             (StatusCode::OK, Json(ExportToPathResponse {
                 success: true,
-                message: format!("Successfully exported {} transactions to {}", 
-                               export_response.transaction_count, file_path_str),
+                message: format!("File exported successfully to: {}", file_path_str),
                 file_path: file_path_str,
                 transaction_count: export_response.transaction_count,
                 child_name: export_response.child_name,
@@ -313,7 +304,7 @@ pub async fn export_to_path(
             (StatusCode::INTERNAL_SERVER_ERROR, Json(ExportToPathResponse {
                 success: false,
                 message: format!("Failed to write export file: {}", e),
-                file_path: String::new(),
+                file_path: file_path.to_string_lossy().to_string(),
                 transaction_count: 0,
                 child_name: String::new(),
             })).into_response()
@@ -348,28 +339,30 @@ async fn export_transactions_csv_internal(
         Err(e) => return Err(format!("Failed to get child details: {}", e)),
     };
 
-    // Get all transactions for the child (no pagination for export)
-    let transaction_request = TransactionListRequest {
+    let domain_query = TransactionListQuery {
         after: None,
-        limit: Some(10000), // Large limit to get all transactions
+        limit: Some(10000),
         start_date: None,
         end_date: None,
     };
 
-    let transactions = match state.transaction_service.list_transactions(transaction_request).await {
-        Ok(response) => response.transactions,
+    let domain_res = match state.transaction_service.list_transactions_domain(domain_query).await {
+        Ok(res) => res,
         Err(e) => return Err(format!("Failed to get transactions: {}", e)),
     };
-
-    // Sort transactions chronologically (oldest first) for CSV export
-    let mut sorted_transactions = transactions;
-    sorted_transactions.sort_by(|a, b| a.date.cmp(&b.date));
+    let mut transactions: Vec<Transaction> = domain_res
+        .transactions
+        .into_iter()
+        .map(TransactionMapper::to_dto)
+        .collect();
+    // Sort chronologically
+    transactions.sort_by(|a, b| a.date.cmp(&b.date));
 
     // Generate CSV content
     let mut csv_content = String::new();
     csv_content.push_str("transaction_id,transaction_date,description,amount\n");
 
-    for (index, transaction) in sorted_transactions.iter().enumerate() {
+    for (index, transaction) in transactions.iter().enumerate() {
         // Parse the date and format as yyyy/mm/dd
         let formatted_date = match DateTime::parse_from_rfc3339(&transaction.date) {
             Ok(dt) => dt.format("%Y/%m/%d").to_string(),
@@ -401,7 +394,7 @@ async fn export_transactions_csv_internal(
     Ok(ExportDataResponse {
         csv_content,
         filename,
-        transaction_count: sorted_transactions.len(),
+        transaction_count: transactions.len(),
         child_name: child.name,
     })
 }

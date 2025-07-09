@@ -11,12 +11,12 @@ use shared::{
     RelocateDataDirectoryRequest, RelocateDataDirectoryResponse, RevertDataDirectoryRequest,
     RevertDataDirectoryResponse, SetActiveChildRequest,
     SetActiveChildResponse, SpendMoneyRequest, SpendMoneyResponse, TransactionListRequest,
-    TransactionTableRequest, TransactionTableResponse, UpdateAllowanceConfigRequest,
-    UpdateAllowanceConfigResponse,
+    TransactionTableResponse, UpdateAllowanceConfigRequest, UpdateAllowanceConfigResponse,
 };
 
+use crate::backend::domain::commands::transactions::{DeleteTransactionsCommand, TransactionListQuery};
+use crate::backend::io::rest::mappers::transaction_mapper::TransactionMapper;
 use backend::{
-    domain::models::child::{Child as DomainChild},
     io::rest::mappers::child_mapper::ChildMapper,
     initialize_backend, AppState,
 };
@@ -160,29 +160,36 @@ async fn get_transactions(
     app_state: tauri::State<'_, AppState>,
     limit: Option<u32>,
 ) -> Result<TransactionTableResponse, String> {
-    info!("📊 Getting transactions with real data");
-
-    // 1. Fetch raw transactions
-    let list_request = TransactionListRequest {
+    info!("📄 Getting transactions table");
+    let domain_query = TransactionListQuery {
         after: None,
         limit,
         start_date: None,
         end_date: None,
     };
-    let list_response = app_state
-        .transaction_service
-        .list_transactions(list_request)
-        .await
-        .map_err(|e| format!("Failed to get transactions: {}", e))?;
 
-    // 2. Format them for the table
+    let result = app_state
+        .transaction_service
+        .list_transactions_domain(domain_query)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let dto_transactions: Vec<shared::Transaction> = result
+        .transactions
+        .into_iter()
+        .map(TransactionMapper::to_dto)
+        .collect();
+
     let formatted_transactions = app_state
         .transaction_table_service
-        .format_transactions_for_table(&list_response.transactions);
+        .format_transactions_for_table(&dto_transactions);
 
     Ok(TransactionTableResponse {
         formatted_transactions,
-        pagination: list_response.pagination,
+        pagination: shared::PaginationInfo {
+            has_more: result.pagination.has_more,
+            next_cursor: result.pagination.next_cursor,
+        },
     })
 }
 
@@ -311,10 +318,18 @@ async fn delete_transactions(
     request: DeleteTransactionsRequest,
 ) -> Result<DeleteTransactionsResponse, String> {
     info!("🗑️ Deleting transactions: {:?}", request.transaction_ids);
+    let cmd = DeleteTransactionsCommand {
+        transaction_ids: request.transaction_ids,
+    };
     app_state
         .transaction_service
-        .delete_transactions(request)
+        .delete_transactions_domain(cmd)
         .await
+        .map(|res| DeleteTransactionsResponse {
+            deleted_count: res.deleted_count,
+            success_message: res.success_message,
+            not_found_ids: res.not_found_ids,
+        })
         .map_err(|e| e.to_string())
 }
 
