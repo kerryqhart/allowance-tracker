@@ -43,7 +43,7 @@ use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
 use std::io::{BufReader, BufWriter};
 use std::path::PathBuf;
-use shared::{Goal, GoalState};
+use crate::backend::domain::models::goal::{DomainGoal, DomainGoalState};
 use super::connection::CsvConnection;
 use super::child_repository::ChildRepository;
 use crate::backend::storage::{ChildStorage, GitManager};
@@ -60,8 +60,8 @@ struct GoalRecord {
     updated_at: String,
 }
 
-impl From<Goal> for GoalRecord {
-    fn from(goal: Goal) -> Self {
+impl From<DomainGoal> for GoalRecord {
+    fn from(goal: DomainGoal) -> Self {
         GoalRecord {
             id: goal.id,
             child_id: goal.child_id,
@@ -74,14 +74,14 @@ impl From<Goal> for GoalRecord {
     }
 }
 
-impl TryFrom<GoalRecord> for Goal {
+impl TryFrom<GoalRecord> for DomainGoal {
     type Error = anyhow::Error;
 
     fn try_from(record: GoalRecord) -> Result<Self> {
-        let state = GoalState::from_string(&record.state)
+        let state = DomainGoalState::from_string(&record.state)
             .map_err(|e| anyhow::anyhow!("Failed to parse goal state: {}", e))?;
 
-        Ok(Goal {
+        Ok(DomainGoal {
             id: record.id,
             child_id: record.child_id,
             description: record.description,
@@ -154,7 +154,7 @@ impl GoalRepository {
     }
     
     /// Read all goals for a child from their CSV file
-    async fn read_goals(&self, child_directory: &str) -> Result<Vec<Goal>> {
+    async fn read_goals(&self, child_directory: &str) -> Result<Vec<DomainGoal>> {
         self.ensure_goals_file_exists(child_directory)?;
         
         let goals_file_path = self.get_goals_file_path(child_directory);
@@ -178,8 +178,8 @@ impl GoalRepository {
                 updated_at: record.get(6).unwrap_or("").to_string(),
             };
             
-            // Convert to Goal
-            match Goal::try_from(goal_record) {
+            // Convert to DomainGoal
+            match DomainGoal::try_from(goal_record) {
                 Ok(goal) => goals.push(goal),
                 Err(e) => {
                     warn!("Failed to parse goal record: {}. Skipping.", e);
@@ -192,7 +192,7 @@ impl GoalRepository {
     }
     
     /// Write all goals for a child to their CSV file
-    async fn write_goals(&self, child_directory: &str, goals: &[Goal]) -> Result<()> {
+    async fn write_goals(&self, child_directory: &str, goals: &[DomainGoal]) -> Result<()> {
         let goals_file_path = self.get_goals_file_path(child_directory);
         let temp_file_path = goals_file_path.with_extension("csv.tmp");
         
@@ -224,7 +224,7 @@ impl GoalRepository {
     }
     
     /// Append a new goal to the CSV file (more efficient than rewriting entire file)
-    async fn append_goal(&self, child_directory: &str, goal: &Goal) -> Result<()> {
+    async fn append_goal(&self, child_directory: &str, goal: &DomainGoal) -> Result<()> {
         self.ensure_goals_file_exists(child_directory)?;
         
         let goals_file_path = self.get_goals_file_path(child_directory);
@@ -259,7 +259,7 @@ impl GoalRepository {
 #[async_trait]
 impl crate::backend::storage::GoalStorage for GoalRepository {
     /// Store a new goal (append-only - creates new record)
-    async fn store_goal(&self, goal: &Goal) -> Result<()> {
+    async fn store_goal(&self, goal: &DomainGoal) -> Result<()> {
         info!("Storing goal in CSV: {}", goal.id);
         
         let child_directory = match self.find_child_directory(&goal.child_id).await? {
@@ -274,7 +274,7 @@ impl crate::backend::storage::GoalStorage for GoalRepository {
     }
     
     /// Get the current active goal for a specific child
-    async fn get_current_goal(&self, child_id: &str) -> Result<Option<Goal>> {
+    async fn get_current_goal(&self, child_id: &str) -> Result<Option<DomainGoal>> {
         let child_directory = match self.find_child_directory(child_id).await? {
             Some(dir) => dir,
             None => return Ok(None),
@@ -287,14 +287,14 @@ impl crate::backend::storage::GoalStorage for GoalRepository {
         
         // Get the most recent goal entry and check if it's active
         match goals.first() {
-            Some(goal) if goal.state == GoalState::Active => Ok(Some(goal.clone())),
+            Some(goal) if goal.state == DomainGoalState::Active => Ok(Some(goal.clone())),
             _ => Ok(None), // No goals or latest goal is cancelled/completed
         }
     }
     
     /// List all goals for a specific child (with optional limit)
     /// Returns goals ordered by created_at descending (most recent first)
-    async fn list_goals(&self, child_id: &str, limit: Option<u32>) -> Result<Vec<Goal>> {
+    async fn list_goals(&self, child_id: &str, limit: Option<u32>) -> Result<Vec<DomainGoal>> {
         let child_directory = match self.find_child_directory(child_id).await? {
             Some(dir) => dir,
             None => return Ok(Vec::new()),
@@ -315,7 +315,7 @@ impl crate::backend::storage::GoalStorage for GoalRepository {
     
     /// Update an existing goal by creating a new record with updated fields
     /// This maintains the append-only history while updating the current state
-    async fn update_goal(&self, goal: &Goal) -> Result<()> {
+    async fn update_goal(&self, goal: &DomainGoal) -> Result<()> {
         info!("Updating goal in CSV: {}", goal.id);
         
         // Simply append the updated goal - the append-only nature preserves history
@@ -326,7 +326,7 @@ impl crate::backend::storage::GoalStorage for GoalRepository {
     }
     
     /// Cancel the current active goal by setting its state to Cancelled
-    async fn cancel_current_goal(&self, child_id: &str) -> Result<Option<Goal>> {
+    async fn cancel_current_goal(&self, child_id: &str) -> Result<Option<DomainGoal>> {
         info!("Cancelling current goal for child: {}", child_id);
         
         let current_goal = match self.get_current_goal(child_id).await? {
@@ -339,7 +339,7 @@ impl crate::backend::storage::GoalStorage for GoalRepository {
         
         // Create cancelled version
         let mut cancelled_goal = current_goal.clone();
-        cancelled_goal.state = GoalState::Cancelled;
+        cancelled_goal.state = DomainGoalState::Cancelled;
         cancelled_goal.updated_at = Utc::now().to_rfc3339();
         
         // Store the cancelled goal (append-only)
@@ -350,7 +350,7 @@ impl crate::backend::storage::GoalStorage for GoalRepository {
     }
     
     /// Mark the current active goal as completed
-    async fn complete_current_goal(&self, child_id: &str) -> Result<Option<Goal>> {
+    async fn complete_current_goal(&self, child_id: &str) -> Result<Option<DomainGoal>> {
         info!("Completing current goal for child: {}", child_id);
         
         let current_goal = match self.get_current_goal(child_id).await? {
@@ -363,7 +363,7 @@ impl crate::backend::storage::GoalStorage for GoalRepository {
         
         // Create completed version
         let mut completed_goal = current_goal.clone();
-        completed_goal.state = GoalState::Completed;
+        completed_goal.state = DomainGoalState::Completed;
         completed_goal.updated_at = Utc::now().to_rfc3339();
         
         // Store the completed goal (append-only)

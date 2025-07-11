@@ -41,7 +41,7 @@ use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
 use std::io::{BufReader, BufWriter};
 use std::path::PathBuf;
-use shared::ParentalControlAttempt;
+use crate::backend::domain::models::parental_control_attempt::ParentalControlAttempt as DomainParentalControlAttempt;
 use super::connection::CsvConnection;
 use crate::backend::storage::GitManager;
 
@@ -54,9 +54,9 @@ struct ParentalControlAttemptRecord {
     success: bool,
 }
 
-impl From<ParentalControlAttemptRecord> for ParentalControlAttempt {
+impl From<ParentalControlAttemptRecord> for DomainParentalControlAttempt {
     fn from(record: ParentalControlAttemptRecord) -> Self {
-        ParentalControlAttempt {
+        DomainParentalControlAttempt {
             id: record.id,
             attempted_value: record.attempted_value,
             timestamp: record.timestamp,
@@ -240,7 +240,7 @@ impl ParentalControlRepository {
     }
     
     /// Load parental control attempts from a specific child's CSV file
-    async fn load_parental_control_attempts_from_directory(&self, child_directory: &str, limit: Option<u32>) -> Result<Vec<ParentalControlAttempt>> {
+    async fn load_parental_control_attempts_from_directory(&self, child_directory: &str, limit: Option<u32>) -> Result<Vec<DomainParentalControlAttempt>> {
         let csv_path = self.get_parental_control_file_path(child_directory);
         
         if !csv_path.exists() {
@@ -256,7 +256,7 @@ impl ParentalControlRepository {
         for result in csv_reader.records() {
             let record = result?;
             if record.len() >= 4 {
-                let attempt = ParentalControlAttempt {
+                let attempt = DomainParentalControlAttempt {
                     id: record[0].parse::<i64>()?,
                     attempted_value: record[1].to_string(),
                     timestamp: record[2].to_string(),
@@ -267,7 +267,7 @@ impl ParentalControlRepository {
         }
         
         // Sort by ID descending (most recent first, assuming IDs are incremental)
-        attempts.sort_by(|a: &ParentalControlAttempt, b: &ParentalControlAttempt| b.id.cmp(&a.id));
+        attempts.sort_by(|a: &DomainParentalControlAttempt, b: &DomainParentalControlAttempt| b.id.cmp(&a.id));
         
         // Apply limit if specified
         if let Some(limit) = limit {
@@ -310,7 +310,7 @@ impl crate::backend::storage::ParentalControlStorage for ParentalControlReposito
         Ok(next_id)
     }
     
-    async fn get_parental_control_attempts(&self, child_id: &str, limit: Option<u32>) -> Result<Vec<ParentalControlAttempt>> {
+    async fn get_parental_control_attempts(&self, child_id: &str, limit: Option<u32>) -> Result<Vec<DomainParentalControlAttempt>> {
         // Find the child directory for this child_id
         let child_directory = match self.find_child_directory_by_id(child_id).await? {
             Some(dir) => dir,
@@ -323,7 +323,7 @@ impl crate::backend::storage::ParentalControlStorage for ParentalControlReposito
         self.load_parental_control_attempts_from_directory(&child_directory, limit).await
     }
     
-    async fn get_all_parental_control_attempts(&self, limit: Option<u32>) -> Result<Vec<ParentalControlAttempt>> {
+    async fn get_all_parental_control_attempts(&self, limit: Option<u32>) -> Result<Vec<DomainParentalControlAttempt>> {
         let directories = self.get_all_child_directories().await?;
         let mut all_attempts = Vec::new();
         
@@ -333,7 +333,7 @@ impl crate::backend::storage::ParentalControlStorage for ParentalControlReposito
         }
         
         // Sort by ID descending across all children (most recent first)
-        all_attempts.sort_by(|a: &ParentalControlAttempt, b: &ParentalControlAttempt| b.id.cmp(&a.id));
+        all_attempts.sort_by(|a: &DomainParentalControlAttempt, b: &DomainParentalControlAttempt| b.id.cmp(&a.id));
         
         // Apply limit if specified
         if let Some(limit) = limit {

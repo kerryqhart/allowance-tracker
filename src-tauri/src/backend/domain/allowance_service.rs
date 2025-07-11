@@ -63,12 +63,10 @@ impl AllowanceService {
             }
         };
 
-        let shared_allowance_config = self
+        let domain_allowance_config = self
             .allowance_repository
             .get_allowance_config(&child_id)
             .await?;
-
-        let domain_allowance_config = shared_allowance_config.map(AllowanceMapper::to_domain);
 
         if let Some(ref config) = domain_allowance_config {
             info!("Found allowance config for child: {}", child_id);
@@ -126,7 +124,7 @@ impl AllowanceService {
         };
 
         // Check if allowance config already exists
-        let existing_shared_config = self
+        let existing_domain_config = self
             .allowance_repository
             .get_allowance_config(&child_id)
             .await?;
@@ -134,14 +132,14 @@ impl AllowanceService {
         let now = Utc::now();
         let timestamp_rfc3339 = now.to_rfc3339();
 
-        let domain_allowance_config = match existing_shared_config {
+        let domain_allowance_config = match existing_domain_config {
             Some(mut config) => {
                 // Update existing config
                 config.amount = command.amount;
                 config.day_of_week = command.day_of_week;
                 config.is_active = command.is_active;
                 config.updated_at = timestamp_rfc3339;
-                AllowanceMapper::to_domain(config)
+                config
             }
             None => {
                 // Create new config
@@ -158,10 +156,9 @@ impl AllowanceService {
             }
         };
 
-        // Store the configuration (convert back to shared for storage)
-        let shared_config = AllowanceMapper::to_dto(domain_allowance_config.clone());
+        // Store the configuration directly as domain model
         self.allowance_repository
-            .store_allowance_config(&shared_config)
+            .store_allowance_config(&domain_allowance_config)
             .await?;
 
         info!(
@@ -199,8 +196,7 @@ impl AllowanceService {
     pub async fn list_allowance_configs(&self) -> Result<Vec<AllowanceConfig>> {
         info!("Listing all allowance configurations");
 
-        let shared_configs = self.allowance_repository.list_allowance_configs().await?;
-        let domain_configs: Vec<AllowanceConfig> = shared_configs.into_iter().map(AllowanceMapper::to_domain).collect();
+        let domain_configs = self.allowance_repository.list_allowance_configs().await?;
 
         info!("Found {} allowance configurations", domain_configs.len());
 

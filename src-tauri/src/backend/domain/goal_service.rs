@@ -127,11 +127,8 @@ impl GoalService {
             updated_at: now_rfc3339,
         };
 
-        // Convert to shared Goal for storage
-        let shared_goal = GoalMapper::to_dto(domain_goal.clone());
-        
-        // Store goal
-        self.goal_repository.store_goal(&shared_goal).await?;
+        // Store goal directly as domain model
+        self.goal_repository.store_goal(&domain_goal).await?;
 
         // Calculate completion projection
         let calculation = self.calculate_goal_completion(&child_id, command.target_amount).await?;
@@ -168,11 +165,8 @@ impl GoalService {
             }
         };
 
-        // Get current goal (returns shared Goal)
-        let current_goal_shared = self.goal_repository.get_current_goal(&child_id).await?;
-        
-        // Convert to domain model
-        let current_goal_domain = current_goal_shared.map(GoalMapper::to_domain);
+        // Get current goal (returns domain Goal)
+        let current_goal_domain = self.goal_repository.get_current_goal(&child_id).await?;
         
         // Calculate completion projection if goal exists
         let calculation = if let Some(ref goal) = current_goal_domain {
@@ -204,14 +198,11 @@ impl GoalService {
             }
         };
 
-        // Get current active goal (returns shared Goal)
-        let current_goal_shared = match self.goal_repository.get_current_goal(&child_id).await? {
+        // Get current active goal (returns domain Goal)
+        let mut current_goal_domain = match self.goal_repository.get_current_goal(&child_id).await? {
             Some(goal) => goal,
             None => return Err(anyhow::anyhow!("No active goal found to update")),
         };
-
-        // Convert to domain model
-        let mut current_goal_domain = GoalMapper::to_domain(current_goal_shared);
 
         // Update fields if provided
         if let Some(description) = command.description {
@@ -242,11 +233,8 @@ impl GoalService {
         // Update timestamp
         current_goal_domain.updated_at = Utc::now().to_rfc3339();
 
-        // Convert back to shared Goal for storage
-        let shared_goal = GoalMapper::to_dto(current_goal_domain.clone());
-
         // Store updated goal (append-only)
-        self.goal_repository.update_goal(&shared_goal).await?;
+        self.goal_repository.update_goal(&current_goal_domain).await?;
 
         // Calculate new completion projection
         let calculation = self.calculate_goal_completion(&child_id, current_goal_domain.target_amount).await?;
@@ -277,14 +265,11 @@ impl GoalService {
             }
         };
 
-        // Cancel the goal (returns shared Goal)
-        let cancelled_goal_shared = match self.goal_repository.cancel_current_goal(&child_id).await? {
+        // Cancel the goal (returns domain Goal)
+        let cancelled_goal_domain = match self.goal_repository.cancel_current_goal(&child_id).await? {
             Some(goal) => goal,
             None => return Err(anyhow::anyhow!("No active goal found to cancel")),
         };
-
-        // Convert to domain model
-        let cancelled_goal_domain = GoalMapper::to_domain(cancelled_goal_shared);
 
         info!("Successfully cancelled goal: {}", cancelled_goal_domain.id);
 
@@ -316,11 +301,8 @@ impl GoalService {
             }
         };
 
-        // Get goal history (returns shared Goals)
-        let goals_shared = self.goal_repository.list_goals(&child_id, command.limit).await?;
-
-        // Convert to domain models
-        let goals_domain = GoalMapper::to_domain_list(goals_shared);
+        // Get goal history (returns domain Goals)
+        let goals_domain = self.goal_repository.list_goals(&child_id, command.limit).await?;
 
         Ok(GetGoalHistoryResult { goals: goals_domain })
     }
@@ -329,17 +311,14 @@ impl GoalService {
     pub async fn check_and_complete_goals(&self, child_id: &str) -> Result<Option<DomainGoal>> {
         info!("Checking for goal completion for child: {}", child_id);
 
-        // Get current active goal (returns shared Goal)
-        let current_goal_shared = match self.goal_repository.get_current_goal(child_id).await? {
+        // Get current active goal (returns domain Goal)
+        let current_goal_domain = match self.goal_repository.get_current_goal(child_id).await? {
             Some(goal) => goal,
             None => {
                 info!("No active goal found for child: {}", child_id);
                 return Ok(None);
             }
         };
-
-        // Convert to domain model
-        let current_goal_domain = GoalMapper::to_domain(current_goal_shared);
 
         // Get current balance
         let current_balance = self.get_current_balance(child_id).await?;
@@ -349,11 +328,8 @@ impl GoalService {
             info!("Goal {} completed! Current balance: ${:.2}, Target: ${:.2}", 
                   current_goal_domain.id, current_balance, current_goal_domain.target_amount);
             
-            // Mark goal as completed (returns shared Goal)
-            let completed_goal_shared = self.goal_repository.complete_current_goal(child_id).await?;
-            
-            // Convert to domain model
-            let completed_goal_domain = completed_goal_shared.map(GoalMapper::to_domain);
+            // Mark goal as completed (returns domain Goal)
+            let completed_goal_domain = self.goal_repository.complete_current_goal(child_id).await?;
             
             return Ok(completed_goal_domain);
         }
