@@ -1,10 +1,19 @@
-Make git approval requirement more explicit in .cursorrules
+feat: Complete Transaction Bounded Context migration from shared to domain models
 
-Updated the git section to be much more prominent and clear about requiring user approval:
-- Changed section header to "Git - REQUIRES USER APPROVAL"
-- Added bold "CRITICAL" and "ALWAYS ASK" warnings
-- Made it explicit to ask "Would you like me to commit these changes?"
-- Expanded to cover ALL git operations (commit, push, merge, rebase, etc.)
-- Added "If unsure, ASK FIRST" safety net
+- Created goal_mapper.rs with full bidirectional conversion between domain and DTO models
+- Fixed goal.rs domain model to remove shared::GoalState dependency, created DomainGoalState
+- Refactored transaction_service.rs to use domain models only, removed dual domain/DTO methods
+- Updated money_management.rs to support domain commands (CreateTransactionCommand)
+- Fixed all Tauri commands in lib.rs to use domain models and mappers at boundaries
+- App builds successfully, all core transaction functionality now uses domain models
 
-This should prevent AI from making commits without explicit user approval. 
+Migration Progress:
+✅ Domain Models Foundation (all major models exist)
+✅ Goal Mapper Creation  
+✅ Goal Domain Model Fix
+✅ Transaction Bounded Context Migration
+⏳ Next: Allowance Bounded Context migration
+
+The architecture now properly separates domain logic from DTOs, with mappers handling
+conversions at the boundaries between layers. This maintains clean domain boundaries
+while preserving API compatibility. 

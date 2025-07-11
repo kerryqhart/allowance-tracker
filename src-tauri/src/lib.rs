@@ -39,7 +39,7 @@ async fn get_calendar_month(
         month, year
     );
 
-    let transaction_request = TransactionListRequest {
+    let transaction_query = TransactionListQuery {
         after: None,
         limit: Some(10000),
         start_date: None,
@@ -51,16 +51,22 @@ async fn get_calendar_month(
         )),
     };
 
-    let transaction_response = app_state
+    let transaction_result = app_state
         .transaction_service
-        .list_transactions(transaction_request)
+        .list_transactions(transaction_query)
         .await
         .map_err(|e| format!("Failed to load calendar data: {}", e))?;
+
+    let dto_transactions: Vec<shared::Transaction> = transaction_result
+        .transactions
+        .into_iter()
+        .map(TransactionMapper::to_dto)
+        .collect();
 
     let calendar_month = app_state.calendar_service.generate_calendar_month(
         month,
         year,
-        transaction_response.transactions,
+        dto_transactions,
     );
 
     info!(
@@ -174,7 +180,7 @@ async fn get_transactions(
 
     let result = app_state
         .transaction_service
-        .list_transactions_domain(domain_query)
+        .list_transactions(domain_query)
         .await
         .map_err(|e| e.to_string())?;
 
@@ -278,20 +284,21 @@ async fn add_money(
     request: AddMoneyRequest,
 ) -> Result<AddMoneyResponse, String> {
     info!("💸 Adding money with real data: {:?}", request);
-    let create_request = app_state
+    let create_command = app_state
         .money_management_service
-        .to_create_transaction_request(request);
-    app_state
+        .to_create_transaction_command(request);
+    let domain_transaction = app_state
         .transaction_service
-        .create_transaction(create_request)
+        .create_transaction(create_command)
         .await
-        .map_err(|e| e.to_string())
-        .map(|transaction| AddMoneyResponse {
-            transaction_id: transaction.id,
-            new_balance: transaction.balance,
-            success_message: "Money added successfully!".to_string(),
-            formatted_amount: format!("${:.2}", transaction.amount),
-        })
+        .map_err(|e| e.to_string())?;
+    
+    Ok(AddMoneyResponse {
+        transaction_id: domain_transaction.id,
+        new_balance: domain_transaction.balance,
+        success_message: "Money added successfully!".to_string(),
+        formatted_amount: format!("${:.2}", domain_transaction.amount),
+    })
 }
 
 #[tauri::command]
@@ -300,20 +307,21 @@ async fn spend_money(
     request: SpendMoneyRequest,
 ) -> Result<SpendMoneyResponse, String> {
     info!("💸 Spending money with real data: {:?}", request);
-    let create_request = app_state
+    let create_command = app_state
         .money_management_service
-        .spend_to_create_transaction_request(request);
-    app_state
+        .spend_to_create_transaction_command(request);
+    let domain_transaction = app_state
         .transaction_service
-        .create_transaction(create_request)
+        .create_transaction(create_command)
         .await
-        .map_err(|e| e.to_string())
-        .map(|transaction| SpendMoneyResponse {
-            transaction_id: transaction.id,
-            new_balance: transaction.balance,
-            success_message: "Money spent successfully!".to_string(),
-            formatted_amount: format!("-${:.2}", transaction.amount.abs()),
-        })
+        .map_err(|e| e.to_string())?;
+    
+    Ok(SpendMoneyResponse {
+        transaction_id: domain_transaction.id,
+        new_balance: domain_transaction.balance,
+        success_message: "Money spent successfully!".to_string(),
+        formatted_amount: format!("-${:.2}", domain_transaction.amount.abs()),
+    })
 }
 
 #[tauri::command]
@@ -325,16 +333,17 @@ async fn delete_transactions(
     let cmd = DeleteTransactionsCommand {
         transaction_ids: request.transaction_ids,
     };
-    app_state
+    let domain_result = app_state
         .transaction_service
-        .delete_transactions_domain(cmd)
+        .delete_transactions(cmd)
         .await
-        .map(|res| DeleteTransactionsResponse {
-            deleted_count: res.deleted_count,
-            success_message: res.success_message,
-            not_found_ids: res.not_found_ids,
-        })
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    
+    Ok(DeleteTransactionsResponse {
+        deleted_count: domain_result.deleted_count,
+        success_message: domain_result.success_message,
+        not_found_ids: domain_result.not_found_ids,
+    })
 }
 
 #[tauri::command]

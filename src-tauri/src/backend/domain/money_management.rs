@@ -12,6 +12,7 @@ use shared::{
 };
 use chrono::{DateTime, Utc, Duration, FixedOffset, NaiveDate, TimeZone};
 use time::OffsetDateTime;
+use crate::backend::domain::commands::transactions::CreateTransactionCommand;
 
 /// Money management service that handles all money-related business logic
 #[derive(Clone)]
@@ -155,6 +156,15 @@ impl MoneyManagementService {
     /// Convert AddMoneyRequest to CreateTransactionRequest
     pub fn to_create_transaction_request(&self, add_money_request: AddMoneyRequest) -> CreateTransactionRequest {
         CreateTransactionRequest {
+            description: add_money_request.description,
+            amount: add_money_request.amount,
+            date: add_money_request.date,
+        }
+    }
+
+    /// Convert AddMoneyRequest to CreateTransactionCommand (domain)
+    pub fn to_create_transaction_command(&self, add_money_request: AddMoneyRequest) -> CreateTransactionCommand {
+        CreateTransactionCommand {
             description: add_money_request.description,
             amount: add_money_request.amount,
             date: add_money_request.date,
@@ -349,6 +359,15 @@ impl MoneyManagementService {
     /// Convert SpendMoneyRequest to CreateTransactionRequest (converting amount to negative)
     pub fn spend_to_create_transaction_request(&self, spend_money_request: SpendMoneyRequest) -> CreateTransactionRequest {
         CreateTransactionRequest {
+            description: spend_money_request.description,
+            amount: -spend_money_request.amount.abs(),  // Ensure negative amount
+            date: spend_money_request.date,
+        }
+    }
+
+    /// Convert SpendMoneyRequest to CreateTransactionCommand (domain, converting amount to negative)
+    pub fn spend_to_create_transaction_command(&self, spend_money_request: SpendMoneyRequest) -> CreateTransactionCommand {
+        CreateTransactionCommand {
             description: spend_money_request.description,
             amount: -spend_money_request.amount.abs(),  // Ensure negative amount
             date: spend_money_request.date,

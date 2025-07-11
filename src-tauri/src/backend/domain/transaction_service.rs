@@ -16,10 +16,7 @@ use crate::backend::domain::commands::transactions::{CreateTransactionCommand, T
 use anyhow::{anyhow, Result};
 use chrono::{Local, NaiveDate};
 use log::{error, info};
-use shared::{
-    CreateTransactionRequest, DeleteTransactionsRequest, DeleteTransactionsResponse, PaginationInfo,
-    Transaction as SharedTransaction, TransactionListRequest, TransactionListResponse,
-};
+// Note: Shared types are now only used at the boundary, converted via mappers
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use time::format_description::well_known::Rfc3339;
@@ -112,16 +109,9 @@ impl<C: Connection> TransactionService<C> {
 
     pub async fn create_transaction(
         &self,
-        request: CreateTransactionRequest,
-    ) -> Result<SharedTransaction> {
-        let cmd = CreateTransactionCommand {
-            description: request.description,
-            amount: request.amount,
-            date: request.date,
-        };
-
-        let domain_tx = self.create_transaction_domain(cmd).await?;
-        Ok(TransactionMapper::to_dto(domain_tx))
+        cmd: CreateTransactionCommand,
+    ) -> Result<DomainTransaction> {
+        self.create_transaction_domain(cmd).await
     }
 
     pub async fn list_transactions_domain(
@@ -181,28 +171,9 @@ impl<C: Connection> TransactionService<C> {
 
     pub async fn list_transactions(
         &self,
-        request: TransactionListRequest,
-    ) -> Result<TransactionListResponse> {
-        let query = TransactionListQuery {
-            after: request.after,
-            limit: request.limit,
-            start_date: request.start_date,
-            end_date: request.end_date,
-        };
-
-        let domain_result = self.list_transactions_domain(query).await?;
-
-        Ok(TransactionListResponse {
-            transactions: domain_result
-                .transactions
-                .into_iter()
-                .map(TransactionMapper::to_dto)
-                .collect(),
-            pagination: PaginationInfo {
-                has_more: domain_result.pagination.has_more,
-                next_cursor: domain_result.pagination.next_cursor,
-            },
-        })
+        query: TransactionListQuery,
+    ) -> Result<TransactionListResult> {
+        self.list_transactions_domain(query).await
     }
 
     pub async fn delete_transactions_domain(
@@ -250,18 +221,9 @@ impl<C: Connection> TransactionService<C> {
 
     pub async fn delete_transactions(
         &self,
-        request: DeleteTransactionsRequest,
-    ) -> Result<DeleteTransactionsResponse> {
-        let cmd = DeleteTransactionsCommand {
-            transaction_ids: request.transaction_ids,
-        };
-        let res = self.delete_transactions_domain(cmd).await?;
-
-        Ok(DeleteTransactionsResponse {
-            deleted_count: res.deleted_count,
-            success_message: res.success_message,
-            not_found_ids: res.not_found_ids,
-        })
+        cmd: DeleteTransactionsCommand,
+    ) -> Result<DeleteTransactionsResult> {
+        self.delete_transactions_domain(cmd).await
     }
 
     async fn check_and_issue_pending_allowances(&self) -> Result<u32> {
@@ -304,7 +266,7 @@ impl<C: Connection> TransactionService<C> {
         child_id: &str,
         date: NaiveDate,
         amount: f64,
-    ) -> Result<SharedTransaction> {
+    ) -> Result<DomainTransaction> {
         let now_millis = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64;
         let transaction_id = DomainTransaction::generate_id(amount, now_millis);
         let allowance_datetime = date.and_hms_opt(12, 0, 0).unwrap();
@@ -345,7 +307,7 @@ impl<C: Connection> TransactionService<C> {
                 .await?;
         }
 
-        Ok(TransactionMapper::to_dto(domain_transaction))
+        Ok(domain_transaction)
     }
 
     async fn get_active_child(&self) -> Result<DomainChild> {
@@ -367,7 +329,7 @@ mod tests {
             ChildStorage,
         },
     };
-    use shared::{Child as SharedChild, TransactionType as SharedTransactionType};
+    // Tests now use domain models instead of shared types
 
     async fn create_test_service() -> (TransactionService<CsvConnection>, Arc<CsvConnection>) {
         let connection = Arc::new(CsvConnection::new_for_test().await.unwrap());
@@ -387,10 +349,13 @@ mod tests {
     async fn create_test_child(
         child_repo: &ChildRepository,
         child_name: &str,
-    ) -> Result<SharedChild> {
-        let child = SharedChild {
+    ) -> Result<DomainChild> {
+        let child = DomainChild {
             id: child_name.to_string(),
             name: child_name.to_string(),
+            birthdate: "2015-01-01".to_string(),
+            created_at: "2025-01-01T00:00:00Z".to_string(),
+            updated_at: "2025-01-01T00:00:00Z".to_string(),
         };
         child_repo.add_child(&child).await?;
         Ok(child)
@@ -407,15 +372,15 @@ mod tests {
             .await
             .unwrap();
 
-        let request = CreateTransactionRequest {
+        let cmd = CreateTransactionCommand {
             amount: 10.0,
             description: "Test transaction".to_string(),
             date: None,
         };
-        let transaction = service.create_transaction(request).await.unwrap();
+        let transaction = service.create_transaction(cmd).await.unwrap();
         assert_eq!(transaction.amount, 10.0);
         assert_eq!(transaction.description, "Test transaction");
         assert_eq!(transaction.balance, 10.0);
-        assert_eq!(transaction.transaction_type, SharedTransactionType::Income);
+        assert_eq!(transaction.transaction_type, DomainTransactionType::Income);
     }
 }

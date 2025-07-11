@@ -1,5 +1,32 @@
 use serde::{Deserialize, Serialize};
-use shared::GoalState;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum DomainGoalState {
+    Active,
+    Cancelled,
+    Completed,
+}
+
+impl DomainGoalState {
+    /// Convert to string for CSV storage
+    pub fn to_string(&self) -> String {
+        match self {
+            DomainGoalState::Active => "active".to_string(),
+            DomainGoalState::Cancelled => "cancelled".to_string(),
+            DomainGoalState::Completed => "completed".to_string(),
+        }
+    }
+
+    /// Parse from string for CSV loading
+    pub fn from_string(s: &str) -> Result<Self, String> {
+        match s.to_lowercase().as_str() {
+            "active" => Ok(DomainGoalState::Active),
+            "cancelled" => Ok(DomainGoalState::Cancelled),
+            "completed" => Ok(DomainGoalState::Completed),
+            _ => Err(format!("Invalid goal state: {}", s)),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DomainGoal {
@@ -7,7 +34,7 @@ pub struct DomainGoal {
     pub child_id: String,
     pub description: String,
     pub target_amount: f64,
-    pub state: GoalState,
+    pub state: DomainGoalState,
     pub created_at: String,
     pub updated_at: String,
 }
