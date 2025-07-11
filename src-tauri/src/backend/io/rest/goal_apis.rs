@@ -12,6 +12,10 @@ use axum::{
 use log::{info, error};
 
 use crate::backend::AppState;
+use crate::backend::domain::commands::goal::{
+    CreateGoalCommand, CancelGoalCommand, GetCurrentGoalCommand, GetGoalHistoryCommand, UpdateGoalCommand,
+};
+use crate::backend::io::rest::mappers::goal_mapper::GoalMapper;
 use shared::{
     CreateGoalRequest, UpdateGoalRequest, GetCurrentGoalRequest, 
     GetGoalHistoryRequest, CancelGoalRequest,
@@ -31,12 +35,16 @@ pub async fn get_current_goal(
 ) -> impl IntoResponse {
     info!("GET /api/goals/current");
 
-    let request = GetCurrentGoalRequest {
+    let command = GetCurrentGoalCommand {
         child_id: None, // Use active child
     };
 
-    match state.goal_service.get_current_goal(request).await {
-        Ok(response) => (StatusCode::OK, Json(response)).into_response(),
+    match state.goal_service.get_current_goal(command).await {
+        Ok(result) => {
+            // Convert domain result back to DTO for response
+            let response = GoalMapper::to_get_current_goal_response(result.goal, result.calculation);
+            (StatusCode::OK, Json(response)).into_response()
+        },
         Err(e) => {
             error!("Failed to get current goal: {}", e);
             (StatusCode::INTERNAL_SERVER_ERROR, "Error retrieving current goal").into_response()
@@ -51,8 +59,18 @@ pub async fn create_goal(
 ) -> impl IntoResponse {
     info!("POST /api/goals - request: {:?}", request);
 
-    match state.goal_service.create_goal(request).await {
-        Ok(response) => (StatusCode::CREATED, Json(response)).into_response(),
+    let command = CreateGoalCommand {
+        child_id: request.child_id,
+        description: request.description,
+        target_amount: request.target_amount,
+    };
+
+    match state.goal_service.create_goal(command).await {
+        Ok(result) => {
+            // Convert domain result back to DTO for response
+            let response = GoalMapper::to_create_goal_response(result.goal, result.calculation, result.success_message);
+            (StatusCode::CREATED, Json(response)).into_response()
+        },
         Err(e) => {
             error!("Failed to create goal: {}", e);
             let status = if e.to_string().contains("already has an active goal") {
@@ -78,8 +96,18 @@ pub async fn update_goal(
 ) -> impl IntoResponse {
     info!("PUT /api/goals - request: {:?}", request);
 
-    match state.goal_service.update_goal(request).await {
-        Ok(response) => (StatusCode::OK, Json(response)).into_response(),
+    let command = UpdateGoalCommand {
+        child_id: request.child_id,
+        description: request.description,
+        target_amount: request.target_amount,
+    };
+
+    match state.goal_service.update_goal(command).await {
+        Ok(result) => {
+            // Convert domain result back to DTO for response
+            let response = GoalMapper::to_update_goal_response(result.goal, result.calculation, result.success_message);
+            (StatusCode::OK, Json(response)).into_response()
+        },
         Err(e) => {
             error!("Failed to update goal: {}", e);
             let status = if e.to_string().contains("No active goal found") {
@@ -104,12 +132,16 @@ pub async fn cancel_goal(
 ) -> impl IntoResponse {
     info!("DELETE /api/goals");
 
-    let request = CancelGoalRequest {
+    let command = CancelGoalCommand {
         child_id: None, // Use active child
     };
 
-    match state.goal_service.cancel_goal(request).await {
-        Ok(response) => (StatusCode::OK, Json(response)).into_response(),
+    match state.goal_service.cancel_goal(command).await {
+        Ok(result) => {
+            // Convert domain result back to DTO for response
+            let response = GoalMapper::to_cancel_goal_response(result.goal, result.success_message);
+            (StatusCode::OK, Json(response)).into_response()
+        },
         Err(e) => {
             error!("Failed to cancel goal: {}", e);
             let status = if e.to_string().contains("No active goal found") {
@@ -131,8 +163,17 @@ pub async fn get_goal_history(
 ) -> impl IntoResponse {
     info!("GET /api/goals/history - query: {:?}", query);
 
-    match state.goal_service.get_goal_history(query).await {
-        Ok(response) => (StatusCode::OK, Json(response)).into_response(),
+    let command = GetGoalHistoryCommand {
+        child_id: query.child_id,
+        limit: query.limit,
+    };
+
+    match state.goal_service.get_goal_history(command).await {
+        Ok(result) => {
+            // Convert domain result back to DTO for response
+            let response = GoalMapper::to_get_goal_history_response(result.goals);
+            (StatusCode::OK, Json(response)).into_response()
+        },
         Err(e) => {
             error!("Failed to get goal history: {}", e);
             (StatusCode::INTERNAL_SERVER_ERROR, "Error retrieving goal history").into_response()
@@ -191,14 +232,14 @@ mod tests {
             .expect("Failed to set active child");
         
         // Set up allowance
-        let allowance_request = shared::UpdateAllowanceConfigRequest {
+        let allowance_command = crate::backend::domain::commands::allowance::UpdateAllowanceConfigCommand {
             child_id: Some(child_response.child.id.clone()),
             amount: 5.0,
             day_of_week: 5, // Friday
             is_active: true,
         };
         
-        app_state.allowance_service.update_allowance_config(allowance_request).await
+        app_state.allowance_service.update_allowance_config(allowance_command).await
             .expect("Failed to set up allowance");
         
         child_response.child.id

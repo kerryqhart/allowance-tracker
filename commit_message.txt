@@ -1,29 +1,35 @@
-feat: Complete Allowance Bounded Context migration from shared to domain models
+feat: Complete Goal Bounded Context migration from shared to domain models
 
-MAJOR MILESTONE: Successfully migrated allowance functionality to use domain models exclusively
+MAJOR MILESTONE: Successfully migrated goal functionality to use domain models exclusively
 
 Domain Architecture:
-- Added allowance module to commands.rs with GetAllowanceConfigCommand/UpdateAllowanceConfigCommand
-- Enhanced domain AllowanceConfig with generate_id() and is_valid_day_of_week() methods  
-- Created comprehensive command/result types for clean service interfaces
+- Added goal module to commands.rs with comprehensive command/result types
+- CreateGoalCommand, UpdateGoalCommand, GetCurrentGoalCommand, CancelGoalCommand, GetGoalHistoryCommand
+- All commands return domain results with proper business logic encapsulation
 
 Service Layer Refactoring:
-- Refactored allowance_service.rs to use domain models only
+- Refactored goal_service.rs to use domain models only (DomainGoal, DomainGoalState)
 - Implemented bidirectional mapping: Storage (shared) ↔ Domain ↔ API (shared DTOs)
-- All method signatures now use domain commands instead of shared DTOs
-- Added proper error handling and validation at domain level
+- All 5 public methods now use domain commands instead of shared DTOs
+- Enhanced goal calculation and validation logic in domain layer
 
 API Integration:
-- Updated Tauri commands in lib.rs to use domain commands and mappers
-- Fixed REST endpoints in allowance_apis.rs with proper DTO conversion
-- Updated goal_service.rs to use domain allowance commands
+- Updated Tauri commands in lib.rs to use domain commands and goal mapper
+- Fixed REST endpoints in goal_apis.rs with proper DTO conversion
+- Updated all goal-related endpoints: GET /current, POST /, PUT /, DELETE /, GET /history
 - Maintained backward compatibility with existing API contracts
 
+Enhanced Components:
+- GoalMapper now provides comprehensive response conversion methods
+- Test suite completely migrated to use domain commands
+- Fixed transaction service integration in goal calculations
+- All 4 test methods updated to use domain types and commands
+
 Benefits Achieved:
-- Clean separation of concerns between layers
-- Domain logic is now independent of external contracts  
+- Clean separation of concerns between domain, storage, and API layers
+- Domain logic is completely independent of external contracts
 - Type safety prevents shared types from leaking into domain
-- Easier testing and maintenance with focused domain models
+- Enhanced maintainability and testability
 - Foundation ready for remaining bounded context migrations
 
 Migration Progress:
@@ -31,7 +37,9 @@ Migration Progress:
 ✅ Goal Mapper Creation  
 ✅ Goal Domain Model Fix
 ✅ Transaction Bounded Context Migration
-✅ Allowance Bounded Context Migration ← COMPLETED
-⏳ Next: Goal Bounded Context Migration
+✅ Allowance Bounded Context Migration
+✅ Goal Bounded Context Migration ← COMPLETED
+⏳ Next: Child Context Verification
 
-All tests pass, app builds and runs successfully with enhanced architecture. 
+Build verification: All compilation errors resolved, only warnings remain.
+Runtime verification: Logs show goal service working correctly with domain commands. 

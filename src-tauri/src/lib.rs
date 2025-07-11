@@ -16,8 +16,10 @@ use shared::{
 
 use crate::backend::domain::commands::transactions::{DeleteTransactionsCommand, TransactionListQuery};
 use crate::backend::domain::commands::allowance::{GetAllowanceConfigCommand, UpdateAllowanceConfigCommand};
+use crate::backend::domain::commands::goal::{CreateGoalCommand, CancelGoalCommand, GetCurrentGoalCommand};
 use crate::backend::io::rest::mappers::transaction_mapper::TransactionMapper;
 use crate::backend::io::rest::mappers::allowance_mapper::AllowanceMapper;
+use crate::backend::io::rest::mappers::goal_mapper::GoalMapper;
 use backend::{
     io::rest::mappers::child_mapper::ChildMapper,
     initialize_backend, AppState,
@@ -139,12 +141,16 @@ async fn get_current_goal(
     app_state: tauri::State<'_, AppState>,
 ) -> Result<GetCurrentGoalResponse, String> {
     info!("🎯 Getting current goal with real data");
-    let request = GetCurrentGoalRequest { child_id: None };
-    app_state
+    let command = GetCurrentGoalCommand { child_id: None };
+    let result = app_state
         .goal_service
-        .get_current_goal(request)
+        .get_current_goal(command)
         .await
-        .map_err(|e| format!("Failed to get current goal: {}", e))
+        .map_err(|e| format!("Failed to get current goal: {}", e))?;
+    
+    // Convert domain result back to DTO for response
+    let response = GoalMapper::to_get_current_goal_response(result.goal, result.calculation);
+    Ok(response)
 }
 
 #[tauri::command]
@@ -157,27 +163,35 @@ async fn create_goal(
         "🎯 CREATE_GOAL COMMAND CALLED: '{}' for ${:.2}",
         description, amount
     );
-    let request = CreateGoalRequest {
+    let command = CreateGoalCommand {
         child_id: None,
         description,
         target_amount: amount,
     };
-    app_state
+    let result = app_state
         .goal_service
-        .create_goal(request)
+        .create_goal(command)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    
+    // Convert domain result back to DTO for response
+    let response = GoalMapper::to_create_goal_response(result.goal, result.calculation, result.success_message);
+    Ok(response)
 }
 
 #[tauri::command]
 async fn cancel_goal(app_state: tauri::State<'_, AppState>) -> Result<CancelGoalResponse, String> {
     info!("🎯 Cancelling current goal");
-    let request = CancelGoalRequest { child_id: None };
-    app_state
+    let command = CancelGoalCommand { child_id: None };
+    let result = app_state
         .goal_service
-        .cancel_goal(request)
+        .cancel_goal(command)
         .await
-        .map_err(|e| format!("Failed to cancel goal: {}", e))
+        .map_err(|e| format!("Failed to cancel goal: {}", e))?;
+    
+    // Convert domain result back to DTO for response
+    let response = GoalMapper::to_cancel_goal_response(result.goal, result.success_message);
+    Ok(response)
 }
 
 #[tauri::command]

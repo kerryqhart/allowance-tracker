@@ -29,12 +29,14 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::backend::storage::csv::{CsvConnection, GoalRepository};
 use crate::backend::storage::GoalStorage;
 use crate::backend::domain::{child_service::ChildService, AllowanceService, TransactionService, BalanceService};
-use shared::{
-    Goal, GoalState, GoalCalculation, CreateGoalRequest, CreateGoalResponse,
-    UpdateGoalRequest, UpdateGoalResponse, GetCurrentGoalRequest, GetCurrentGoalResponse,
-    GetGoalHistoryRequest, GetGoalHistoryResponse, CancelGoalRequest, CancelGoalResponse,
+use crate::backend::domain::models::goal::{DomainGoal, DomainGoalState};
+use crate::backend::domain::commands::goal::{
+    CreateGoalCommand, UpdateGoalCommand, GetCurrentGoalCommand, GetGoalHistoryCommand, CancelGoalCommand,
+    CreateGoalResult, UpdateGoalResult, GetCurrentGoalResult, GetGoalHistoryResult, CancelGoalResult,
 };
 use crate::backend::domain::commands::transactions::{TransactionListQuery};
+use crate::backend::io::rest::mappers::goal_mapper::GoalMapper;
+use shared::GoalCalculation;
 
 /// Service for managing goals and goal-related calculations
 #[derive(Clone)]
@@ -66,24 +68,24 @@ impl GoalService {
     }
 
     /// Create a new goal
-    pub async fn create_goal(&self, request: CreateGoalRequest) -> Result<CreateGoalResponse> {
-        info!("Creating goal: {:?}", request);
+    pub async fn create_goal(&self, command: CreateGoalCommand) -> Result<CreateGoalResult> {
+        info!("Creating goal: {:?}", command);
 
         // Validate description
-        if request.description.trim().is_empty() {
+        if command.description.trim().is_empty() {
             return Err(anyhow::anyhow!("Goal description cannot be empty"));
         }
-        if request.description.len() > 256 {
+        if command.description.len() > 256 {
             return Err(anyhow::anyhow!("Goal description cannot exceed 256 characters"));
         }
 
         // Validate target amount
-        if request.target_amount <= 0.0 {
+        if command.target_amount <= 0.0 {
             return Err(anyhow::anyhow!("Goal target amount must be positive"));
         }
 
         // Get child ID
-        let child_id = match request.child_id {
+        let child_id = match command.child_id {
             Some(id) => id,
             None => {
                 let active_child_response = self.child_service.get_active_child().await?;
@@ -102,50 +104,53 @@ impl GoalService {
 
         // Get current balance to validate goal is achievable
         let current_balance = self.get_current_balance(&child_id).await?;
-        if current_balance >= request.target_amount {
+        if current_balance >= command.target_amount {
             return Err(anyhow::anyhow!("Target amount (${:.2}) must be greater than current balance (${:.2})", 
-                                     request.target_amount, current_balance));
+                                     command.target_amount, current_balance));
         }
 
         // Generate goal ID
         let now_millis = SystemTime::now()
             .duration_since(UNIX_EPOCH)?
             .as_millis() as u64;
-        let goal_id = Goal::generate_id(&child_id, now_millis);
+        let goal_id = shared::Goal::generate_id(&child_id, now_millis);
 
-        // Create goal
+        // Create domain goal
         let now_rfc3339 = Utc::now().to_rfc3339();
-        let goal = Goal {
+        let domain_goal = DomainGoal {
             id: goal_id,
             child_id: child_id.clone(),
-            description: request.description.trim().to_string(),
-            target_amount: request.target_amount,
-            state: GoalState::Active,
+            description: command.description.trim().to_string(),
+            target_amount: command.target_amount,
+            state: DomainGoalState::Active,
             created_at: now_rfc3339.clone(),
             updated_at: now_rfc3339,
         };
 
+        // Convert to shared Goal for storage
+        let shared_goal = GoalMapper::to_dto(domain_goal.clone());
+        
         // Store goal
-        self.goal_repository.store_goal(&goal).await?;
+        self.goal_repository.store_goal(&shared_goal).await?;
 
         // Calculate completion projection
-        let calculation = self.calculate_goal_completion(&child_id, request.target_amount).await?;
+        let calculation = self.calculate_goal_completion(&child_id, command.target_amount).await?;
 
-        info!("Successfully created goal: {}", goal.id);
+        info!("Successfully created goal: {}", domain_goal.id);
 
-        Ok(CreateGoalResponse {
-            goal,
+        Ok(CreateGoalResult {
+            goal: domain_goal,
             calculation,
             success_message: "Goal created successfully".to_string(),
         })
     }
 
     /// Get current active goal with calculations
-    pub async fn get_current_goal(&self, request: GetCurrentGoalRequest) -> Result<GetCurrentGoalResponse> {
-        info!("Getting current goal: {:?}", request);
+    pub async fn get_current_goal(&self, command: GetCurrentGoalCommand) -> Result<GetCurrentGoalResult> {
+        info!("Getting current goal: {:?}", command);
 
         // Get child ID
-        let child_id = match request.child_id {
+        let child_id = match command.child_id {
             Some(id) => id,
             None => {
                 let active_child_response = self.child_service.get_active_child().await?;
@@ -153,7 +158,7 @@ impl GoalService {
                     Some(c) => c.id,
                     None => {
                         info!("No active child found for goal request");
-                        return Ok(GetCurrentGoalResponse {
+                        return Ok(GetCurrentGoalResult {
                             goal: None,
                             calculation: None,
                         });
@@ -163,28 +168,31 @@ impl GoalService {
             }
         };
 
-        // Get current goal
-        let current_goal = self.goal_repository.get_current_goal(&child_id).await?;
+        // Get current goal (returns shared Goal)
+        let current_goal_shared = self.goal_repository.get_current_goal(&child_id).await?;
+        
+        // Convert to domain model
+        let current_goal_domain = current_goal_shared.map(GoalMapper::to_domain);
         
         // Calculate completion projection if goal exists
-        let calculation = if let Some(ref goal) = current_goal {
+        let calculation = if let Some(ref goal) = current_goal_domain {
             Some(self.calculate_goal_completion(&child_id, goal.target_amount).await?)
         } else {
             None
         };
 
-        Ok(GetCurrentGoalResponse {
-            goal: current_goal,
+        Ok(GetCurrentGoalResult {
+            goal: current_goal_domain,
             calculation,
         })
     }
 
     /// Update current active goal
-    pub async fn update_goal(&self, request: UpdateGoalRequest) -> Result<UpdateGoalResponse> {
-        info!("Updating goal: {:?}", request);
+    pub async fn update_goal(&self, command: UpdateGoalCommand) -> Result<UpdateGoalResult> {
+        info!("Updating goal: {:?}", command);
 
         // Get child ID
-        let child_id = match request.child_id {
+        let child_id = match command.child_id {
             Some(id) => id,
             None => {
                 let active_child_response = self.child_service.get_active_child().await?;
@@ -196,24 +204,27 @@ impl GoalService {
             }
         };
 
-        // Get current active goal
-        let mut current_goal = match self.goal_repository.get_current_goal(&child_id).await? {
+        // Get current active goal (returns shared Goal)
+        let current_goal_shared = match self.goal_repository.get_current_goal(&child_id).await? {
             Some(goal) => goal,
             None => return Err(anyhow::anyhow!("No active goal found to update")),
         };
 
+        // Convert to domain model
+        let mut current_goal_domain = GoalMapper::to_domain(current_goal_shared);
+
         // Update fields if provided
-        if let Some(description) = request.description {
+        if let Some(description) = command.description {
             if description.trim().is_empty() {
                 return Err(anyhow::anyhow!("Goal description cannot be empty"));
             }
             if description.len() > 256 {
                 return Err(anyhow::anyhow!("Goal description cannot exceed 256 characters"));
             }
-            current_goal.description = description.trim().to_string();
+            current_goal_domain.description = description.trim().to_string();
         }
 
-        if let Some(target_amount) = request.target_amount {
+        if let Some(target_amount) = command.target_amount {
             if target_amount <= 0.0 {
                 return Err(anyhow::anyhow!("Goal target amount must be positive"));
             }
@@ -225,33 +236,36 @@ impl GoalService {
                                          target_amount, current_balance));
             }
             
-            current_goal.target_amount = target_amount;
+            current_goal_domain.target_amount = target_amount;
         }
 
         // Update timestamp
-        current_goal.updated_at = Utc::now().to_rfc3339();
+        current_goal_domain.updated_at = Utc::now().to_rfc3339();
+
+        // Convert back to shared Goal for storage
+        let shared_goal = GoalMapper::to_dto(current_goal_domain.clone());
 
         // Store updated goal (append-only)
-        self.goal_repository.update_goal(&current_goal).await?;
+        self.goal_repository.update_goal(&shared_goal).await?;
 
         // Calculate new completion projection
-        let calculation = self.calculate_goal_completion(&child_id, current_goal.target_amount).await?;
+        let calculation = self.calculate_goal_completion(&child_id, current_goal_domain.target_amount).await?;
 
-        info!("Successfully updated goal: {}", current_goal.id);
+        info!("Successfully updated goal: {}", current_goal_domain.id);
 
-        Ok(UpdateGoalResponse {
-            goal: current_goal,
+        Ok(UpdateGoalResult {
+            goal: current_goal_domain,
             calculation,
             success_message: "Goal updated successfully".to_string(),
         })
     }
 
     /// Cancel current active goal
-    pub async fn cancel_goal(&self, request: CancelGoalRequest) -> Result<CancelGoalResponse> {
-        info!("Cancelling goal: {:?}", request);
+    pub async fn cancel_goal(&self, command: CancelGoalCommand) -> Result<CancelGoalResult> {
+        info!("Cancelling goal: {:?}", command);
 
         // Get child ID
-        let child_id = match request.child_id {
+        let child_id = match command.child_id {
             Some(id) => id,
             None => {
                 let active_child_response = self.child_service.get_active_child().await?;
@@ -263,26 +277,29 @@ impl GoalService {
             }
         };
 
-        // Cancel the goal
-        let cancelled_goal = match self.goal_repository.cancel_current_goal(&child_id).await? {
+        // Cancel the goal (returns shared Goal)
+        let cancelled_goal_shared = match self.goal_repository.cancel_current_goal(&child_id).await? {
             Some(goal) => goal,
             None => return Err(anyhow::anyhow!("No active goal found to cancel")),
         };
 
-        info!("Successfully cancelled goal: {}", cancelled_goal.id);
+        // Convert to domain model
+        let cancelled_goal_domain = GoalMapper::to_domain(cancelled_goal_shared);
 
-        Ok(CancelGoalResponse {
-            goal: cancelled_goal,
+        info!("Successfully cancelled goal: {}", cancelled_goal_domain.id);
+
+        Ok(CancelGoalResult {
+            goal: cancelled_goal_domain,
             success_message: "Goal cancelled successfully".to_string(),
         })
     }
 
     /// Get goal history for a child
-    pub async fn get_goal_history(&self, request: GetGoalHistoryRequest) -> Result<GetGoalHistoryResponse> {
-        info!("Getting goal history: {:?}", request);
+    pub async fn get_goal_history(&self, command: GetGoalHistoryCommand) -> Result<GetGoalHistoryResult> {
+        info!("Getting goal history: {:?}", command);
 
         // Get child ID
-        let child_id = match request.child_id {
+        let child_id = match command.child_id {
             Some(id) => id,
             None => {
                 let active_child_response = self.child_service.get_active_child().await?;
@@ -290,7 +307,7 @@ impl GoalService {
                     Some(c) => c.id,
                     None => {
                         info!("No active child found for goal history request");
-                        return Ok(GetGoalHistoryResponse {
+                        return Ok(GetGoalHistoryResult {
                             goals: Vec::new(),
                         });
                     }
@@ -299,18 +316,21 @@ impl GoalService {
             }
         };
 
-        // Get goal history
-        let goals = self.goal_repository.list_goals(&child_id, request.limit).await?;
+        // Get goal history (returns shared Goals)
+        let goals_shared = self.goal_repository.list_goals(&child_id, command.limit).await?;
 
-        Ok(GetGoalHistoryResponse { goals })
+        // Convert to domain models
+        let goals_domain = GoalMapper::to_domain_list(goals_shared);
+
+        Ok(GetGoalHistoryResult { goals: goals_domain })
     }
 
     /// Check if current balance meets any active goal and auto-complete if so
-    pub async fn check_and_complete_goals(&self, child_id: &str) -> Result<Option<Goal>> {
+    pub async fn check_and_complete_goals(&self, child_id: &str) -> Result<Option<DomainGoal>> {
         info!("Checking for goal completion for child: {}", child_id);
 
-        // Get current active goal
-        let current_goal = match self.goal_repository.get_current_goal(child_id).await? {
+        // Get current active goal (returns shared Goal)
+        let current_goal_shared = match self.goal_repository.get_current_goal(child_id).await? {
             Some(goal) => goal,
             None => {
                 info!("No active goal found for child: {}", child_id);
@@ -318,18 +338,24 @@ impl GoalService {
             }
         };
 
+        // Convert to domain model
+        let current_goal_domain = GoalMapper::to_domain(current_goal_shared);
+
         // Get current balance
         let current_balance = self.get_current_balance(child_id).await?;
 
         // Check if goal is completed
-        if current_balance >= current_goal.target_amount {
+        if current_balance >= current_goal_domain.target_amount {
             info!("Goal {} completed! Current balance: ${:.2}, Target: ${:.2}", 
-                  current_goal.id, current_balance, current_goal.target_amount);
+                  current_goal_domain.id, current_balance, current_goal_domain.target_amount);
             
-            // Mark goal as completed
-            let completed_goal = self.goal_repository.complete_current_goal(child_id).await?;
+            // Mark goal as completed (returns shared Goal)
+            let completed_goal_shared = self.goal_repository.complete_current_goal(child_id).await?;
             
-            return Ok(completed_goal);
+            // Convert to domain model
+            let completed_goal_domain = completed_goal_shared.map(GoalMapper::to_domain);
+            
+            return Ok(completed_goal_domain);
         }
 
         Ok(None)
@@ -441,7 +467,7 @@ impl GoalService {
             end_date: None,
         };
 
-        let result = self.transaction_service.list_transactions_domain(query).await?;
+        let result = self.transaction_service.list_transactions(query).await?;
 
         match result.transactions.first() {
             Some(tx) => Ok(tx.balance),
@@ -456,7 +482,10 @@ mod tests {
     use std::sync::Arc;
     use crate::backend::storage::csv::CsvConnection;
     use crate::backend::domain::{ChildService, AllowanceService, TransactionService, BalanceService};
-    use shared::{Child, AllowanceConfig, CreateChildRequest};
+    use shared::{Child, AllowanceConfig, CreateChildRequest, CreateGoalRequest, CreateGoalResponse, CancelGoalRequest, CancelGoalResponse, GetCurrentGoalRequest, GetCurrentGoalResponse};
+use crate::backend::domain::commands::goal::CreateGoalCommand;
+use crate::backend::domain::commands::goal::CancelGoalCommand;
+use crate::backend::domain::commands::goal::GetCurrentGoalCommand;
     use chrono::Utc;
 
     async fn create_test_service() -> GoalService {
@@ -482,14 +511,14 @@ mod tests {
             .expect("Failed to create test child");
         
         // Set up allowance
-        let allowance_request = shared::UpdateAllowanceConfigRequest {
+        let allowance_command = crate::backend::domain::commands::allowance::UpdateAllowanceConfigCommand {
             child_id: Some(child_response.child.id.clone()),
             amount: 5.0,
             day_of_week: 5, // Friday
             is_active: true,
         };
         
-        service.allowance_service.update_allowance_config(allowance_request).await
+        service.allowance_service.update_allowance_config(allowance_command).await
             .expect("Failed to set up allowance");
         
         child_response.child.id
@@ -500,18 +529,18 @@ mod tests {
         let service = create_test_service().await;
         let child_id = create_test_child_and_allowance(&service).await;
         
-        let request = CreateGoalRequest {
+        let command = CreateGoalCommand {
             child_id: Some(child_id.clone()),
             description: "Buy new toy".to_string(),
             target_amount: 25.0,
         };
         
-        let response = service.create_goal(request).await.expect("Failed to create goal");
+        let result = service.create_goal(command).await.expect("Failed to create goal");
         
-        assert_eq!(response.goal.description, "Buy new toy");
-        assert_eq!(response.goal.target_amount, 25.0);
-        assert_eq!(response.goal.state, GoalState::Active);
-        assert!(response.calculation.is_achievable);
+        assert_eq!(result.goal.description, "Buy new toy");
+        assert_eq!(result.goal.target_amount, 25.0);
+        assert_eq!(result.goal.state, DomainGoalState::Active);
+        assert!(result.calculation.is_achievable);
     }
 
     #[tokio::test]
@@ -520,24 +549,24 @@ mod tests {
         let child_id = create_test_child_and_allowance(&service).await;
         
         // Empty description should fail
-        let request = CreateGoalRequest {
+        let command = CreateGoalCommand {
             child_id: Some(child_id.clone()),
             description: "".to_string(),
             target_amount: 25.0,
         };
         
-        let result = service.create_goal(request).await;
+        let result = service.create_goal(command).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("cannot be empty"));
         
         // Negative amount should fail
-        let request = CreateGoalRequest {
+        let command = CreateGoalCommand {
             child_id: Some(child_id.clone()),
             description: "Test goal".to_string(),
             target_amount: -10.0,
         };
         
-        let result = service.create_goal(request).await;
+        let result = service.create_goal(command).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("must be positive"));
     }
@@ -548,32 +577,32 @@ mod tests {
         let child_id = create_test_child_and_allowance(&service).await;
         
         // Create a goal first
-        let create_request = CreateGoalRequest {
+        let create_command = CreateGoalCommand {
             child_id: Some(child_id.clone()),
             description: "Buy new toy".to_string(),
             target_amount: 25.0,
         };
         
-        service.create_goal(create_request).await.expect("Failed to create goal");
+        service.create_goal(create_command).await.expect("Failed to create goal");
         
         // Cancel the goal
-        let cancel_request = CancelGoalRequest {
+        let cancel_command = CancelGoalCommand {
             child_id: Some(child_id.clone()),
         };
         
-        let response = service.cancel_goal(cancel_request).await.expect("Failed to cancel goal");
+        let result = service.cancel_goal(cancel_command).await.expect("Failed to cancel goal");
         
-        assert_eq!(response.goal.state, GoalState::Cancelled);
+        assert_eq!(result.goal.state, DomainGoalState::Cancelled);
         
         // Should no longer have an active goal
-        let current_goal_request = GetCurrentGoalRequest {
+        let current_goal_command = GetCurrentGoalCommand {
             child_id: Some(child_id),
         };
         
-        let current_response = service.get_current_goal(current_goal_request).await
+        let current_result = service.get_current_goal(current_goal_command).await
             .expect("Failed to get current goal");
         
-        assert!(current_response.goal.is_none());
+        assert!(current_result.goal.is_none());
     }
 
     #[tokio::test]
@@ -582,17 +611,17 @@ mod tests {
         let child_id = create_test_child_and_allowance(&service).await;
         
         // Create a goal that requires multiple allowances
-        let request = CreateGoalRequest {
+        let command = CreateGoalCommand {
             child_id: Some(child_id),
             description: "Buy expensive toy".to_string(),
             target_amount: 30.0, // With $5 allowances, should need 6 allowances
         };
         
-        let response = service.create_goal(request).await.expect("Failed to create goal");
+        let result = service.create_goal(command).await.expect("Failed to create goal");
         
-        assert_eq!(response.calculation.allowances_needed, 6);
-        assert!(response.calculation.is_achievable);
-        assert!(response.calculation.projected_completion_date.is_some());
-        assert!(!response.calculation.exceeds_time_limit);
+        assert_eq!(result.calculation.allowances_needed, 6);
+        assert!(result.calculation.is_achievable);
+        assert!(result.calculation.projected_completion_date.is_some());
+        assert!(!result.calculation.exceeds_time_limit);
     }
 } 

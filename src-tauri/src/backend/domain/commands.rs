@@ -85,4 +85,80 @@ pub mod allowance {
         pub allowance_config: AllowanceConfig,
         pub success_message: String,
     }
+}
+
+pub mod goal {
+    use crate::backend::domain::models::goal::DomainGoal;
+    use shared::GoalCalculation;
+
+    /// Input for creating a new goal.
+    #[derive(Debug, Clone)]
+    pub struct CreateGoalCommand {
+        pub child_id: Option<String>,
+        pub description: String,
+        pub target_amount: f64,
+    }
+
+    /// Input for updating a goal.
+    #[derive(Debug, Clone)]
+    pub struct UpdateGoalCommand {
+        pub child_id: Option<String>,
+        pub description: Option<String>,
+        pub target_amount: Option<f64>,
+    }
+
+    /// Input for getting current goal.
+    #[derive(Debug, Clone)]
+    pub struct GetCurrentGoalCommand {
+        pub child_id: Option<String>,
+    }
+
+    /// Input for getting goal history.
+    #[derive(Debug, Clone)]
+    pub struct GetGoalHistoryCommand {
+        pub child_id: Option<String>,
+        pub limit: Option<u32>,
+    }
+
+    /// Input for canceling a goal.
+    #[derive(Debug, Clone)]
+    pub struct CancelGoalCommand {
+        pub child_id: Option<String>,
+    }
+
+    /// Result of creating a goal.
+    #[derive(Debug, Clone)]
+    pub struct CreateGoalResult {
+        pub goal: DomainGoal,
+        pub calculation: GoalCalculation,
+        pub success_message: String,
+    }
+
+    /// Result of updating a goal.
+    #[derive(Debug, Clone)]
+    pub struct UpdateGoalResult {
+        pub goal: DomainGoal,
+        pub calculation: GoalCalculation,
+        pub success_message: String,
+    }
+
+    /// Result of getting current goal.
+    #[derive(Debug, Clone)]
+    pub struct GetCurrentGoalResult {
+        pub goal: Option<DomainGoal>,
+        pub calculation: Option<GoalCalculation>,
+    }
+
+    /// Result of getting goal history.
+    #[derive(Debug, Clone)]
+    pub struct GetGoalHistoryResult {
+        pub goals: Vec<DomainGoal>,
+    }
+
+    /// Result of canceling a goal.
+    #[derive(Debug, Clone)]
+    pub struct CancelGoalResult {
+        pub goal: DomainGoal,
+        pub success_message: String,
+    }
 } 
