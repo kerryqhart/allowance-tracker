@@ -482,7 +482,7 @@ mod tests {
     use std::sync::Arc;
     use crate::backend::storage::csv::CsvConnection;
     use crate::backend::domain::{ChildService, AllowanceService, TransactionService, BalanceService};
-    use shared::{Child, AllowanceConfig, CreateChildRequest, CreateGoalRequest, CreateGoalResponse, CancelGoalRequest, CancelGoalResponse, GetCurrentGoalRequest, GetCurrentGoalResponse};
+
 use crate::backend::domain::commands::goal::CreateGoalCommand;
 use crate::backend::domain::commands::goal::CancelGoalCommand;
 use crate::backend::domain::commands::goal::GetCurrentGoalCommand;

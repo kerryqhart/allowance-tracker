@@ -1,29 +1,30 @@
-feat(domain): Complete Parental Control Bounded Context Migration
+feat(storage): Begin Storage Layer Migration to Domain Models
 
-**Domain Architecture:**
-- Migrated parental_control_service.rs to use domain commands exclusively
-- Added ValidateParentalControlCommand and ValidateParentalControlResult
-- Removed all shared DTO dependencies from domain service layer
+**Storage Traits Updated:**
+- Migrated AllowanceStorage, ParentalControlStorage, and GoalStorage traits to use domain models
+- Added DomainAllowanceConfig, DomainParentalControlAttempt, and DomainGoal imports
+- Updated method signatures to use domain models instead of shared DTOs
 
-**Service Layer Refactoring:**
-- Updated ParentalControlService::validate_answer() to use domain commands
-- Maintained all existing functionality with domain types
-- Preserved test coverage for all validation scenarios
+**Domain Models Created:**
+- Added ParentalControlAttempt domain model with business logic methods
+- Updated domain models module to include parental_control_attempt
 
-**API Integration Updates:**
-- Tauri Commands: Updated validate_parental_control() with bidirectional mapping
-- REST API: Updated validate_parental_control_answer() with proper conversion
-- Both APIs handle: SharedRequest → DomainCommand → DomainResult → SharedResponse
+**Partial Repository Updates:**
+- Updated AllowanceRepository to use DomainAllowanceConfig
+- Fixed imports and method signatures for allowance storage
 
-**Test Coverage:**
-- All parental control service tests updated to use domain commands
-- Maintained coverage for correct/incorrect answers, case sensitivity, whitespace handling
-- All validation scenarios continue to pass
+**Work in Progress:**
+- Goal repository migration (needs type conversion updates)
+- Parental control repository migration
+- Domain service updates to handle new storage signatures
+- Mapper updates for domain/shared conversions
 
-**Migration Progress:**
-✅ Allowance Bounded Context
-✅ Goal Bounded Context  
-✅ Child Bounded Context
-✅ Parental Control Bounded Context
+**Next Steps:**
+1. Complete goal repository migration
+2. Update parental control repository
+3. Fix domain service conversion issues
+4. Update mappers for bidirectional conversion
+5. Update all CSV repositories to use domain models
 
-Next: Complete remaining supporting services (money_management, data_directory) 
+This is a systematic migration of the storage layer from shared DTOs to domain models, 
+following the bounded context migration pattern established in previous commits. 

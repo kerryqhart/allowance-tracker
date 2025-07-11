@@ -7,7 +7,9 @@ use anyhow::Result;
 use async_trait::async_trait;
 use crate::backend::domain::models::child::Child as DomainChild;
 use crate::backend::domain::models::transaction::Transaction as DomainTransaction;
-use shared::{AllowanceConfig, ParentalControlAttempt, Goal};
+use crate::backend::domain::models::allowance::AllowanceConfig as DomainAllowanceConfig;
+use crate::backend::domain::models::parental_control_attempt::ParentalControlAttempt as DomainParentalControlAttempt;
+use crate::backend::domain::models::goal::DomainGoal;
 
 /// Trait defining the interface for transaction storage operations
 /// 
@@ -93,19 +95,19 @@ pub trait ChildStorage: Send + Sync {
 #[async_trait]
 pub trait AllowanceStorage: Send + Sync {
     /// Store a new allowance config for a child
-    async fn store_allowance_config(&self, config: &AllowanceConfig) -> Result<()>;
+    async fn store_allowance_config(&self, config: &DomainAllowanceConfig) -> Result<()>;
     
     /// Retrieve allowance config for a specific child by child ID
-    async fn get_allowance_config(&self, child_id: &str) -> Result<Option<AllowanceConfig>>;
+    async fn get_allowance_config(&self, child_id: &str) -> Result<Option<DomainAllowanceConfig>>;
     
     /// Update an existing allowance config for a child
-    async fn update_allowance_config(&self, config: &AllowanceConfig) -> Result<()>;
+    async fn update_allowance_config(&self, config: &DomainAllowanceConfig) -> Result<()>;
     
     /// Delete allowance config for a specific child
     async fn delete_allowance_config(&self, child_id: &str) -> Result<bool>;
     
     /// List all allowance configs (for admin purposes)
-    async fn list_allowance_configs(&self) -> Result<Vec<AllowanceConfig>>;
+    async fn list_allowance_configs(&self) -> Result<Vec<DomainAllowanceConfig>>;
 }
 
 /// Trait defining the interface for parental control attempt storage operations
@@ -115,10 +117,10 @@ pub trait ParentalControlStorage: Send + Sync {
     async fn record_parental_control_attempt(&self, child_id: &str, attempted_value: &str, success: bool) -> Result<i64>;
     
     /// Get parental control attempts for a specific child with optional limit
-    async fn get_parental_control_attempts(&self, child_id: &str, limit: Option<u32>) -> Result<Vec<ParentalControlAttempt>>;
+    async fn get_parental_control_attempts(&self, child_id: &str, limit: Option<u32>) -> Result<Vec<DomainParentalControlAttempt>>;
     
     /// Get all parental control attempts across all children (for admin/debugging)
-    async fn get_all_parental_control_attempts(&self, limit: Option<u32>) -> Result<Vec<ParentalControlAttempt>>;
+    async fn get_all_parental_control_attempts(&self, limit: Option<u32>) -> Result<Vec<DomainParentalControlAttempt>>;
 }
 
 /// Trait defining the interface for goal storage operations
@@ -129,24 +131,24 @@ pub trait ParentalControlStorage: Send + Sync {
 #[async_trait]
 pub trait GoalStorage: Send + Sync {
     /// Store a new goal (append-only - creates new record)
-    async fn store_goal(&self, goal: &Goal) -> Result<()>;
+    async fn store_goal(&self, goal: &DomainGoal) -> Result<()>;
     
     /// Get the current active goal for a specific child
-    async fn get_current_goal(&self, child_id: &str) -> Result<Option<Goal>>;
+    async fn get_current_goal(&self, child_id: &str) -> Result<Option<DomainGoal>>;
     
     /// List all goals for a specific child (with optional limit)
     /// Returns goals ordered by created_at descending (most recent first)
-    async fn list_goals(&self, child_id: &str, limit: Option<u32>) -> Result<Vec<Goal>>;
+    async fn list_goals(&self, child_id: &str, limit: Option<u32>) -> Result<Vec<DomainGoal>>;
     
     /// Update an existing goal by creating a new record with updated fields
     /// This maintains the append-only history while updating the current state
-    async fn update_goal(&self, goal: &Goal) -> Result<()>;
+    async fn update_goal(&self, goal: &DomainGoal) -> Result<()>;
     
     /// Cancel the current active goal by setting its state to Cancelled
-    async fn cancel_current_goal(&self, child_id: &str) -> Result<Option<Goal>>;
+    async fn cancel_current_goal(&self, child_id: &str) -> Result<Option<DomainGoal>>;
     
     /// Mark the current active goal as completed
-    async fn complete_current_goal(&self, child_id: &str) -> Result<Option<Goal>>;
+    async fn complete_current_goal(&self, child_id: &str) -> Result<Option<DomainGoal>>;
     
     /// Check if a child has an active goal
     async fn has_active_goal(&self, child_id: &str) -> Result<bool>;

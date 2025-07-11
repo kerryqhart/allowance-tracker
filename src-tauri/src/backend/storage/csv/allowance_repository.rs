@@ -27,7 +27,7 @@ use async_trait::async_trait;
 use log::{info, warn, debug};
 use std::fs;
 use std::path::PathBuf;
-use shared::AllowanceConfig;
+use crate::backend::domain::models::allowance::AllowanceConfig as DomainAllowanceConfig;
 use super::connection::CsvConnection;
 use crate::backend::storage::GitManager;
 use serde_yaml;
@@ -56,7 +56,7 @@ impl AllowanceRepository {
     }
     
     /// Save allowance config to a specific child directory
-    async fn save_allowance_config_to_directory(&self, config: &AllowanceConfig, child_directory: &str) -> Result<()> {
+    async fn save_allowance_config_to_directory(&self, config: &DomainAllowanceConfig, child_directory: &str) -> Result<()> {
         let child_dir = self.connection.get_child_directory(child_directory);
         
         // Ensure the child directory exists
@@ -89,7 +89,7 @@ impl AllowanceRepository {
     }
     
     /// Load allowance config from a specific child directory
-    async fn load_allowance_config_from_directory(&self, child_directory: &str) -> Result<Option<AllowanceConfig>> {
+    async fn load_allowance_config_from_directory(&self, child_directory: &str) -> Result<Option<DomainAllowanceConfig>> {
         let yaml_path = self.get_allowance_config_path(child_directory);
         
         if !yaml_path.exists() {
@@ -98,7 +98,7 @@ impl AllowanceRepository {
         }
         
         let yaml_content = fs::read_to_string(&yaml_path)?;
-        let config: AllowanceConfig = serde_yaml::from_str(&yaml_content)?;
+        let config: DomainAllowanceConfig = serde_yaml::from_str(&yaml_content)?;
         
         debug!("Loaded allowance config for child directory '{}' from {:?}", child_directory, yaml_path);
         Ok(Some(config))
@@ -180,7 +180,7 @@ impl AllowanceRepository {
 
 #[async_trait]
 impl crate::backend::storage::AllowanceStorage for AllowanceRepository {
-    async fn store_allowance_config(&self, config: &AllowanceConfig) -> Result<()> {
+    async fn store_allowance_config(&self, config: &DomainAllowanceConfig) -> Result<()> {
         // Find the child directory for this child_id
         let child_directory = match self.find_child_directory_by_id(&config.child_id).await? {
             Some(dir) => dir,
@@ -197,7 +197,7 @@ impl crate::backend::storage::AllowanceStorage for AllowanceRepository {
         Ok(())
     }
     
-    async fn get_allowance_config(&self, child_id: &str) -> Result<Option<AllowanceConfig>> {
+    async fn get_allowance_config(&self, child_id: &str) -> Result<Option<DomainAllowanceConfig>> {
         // Find the child directory for this child_id
         let child_directory = match self.find_child_directory_by_id(child_id).await? {
             Some(dir) => dir,
@@ -210,7 +210,7 @@ impl crate::backend::storage::AllowanceStorage for AllowanceRepository {
         self.load_allowance_config_from_directory(&child_directory).await
     }
     
-    async fn update_allowance_config(&self, config: &AllowanceConfig) -> Result<()> {
+    async fn update_allowance_config(&self, config: &DomainAllowanceConfig) -> Result<()> {
         // Update is the same as store for YAML files
         self.store_allowance_config(config).await
     }
@@ -237,7 +237,7 @@ impl crate::backend::storage::AllowanceStorage for AllowanceRepository {
         }
     }
     
-    async fn list_allowance_configs(&self) -> Result<Vec<AllowanceConfig>> {
+    async fn list_allowance_configs(&self) -> Result<Vec<DomainAllowanceConfig>> {
         let directories = self.get_all_child_directories_with_allowance_configs().await?;
         let mut configs = Vec::new();
         
