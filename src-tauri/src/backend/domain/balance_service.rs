@@ -205,16 +205,17 @@ impl<C: Connection> BalanceService<C> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::storage::DbConnection;
+    use crate::backend::storage::csv::CsvConnection;
     use shared::{Transaction, TransactionType};
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    async fn create_test_service() -> BalanceService<crate::backend::storage::DbConnection> {
-        let db = Arc::new(crate::backend::storage::DbConnection::init_test().await.unwrap());
+    async fn create_test_service() -> BalanceService<CsvConnection> {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
         BalanceService::new(db)
     }
 
-    async fn create_test_transaction(service: &BalanceService<crate::backend::storage::DbConnection>, child_id: &str, date: &str, description: &str, amount: f64, balance: f64) -> Transaction {
+    async fn create_test_transaction(service: &BalanceService<CsvConnection>, child_id: &str, date: &str, description: &str, amount: f64, balance: f64) -> Transaction {
         let now_millis = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -239,7 +240,8 @@ mod tests {
         let service = create_test_service().await;
         
         // Create a child first
-        let db = Arc::new(crate::backend::storage::DbConnection::init_test().await.unwrap());
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
         let child_service = crate::backend::domain::child_service::ChildService::new(db);
         let child_response = child_service.create_child(shared::CreateChildRequest {
             name: "Test Child".to_string(),

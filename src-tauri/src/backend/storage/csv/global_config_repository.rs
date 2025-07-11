@@ -198,7 +198,7 @@ impl GlobalConfigStorage for GlobalConfigRepository {
 mod tests {
     use super::*;
     use tempfile::TempDir;
-    use shared::Child;
+    use crate::backend::domain::models::child::Child as DomainChild;
     use crate::backend::storage::ChildStorage;
     use crate::backend::storage::csv::ChildRepository;
 
@@ -227,12 +227,12 @@ mod tests {
         let (repo, child_repo, _temp_dir) = setup_test_repo().await;
         
         // Create a test child first
-        let child = Child {
+        let child = DomainChild {
             id: "child::1234567890".to_string(),
             name: "Test Child".to_string(),
-            birthdate: "2010-01-01".to_string(),
-            created_at: Utc::now().to_rfc3339(),
-            updated_at: Utc::now().to_rfc3339(),
+            birthdate: chrono::NaiveDate::parse_from_str("2010-01-01", "%Y-%m-%d").unwrap(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
         };
         child_repo.store_child(&child).await.unwrap();
         
@@ -249,12 +249,12 @@ mod tests {
         let (repo, child_repo, _temp_dir) = setup_test_repo().await;
         
         // Create and set a child first
-        let child = Child {
+        let child = DomainChild {
             id: "child::1234567890".to_string(),
             name: "Test Child".to_string(),
-            birthdate: "2010-01-01".to_string(),
-            created_at: Utc::now().to_rfc3339(),
-            updated_at: Utc::now().to_rfc3339(),
+            birthdate: chrono::NaiveDate::parse_from_str("2010-01-01", "%Y-%m-%d").unwrap(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
         };
         child_repo.store_child(&child).await.unwrap();
         repo.set_active_child_directory(Some("test_child".to_string())).await.unwrap();
@@ -302,12 +302,12 @@ mod tests {
         let (repo, child_repo, temp_dir) = setup_test_repo().await;
         
         // Create a child and set as active
-        let child = Child {
+        let child = DomainChild {
             id: "child::1234567890".to_string(),
             name: "Test Child".to_string(),
-            birthdate: "2010-01-01".to_string(),
-            created_at: Utc::now().to_rfc3339(),
-            updated_at: Utc::now().to_rfc3339(),
+            birthdate: chrono::NaiveDate::parse_from_str("2010-01-01", "%Y-%m-%d").unwrap(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
         };
         child_repo.store_child(&child).await.unwrap();
         repo.set_active_child_directory(Some("test_child".to_string())).await.unwrap();

@@ -385,22 +385,22 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
     use chrono::Utc;
-    use shared::Child;
+    use crate::backend::domain::models::child::Child as DomainChild;
     use crate::backend::storage::GoalStorage;
 
-    async fn setup_test_repo_with_child() -> (GoalRepository, ChildRepository, TempDir, Child) {
+    async fn setup_test_repo_with_child() -> (GoalRepository, ChildRepository, TempDir, DomainChild) {
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
         let connection = CsvConnection::new(temp_dir.path()).expect("Failed to create connection");
         let goal_repo = GoalRepository::new(connection.clone());
         let child_repo = ChildRepository::new(connection);
         
         // Create a test child first
-        let child = Child {
+        let child = DomainChild {
             id: "child::1234567890".to_string(),
             name: "Test Child".to_string(),
-            birthdate: "2010-01-01".to_string(),
-            created_at: Utc::now().to_rfc3339(),
-            updated_at: Utc::now().to_rfc3339(),
+            birthdate: chrono::NaiveDate::parse_from_str("2010-01-01", "%Y-%m-%d").unwrap(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
         };
         
         child_repo.store_child(&child).await.expect("Failed to create test child");

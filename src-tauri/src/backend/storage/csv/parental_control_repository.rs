@@ -349,23 +349,23 @@ impl crate::backend::storage::ParentalControlStorage for ParentalControlReposito
 mod tests {
     use super::*;
     use tempfile::TempDir;
-    use shared::Child;
+    use crate::backend::domain::models::child::Child as DomainChild;
     use crate::backend::storage::{ChildStorage, ParentalControlStorage};
     use crate::backend::storage::csv::ChildRepository;
 
-    async fn setup_test_repo_with_child() -> (ParentalControlRepository, ChildRepository, TempDir, Child) {
+    async fn setup_test_repo_with_child() -> (ParentalControlRepository, ChildRepository, TempDir, DomainChild) {
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
         let connection = CsvConnection::new(temp_dir.path()).expect("Failed to create connection");
         let parental_control_repo = ParentalControlRepository::new(connection.clone());
         let child_repo = ChildRepository::new(connection);
         
         // Create a test child first
-        let child = Child {
+        let child = DomainChild {
             id: "child::1234567890".to_string(),
             name: "Test Child".to_string(),
-            birthdate: "2010-01-01".to_string(),
-            created_at: Utc::now().to_rfc3339(),
-            updated_at: Utc::now().to_rfc3339(),
+            birthdate: chrono::NaiveDate::parse_from_str("2010-01-01", "%Y-%m-%d").unwrap(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
         };
         
         child_repo.store_child(&child).await.expect("Failed to create test child");
@@ -428,12 +428,12 @@ mod tests {
         let (repo, child_repo, _temp_dir, child1) = setup_test_repo_with_child().await;
         
         // Create a second child
-        let child2 = Child {
+        let child2 = DomainChild {
             id: "child::2345678901".to_string(),
             name: "Second Child".to_string(),
-            birthdate: "2012-01-01".to_string(),
-            created_at: Utc::now().to_rfc3339(),
-            updated_at: Utc::now().to_rfc3339(),
+            birthdate: chrono::NaiveDate::parse_from_str("2012-01-01", "%Y-%m-%d").unwrap(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
         };
         child_repo.store_child(&child2).await.unwrap();
         

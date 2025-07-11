@@ -126,10 +126,11 @@ pub struct ParentalControlStats {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::storage::DbConnection;
+    use crate::backend::storage::csv::CsvConnection;
 
     async fn setup_test() -> ParentalControlService {
-        let db = Arc::new(DbConnection::init_test().await.expect("Failed to create test database"));
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db = Arc::new(CsvConnection::new(temp_dir.path()).expect("Failed to create test database"));
         ParentalControlService::new(db)
     }
 
@@ -282,7 +283,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_custom_answer() {
-        let db = Arc::new(DbConnection::init_test().await.expect("Failed to create test database"));
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db = Arc::new(CsvConnection::new(temp_dir.path()).expect("Failed to create test database"));
         let service = ParentalControlService::with_answer(db, "custom answer".to_string());
         
         // Test correct custom answer
