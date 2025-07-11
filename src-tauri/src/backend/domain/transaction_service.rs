@@ -314,7 +314,7 @@ impl<C: Connection> TransactionService<C> {
         self.child_service
             .get_active_child()
             .await?
-            .child
+            .active_child.child
             .ok_or_else(|| anyhow!("No active child found."))
     }
 }

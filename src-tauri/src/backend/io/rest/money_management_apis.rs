@@ -33,7 +33,7 @@ pub async fn add_money(
             return (StatusCode::INTERNAL_SERVER_ERROR, "Error retrieving active child").into_response();
         }
     };
-    let active_child = match active_child_response.child {
+    let active_child = match active_child_response.active_child.child {
         Some(child) => {
             info!("✅ Active child found: {}", child.id);
             child
@@ -138,7 +138,7 @@ pub async fn spend_money(
             return (StatusCode::INTERNAL_SERVER_ERROR, "Error retrieving active child").into_response();
         }
     };
-    let active_child = match active_child_response.child {
+    let active_child = match active_child_response.active_child.child {
         Some(child) => {
             info!("✅ Active child found: {}", child.id);
             child

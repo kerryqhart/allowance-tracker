@@ -89,7 +89,7 @@ impl GoalService {
             Some(id) => id,
             None => {
                 let active_child_response = self.child_service.get_active_child().await?;
-                let child = match active_child_response.child {
+                let child = match active_child_response.active_child.child {
                     Some(c) => c.id,
                     None => return Err(anyhow::anyhow!("No active child found")),
                 };
@@ -154,7 +154,7 @@ impl GoalService {
             Some(id) => id,
             None => {
                 let active_child_response = self.child_service.get_active_child().await?;
-                let child = match active_child_response.child {
+                let child = match active_child_response.active_child.child {
                     Some(c) => c.id,
                     None => {
                         info!("No active child found for goal request");
@@ -196,7 +196,7 @@ impl GoalService {
             Some(id) => id,
             None => {
                 let active_child_response = self.child_service.get_active_child().await?;
-                let child = match active_child_response.child {
+                let child = match active_child_response.active_child.child {
                     Some(c) => c.id,
                     None => return Err(anyhow::anyhow!("No active child found to update goal")),
                 };
@@ -269,7 +269,7 @@ impl GoalService {
             Some(id) => id,
             None => {
                 let active_child_response = self.child_service.get_active_child().await?;
-                let child = match active_child_response.child {
+                let child = match active_child_response.active_child.child {
                     Some(c) => c.id,
                     None => return Err(anyhow::anyhow!("No active child found to cancel goal")),
                 };
@@ -303,7 +303,7 @@ impl GoalService {
             Some(id) => id,
             None => {
                 let active_child_response = self.child_service.get_active_child().await?;
-                let child = match active_child_response.child {
+                let child = match active_child_response.active_child.child {
                     Some(c) => c.id,
                     None => {
                         info!("No active child found for goal history request");

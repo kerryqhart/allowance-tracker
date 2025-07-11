@@ -17,6 +17,7 @@ use shared::{
 use crate::backend::domain::commands::transactions::{DeleteTransactionsCommand, TransactionListQuery};
 use crate::backend::domain::commands::allowance::{GetAllowanceConfigCommand, UpdateAllowanceConfigCommand};
 use crate::backend::domain::commands::goal::{CreateGoalCommand, CancelGoalCommand, GetCurrentGoalCommand};
+use crate::backend::domain::commands::child::{CreateChildCommand, SetActiveChildCommand};
 use crate::backend::io::rest::mappers::transaction_mapper::TransactionMapper;
 use crate::backend::io::rest::mappers::allowance_mapper::AllowanceMapper;
 use crate::backend::io::rest::mappers::goal_mapper::GoalMapper;
@@ -237,12 +238,12 @@ async fn get_active_child(
     app_state: tauri::State<'_, AppState>,
 ) -> Result<ActiveChildResponse, String> {
     info!("👶 Getting active child with real data");
-    let active_child_domain = app_state
+    let active_child_result = app_state
         .child_service
         .get_active_child()
         .await
         .map_err(|e| e.to_string())?;
-    let response_dto = ChildMapper::to_active_child_dto(active_child_domain);
+    let response_dto = ChildMapper::to_active_child_dto(active_child_result.active_child);
     info!(
         "✅ Active child loaded: {:?}",
         response_dto.active_child.as_ref().map(|c| &c.name)
@@ -254,7 +255,7 @@ async fn get_active_child(
 async fn has_children(app_state: tauri::State<'_, AppState>) -> Result<bool, String> {
     info!("👶 Checking for children with real data");
     match app_state.child_service.list_children().await {
-        Ok(children) => Ok(!children.is_empty()),
+        Ok(result) => Ok(!result.children.is_empty()),
         Err(e) => {
             error!("❌ Failed to list children: {}", e);
             Err(format!("Failed to list children: {}", e))
@@ -267,12 +268,12 @@ async fn list_children(
     app_state: tauri::State<'_, AppState>,
 ) -> Result<ChildListResponse, String> {
     info!("👶 Listing children with real data");
-    let children_response = app_state
+    let children_result = app_state
         .child_service
         .list_children()
         .await
         .map_err(|e| format!("Failed to list children: {}", e))?;
-    let response_dto = ChildMapper::to_child_list_dto(children_response);
+    let response_dto = ChildMapper::to_child_list_dto(children_result.children);
     Ok(response_dto)
 }
 
@@ -282,12 +283,15 @@ async fn set_active_child(
     request: SetActiveChildRequest,
 ) -> Result<SetActiveChildResponse, String> {
     info!("👶 Setting active child with real data: {}", request.child_id);
-    let response = app_state
+    let command = SetActiveChildCommand {
+        child_id: request.child_id,
+    };
+    let result = app_state
         .child_service
-        .set_active_child(&request.child_id)
+        .set_active_child(command)
         .await
         .map_err(|e| format!("Failed to set active child: {}", e))?;
-    let response_dto = ChildMapper::to_set_active_child_dto(response);
+    let response_dto = ChildMapper::to_set_active_child_dto(result.child);
     Ok(response_dto)
 }
 
@@ -297,13 +301,17 @@ async fn create_child(
     request: CreateChildRequest,
 ) -> Result<ChildResponse, String> {
     info!("👶 Creating child with real data: {}", request.name);
-    let response = app_state
+    let command = CreateChildCommand {
+        name: request.name,
+        birthdate: request.birthdate,
+    };
+    let result = app_state
         .child_service
-        .create_child(request)
+        .create_child(command)
         .await
         .map_err(|e| format!("Failed to create child: {}", e))?;
     let response_dto =
-        ChildMapper::to_child_response_dto(response, "Child created successfully");
+        ChildMapper::to_child_response_dto(result.child, "Child created successfully");
     Ok(response_dto)
 }
 
@@ -381,11 +389,26 @@ async fn validate_parental_control(
     request: ParentalControlRequest,
 ) -> Result<ParentalControlResponse, String> {
     info!("🔒 Validating parental control");
-    app_state
+    
+    // Convert shared request to domain command
+    let domain_command = crate::backend::domain::commands::parental_control::ValidateParentalControlCommand {
+        answer: request.answer,
+    };
+    
+    // Execute domain command
+    let domain_result = app_state
         .parental_control_service
-        .validate_answer(request)
+        .validate_answer(domain_command)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    
+    // Convert domain result back to shared response
+    let shared_response = ParentalControlResponse {
+        success: domain_result.success,
+        message: domain_result.message,
+    };
+    
+    Ok(shared_response)
 }
 
 #[tauri::command]

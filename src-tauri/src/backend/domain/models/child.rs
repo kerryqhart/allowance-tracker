@@ -14,6 +14,13 @@ pub struct Child {
     pub updated_at: DateTime<Utc>,
 }
 
+impl Child {
+    /// Generate a unique ID for a child
+    pub fn generate_id(timestamp_millis: u64) -> String {
+        format!("child::{}", timestamp_millis)
+    }
+}
+
 /// Represents the active child, which could be None if no child is selected.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ActiveChild {

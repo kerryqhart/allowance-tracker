@@ -14,6 +14,7 @@ use crate::backend::domain::commands::allowance::{
 use crate::backend::domain::commands::allowance::{
     GetAllowanceConfigResult, UpdateAllowanceConfigResult
 };
+use crate::backend::domain::commands::child::GetChildCommand;
 use crate::backend::io::rest::mappers::allowance_mapper::AllowanceMapper;
 
 /// Service for managing allowance configurations
@@ -48,8 +49,8 @@ impl AllowanceService {
             Some(id) => id,
             None => {
                 // Use active child if no child_id provided
-                let active_child_response = self.child_service.get_active_child().await?;
-                let child = match active_child_response.child {
+                let active_child_result = self.child_service.get_active_child().await?;
+                let child = match active_child_result.active_child.child {
                     Some(c) => c.id,
                     None => {
                         warn!("No active child found for allowance config request");
@@ -107,15 +108,16 @@ impl AllowanceService {
         let child_id = match command.child_id {
             Some(id) => {
                 // Verify the child exists
-                if self.child_service.get_child(&id).await?.is_none() {
+                let get_child_command = GetChildCommand { child_id: id.clone() };
+                if self.child_service.get_child(get_child_command).await?.child.is_none() {
                     return Err(anyhow::anyhow!("Child not found: {}", id));
                 }
                 id
             }
             None => {
                 // Use active child if no child_id provided
-                let active_child_response = self.child_service.get_active_child().await?;
-                let child = match active_child_response.child {
+                let active_child_result = self.child_service.get_active_child().await?;
+                let child = match active_child_result.active_child.child {
                     Some(c) => c.id,
                     None => return Err(anyhow::anyhow!("No active child found to update allowance config")),
                 };

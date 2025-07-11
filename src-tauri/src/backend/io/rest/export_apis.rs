@@ -88,7 +88,7 @@ pub async fn export_transactions_csv(
     } else {
         match state.child_service.get_active_child().await {
             Ok(response) => {
-                if let Some(child) = response.child {
+                if let Some(child) = response.active_child.child {
                     child.id
                 } else {
                     return (StatusCode::BAD_REQUEST, Json("No active child set and no child_id provided")).into_response();
@@ -102,12 +102,17 @@ pub async fn export_transactions_csv(
     };
 
     // Get the child details for the filename
-    let child = match state.child_service.get_child(&child_id_to_use).await {
-        Ok(Some(child)) => child,
-        Ok(None) => {
-            error!("Child not found: {}", child_id_to_use);
-            return (StatusCode::NOT_FOUND, "Child not found").into_response();
-        }
+    let get_child_command = crate::backend::domain::commands::child::GetChildCommand {
+        child_id: child_id_to_use.clone(),
+    };
+    let child = match state.child_service.get_child(get_child_command).await {
+        Ok(result) => match result.child {
+            Some(child) => child,
+            None => {
+                error!("Child not found: {}", child_id_to_use);
+                return (StatusCode::NOT_FOUND, "Child not found").into_response();
+            }
+        },
         Err(e) => {
             error!("Failed to get child details: {}", e);
             return (StatusCode::INTERNAL_SERVER_ERROR, "Error retrieving child details").into_response();
@@ -322,7 +327,7 @@ async fn export_transactions_csv_internal(
     } else {
         match state.child_service.get_active_child().await {
             Ok(response) => {
-                if let Some(child) = response.child {
+                if let Some(child) = response.active_child.child {
                     child.id
                 } else {
                     return Err("No active child found".to_string());
@@ -333,9 +338,14 @@ async fn export_transactions_csv_internal(
     };
 
     // Get the child details for the filename
-    let child = match state.child_service.get_child(&child_id_to_use).await {
-        Ok(Some(child)) => child,
-        Ok(None) => return Err(format!("Child not found: {}", child_id_to_use)),
+    let get_child_command = crate::backend::domain::commands::child::GetChildCommand {
+        child_id: child_id_to_use.clone(),
+    };
+    let child = match state.child_service.get_child(get_child_command).await {
+        Ok(result) => match result.child {
+            Some(child) => child,
+            None => return Err(format!("Child not found: {}", child_id_to_use)),
+        },
         Err(e) => return Err(format!("Failed to get child details: {}", e)),
     };
 

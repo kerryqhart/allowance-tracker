@@ -31,7 +31,7 @@ impl DataDirectoryService {
             id.to_string()
         } else {
             let response = self.child_service.get_active_child().await?;
-            response.child.ok_or_else(|| anyhow::anyhow!("No active child found"))?.id
+            response.active_child.child.ok_or_else(|| anyhow::anyhow!("No active child found"))?.id
         };
 
         let current_path = self.csv_connection.get_child_directory(&child_id_to_use);
@@ -55,7 +55,7 @@ impl DataDirectoryService {
             id.to_string()
         } else {
             let response = self.child_service.get_active_child().await?;
-            response.child.ok_or_else(|| anyhow::anyhow!("No active child found"))?.id
+            response.active_child.child.ok_or_else(|| anyhow::anyhow!("No active child found"))?.id
         };
 
         info!("🔄 About to call csv_connection.relocate_child_data_directory with child '{}' and path: {}", child_id_to_use, request.new_path);
@@ -93,7 +93,7 @@ impl DataDirectoryService {
             id.to_string()
         } else {
             let response = self.child_service.get_active_child().await?;
-            response.child.ok_or_else(|| anyhow::anyhow!("No active child found"))?.id
+            response.active_child.child.ok_or_else(|| anyhow::anyhow!("No active child found"))?.id
         };
 
         // Check if there's actually a redirect file

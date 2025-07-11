@@ -3,18 +3,24 @@
 //! Endpoints for creating, retrieving, updating, and deleting children.
 
 use axum::{
-    extract::State,
+    extract::{Path, State},
     http::StatusCode,
     response::{IntoResponse, Json},
+    routing::{delete, get, post, put},
+    Router,
 };
-use log::{info, error};
+use log::{error, info};
 
 use crate::backend::AppState;
-use shared::{
-    CreateChildRequest, UpdateChildRequest, SetActiveChildRequest,
-};
 use crate::backend::io::rest::mappers::child_mapper::ChildMapper;
-
+use crate::backend::domain::commands::child::{
+    CreateChildCommand, UpdateChildCommand, GetChildCommand, 
+    SetActiveChildCommand, DeleteChildCommand
+};
+use shared::{
+    ChildListResponse, ChildResponse, CreateChildRequest, SetActiveChildRequest, UpdateChildRequest,
+    ActiveChildResponse,
+};
 
 /// Create a new child
 pub async fn create_child(
@@ -22,12 +28,18 @@ pub async fn create_child(
     Json(request): Json<CreateChildRequest>,
 ) -> impl IntoResponse {
     info!("POST /api/children - request: {:?}", request);
-
-    match state.child_service.create_child(request).await {
-        Ok(domain_child) => {
-            let response = ChildMapper::to_child_response_dto(domain_child, "Child created successfully");
+    
+    let command = CreateChildCommand {
+        name: request.name,
+        birthdate: request.birthdate,
+    };
+    
+    match state.child_service.create_child(command).await {
+        Ok(result) => {
+            let response = ChildMapper::to_child_response_dto(result.child, "Child created successfully");
+            info!("✅ Child created successfully: {:?}", response);
             (StatusCode::CREATED, Json(response)).into_response()
-        },
+        }
         Err(e) => {
             error!("Failed to create child: {}", e);
             (StatusCode::BAD_REQUEST, e.to_string()).into_response()
@@ -36,39 +48,43 @@ pub async fn create_child(
 }
 
 /// Get a child by ID
-pub async fn get_child(
-    State(state): State<AppState>,
-    axum::extract::Path(child_id): axum::extract::Path<String>,
-) -> impl IntoResponse {
-    info!("GET /api/children/{}", child_id);
-
-    match state.child_service.get_child(&child_id).await {
-        Ok(Some(domain_child)) => {
-            let response = ChildMapper::to_dto(domain_child);
-            (StatusCode::OK, Json(response)).into_response()
+pub async fn get_child_by_id(State(state): State<AppState>, Path(child_id): Path<String>) -> impl IntoResponse {
+    info!("GET /api/children/{} - request", child_id);
+    
+    let command = GetChildCommand { child_id: child_id.clone() };
+    
+    match state.child_service.get_child(command).await {
+        Ok(result) => match result.child {
+            Some(domain_child) => {
+                let response = ChildMapper::to_child_response_dto(domain_child, "Child found");
+                info!("✅ Child found: {}", child_id);
+                (StatusCode::OK, Json(response)).into_response()
+            }
+            None => {
+                info!("Child not found: {}", child_id);
+                (StatusCode::NOT_FOUND, "Child not found").into_response()
+            }
         },
-        Ok(None) => (StatusCode::NOT_FOUND, "Child not found").into_response(),
         Err(e) => {
             error!("Failed to get child: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, "Error retrieving child").into_response()
+            (StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response()
         }
     }
 }
 
 /// List all children
-pub async fn list_children(
-    State(state): State<AppState>,
-) -> impl IntoResponse {
-    info!("GET /api/children");
-
+pub async fn list_children(State(state): State<AppState>) -> impl IntoResponse {
+    info!("GET /api/children - request");
+    
     match state.child_service.list_children().await {
-        Ok(domain_children) => {
-            let response = ChildMapper::to_child_list_dto(domain_children);
+        Ok(result) => {
+            let response = ChildMapper::to_child_list_dto(result.children);
+            info!("✅ Children listed: {} children", response.children.len());
             (StatusCode::OK, Json(response)).into_response()
-        },
+        }
         Err(e) => {
             error!("Failed to list children: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, "Error listing children").into_response()
+            (StatusCode::INTERNAL_SERVER_ERROR, "Failed to list children").into_response()
         }
     }
 }
@@ -76,63 +92,61 @@ pub async fn list_children(
 /// Update a child
 pub async fn update_child(
     State(state): State<AppState>,
-    axum::extract::Path(child_id): axum::extract::Path<String>,
+    Path(child_id): Path<String>,
     Json(request): Json<UpdateChildRequest>,
 ) -> impl IntoResponse {
     info!("PUT /api/children/{} - request: {:?}", child_id, request);
-
-    match state.child_service.update_child(&child_id, request).await {
-        Ok(domain_child) => {
-            let response = ChildMapper::to_child_response_dto(domain_child, "Child updated successfully");
+    
+    let command = UpdateChildCommand {
+        child_id: child_id.clone(),
+        name: request.name,
+        birthdate: request.birthdate,
+    };
+    
+    match state.child_service.update_child(command).await {
+        Ok(result) => {
+            let response = ChildMapper::to_child_response_dto(result.child, "Child updated successfully");
+            info!("✅ Child updated successfully: {}", child_id);
             (StatusCode::OK, Json(response)).into_response()
-        },
+        }
         Err(e) => {
             error!("Failed to update child: {}", e);
-            let status = if e.to_string().contains("not found") {
-                StatusCode::NOT_FOUND
-            } else {
-                StatusCode::BAD_REQUEST
-            };
-            (status, e.to_string()).into_response()
+            (StatusCode::BAD_REQUEST, e.to_string()).into_response()
         }
     }
 }
 
 /// Delete a child
-pub async fn delete_child(
-    State(state): State<AppState>,
-    axum::extract::Path(child_id): axum::extract::Path<String>,
-) -> impl IntoResponse {
-    info!("DELETE /api/children/{}", child_id);
-
-    match state.child_service.delete_child(&child_id).await {
-        Ok(()) => (StatusCode::NO_CONTENT, "").into_response(),
+pub async fn delete_child(State(state): State<AppState>, Path(child_id): Path<String>) -> impl IntoResponse {
+    info!("DELETE /api/children/{} - request", child_id);
+    
+    let command = DeleteChildCommand { child_id: child_id.clone() };
+    
+    match state.child_service.delete_child(command).await {
+        Ok(_result) => {
+            info!("✅ Child deleted successfully: {}", child_id);
+            (StatusCode::NO_CONTENT, "").into_response()
+        }
         Err(e) => {
             error!("Failed to delete child: {}", e);
-            let status = if e.to_string().contains("not found") {
-                StatusCode::NOT_FOUND
-            } else {
-                StatusCode::INTERNAL_SERVER_ERROR
-            };
-            (status, e.to_string()).into_response()
+            (StatusCode::BAD_REQUEST, e.to_string()).into_response()
         }
     }
 }
 
 /// Get the currently active child
-pub async fn get_active_child(
-    State(state): State<AppState>,
-) -> impl IntoResponse {
-    info!("GET /api/active-child");
-
+pub async fn get_active_child(State(state): State<AppState>) -> impl IntoResponse {
+    info!("GET /api/children/active - request");
+    
     match state.child_service.get_active_child().await {
-        Ok(domain_active_child) => {
-            let response = ChildMapper::to_active_child_dto(domain_active_child);
+        Ok(result) => {
+            let response = ChildMapper::to_active_child_dto(result.active_child);
+            info!("✅ Active child retrieved");
             (StatusCode::OK, Json(response)).into_response()
-        },
+        }
         Err(e) => {
             error!("Failed to get active child: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, "Error retrieving active child").into_response()
+            (StatusCode::INTERNAL_SERVER_ERROR, "Failed to get active child").into_response()
         }
     }
 }
@@ -142,23 +156,34 @@ pub async fn set_active_child(
     State(state): State<AppState>,
     Json(request): Json<SetActiveChildRequest>,
 ) -> impl IntoResponse {
-    info!("POST /api/active-child - request: {:?}", request);
-
-    match state.child_service.set_active_child(&request.child_id).await {
-        Ok(domain_child) => {
-            let response = ChildMapper::to_set_active_child_dto(domain_child);
+    info!("POST /api/children/active - request: {:?}", request);
+    
+    let command = SetActiveChildCommand {
+        child_id: request.child_id.clone(),
+    };
+    
+    match state.child_service.set_active_child(command).await {
+        Ok(result) => {
+            let response = ChildMapper::to_set_active_child_dto(result.child);
+            info!("✅ Active child set successfully: {}", request.child_id);
             (StatusCode::OK, Json(response)).into_response()
-        },
+        }
         Err(e) => {
             error!("Failed to set active child: {}", e);
-            let status = if e.to_string().contains("not found") {
-                StatusCode::NOT_FOUND
-            } else {
-                StatusCode::BAD_REQUEST
-            };
-            (status, e.to_string()).into_response()
+            (StatusCode::BAD_REQUEST, e.to_string()).into_response()
         }
     }
+}
+
+pub fn create_child_router() -> Router<AppState> {
+    Router::new()
+        .route("/", post(create_child))
+        .route("/", get(list_children))
+        .route("/:id", get(get_child_by_id))
+        .route("/:id", put(update_child))
+        .route("/:id", delete(delete_child))
+        .route("/active", get(get_active_child))
+        .route("/active", post(set_active_child))
 }
 
 #[cfg(test)]

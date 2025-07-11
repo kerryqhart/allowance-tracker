@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use crate::backend::storage::csv::{CsvConnection, ParentalControlRepository};
 use crate::backend::storage::traits::ParentalControlStorage;
+use crate::backend::domain::commands::parental_control::{ValidateParentalControlCommand, ValidateParentalControlResult};
 use shared::{ParentalControlRequest, ParentalControlResponse};
 
 /// Service for handling parental control validation
@@ -33,8 +34,8 @@ impl ParentalControlService {
     }
 
     /// Validate a parental control answer
-    pub async fn validate_answer(&self, request: ParentalControlRequest) -> Result<ParentalControlResponse> {
-        let attempted_answer = request.answer.trim();
+    pub async fn validate_answer(&self, command: ValidateParentalControlCommand) -> Result<ValidateParentalControlResult> {
+        let attempted_answer = command.answer.trim();
         info!("Validating parental control answer (length: {})", attempted_answer.len());
 
         // Perform case-insensitive comparison
@@ -52,21 +53,21 @@ impl ParentalControlService {
         }
 
         // Generate response
-        let response = if is_correct {
+        let result = if is_correct {
             info!("Parental control validation successful");
-            ParentalControlResponse {
+            ValidateParentalControlResult {
                 success: true,
                 message: "Access granted! Welcome to parental settings.".to_string(),
             }
         } else {
             info!("Parental control validation failed for answer: '{}'", attempted_answer);
-            ParentalControlResponse {
+            ValidateParentalControlResult {
                 success: false,
                 message: "Incorrect answer. Access denied.".to_string(),
             }
         };
 
-        Ok(response)
+        Ok(result)
     }
 
     /// Get the correct answer (for testing purposes)
@@ -136,11 +137,11 @@ mod tests {
     async fn test_correct_answer_validation() {
         let service = setup_test().await;
         
-        let request = ParentalControlRequest {
+        let command = ValidateParentalControlCommand {
             answer: "ice cold".to_string(),
         };
         
-        let response = service.validate_answer(request).await.unwrap();
+        let response = service.validate_answer(command).await.unwrap();
         assert!(response.success);
         assert!(response.message.contains("Access granted"));
     }
@@ -158,11 +159,11 @@ mod tests {
         ];
         
         for answer in test_cases {
-            let request = ParentalControlRequest {
+            let command = ValidateParentalControlCommand {
                 answer: answer.to_string(),
             };
             
-            let response = service.validate_answer(request).await.unwrap();
+            let response = service.validate_answer(command).await.unwrap();
             assert!(response.success, "Answer '{}' should be accepted", answer);
         }
     }
@@ -179,11 +180,11 @@ mod tests {
         ];
         
         for answer in test_cases {
-            let request = ParentalControlRequest {
+            let command = ValidateParentalControlCommand {
                 answer: answer.to_string(),
             };
             
-            let response = service.validate_answer(request).await.unwrap();
+            let response = service.validate_answer(command).await.unwrap();
             assert!(response.success, "Answer '{}' should be accepted", answer);
         }
     }
@@ -203,11 +204,11 @@ mod tests {
         ];
         
         for answer in test_cases {
-            let request = ParentalControlRequest {
+            let command = ValidateParentalControlCommand {
                 answer: answer.to_string(),
             };
             
-            let response = service.validate_answer(request).await.unwrap();
+            let response = service.validate_answer(command).await.unwrap();
             assert!(!response.success, "Answer '{}' should be rejected", answer);
             assert!(response.message.contains("Incorrect answer"));
         }
@@ -222,16 +223,16 @@ mod tests {
         assert_eq!(initial_attempts.len(), 0);
         
         // Make a correct attempt
-        let correct_request = ParentalControlRequest {
+        let correct_command = ValidateParentalControlCommand {
             answer: "ice cold".to_string(),
         };
-        service.validate_answer(correct_request).await.unwrap();
+        service.validate_answer(correct_command).await.unwrap();
         
         // Make an incorrect attempt
-        let incorrect_request = ParentalControlRequest {
+        let incorrect_command = ValidateParentalControlCommand {
             answer: "wrong".to_string(),
         };
-        service.validate_answer(incorrect_request).await.unwrap();
+        service.validate_answer(incorrect_command).await.unwrap();
         
         // Check attempts were recorded
         let attempts = service.get_recent_attempts(None).await.unwrap();
@@ -265,10 +266,10 @@ mod tests {
         ];
         
         for (answer, _expected) in requests {
-            let request = ParentalControlRequest {
+            let command = ValidateParentalControlCommand {
                 answer: answer.to_string(),
             };
-            service.validate_answer(request).await.unwrap();
+            service.validate_answer(command).await.unwrap();
         }
         
         // Check stats
@@ -285,17 +286,17 @@ mod tests {
         let service = ParentalControlService::with_answer(db, "custom answer".to_string());
         
         // Test correct custom answer
-        let correct_request = ParentalControlRequest {
+        let correct_command = ValidateParentalControlCommand {
             answer: "custom answer".to_string(),
         };
-        let response = service.validate_answer(correct_request).await.unwrap();
+        let response = service.validate_answer(correct_command).await.unwrap();
         assert!(response.success);
         
         // Test default answer should fail
-        let default_request = ParentalControlRequest {
+        let default_command = ValidateParentalControlCommand {
             answer: "ice cold".to_string(),
         };
-        let response = service.validate_answer(default_request).await.unwrap();
+        let response = service.validate_answer(default_command).await.unwrap();
         assert!(!response.success);
     }
 } 

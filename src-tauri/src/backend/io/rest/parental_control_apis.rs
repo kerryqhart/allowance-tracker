@@ -2,7 +2,7 @@ use axum::{extract::State, http::StatusCode, response::Json, routing::post, Rout
 use log::{error, info};
 use serde_json::Value;
 
-use crate::backend::AppState;
+use crate::backend::{AppState, domain};
 use shared::{ParentalControlRequest, ParentalControlResponse};
 
 /// Create the parental control API router
@@ -28,11 +28,23 @@ pub async fn validate_parental_control_answer(
         return Err((StatusCode::BAD_REQUEST, Json(error_response)));
     }
 
+    // Convert shared request to domain command
+    let domain_command = domain::commands::parental_control::ValidateParentalControlCommand {
+        answer: request.answer,
+    };
+    
     // Validate the answer using the domain service
-    match app_state.parental_control_service.validate_answer(request).await {
-        Ok(response) => {
-            info!("Parental control validation result: success={}", response.success);
-            Ok(Json(response))
+    match app_state.parental_control_service.validate_answer(domain_command).await {
+        Ok(domain_result) => {
+            info!("Parental control validation result: success={}", domain_result.success);
+            
+            // Convert domain result back to shared response
+            let shared_response = ParentalControlResponse {
+                success: domain_result.success,
+                message: domain_result.message,
+            };
+            
+            Ok(Json(shared_response))
         }
         Err(e) => {
             error!("Failed to validate parental control answer: {}", e);

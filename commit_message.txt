@@ -1,45 +1,29 @@
-feat: Complete Goal Bounded Context migration from shared to domain models
+feat(domain): Complete Parental Control Bounded Context Migration
 
-MAJOR MILESTONE: Successfully migrated goal functionality to use domain models exclusively
+**Domain Architecture:**
+- Migrated parental_control_service.rs to use domain commands exclusively
+- Added ValidateParentalControlCommand and ValidateParentalControlResult
+- Removed all shared DTO dependencies from domain service layer
 
-Domain Architecture:
-- Added goal module to commands.rs with comprehensive command/result types
-- CreateGoalCommand, UpdateGoalCommand, GetCurrentGoalCommand, CancelGoalCommand, GetGoalHistoryCommand
-- All commands return domain results with proper business logic encapsulation
+**Service Layer Refactoring:**
+- Updated ParentalControlService::validate_answer() to use domain commands
+- Maintained all existing functionality with domain types
+- Preserved test coverage for all validation scenarios
 
-Service Layer Refactoring:
-- Refactored goal_service.rs to use domain models only (DomainGoal, DomainGoalState)
-- Implemented bidirectional mapping: Storage (shared) ↔ Domain ↔ API (shared DTOs)
-- All 5 public methods now use domain commands instead of shared DTOs
-- Enhanced goal calculation and validation logic in domain layer
+**API Integration Updates:**
+- Tauri Commands: Updated validate_parental_control() with bidirectional mapping
+- REST API: Updated validate_parental_control_answer() with proper conversion
+- Both APIs handle: SharedRequest → DomainCommand → DomainResult → SharedResponse
 
-API Integration:
-- Updated Tauri commands in lib.rs to use domain commands and goal mapper
-- Fixed REST endpoints in goal_apis.rs with proper DTO conversion
-- Updated all goal-related endpoints: GET /current, POST /, PUT /, DELETE /, GET /history
-- Maintained backward compatibility with existing API contracts
+**Test Coverage:**
+- All parental control service tests updated to use domain commands
+- Maintained coverage for correct/incorrect answers, case sensitivity, whitespace handling
+- All validation scenarios continue to pass
 
-Enhanced Components:
-- GoalMapper now provides comprehensive response conversion methods
-- Test suite completely migrated to use domain commands
-- Fixed transaction service integration in goal calculations
-- All 4 test methods updated to use domain types and commands
+**Migration Progress:**
+✅ Allowance Bounded Context
+✅ Goal Bounded Context  
+✅ Child Bounded Context
+✅ Parental Control Bounded Context
 
-Benefits Achieved:
-- Clean separation of concerns between domain, storage, and API layers
-- Domain logic is completely independent of external contracts
-- Type safety prevents shared types from leaking into domain
-- Enhanced maintainability and testability
-- Foundation ready for remaining bounded context migrations
-
-Migration Progress:
-✅ Domain Models Foundation
-✅ Goal Mapper Creation  
-✅ Goal Domain Model Fix
-✅ Transaction Bounded Context Migration
-✅ Allowance Bounded Context Migration
-✅ Goal Bounded Context Migration ← COMPLETED
-⏳ Next: Child Context Verification
-
-Build verification: All compilation errors resolved, only warnings remain.
-Runtime verification: Logs show goal service working correctly with domain commands. 
+Next: Complete remaining supporting services (money_management, data_directory) 

@@ -161,4 +161,98 @@ pub mod goal {
         pub goal: DomainGoal,
         pub success_message: String,
     }
+}
+
+pub mod child {
+    use crate::backend::domain::models::child::{ActiveChild, Child as DomainChild};
+
+    /// Input for creating a new child.
+    #[derive(Debug, Clone)]
+    pub struct CreateChildCommand {
+        pub name: String,
+        pub birthdate: String, // Format: YYYY-MM-DD
+    }
+
+    /// Input for updating a child.
+    #[derive(Debug, Clone)]
+    pub struct UpdateChildCommand {
+        pub child_id: String,
+        pub name: Option<String>,
+        pub birthdate: Option<String>, // Format: YYYY-MM-DD
+    }
+
+    /// Input for getting a child by ID.
+    #[derive(Debug, Clone)]
+    pub struct GetChildCommand {
+        pub child_id: String,
+    }
+
+    /// Input for setting the active child.
+    #[derive(Debug, Clone)]
+    pub struct SetActiveChildCommand {
+        pub child_id: String,
+    }
+
+    /// Input for deleting a child.
+    #[derive(Debug, Clone)]
+    pub struct DeleteChildCommand {
+        pub child_id: String,
+    }
+
+    /// Result of creating a child.
+    #[derive(Debug, Clone)]
+    pub struct CreateChildResult {
+        pub child: DomainChild,
+    }
+
+    /// Result of updating a child.
+    #[derive(Debug, Clone)]
+    pub struct UpdateChildResult {
+        pub child: DomainChild,
+    }
+
+    /// Result of getting a child.
+    #[derive(Debug, Clone)]
+    pub struct GetChildResult {
+        pub child: Option<DomainChild>,
+    }
+
+    /// Result of getting active child.
+    #[derive(Debug, Clone)]
+    pub struct GetActiveChildResult {
+        pub active_child: ActiveChild,
+    }
+
+    /// Result of listing children.
+    #[derive(Debug, Clone)]
+    pub struct ListChildrenResult {
+        pub children: Vec<DomainChild>,
+    }
+
+    /// Result of setting active child.
+    #[derive(Debug, Clone)]
+    pub struct SetActiveChildResult {
+        pub child: DomainChild,
+    }
+
+    /// Result of deleting a child.
+    #[derive(Debug, Clone)]
+    pub struct DeleteChildResult {
+        pub success_message: String,
+    }
+}
+
+pub mod parental_control {
+    /// Input for validating parental control answer.
+    #[derive(Debug, Clone)]
+    pub struct ValidateParentalControlCommand {
+        pub answer: String,
+    }
+
+    /// Result of validating parental control answer.
+    #[derive(Debug, Clone)]
+    pub struct ValidateParentalControlResult {
+        pub success: bool,
+        pub message: String,
+    }
 } 
