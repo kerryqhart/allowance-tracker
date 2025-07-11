@@ -296,12 +296,51 @@ impl TransactionRepository {
         let child_ids: Vec<String> = children.into_iter().map(|child| child.id).collect();
         Ok(child_ids)
     }
+    
+    /// Compare two date strings properly handling different timezones
+    fn compare_dates(&self, date1: &str, date2: &str) -> i32 {
+        use chrono::{DateTime, FixedOffset};
+        
+        // Try to parse both dates as RFC3339 datetime objects
+        match (DateTime::parse_from_rfc3339(date1), DateTime::parse_from_rfc3339(date2)) {
+            (Ok(dt1), Ok(dt2)) => {
+                // Compare as datetime objects (automatically handles timezone conversion)
+                let result = if dt1 < dt2 { -1 } else if dt1 > dt2 { 1 } else { 0 };
+                info!("🕐 compare_dates: '{}' vs '{}' -> parsed as {} vs {} -> result: {}", 
+                     date1, date2, dt1, dt2, result);
+                result
+            }
+            (Err(e1), Ok(_)) => {
+                warn!("🕐 compare_dates: Failed to parse date1 '{}': {}", date1, e1);
+                // Fallback to string comparison
+                let result = date1.cmp(date2) as i32;
+                info!("🕐 compare_dates: Using string comparison: '{}' vs '{}' -> {}", date1, date2, result);
+                result
+            }
+            (Ok(_), Err(e2)) => {
+                warn!("🕐 compare_dates: Failed to parse date2 '{}': {}", date2, e2);
+                // Fallback to string comparison
+                let result = date1.cmp(date2) as i32;
+                info!("🕐 compare_dates: Using string comparison: '{}' vs '{}' -> {}", date1, date2, result);
+                result
+            }
+            (Err(e1), Err(e2)) => {
+                warn!("🕐 compare_dates: Failed to parse both dates '{}' and '{}': {} / {}", date1, date2, e1, e2);
+                // Fallback to string comparison if parsing fails
+                let result = date1.cmp(date2) as i32;
+                info!("🕐 compare_dates: Using string comparison: '{}' vs '{}' -> {}", date1, date2, result);
+                result
+            }
+        }
+    }
 }
 
 #[async_trait]
 impl crate::backend::storage::TransactionStorage for TransactionRepository {
     async fn store_transaction(&self, transaction: &DomainTransaction) -> Result<()> {
-        let child_directory = self.connection.get_child_directory(&transaction.child_id);
+        // Convert child ID to child name for directory lookup
+        let child_name = self.get_child_directory_name(&transaction.child_id).await?;
+        let child_directory = self.connection.get_child_directory(&child_name);
         let mut transactions = self.read_transactions(child_directory.to_str().unwrap()).await.unwrap_or_default();
         if let Some(pos) = transactions.iter().position(|t| t.id == transaction.id) {
             transactions[pos] = transaction.clone();
@@ -316,7 +355,9 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
         child_id: &str,
         transaction_id: &str,
     ) -> Result<Option<DomainTransaction>> {
-        let child_directory = self.connection.get_child_directory(child_id);
+        // Convert child ID to child name for directory lookup
+        let child_name = self.get_child_directory_name(child_id).await?;
+        let child_directory = self.connection.get_child_directory(&child_name);
         Ok(self
             .read_transactions(child_directory.to_str().unwrap())
             .await?
@@ -330,7 +371,9 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
         limit: Option<u32>,
         after: Option<String>,
     ) -> Result<Vec<DomainTransaction>> {
-        let child_directory = self.connection.get_child_directory(child_id);
+        // Convert child ID to child name for directory lookup
+        let child_name = self.get_child_directory_name(child_id).await?;
+        let child_directory = self.connection.get_child_directory(&child_name);
         let mut transactions = self.read_transactions(child_directory.to_str().unwrap()).await?;
         transactions.sort_by(|a, b| b.date.cmp(&a.date)); // Sort by date descending
 
@@ -355,17 +398,66 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
         start_date: Option<String>,
         end_date: Option<String>,
     ) -> Result<Vec<DomainTransaction>> {
-        let child_directory = self.connection.get_child_directory(child_id);
+        info!("📁 CSV: list_transactions_chronological for child_id={}, start_date={:?}, end_date={:?}", 
+              child_id, start_date, end_date);
+        
+        // Convert child ID to child name for directory lookup
+        let child_name = self.get_child_directory_name(child_id).await?;
+        info!("📁 CSV: child_id '{}' converted to child_name '{}'", child_id, child_name);
+        
+        let child_directory = self.connection.get_child_directory(&child_name);
+        info!("📁 CSV: child_directory = {:?}", child_directory);
+        
         let mut transactions = self.read_transactions(child_directory.to_str().unwrap()).await?;
+        info!("📁 CSV: Raw transactions loaded: {} transactions", transactions.len());
+        
+        for (i, tx) in transactions.iter().enumerate().take(5) {
+            info!("📁 CSV: Raw tx {}: id={}, date={}, amount={}, description={}", 
+                 i + 1, tx.id, tx.date, tx.amount, tx.description);
+        }
+        if transactions.len() > 5 {
+            info!("📁 CSV: ... and {} more raw transactions", transactions.len() - 5);
+        }
+        
         transactions.sort_by(|a, b| a.date.cmp(&b.date)); // Sort by date ascending
 
         let mut filtered = transactions;
+        let initial_count = filtered.len();
 
+        // Convert date strings to datetime objects for proper comparison
         if let Some(start) = start_date {
-            filtered.retain(|t| t.date >= start);
+            info!("📁 CSV: Filtering by start_date: {}", start);
+            let before_filter = filtered.len();
+            filtered.retain(|t| {
+                let comparison = self.compare_dates(&t.date, &start);
+                let keeps = comparison >= 0;
+                if !keeps && before_filter <= 10 { // Log first few filtered out
+                    info!("📁 CSV: Filtering OUT transaction {} (date={}) because compare_dates({}, {}) = {}", 
+                         t.id, t.date, t.date, start, comparison);
+                }
+                keeps
+            });
+            info!("📁 CSV: After start_date filter: {} -> {} transactions", before_filter, filtered.len());
         }
         if let Some(end) = end_date {
-            filtered.retain(|t| t.date <= end);
+            info!("📁 CSV: Filtering by end_date: {}", end);
+            let before_filter = filtered.len();
+            filtered.retain(|t| {
+                let comparison = self.compare_dates(&t.date, &end);
+                let keeps = comparison <= 0;
+                if !keeps && before_filter <= 10 { // Log first few filtered out
+                    info!("📁 CSV: Filtering OUT transaction {} (date={}) because compare_dates({}, {}) = {} (should be <= 0)", 
+                         t.id, t.date, t.date, end, comparison);
+                }
+                keeps
+            });
+            info!("📁 CSV: After end_date filter: {} -> {} transactions", before_filter, filtered.len());
+        }
+
+        info!("📁 CSV: Final filtered transactions: {} (started with {})", filtered.len(), initial_count);
+        for (i, tx) in filtered.iter().enumerate().take(5) {
+            info!("📁 CSV: Final tx {}: id={}, date={}, amount={}, description={}", 
+                 i + 1, tx.id, tx.date, tx.amount, tx.description);
         }
 
         Ok(filtered)
@@ -402,7 +494,9 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
     }
 
     async fn delete_transactions(&self, child_id: &str, transaction_ids: &[String]) -> Result<u32> {
-        let child_directory = self.connection.get_child_directory(child_id);
+        // Convert child ID to child name for directory lookup
+        let child_name = self.get_child_directory_name(child_id).await?;
+        let child_directory = self.connection.get_child_directory(&child_name);
         let mut transactions = self.read_transactions(child_directory.to_str().unwrap()).await?;
         let initial_len = transactions.len();
         transactions.retain(|t| !transaction_ids.contains(&t.id));
@@ -422,9 +516,11 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
         child_id: &str,
         date: &str,
     ) -> Result<Vec<DomainTransaction>> {
-        let child_directory = self.connection.get_child_directory(child_id);
+        // Convert child ID to child name for directory lookup
+        let child_name = self.get_child_directory_name(child_id).await?;
+        let child_directory = self.connection.get_child_directory(&child_name);
         let mut transactions = self.read_transactions(child_directory.to_str().unwrap()).await?;
-        transactions.retain(|t| t.date.as_str() >= date);
+        transactions.retain(|t| self.compare_dates(&t.date, date) >= 0);
         Ok(transactions)
     }
 
@@ -433,9 +529,11 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
         child_id: &str,
         date: &str,
     ) -> Result<Option<DomainTransaction>> {
-        let child_directory = self.connection.get_child_directory(child_id);
+        // Convert child ID to child name for directory lookup
+        let child_name = self.get_child_directory_name(child_id).await?;
+        let child_directory = self.connection.get_child_directory(&child_name);
         let mut transactions = self.read_transactions(child_directory.to_str().unwrap()).await?;
-        transactions.retain(|t| t.date.as_str() < date);
+        transactions.retain(|t| self.compare_dates(&t.date, date) < 0);
         transactions.sort_by(|a, b| b.date.cmp(&a.date));
         Ok(transactions.into_iter().next())
     }
@@ -513,6 +611,31 @@ mod tests {
         };
         
         (repo, cleanup)
+    }
+    
+    #[tokio::test]
+    async fn test_compare_dates_timezone_fix() {
+        let (repo, _cleanup) = setup_test_repo().await;
+        
+        // Test the exact scenario from the bug report
+        let cdt_transaction_date = "2025-06-15T00:00:00-0500"; // CDT transaction
+        let utc_query_end_date = "2025-06-30T23:59:59Z";       // UTC query
+        
+        // The CDT transaction should be BEFORE the UTC end date (comparison should be < 0)
+        let result = repo.compare_dates(cdt_transaction_date, utc_query_end_date);
+        println!("Test: compare_dates('{}', '{}') = {}", cdt_transaction_date, utc_query_end_date, result);
+        assert!(result < 0, "CDT transaction should be before UTC end date");
+        
+        // Test another CDT transaction that should be included
+        let cdt_transaction_june27 = "2025-06-27T07:00:00-0500";
+        let result2 = repo.compare_dates(cdt_transaction_june27, utc_query_end_date);
+        println!("Test: compare_dates('{}', '{}') = {}", cdt_transaction_june27, utc_query_end_date, result2);
+        assert!(result2 < 0, "CDT June 27 transaction should be before UTC end date");
+        
+        // Test string comparison fallback with invalid dates
+        let invalid_date = "invalid-date";
+        let result3 = repo.compare_dates(invalid_date, utc_query_end_date);
+        println!("Test: compare_dates('{}', '{}') = {} (fallback)", invalid_date, utc_query_end_date, result3);
     }
     
     #[tokio::test]

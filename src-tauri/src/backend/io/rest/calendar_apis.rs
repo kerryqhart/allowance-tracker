@@ -11,8 +11,11 @@ use serde::Deserialize;
 use crate::backend::AppState;
 use shared::{
     CalendarMonth, CalendarFocusDate, UpdateCalendarFocusRequest, UpdateCalendarFocusResponse,
-    CurrentDateResponse, TransactionListRequest, TransactionListResponse, PaginationInfo,
+    CurrentDateResponse, PaginationInfo, Transaction,
 };
+
+use crate::backend::domain::commands::transactions::TransactionListQuery;
+use crate::backend::io::rest::mappers::transaction_mapper::TransactionMapper;
 use chrono::{NaiveDate, NaiveTime};
 
 // Query parameters for calendar month API
@@ -37,40 +40,66 @@ async fn get_calendar_month(
     State(state): State<AppState>,
     Query(request): Query<CalendarMonthQuery>,
 ) -> impl IntoResponse {
-    info!("GET /api/calendar - request: {:?}", request);
+    info!("🗓️ GET /api/calendar - request: {:?}", request);
 
     let days_in_month = state.calendar_service.days_in_month(request.month, request.year);
+    info!("🗓️ Days in month {}/{}: {}", request.month, request.year, days_in_month);
 
     // Calculate end date for target month
     let end_date = format!("{:04}-{:02}-{:02}T23:59:59Z", 
                           request.year, request.month, days_in_month);
+    info!("🗓️ Query end date: {}", end_date);
 
-    // Single comprehensive call to get ALL transactions needed for proper balance calculation
-    // This includes: real transactions + future allowances from all previous months
-    let transaction_request = TransactionListRequest {
+    let domain_query = TransactionListQuery {
         after: None,
-        limit: Some(10000), // Large limit to get comprehensive history
-        start_date: None, // From beginning of time
-        end_date: Some(end_date), // To end of target month
+        limit: Some(10000),
+        start_date: None,
+        end_date: Some(end_date.clone()),
     };
+    info!("🗓️ Domain query: {:?}", domain_query);
 
-    let transaction_response = match state.transaction_service.list_transactions(transaction_request).await {
-        Ok(response) => response,
+    let result = match state.transaction_service.list_transactions_domain(domain_query).await {
+        Ok(res) => {
+            info!("🗓️ Raw domain transactions loaded: {} transactions", res.transactions.len());
+            for (i, tx) in res.transactions.iter().enumerate().take(5) {
+                info!("🗓️ Transaction {}: id={}, date={}, amount={}, description={}", 
+                     i + 1, tx.id, tx.date, tx.amount, tx.description);
+            }
+            if res.transactions.len() > 5 {
+                info!("🗓️ ... and {} more transactions", res.transactions.len() - 5);
+            }
+            res
+        },
         Err(e) => {
-            error!("Failed to get transactions for calendar: {}", e);
+            error!("❌ Failed to get transactions for calendar: {}", e);
             return (StatusCode::INTERNAL_SERVER_ERROR, "Error getting transactions").into_response();
         }
     };
 
-    // debug!("🗓️ SINGLE CALL: Fetched {} total transactions (real + future allowances) for {}/{}", 
-    //       transaction_response.transactions.len(), request.month, request.year);
+    // Convert domain transactions to DTOs for calendar service
+    let dto_transactions: Vec<Transaction> = result
+        .transactions
+        .into_iter()
+        .map(TransactionMapper::to_dto)
+        .collect();
+    
+    info!("🗓️ DTO transactions for calendar: {} transactions", dto_transactions.len());
+    for (i, tx) in dto_transactions.iter().enumerate().take(5) {
+        info!("🗓️ DTO Transaction {}: id={}, date={}, amount={}, description={}", 
+             i + 1, tx.id, tx.date, tx.amount, tx.description);
+    }
 
-    // Single call to domain layer with comprehensive transaction data
     let calendar_month = state.calendar_service.generate_calendar_month(
         request.month,
         request.year,
-        transaction_response.transactions,
+        dto_transactions,
     );
+    
+    info!("🗓️ Generated calendar with {} days", calendar_month.days.len());
+    let total_transaction_count: usize = calendar_month.days.iter()
+        .map(|day| day.transactions.len())
+        .sum();
+    info!("🗓️ Total transactions in calendar days: {}", total_transaction_count);
 
     (StatusCode::OK, Json(calendar_month)).into_response()
 }
