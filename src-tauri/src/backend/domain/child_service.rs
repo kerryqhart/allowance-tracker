@@ -1,6 +1,6 @@
 use anyhow::{Result, Context};
 use chrono::{Utc, NaiveDate};
-use log::{info, warn};
+use log::{info, warn, debug};
 use std::sync::Arc;
 
 use crate::backend::domain::models::child::{ActiveChild, Child as DomainChild};
@@ -127,14 +127,14 @@ impl ChildService {
 
     /// Get the currently active child
     pub async fn get_active_child(&self) -> Result<ActiveChild> {
-        info!("Getting active child");
+        debug!("Getting active child");
 
         let active_child_id = self.child_repository.get_active_child().await?;
 
         let active_child_model = if let Some(child_id) = active_child_id {
             match self.child_repository.get_child(&child_id).await? {
                 Some(child) => {
-                    info!("Found active child: {}", child_id);
+                    debug!("Found active child: {}", child_id);
                     Some(child)
                 },
                 None => {

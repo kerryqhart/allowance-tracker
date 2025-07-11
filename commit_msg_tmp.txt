@@ -1,6 +1,0 @@
-refactor(api): migrate money management endpoints to domain commands
-
-• `money_management_apis.rs` now constructs `CreateTransactionCommand` and calls `create_transaction_domain`.
-• Uses `TransactionMapper` to convert domain Transaction back to DTO.
-
-This completes REST-layer migration off shared DTOs for transaction creation pathways. 

@@ -4,7 +4,7 @@ use std::fs;
 use std::io;
 use chrono::Utc;
 use crate::backend::storage::traits::Connection;
-use log::{info, warn, error};
+use log::{info, warn, error, debug};
 use fs_extra::dir::{CopyOptions, copy as copy_dir};
 use std::sync::{Arc, Mutex};
 
@@ -105,7 +105,7 @@ impl CsvConnection {
                     
                     // debug!("🔍 Checking if redirected path exists: {}", path.display());
                     if path.exists() {
-                        info!("✅ Child {} data redirected to: {}", child_name, path.display());
+                        debug!("✅ Child {} data redirected to: {}", child_name, path.display());
                         return path;
                     } else {
                         warn!("⚠️ Child {} redirect file points to non-existent directory: {}. Using default.", child_name, redirected_path);

@@ -9,7 +9,10 @@ use log::{error, info};
 use serde::Deserialize;
 
 use crate::backend::AppState;
-use shared::{TransactionListRequest, TransactionTableResponse};
+use shared::{TransactionTableResponse, PaginationInfo, Transaction};
+
+use crate::backend::domain::commands::transactions::TransactionListQuery;
+use crate::backend::io::rest::mappers::transaction_mapper::TransactionMapper;
 
 // Query parameters for transaction table API
 #[derive(Debug, Deserialize)]
@@ -30,33 +33,38 @@ async fn get_transaction_table(
 ) -> impl IntoResponse {
     info!("GET /api/transactions/table - query: {:?}", query);
 
-    let request = TransactionListRequest {
+    let domain_query = TransactionListQuery {
         after: query.after.clone(),
         limit: query.limit,
         start_date: None,
         end_date: None,
     };
 
-    match state.transaction_service.list_transactions(request).await {
-        Ok(transactions_response) => {
+    match state.transaction_service.list_transactions_domain(domain_query).await {
+        Ok(result) => {
+            let dto_transactions: Vec<Transaction> = result
+                .transactions
+                .into_iter()
+                .map(TransactionMapper::to_dto)
+                .collect();
+
             let formatted_transactions = state
                 .transaction_table_service
-                .format_transactions_for_table(&transactions_response.transactions);
+                .format_transactions_for_table(&dto_transactions);
 
             let table_response = TransactionTableResponse {
                 formatted_transactions,
-                pagination: transactions_response.pagination,
+                pagination: PaginationInfo {
+                    has_more: result.pagination.has_more,
+                    next_cursor: result.pagination.next_cursor,
+                },
             };
 
             (StatusCode::OK, Json(table_response)).into_response()
         }
         Err(e) => {
             error!("Failed to get transaction table data: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Error getting transaction table",
-            )
-                .into_response()
+            (StatusCode::INTERNAL_SERVER_ERROR, "Error getting transaction table").into_response()
         }
     }
 }

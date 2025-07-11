@@ -1,13 +1,24 @@
-refactor(transaction): Migrate transaction context to domain models
+Reduce excessive logging by changing frequent info logs to debug level
 
-This commit continues the migration from shared DTOs to internal domain models, focusing on the "Transaction" bounded context.
+The issue was that several frequently-called methods were logging at info level:
+- get_child_directory() logged redirect messages on every call
+- discover_children() logged child count on every call  
+- get_active_child() logged on every call
+- Found active child logged on every call
 
-Key changes:
-- Created `Transaction` and `TransactionType` domain models in `src-tauri/src/backend/domain/models/transaction.rs`.
-- Implemented `TransactionMapper` to convert between domain models and shared DTOs.
-- Refactored `TransactionService` to use the new domain models for all internal logic, only converting to DTOs at the boundary.
-- Updated the `TransactionStorage` trait to use `DomainTransaction`.
-- Refactored the `CsvTransactionRepository` to implement the updated trait and use the domain model.
-- Deleted the entire `sqlite` storage module and its references to simplify the codebase, as it was unused.
+These methods are called multiple times per HTTP request due to:
+1. Multiple services calling get_active_child()
+2. Each get_active_child() triggering discover_children()
+3. discover_children() calling get_child_directory() for each child
+4. Other repository operations also calling get_child_directory()
 
-This completes the second major phase of the domain model refactoring plan. 
+This created a cascade of dozens of log messages for each frontend request.
+
+Fixed by changing log level from info! to debug! for:
+- "Child X data redirected to" message in get_child_directory()
+- "Discovered N children" message in discover_children()  
+- "Getting active child" message in get_active_child()
+- "Found active child" message in get_active_child()
+
+Now these debug messages are only visible when debug logging is enabled,
+but normal operations will have much cleaner logs. 

@@ -227,10 +227,24 @@ fn app() -> Html {
             spawn_local(async move {
                 Logger::debug_with_component("App", "Checking if this is first run");
                 
-                // For testing, always show the setup wizard
-                // TODO: Replace with actual backend check
-                is_first_run.set(true);
-                show_setup_wizard.set(true);
+                match api_client.list_children().await {
+                    Ok(response) => {
+                        if response.children.is_empty() {
+                            // No children yet → first run
+                            is_first_run.set(true);
+                            show_setup_wizard.set(true);
+                        } else {
+                            is_first_run.set(false);
+                            show_setup_wizard.set(false);
+                        }
+                    }
+                    Err(err) => {
+                        // If the backend is unreachable we still want the main UI to try to load
+                        gloo::console::error!("Failed first-run check:", err.clone());
+                        is_first_run.set(false);
+                        show_setup_wizard.set(false);
+                    }
+                }
                 setup_check_complete.set(true);
             });
         }

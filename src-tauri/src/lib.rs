@@ -25,6 +25,7 @@ use axum::serve;
 use tokio::net::TcpListener;
 use std::net::SocketAddr;
 use tauri::Manager;
+use tauri_plugin_log::Target;
 
 // Real Tauri commands that use backend services
 #[tauri::command]
@@ -444,6 +445,18 @@ pub fn run() {
     }
 
     tauri::Builder::default()
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .targets([
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
+                        file_name: Some("allowance-tracker.log".to_string()),
+                    }),
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Webview),
+                ])
+                .level(log::LevelFilter::Info)
+                .build()
+        )
         .plugin(tauri_plugin_dialog::init())
         .manage(app_state)
         .invoke_handler(tauri::generate_handler![

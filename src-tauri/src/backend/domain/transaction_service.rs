@@ -134,10 +134,30 @@ impl<C: Connection> TransactionService<C> {
         let limit = query.limit.unwrap_or(20);
         let query_limit = limit + 1;
 
-        let mut db_transactions = self
-            .transaction_repository
-            .list_transactions(&active_child.id, Some(query_limit), query.after)
-            .await?;
+        // Decide which repository method to use based on date filters
+        let mut db_transactions = if query.start_date.is_some() || query.end_date.is_some() {
+            // Fetch chronologically within range then reverse so newest first
+            let mut txs = self
+                .transaction_repository
+                .list_transactions_chronological(&active_child.id, query.start_date.clone(), query.end_date.clone())
+                .await?;
+            txs.reverse();
+            // Apply cursor & limit manually (after is applied after reversing because IDs unique)
+            if let Some(after_id) = query.after.clone() {
+                if let Some(idx) = txs.iter().position(|t| t.id == after_id) {
+                    txs = txs.into_iter().skip(idx + 1).collect();
+                }
+            }
+            if let Some(lim) = query.limit {
+                txs.truncate(lim as usize + 1); // +1 to detect has_more later
+            }
+            txs
+        } else {
+            self
+                .transaction_repository
+                .list_transactions(&active_child.id, Some(query_limit), query.after)
+                .await?
+        };
 
         // TODO: reintegrate future allowances generation once domain models are finished
         db_transactions.sort_by(|a, b| b.date.cmp(&a.date));

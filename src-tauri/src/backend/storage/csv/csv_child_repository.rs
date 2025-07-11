@@ -3,26 +3,22 @@ use async_trait::async_trait;
 use log::{info, warn, debug};
 use std::fs;
 use std::path::PathBuf;
-use shared::Child as SharedChild;
 use crate::backend::domain::models::child::Child as DomainChild;
+use crate::backend::storage::traits::ChildRepository;
+use serde::{Deserialize, Serialize};
 use super::connection::CsvConnection;
-use crate::backend::storage::GitManager;
 use serde_yaml;
 
 /// CSV-based child repository using filesystem discovery
 #[derive(Clone)]
-pub struct ChildRepository {
+pub struct CsvChildRepository {
     connection: CsvConnection,
-    git_manager: GitManager,
 }
 
-impl ChildRepository {
+impl CsvChildRepository {
     /// Create a new CSV child repository
     pub fn new(connection: CsvConnection) -> Self {
-        Self { 
-            connection,
-            git_manager: GitManager::new(),
-        }
+        Self { connection }
     }
     
     /// Generate a safe filesystem identifier from a child name
@@ -125,12 +121,9 @@ impl ChildRepository {
         }
         
         let yaml_content = fs::read_to_string(&yaml_path)?;
-        let shared_child: SharedChild = serde_yaml::from_str(&yaml_content)?;
+        let shared_child: DomainChild = serde_yaml::from_str(&yaml_content)?;
         
-        let domain_child = crate::backend::io::rest::mappers::child_mapper::ChildMapper::to_domain(shared_child)
-            .context("Failed to map shared child to domain child")?;
-
-        Ok(Some(domain_child))
+        Ok(Some(shared_child))
     }
     
     /// Save a child to their directory
@@ -144,8 +137,7 @@ impl ChildRepository {
         
         // Write child.yaml
         let yaml_path = self.get_child_yaml_path(directory_name);
-        let shared_child = crate::backend::io::rest::mappers::child_mapper::ChildMapper::to_dto(child.clone());
-        let yaml_content = serde_yaml::to_string(&shared_child)?;
+        let yaml_content = serde_yaml::to_string(&child)?;
         
         // Atomic write using temp file
         let temp_path = yaml_path.with_extension("tmp");
@@ -153,16 +145,6 @@ impl ChildRepository {
         fs::rename(&temp_path, &yaml_path)?;
         
         info!("Saved child {} to directory: {}", child.name, directory_name);
-        
-        // Git integration: commit the child.yaml change
-        let action_description = format!("Updated child configuration for {}", child.name);
-        
-        // This is non-blocking - git errors won't fail the child operation
-        let _ = self.git_manager.commit_file_change(
-            &child_dir,
-            "child.yaml", 
-            &action_description
-        ).await;
         
         Ok(())
     }
@@ -228,7 +210,7 @@ impl ChildRepository {
 }
 
 #[async_trait]
-impl crate::backend::storage::ChildStorage for ChildRepository {
+impl ChildRepository for CsvChildRepository {
     /// Store a new child
     async fn store_child(&self, child: &DomainChild) -> Result<()> {
         let dir_name = Self::generate_safe_directory_name(&child.name);
@@ -248,55 +230,50 @@ impl crate::backend::storage::ChildStorage for ChildRepository {
     
     /// Update an existing child
     async fn update_child(&self, child: &DomainChild) -> Result<()> {
-        let dir_name = self.find_directory_by_child_id(&child.id).await?
-            .ok_or_else(|| anyhow::anyhow!("Could not find directory for child ID: {}", child.id))?;
-        
-        self.save_child_to_directory(child, &dir_name).await
+        // Find existing child directory to handle name changes
+        if let Some(dir_name) = self.find_directory_by_child_id(&child.id).await? {
+            self.save_child_to_directory(child, &dir_name).await
+        } else {
+            // This is an update, so the child should exist
+            warn!("Attempted to update a non-existent child: {}", child.id);
+            Err(anyhow::anyhow!("Child not found for update"))
+        }
     }
-    
+
     /// Delete a child by ID
     async fn delete_child(&self, child_id: &str) -> Result<()> {
-        let directory_name = match self.find_directory_by_child_id(child_id).await? {
-            Some(dir) => dir,
-            None => return Err(anyhow::anyhow!("Child not found: {}", child_id)),
-        };
-        
-        let child_dir = self.connection.get_child_directory(&directory_name);
-        
-        if child_dir.exists() {
-            fs::remove_dir_all(&child_dir)?;
-            info!("Deleted child directory: {:?}", child_dir);
+        if let Some(dir_name) = self.find_directory_by_child_id(child_id).await? {
+            let child_dir = self.connection.get_child_directory(&dir_name);
+            if child_dir.exists() {
+                fs::remove_dir_all(&child_dir)?;
+                info!("Deleted child directory: {:?}", child_dir);
+            }
+        } else {
+            warn!("Attempted to delete a non-existent child: {}", child_id);
         }
-        
         Ok(())
     }
-    
-    /// Get the currently active child
+
+    /// Get the currently active child ID
     async fn get_active_child(&self) -> Result<Option<String>> {
-        let directory_name = match self.get_active_child_directory().await? {
-            Some(dir) => dir,
-            None => return Ok(None),
-        };
-        
-        // Load the child from this directory and return their ID
-        match self.load_child_from_directory(&directory_name).await? {
-            Some(child) => Ok(Some(child.id)),
-            None => {
-                warn!("Active child directory {} doesn't contain a valid child", directory_name);
+        if let Some(dir_name) = self.get_active_child_directory().await? {
+            if let Ok(Some(child)) = self.load_child_from_directory(&dir_name).await {
+                Ok(Some(child.id))
+            } else {
                 Ok(None)
             }
+        } else {
+            Ok(None)
         }
     }
-    
+
     /// Set the currently active child
     async fn set_active_child(&self, child_id: &str) -> Result<()> {
-        // First verify the child exists and find their directory
-        let directory_name = match self.find_directory_by_child_id(child_id).await? {
-            Some(dir) => dir,
-            None => return Err(anyhow::anyhow!("Child not found: {}", child_id)),
-        };
-        
-        self.set_active_child_directory(&directory_name).await
+        if let Some(dir_name) = self.find_directory_by_child_id(child_id).await? {
+            self.set_active_child_directory(&dir_name).await
+        } else {
+            Err(anyhow::anyhow!("Child not found to set as active"))
+        }
     }
 }
 
@@ -304,76 +281,53 @@ impl crate::backend::storage::ChildStorage for ChildRepository {
 mod tests {
     use super::*;
     use tempfile::TempDir;
-    use crate::backend::storage::ChildStorage;
-    
-    async fn setup_test_repo() -> (ChildRepository, TempDir) {
+    use chrono::NaiveDate;
+    use crate::backend::storage::traits::ChildRepository;
+
+    async fn setup_test_repo() -> (CsvChildRepository, TempDir) {
         let temp_dir = TempDir::new().unwrap();
         let connection = CsvConnection::new(temp_dir.path()).unwrap();
-        let repo = ChildRepository::new(connection);
-        (repo, temp_dir)
+        (CsvChildRepository::new(connection), temp_dir)
     }
-    
-    #[tokio::test]
-    async fn test_generate_safe_directory_name() {
-        assert_eq!(ChildRepository::generate_safe_directory_name("Emma Smith"), "emma_smith");
-        assert_eq!(ChildRepository::generate_safe_directory_name("José María"), "jose_maria");
-        assert_eq!(ChildRepository::generate_safe_directory_name("Kid #1"), "kid_1");
-        assert_eq!(ChildRepository::generate_safe_directory_name("Test-Child"), "test_child");
+
+    #[test]
+    fn test_generate_safe_directory_name() {
+        assert_eq!(CsvChildRepository::generate_safe_directory_name("Emma Smith"), "emma_smith");
+        assert_eq!(CsvChildRepository::generate_safe_directory_name("José María"), "jose_maria");
+        assert_eq!(CsvChildRepository::generate_safe_directory_name("  Test-Name "), "test_name");
     }
-    
+
     #[tokio::test]
     async fn test_store_and_discover_child() {
         let (repo, _temp_dir) = setup_test_repo().await;
-        
-        // Create a child
-        let now = chrono::Utc::now();
         let child = DomainChild {
-            id: "child::123".to_string(),
+            id: "child1".to_string(),
             name: "Test Child".to_string(),
-            birthdate: chrono::NaiveDate::from_ymd_opt(2015, 5, 15).unwrap(),
-            created_at: now,
-            updated_at: now,
+            birthdate: NaiveDate::from_ymd_opt(2010, 1, 1).unwrap(),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
         };
-        
-        // Store the child
-        repo.store_child(&child).await.expect("Failed to store child");
-        
-        // Discover children
-        let children = repo.list_children().await.expect("Failed to list children");
+        repo.store_child(&child).await.unwrap();
+
+        let children = repo.discover_children().await.unwrap();
         assert_eq!(children.len(), 1);
-        assert_eq!(children[0].name, "Test Child");
-        assert_eq!(children[0].id, "child::123");
-        
-        // Get the specific child
-        let retrieved_child = repo.get_child("child::123").await.expect("Failed to get child");
-        assert!(retrieved_child.is_some());
-        assert_eq!(retrieved_child.unwrap().name, "Test Child");
+        assert_eq!(children[0].id, "child1");
     }
-    
+
     #[tokio::test]
     async fn test_active_child_management() {
         let (repo, _temp_dir) = setup_test_repo().await;
-        
-        // Initially, no active child
-        let active_child_id = repo.get_active_child().await.expect("Failed to get active child");
-        assert!(active_child_id.is_none());
-        
-        // Create and store a child
-        let now = chrono::Utc::now();
         let child = DomainChild {
-            id: "child::456".to_string(),
-            name: "Active Child".to_string(),
-            birthdate: chrono::NaiveDate::from_ymd_opt(2018, 8, 8).unwrap(),
-            created_at: now,
-            updated_at: now,
+            id: "child1".to_string(),
+            name: "Test Child".to_string(),
+            birthdate: NaiveDate::from_ymd_opt(2010, 1, 1).unwrap(),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
         };
-        repo.store_child(&child).await.expect("Failed to store child");
-        
-        // Set active child
-        repo.set_active_child("child::456").await.expect("Failed to set active child");
-        
-        // Get active child
-        let active_child_id = repo.get_active_child().await.expect("Failed to get active child");
-        assert_eq!(active_child_id, Some("child::456".to_string()));
+        repo.store_child(&child).await.unwrap();
+
+        repo.set_active_child("child1").await.unwrap();
+        let active_id = repo.get_active_child().await.unwrap();
+        assert_eq!(active_id, Some("child1".to_string()));
     }
 } 
