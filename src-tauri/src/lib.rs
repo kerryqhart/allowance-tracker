@@ -15,7 +15,9 @@ use shared::{
 };
 
 use crate::backend::domain::commands::transactions::{DeleteTransactionsCommand, TransactionListQuery};
+use crate::backend::domain::commands::allowance::{GetAllowanceConfigCommand, UpdateAllowanceConfigCommand};
 use crate::backend::io::rest::mappers::transaction_mapper::TransactionMapper;
+use crate::backend::io::rest::mappers::allowance_mapper::AllowanceMapper;
 use backend::{
     io::rest::mappers::child_mapper::ChildMapper,
     initialize_backend, AppState,
@@ -87,12 +89,18 @@ async fn get_allowance_config(
     app_state: tauri::State<'_, AppState>,
 ) -> Result<GetAllowanceConfigResponse, String> {
     info!("📋 Getting allowance config with real data");
-    let request = GetAllowanceConfigRequest { child_id: None };
-    app_state
+    let command = GetAllowanceConfigCommand { child_id: None };
+    let result = app_state
         .allowance_service
-        .get_allowance_config(request)
+        .get_allowance_config(command)
         .await
-        .map_err(|e| format!("Failed to get allowance config: {}", e))
+        .map_err(|e| format!("Failed to get allowance config: {}", e))?;
+    
+    // Convert domain result back to DTO for response
+    let dto_config = result.allowance_config.map(AllowanceMapper::to_dto);
+    Ok(GetAllowanceConfigResponse { 
+        allowance_config: dto_config 
+    })
 }
 
 #[tauri::command]
@@ -106,17 +114,24 @@ async fn update_allowance_config(
         "💰 Updating allowance config: ${:.2} on day {} (active: {})",
         amount, day_of_week, is_active
     );
-    let request = UpdateAllowanceConfigRequest {
+    let command = UpdateAllowanceConfigCommand {
         child_id: None,
         amount,
         day_of_week,
         is_active,
     };
-    app_state
+    let result = app_state
         .allowance_service
-        .update_allowance_config(request)
+        .update_allowance_config(command)
         .await
-        .map_err(|e| format!("Failed to update allowance config: {}", e))
+        .map_err(|e| format!("Failed to update allowance config: {}", e))?;
+    
+    // Convert domain result back to DTO for response
+    let dto_config = AllowanceMapper::to_dto(result.allowance_config);
+    Ok(UpdateAllowanceConfigResponse {
+        allowance_config: dto_config,
+        success_message: result.success_message,
+    })
 }
 
 #[tauri::command]

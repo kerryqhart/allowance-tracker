@@ -14,7 +14,10 @@ use log::{info, error};
 use crate::backend::AppState;
 use shared::{
     GetAllowanceConfigRequest, UpdateAllowanceConfigRequest,
+    GetAllowanceConfigResponse, UpdateAllowanceConfigResponse,
 };
+use crate::backend::domain::commands::allowance::{GetAllowanceConfigCommand, UpdateAllowanceConfigCommand};
+use crate::backend::io::rest::mappers::allowance_mapper::AllowanceMapper;
 
 /// Create a router for allowance related APIs
 pub fn router() -> Router<AppState> {
@@ -28,12 +31,19 @@ pub async fn get_allowance_config(
 ) -> impl IntoResponse {
     info!("GET /api/allowance");
 
-    let request = GetAllowanceConfigRequest {
+    let command = GetAllowanceConfigCommand {
         child_id: None, // Use active child
     };
 
-    match state.allowance_service.get_allowance_config(request).await {
-        Ok(response) => (StatusCode::OK, Json(response)).into_response(),
+    match state.allowance_service.get_allowance_config(command).await {
+        Ok(result) => {
+            // Convert domain result back to DTO for response
+            let dto_config = result.allowance_config.map(AllowanceMapper::to_dto);
+            let response = GetAllowanceConfigResponse { 
+                allowance_config: dto_config 
+            };
+            (StatusCode::OK, Json(response)).into_response()
+        },
         Err(e) => {
             error!("Failed to get allowance config: {}", e);
             (StatusCode::INTERNAL_SERVER_ERROR, "Error retrieving allowance configuration").into_response()
@@ -48,8 +58,23 @@ pub async fn update_allowance_config(
 ) -> impl IntoResponse {
     info!("POST /api/allowance - request: {:?}", request);
 
-    match state.allowance_service.update_allowance_config(request).await {
-        Ok(response) => (StatusCode::OK, Json(response)).into_response(),
+    let command = UpdateAllowanceConfigCommand {
+        child_id: request.child_id,
+        amount: request.amount,
+        day_of_week: request.day_of_week,
+        is_active: request.is_active,
+    };
+
+    match state.allowance_service.update_allowance_config(command).await {
+        Ok(result) => {
+            // Convert domain result back to DTO for response
+            let dto_config = AllowanceMapper::to_dto(result.allowance_config);
+            let response = UpdateAllowanceConfigResponse {
+                allowance_config: dto_config,
+                success_message: result.success_message,
+            };
+            (StatusCode::OK, Json(response)).into_response()
+        },
         Err(e) => {
             error!("Failed to update allowance config: {}", e);
             let status = if e.to_string().contains("not found") {

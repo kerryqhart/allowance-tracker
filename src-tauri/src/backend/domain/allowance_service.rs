@@ -6,10 +6,15 @@ use std::sync::Arc;
 use crate::backend::storage::csv::{CsvConnection, AllowanceRepository, TransactionRepository};
 use crate::backend::storage::traits::{AllowanceStorage, TransactionStorage};
 use crate::backend::domain::child_service::ChildService;
-use shared::{
-    AllowanceConfig, GetAllowanceConfigRequest, GetAllowanceConfigResponse,
-    UpdateAllowanceConfigRequest, UpdateAllowanceConfigResponse, Transaction, TransactionType,
+use crate::backend::domain::models::allowance::AllowanceConfig;
+use crate::backend::domain::models::transaction::{Transaction as DomainTransaction, TransactionType as DomainTransactionType};
+use crate::backend::domain::commands::allowance::{
+    GetAllowanceConfigCommand, UpdateAllowanceConfigCommand
 };
+use crate::backend::domain::commands::allowance::{
+    GetAllowanceConfigResult, UpdateAllowanceConfigResult
+};
+use crate::backend::io::rest::mappers::allowance_mapper::AllowanceMapper;
 
 /// Service for managing allowance configurations
 #[derive(Clone)]
@@ -35,11 +40,11 @@ impl AllowanceService {
     /// Get allowance configuration for a child
     pub async fn get_allowance_config(
         &self,
-        request: GetAllowanceConfigRequest,
-    ) -> Result<GetAllowanceConfigResponse> {
-        info!("Getting allowance config: {:?}", request);
+        command: GetAllowanceConfigCommand,
+    ) -> Result<GetAllowanceConfigResult> {
+        info!("Getting allowance config: {:?}", command);
 
-        let child_id = match request.child_id {
+        let child_id = match command.child_id {
             Some(id) => id,
             None => {
                 // Use active child if no child_id provided
@@ -48,7 +53,7 @@ impl AllowanceService {
                     Some(c) => c.id,
                     None => {
                         warn!("No active child found for allowance config request");
-                        return Ok(GetAllowanceConfigResponse {
+                        return Ok(GetAllowanceConfigResult {
                             allowance_config: None,
                         });
                     }
@@ -57,12 +62,14 @@ impl AllowanceService {
             }
         };
 
-        let allowance_config = self
+        let shared_allowance_config = self
             .allowance_repository
             .get_allowance_config(&child_id)
             .await?;
 
-        if let Some(ref config) = allowance_config {
+        let domain_allowance_config = shared_allowance_config.map(AllowanceMapper::to_domain);
+
+        if let Some(ref config) = domain_allowance_config {
             info!("Found allowance config for child: {}", child_id);
             info!("🔍 DEBUG: Allowance config details - day_of_week: {}, day_name: {}, amount: {}, is_active: {}", 
                 config.day_of_week, config.day_name(), config.amount, config.is_active);
@@ -70,34 +77,34 @@ impl AllowanceService {
             info!("No allowance config found for child: {}", child_id);
         }
 
-        Ok(GetAllowanceConfigResponse { allowance_config })
+        Ok(GetAllowanceConfigResult { allowance_config: domain_allowance_config })
     }
 
     /// Update allowance configuration for a child
     pub async fn update_allowance_config(
         &self,
-        request: UpdateAllowanceConfigRequest,
-    ) -> Result<UpdateAllowanceConfigResponse> {
-        info!("Updating allowance config: {:?}", request);
+        command: UpdateAllowanceConfigCommand,
+    ) -> Result<UpdateAllowanceConfigResult> {
+        info!("Updating allowance config: {:?}", command);
 
         // Validate day of week
-        if !AllowanceConfig::is_valid_day_of_week(request.day_of_week) {
+        if !AllowanceConfig::is_valid_day_of_week(command.day_of_week) {
             return Err(anyhow::anyhow!(
                 "Invalid day of week: {}. Must be 0-6 (Sunday-Saturday)",
-                request.day_of_week
+                command.day_of_week
             ));
         }
 
         // Validate amount
-        if request.amount < 0.0 {
+        if command.amount < 0.0 {
             return Err(anyhow::anyhow!("Allowance amount cannot be negative"));
         }
 
-        if request.amount > 1_000_000.0 {
+        if command.amount > 1_000_000.0 {
             return Err(anyhow::anyhow!("Allowance amount is too large"));
         }
 
-        let child_id = match request.child_id {
+        let child_id = match command.child_id {
             Some(id) => {
                 // Verify the child exists
                 if self.child_service.get_child(&id).await?.is_none() {
@@ -117,7 +124,7 @@ impl AllowanceService {
         };
 
         // Check if allowance config already exists
-        let existing_config = self
+        let existing_shared_config = self
             .allowance_repository
             .get_allowance_config(&child_id)
             .await?;
@@ -125,14 +132,14 @@ impl AllowanceService {
         let now = Utc::now();
         let timestamp_rfc3339 = now.to_rfc3339();
 
-        let allowance_config = match existing_config {
+        let domain_allowance_config = match existing_shared_config {
             Some(mut config) => {
                 // Update existing config
-                config.amount = request.amount;
-                config.day_of_week = request.day_of_week;
-                config.is_active = request.is_active;
+                config.amount = command.amount;
+                config.day_of_week = command.day_of_week;
+                config.is_active = command.is_active;
                 config.updated_at = timestamp_rfc3339;
-                config
+                AllowanceMapper::to_domain(config)
             }
             None => {
                 // Create new config
@@ -140,29 +147,30 @@ impl AllowanceService {
                 AllowanceConfig {
                     id: AllowanceConfig::generate_id(&child_id, timestamp_millis),
                     child_id: child_id.clone(),
-                    amount: request.amount,
-                    day_of_week: request.day_of_week,
-                    is_active: request.is_active,
+                    amount: command.amount,
+                    day_of_week: command.day_of_week,
+                    is_active: command.is_active,
                     created_at: timestamp_rfc3339.clone(),
                     updated_at: timestamp_rfc3339,
                 }
             }
         };
 
-        // Store the configuration
+        // Store the configuration (convert back to shared for storage)
+        let shared_config = AllowanceMapper::to_dto(domain_allowance_config.clone());
         self.allowance_repository
-            .store_allowance_config(&allowance_config)
+            .store_allowance_config(&shared_config)
             .await?;
 
         info!(
             "Updated allowance config for child {}: ${:.2} on {}s",
             child_id,
-            allowance_config.amount,
-            allowance_config.day_name()
+            domain_allowance_config.amount,
+            domain_allowance_config.day_name()
         );
 
-        Ok(UpdateAllowanceConfigResponse {
-            allowance_config,
+        Ok(UpdateAllowanceConfigResult {
+            allowance_config: domain_allowance_config,
             success_message: "Allowance configuration updated successfully".to_string(),
         })
     }
@@ -189,11 +197,12 @@ impl AllowanceService {
     pub async fn list_allowance_configs(&self) -> Result<Vec<AllowanceConfig>> {
         info!("Listing all allowance configurations");
 
-        let configs = self.allowance_repository.list_allowance_configs().await?;
+        let shared_configs = self.allowance_repository.list_allowance_configs().await?;
+        let domain_configs: Vec<AllowanceConfig> = shared_configs.into_iter().map(AllowanceMapper::to_domain).collect();
 
-        info!("Found {} allowance configurations", configs.len());
+        info!("Found {} allowance configurations", domain_configs.len());
 
-        Ok(configs)
+        Ok(domain_configs)
     }
 
     /// Generate forward-looking allowance transactions for a given date range
@@ -202,7 +211,7 @@ impl AllowanceService {
         child_id: &str,
         start_date: NaiveDate,
         end_date: NaiveDate,
-    ) -> Result<Vec<Transaction>> {
+    ) -> Result<Vec<DomainTransaction>> {
         info!("Generating future allowance transactions for child: {} from {} to {}", 
               child_id, start_date, end_date);
 
@@ -230,14 +239,14 @@ impl AllowanceService {
                 if day_of_week == config.day_of_week {
                     // This is a future allowance day!
                     let formatted_date = current.and_hms_opt(12, 0, 0).unwrap().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
-                    let allowance_transaction = Transaction {
+                    let allowance_transaction = DomainTransaction {
                         id: format!("future-allowance::{}::{}", child_id, current.format("%Y-%m-%d")),
                         child_id: child_id.to_string(),
                         date: formatted_date.clone(),
                         description: "Weekly allowance".to_string(),
                         amount: config.amount,
                         balance: 0.0, // Balance is not meaningful for future transactions
-                        transaction_type: TransactionType::FutureAllowance,
+                        transaction_type: DomainTransactionType::FutureAllowance,
                     };
                     
                     future_allowances.push(allowance_transaction);
@@ -352,15 +361,16 @@ impl AllowanceService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use shared::{Child, CreateChildRequest};
+    use crate::backend::domain::models::child::DomainChild;
+    use crate::backend::domain::commands::child::CreateChildCommand;
 
     async fn setup_test() -> AllowanceService {
         let db = Arc::new(CsvConnection::new_default().expect("Failed to init test DB"));
         AllowanceService::new(db)
     }
 
-    async fn create_test_child(service: &AllowanceService) -> Child {
-        let request = CreateChildRequest {
+    async fn create_test_child(service: &AllowanceService) -> DomainChild {
+        let request = shared::CreateChildRequest {
             name: "Test Child".to_string(),
             birthdate: "2015-01-01".to_string(),
         };
@@ -369,7 +379,9 @@ mod tests {
             .create_child(request)
             .await
             .expect("Failed to create test child");
-        response.child
+        
+        // Convert the shared Child to DomainChild
+        crate::backend::io::rest::mappers::child_mapper::ChildMapper::to_domain(response.child)
     }
 
     #[tokio::test]
@@ -377,12 +389,12 @@ mod tests {
         let service = setup_test().await;
         let child = create_test_child(&service).await;
 
-        let request = GetAllowanceConfigRequest {
+        let command = GetAllowanceConfigCommand {
             child_id: Some(child.id),
         };
 
         let response = service
-            .get_allowance_config(request)
+            .get_allowance_config(command)
             .await
             .expect("Failed to get allowance config");
 
@@ -395,7 +407,7 @@ mod tests {
         let child = create_test_child(&service).await;
 
         // Create allowance config
-        let update_request = UpdateAllowanceConfigRequest {
+        let update_command = UpdateAllowanceConfigCommand {
             child_id: Some(child.id.clone()),
             amount: 10.0,
             day_of_week: 1, // Monday
@@ -403,7 +415,7 @@ mod tests {
         };
 
         let update_response = service
-            .update_allowance_config(update_request)
+            .update_allowance_config(update_command)
             .await
             .expect("Failed to update allowance config");
 
@@ -437,7 +449,7 @@ mod tests {
         let child = create_test_child(&service).await;
 
         // Create initial config
-        let initial_request = UpdateAllowanceConfigRequest {
+        let initial_command = UpdateAllowanceConfigCommand {
             child_id: Some(child.id.clone()),
             amount: 5.0,
             day_of_week: 0, // Sunday
@@ -445,14 +457,14 @@ mod tests {
         };
 
         let initial_response = service
-            .update_allowance_config(initial_request)
+            .update_allowance_config(initial_command)
             .await
             .expect("Failed to create initial allowance config");
 
         let initial_id = initial_response.allowance_config.id.clone();
 
         // Update the config
-        let update_request = UpdateAllowanceConfigRequest {
+        let update_command = UpdateAllowanceConfigCommand {
             child_id: Some(child.id.clone()),
             amount: 15.0,
             day_of_week: 6, // Saturday
@@ -460,7 +472,7 @@ mod tests {
         };
 
         let update_response = service
-            .update_allowance_config(update_request)
+            .update_allowance_config(update_command)
             .await
             .expect("Failed to update allowance config");
 

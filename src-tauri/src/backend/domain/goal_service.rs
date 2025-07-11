@@ -357,7 +357,7 @@ impl GoalService {
 
         // Get allowance configuration
         let allowance_config = self.allowance_service
-            .get_allowance_config(shared::GetAllowanceConfigRequest {
+            .get_allowance_config(crate::backend::domain::commands::allowance::GetAllowanceConfigCommand {
                 child_id: Some(child_id.to_string()),
             })
             .await?;

@@ -1,19 +1,37 @@
-feat: Complete Transaction Bounded Context migration from shared to domain models
+feat: Complete Allowance Bounded Context migration from shared to domain models
 
-- Created goal_mapper.rs with full bidirectional conversion between domain and DTO models
-- Fixed goal.rs domain model to remove shared::GoalState dependency, created DomainGoalState
-- Refactored transaction_service.rs to use domain models only, removed dual domain/DTO methods
-- Updated money_management.rs to support domain commands (CreateTransactionCommand)
-- Fixed all Tauri commands in lib.rs to use domain models and mappers at boundaries
-- App builds successfully, all core transaction functionality now uses domain models
+MAJOR MILESTONE: Successfully migrated allowance functionality to use domain models exclusively
+
+Domain Architecture:
+- Added allowance module to commands.rs with GetAllowanceConfigCommand/UpdateAllowanceConfigCommand
+- Enhanced domain AllowanceConfig with generate_id() and is_valid_day_of_week() methods  
+- Created comprehensive command/result types for clean service interfaces
+
+Service Layer Refactoring:
+- Refactored allowance_service.rs to use domain models only
+- Implemented bidirectional mapping: Storage (shared) ↔ Domain ↔ API (shared DTOs)
+- All method signatures now use domain commands instead of shared DTOs
+- Added proper error handling and validation at domain level
+
+API Integration:
+- Updated Tauri commands in lib.rs to use domain commands and mappers
+- Fixed REST endpoints in allowance_apis.rs with proper DTO conversion
+- Updated goal_service.rs to use domain allowance commands
+- Maintained backward compatibility with existing API contracts
+
+Benefits Achieved:
+- Clean separation of concerns between layers
+- Domain logic is now independent of external contracts  
+- Type safety prevents shared types from leaking into domain
+- Easier testing and maintenance with focused domain models
+- Foundation ready for remaining bounded context migrations
 
 Migration Progress:
-✅ Domain Models Foundation (all major models exist)
+✅ Domain Models Foundation
 ✅ Goal Mapper Creation  
 ✅ Goal Domain Model Fix
 ✅ Transaction Bounded Context Migration
-⏳ Next: Allowance Bounded Context migration
+✅ Allowance Bounded Context Migration ← COMPLETED
+⏳ Next: Goal Bounded Context Migration
 
-The architecture now properly separates domain logic from DTOs, with mappers handling
-conversions at the boundaries between layers. This maintains clean domain boundaries
-while preserving API compatibility. 
+All tests pass, app builds and runs successfully with enhanced architecture. 

@@ -13,6 +13,12 @@ pub struct AllowanceConfig {
 }
 
 impl AllowanceConfig {
+    /// Generate an allowance config ID based on child ID and timestamp
+    pub fn generate_id(child_id: &str, epoch_millis: u64) -> String {
+        format!("allowance::{}::{}", child_id, epoch_millis)
+    }
+    
+    /// Get the day name for the configured day of week
     pub fn day_name(&self) -> &'static str {
         match self.day_of_week {
             0 => "Sunday",
@@ -24,5 +30,10 @@ impl AllowanceConfig {
             6 => "Saturday",
             _ => "Invalid Day",
         }
+    }
+    
+    /// Validate day of week value
+    pub fn is_valid_day_of_week(day: u8) -> bool {
+        day <= 6
     }
 } 

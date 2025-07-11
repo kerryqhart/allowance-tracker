@@ -53,4 +53,36 @@ pub mod transactions {
         pub not_found_ids: Vec<String>,
         pub success_message: String,
     }
+}
+
+pub mod allowance {
+    use crate::backend::domain::models::allowance::AllowanceConfig;
+
+    /// Input for getting allowance configuration.
+    #[derive(Debug, Clone)]
+    pub struct GetAllowanceConfigCommand {
+        pub child_id: Option<String>,
+    }
+
+    /// Input for updating allowance configuration.
+    #[derive(Debug, Clone)]
+    pub struct UpdateAllowanceConfigCommand {
+        pub child_id: Option<String>,
+        pub amount: f64,
+        pub day_of_week: u8,
+        pub is_active: bool,
+    }
+
+    /// Result of getting allowance configuration.
+    #[derive(Debug, Clone)]
+    pub struct GetAllowanceConfigResult {
+        pub allowance_config: Option<AllowanceConfig>,
+    }
+
+    /// Result of updating allowance configuration.
+    #[derive(Debug, Clone)]
+    pub struct UpdateAllowanceConfigResult {
+        pub allowance_config: AllowanceConfig,
+        pub success_message: String,
+    }
 } 
