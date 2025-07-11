@@ -124,5 +124,10 @@ allowance-tracker/
 - Minimize dependency tree size for faster builds
 - Use workspace dependencies for shared crates 
 
-## Git
-- "When running a `git commit`, write the provided commit message to a temporary file on disk using the edit_file tool (so you can use the full range of characters, including newlines). Then invoke the commit command using `git commit --file=<temp-file>`. After the commit succeeds, delete the temporary file."
+## Git - REQUIRES USER APPROVAL
+- **CRITICAL**: NEVER run git commands without explicit user approval first
+- **ALWAYS ASK**: "Would you like me to commit these changes?" before any git operations
+- Only after user explicitly approves should you proceed with git commands
+- When user approves a commit: write the commit message to a temporary file using edit_file, then run `git commit --file=<temp-file>`, then delete the temp file
+- This applies to ALL git operations: commit, push, merge, rebase, etc.
+- If unsure whether user wants changes committed, ASK FIRST

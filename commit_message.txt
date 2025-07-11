@@ -1,24 +1,10 @@
-Reduce excessive logging by changing frequent info logs to debug level
+Make git approval requirement more explicit in .cursorrules
 
-The issue was that several frequently-called methods were logging at info level:
-- get_child_directory() logged redirect messages on every call
-- discover_children() logged child count on every call  
-- get_active_child() logged on every call
-- Found active child logged on every call
+Updated the git section to be much more prominent and clear about requiring user approval:
+- Changed section header to "Git - REQUIRES USER APPROVAL"
+- Added bold "CRITICAL" and "ALWAYS ASK" warnings
+- Made it explicit to ask "Would you like me to commit these changes?"
+- Expanded to cover ALL git operations (commit, push, merge, rebase, etc.)
+- Added "If unsure, ASK FIRST" safety net
 
-These methods are called multiple times per HTTP request due to:
-1. Multiple services calling get_active_child()
-2. Each get_active_child() triggering discover_children()
-3. discover_children() calling get_child_directory() for each child
-4. Other repository operations also calling get_child_directory()
-
-This created a cascade of dozens of log messages for each frontend request.
-
-Fixed by changing log level from info! to debug! for:
-- "Child X data redirected to" message in get_child_directory()
-- "Discovered N children" message in discover_children()  
-- "Getting active child" message in get_active_child()
-- "Found active child" message in get_active_child()
-
-Now these debug messages are only visible when debug logging is enabled,
-but normal operations will have much cleaner logs. 
+This should prevent AI from making commits without explicit user approval. 
