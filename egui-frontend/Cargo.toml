@@ -4,8 +4,7 @@ version = "0.1.0"
 edition = "2021"
 description = "A fun and engaging allowance tracker for kids - egui frontend"
 
-# Exclude this from the main workspace
-[workspace]
+
 
 [dependencies]
 # egui framework and platform integration

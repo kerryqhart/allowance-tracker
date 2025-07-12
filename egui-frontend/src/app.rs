@@ -331,68 +331,59 @@ impl eframe::App for AllowanceTrackerApp {
                         if self.calendar_transactions.is_empty() {
                             ui.label("No transactions yet!");
                         } else {
-                            // Create a nice table-like display
+                            // Create a properly formatted table using Grid
                             ui.group(|ui| {
-                                ui.set_min_width(450.0);
+                                ui.set_min_width(550.0);
                                 
-                                // Table header
-                                ui.horizontal(|ui| {
-                                    ui.set_min_height(30.0);
-                                    ui.strong("DATE");
-                                    ui.separator();
-                                    ui.strong("DESCRIPTION");
-                                    ui.separator();
-                                    ui.strong("AMOUNT");
-                                    ui.separator();
-                                    ui.strong("BALANCE");
-                                });
-                                
-                                ui.separator();
-                                
-                                // Transaction rows
-                                for transaction in &self.calendar_transactions {
-                                    ui.horizontal(|ui| {
-                                        ui.set_min_height(25.0);
+                                // Use Grid for proper table layout with striped rows
+                                egui::Grid::new("transactions_table")
+                                    .striped(true)
+                                    .spacing([12.0, 8.0])
+                                    .min_col_width(90.0)
+                                    .show(ui, |ui| {
+                                        // Table header with bold styling
+                                        ui.strong("DATE");
+                                        ui.strong("DESCRIPTION");
+                                        ui.strong("AMOUNT");
+                                        ui.strong("BALANCE");
+                                        ui.end_row();
                                         
-                                        // Date column (simplified)
-                                        let date_str = if let Some(date_part) = transaction.date.split('T').next() {
-                                            // Parse and format date nicely
-                                            if let Ok(parsed_date) = chrono::NaiveDate::parse_from_str(date_part, "%Y-%m-%d") {
-                                                parsed_date.format("%b %d, %Y").to_string()
+                                        // Transaction rows
+                                        for transaction in &self.calendar_transactions {
+                                            // Date column (formatted nicely)
+                                            let date_str = if let Some(date_part) = transaction.date.split('T').next() {
+                                                // Parse and format date nicely
+                                                if let Ok(parsed_date) = chrono::NaiveDate::parse_from_str(date_part, "%Y-%m-%d") {
+                                                    parsed_date.format("%b %d, %Y").to_string()
+                                                } else {
+                                                    date_part.to_string()
+                                                }
                                             } else {
-                                                date_part.to_string()
+                                                "Unknown".to_string()
+                                            };
+                                            ui.label(date_str);
+                                            
+                                            // Description column
+                                            ui.label(&transaction.description);
+                                            
+                                            // Amount column with color coding
+                                            if transaction.amount >= 0.0 {
+                                                ui.colored_label(
+                                                    egui::Color32::from_rgb(34, 139, 34), // Green for positive
+                                                    format!("+${:.2}", transaction.amount)
+                                                );
+                                            } else {
+                                                ui.colored_label(
+                                                    egui::Color32::from_rgb(220, 20, 60), // Red for negative
+                                                    format!("-${:.2}", transaction.amount.abs())
+                                                );
                                             }
-                                        } else {
-                                            "Unknown".to_string()
-                                        };
-                                        ui.label(date_str);
-                                        
-                                        ui.separator();
-                                        
-                                        // Description column
-                                        ui.label(&transaction.description);
-                                        
-                                        ui.separator();
-                                        
-                                        // Amount column with color coding
-                                        if transaction.amount >= 0.0 {
-                                            ui.colored_label(
-                                                egui::Color32::from_rgb(34, 139, 34), // Green for positive
-                                                format!("+${:.2}", transaction.amount)
-                                            );
-                                        } else {
-                                            ui.colored_label(
-                                                egui::Color32::from_rgb(220, 20, 60), // Red for negative
-                                                format!("-${:.2}", transaction.amount.abs())
-                                            );
+                                            
+                                            // Balance column
+                                            ui.label(format!("${:.2}", transaction.balance));
+                                            ui.end_row();
                                         }
-                                        
-                                        ui.separator();
-                                        
-                                        // Balance column
-                                        ui.label(format!("${:.2}", transaction.balance));
                                     });
-                                }
                             });
                         }
                     });
