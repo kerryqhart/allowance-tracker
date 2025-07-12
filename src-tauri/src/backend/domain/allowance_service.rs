@@ -323,11 +323,15 @@ impl AllowanceService {
     /// Check if an allowance already exists for a specific date
     /// This is used to prevent duplicate allowances
     async fn has_allowance_for_date(&self, child_id: &str, date: NaiveDate) -> Result<bool> {
+        info!("🎯 ALLOWANCE DEBUG: has_allowance_for_date() called for child {} on date {}", child_id, date);
+        
         // Get all transactions for the child
         let transactions = self.transaction_repository.list_transactions(child_id, None, None).await?;
+        info!("🎯 ALLOWANCE DEBUG: Retrieved {} total transactions for allowance check", transactions.len());
         
         // Format the date as string prefix (YYYY-MM-DD) to match
         let date_prefix = date.format("%Y-%m-%d").to_string();
+        info!("🎯 ALLOWANCE DEBUG: Looking for allowances on date prefix: {}", date_prefix);
         
         // Check if any transaction for this date looks like an allowance
         // We'll be more conservative: look for any positive income on allowance day
@@ -335,18 +339,28 @@ impl AllowanceService {
         for transaction in transactions {
             // Check if transaction is on this date and has positive amount (indicating income/allowance)
             if transaction.date.starts_with(&date_prefix) && transaction.amount > 0.0 {
+                info!("🎯 ALLOWANCE DEBUG: Found positive transaction on target date: {} (${:.2}) - {}", 
+                      transaction.id, transaction.amount, transaction.description);
                 // Check if the description suggests it's an allowance
                 let desc_lower = transaction.description.to_lowercase();
                 if desc_lower.contains("allowance") || desc_lower.contains("weekly") {
                     allowance_count += 1;
-                    info!("Found existing allowance {} for {} on {}: {}", 
+                    info!("🎯 ALLOWANCE DEBUG: ✅ Found existing allowance {} for {} on {}: {}", 
                           allowance_count, child_id, date, transaction.description);
+                } else {
+                    info!("🎯 ALLOWANCE DEBUG: ❌ Positive transaction but not an allowance: {}", transaction.description);
                 }
+            } else if transaction.date.starts_with(&date_prefix) {
+                info!("🎯 ALLOWANCE DEBUG: Found transaction on target date but not positive: {} (${:.2}) - {}", 
+                      transaction.id, transaction.amount, transaction.description);
             }
         }
         
+        let has_allowance = allowance_count > 0;
+        info!("🎯 ALLOWANCE DEBUG: has_allowance_for_date() result: {} (found {} allowances)", has_allowance, allowance_count);
+        
         // Return true if we found at least one allowance for this date
-        Ok(allowance_count > 0)
+        Ok(has_allowance)
     }
 
     /// Utility method to check if a given date is an allowance day for a specific day of week

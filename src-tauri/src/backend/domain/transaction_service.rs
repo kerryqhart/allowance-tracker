@@ -118,6 +118,7 @@ impl<C: Connection> TransactionService<C> {
         &self,
         query: TransactionListQuery,
     ) -> Result<TransactionListResult> {
+        info!("🎯 ALLOWANCE DEBUG: list_transactions_domain() called - this will trigger allowance check");
         self.check_and_issue_pending_allowances().await?;
         let active_child = self.get_active_child().await?;
 
@@ -227,36 +228,45 @@ impl<C: Connection> TransactionService<C> {
     }
 
     async fn check_and_issue_pending_allowances(&self) -> Result<u32> {
+        info!("🎯 ALLOWANCE DEBUG: check_and_issue_pending_allowances() called");
         if let Ok(active_child) = self.get_active_child().await {
+            info!("🎯 ALLOWANCE DEBUG: Found active child: {}", active_child.id);
             let current_date = Local::now().naive_local().date();
             let check_from_date = current_date - chrono::Duration::days(7);
+            info!("🎯 ALLOWANCE DEBUG: Checking allowances from {} to {}", check_from_date, current_date);
 
             let pending_allowances = self
                 .allowance_service
                 .get_pending_allowance_dates(&active_child.id, check_from_date, current_date)
                 .await?;
+            info!("🎯 ALLOWANCE DEBUG: Found {} pending allowances", pending_allowances.len());
+            
             let mut issued_count = 0;
             for (allowance_date, amount) in pending_allowances {
+                info!("🎯 ALLOWANCE DEBUG: About to create allowance for {} (${:.2})", allowance_date, amount);
                 match self
                     .create_allowance_transaction(&active_child.id, allowance_date, amount)
                     .await
                 {
                     Ok(transaction) => {
                         info!(
-                            "Issued allowance: {} for ${:.2} on {}",
+                            "🎯 ALLOWANCE DEBUG: Successfully issued allowance: {} for ${:.2} on {}",
                             transaction.id, amount, allowance_date
                         );
                         issued_count += 1;
                     }
                     Err(e) => {
                         error!(
-                            "Failed to issue allowance for {} on {}: {}",
+                            "🎯 ALLOWANCE DEBUG: Failed to issue allowance for {} on {}: {}",
                             active_child.id, allowance_date, e
                         );
                     }
                 }
             }
+            info!("🎯 ALLOWANCE DEBUG: Total allowances issued: {}", issued_count);
             return Ok(issued_count);
+        } else {
+            info!("🎯 ALLOWANCE DEBUG: No active child found");
         }
         Ok(0)
     }
@@ -267,8 +277,11 @@ impl<C: Connection> TransactionService<C> {
         date: NaiveDate,
         amount: f64,
     ) -> Result<DomainTransaction> {
+        info!("🎯 ALLOWANCE DEBUG: create_allowance_transaction() called for child {}, date {}, amount ${:.2}", child_id, date, amount);
         let now_millis = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64;
         let transaction_id = DomainTransaction::generate_id(amount, now_millis);
+        info!("🎯 ALLOWANCE DEBUG: Generated transaction ID: {}", transaction_id);
+        
         let allowance_datetime = date.and_hms_opt(12, 0, 0).unwrap();
         let utc_datetime = chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(
             allowance_datetime,
@@ -277,14 +290,16 @@ impl<C: Connection> TransactionService<C> {
         let eastern_offset = chrono::FixedOffset::west_opt(5 * 3600).unwrap();
         let eastern_datetime = utc_datetime.with_timezone(&eastern_offset);
         let transaction_date = eastern_datetime.to_rfc3339();
+        info!("🎯 ALLOWANCE DEBUG: Transaction date formatted as: {}", transaction_date);
 
         let transaction_balance = self
             .balance_service
             .calculate_balance_for_new_transaction(child_id, &transaction_date, amount)
             .await?;
+        info!("🎯 ALLOWANCE DEBUG: Calculated balance: {}", transaction_balance);
 
         let domain_transaction = DomainTransaction {
-            id: transaction_id,
+            id: transaction_id.clone(),
             child_id: child_id.to_string(),
             date: transaction_date.clone(),
             description: "Weekly allowance".to_string(),
@@ -293,20 +308,24 @@ impl<C: Connection> TransactionService<C> {
             transaction_type: DomainTransactionType::Income,
         };
 
+        info!("🎯 ALLOWANCE DEBUG: About to store transaction: {}", transaction_id);
         self.transaction_repository
             .store_transaction(&domain_transaction)
             .await?;
+        info!("🎯 ALLOWANCE DEBUG: Transaction stored successfully: {}", transaction_id);
 
         if self
             .balance_service
             .requires_balance_recalculation(child_id, &transaction_date)
             .await?
         {
+            info!("🎯 ALLOWANCE DEBUG: Recalculating balances from date: {}", transaction_date);
             self.balance_service
                 .recalculate_balances_from_date(child_id, &transaction_date)
                 .await?;
         }
 
+        info!("🎯 ALLOWANCE DEBUG: create_allowance_transaction() completed for {}", transaction_id);
         Ok(domain_transaction)
     }
 
