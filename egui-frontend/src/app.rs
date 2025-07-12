@@ -1,8 +1,9 @@
 use log::{info, warn};
-use std::sync::Arc;
-use chrono::{Datelike, Local};
+use chrono::Datelike;
 use shared::*;
 use allowance_tracker_egui::backend::{Backend};
+use allowance_tracker_egui::backend::domain::commands::transactions::TransactionListQuery;
+use allowance_tracker_egui::backend::domain::commands::child::SetActiveChildCommand;
 use eframe::egui;
 
 /// Helper function to convert domain child to shared child
@@ -13,6 +14,27 @@ pub fn to_dto(child: allowance_tracker_egui::backend::domain::models::child::Chi
         birthdate: child.birthdate.to_string(),
         created_at: child.created_at.to_rfc3339(),
         updated_at: child.updated_at.to_rfc3339(),
+    }
+}
+
+/// Simple transaction mapper for converting domain transactions to DTOs
+struct TransactionMapper;
+
+impl TransactionMapper {
+    fn to_dto(domain_tx: allowance_tracker_egui::backend::domain::models::transaction::Transaction) -> Transaction {
+        Transaction {
+            id: domain_tx.id,
+            child_id: domain_tx.child_id,
+            date: domain_tx.date,
+            description: domain_tx.description,
+            amount: domain_tx.amount,
+            balance: domain_tx.balance,
+            transaction_type: match domain_tx.transaction_type {
+                allowance_tracker_egui::backend::domain::models::transaction::TransactionType::Income => TransactionType::Income,
+                allowance_tracker_egui::backend::domain::models::transaction::TransactionType::Expense => TransactionType::Expense,
+                allowance_tracker_egui::backend::domain::models::transaction::TransactionType::FutureAllowance => TransactionType::FutureAllowance,
+            },
+        }
     }
 }
 
@@ -125,9 +147,35 @@ impl AllowanceTrackerApp {
     fn load_calendar_data(&mut self) {
         info!("📅 Loading calendar data for {}/{}", self.selected_month, self.selected_year);
         
-        // For now, load empty transactions
-        // TODO: Implement actual calendar data loading
-        self.calendar_transactions = Vec::new();
+        // Load recent transactions for the current month
+        let query = TransactionListQuery {
+            after: None,
+            limit: Some(20), // Load last 20 transactions
+            start_date: None,
+            end_date: None,
+        };
+        
+        match self.backend.transaction_service.list_transactions_domain(query) {
+            Ok(result) => {
+                info!("📊 Successfully loaded {} transactions", result.transactions.len());
+                
+                // Convert domain transactions to DTOs
+                self.calendar_transactions = result.transactions
+                    .into_iter()
+                    .map(TransactionMapper::to_dto)
+                    .collect();
+                
+                // Update balance from the most recent transaction
+                if let Some(latest_transaction) = self.calendar_transactions.first() {
+                    self.current_balance = latest_transaction.balance;
+                }
+            }
+            Err(e) => {
+                warn!("❌ Failed to load transactions: {}", e);
+                self.error_message = Some(format!("Failed to load transactions: {}", e));
+                self.calendar_transactions = Vec::new();
+            }
+        }
     }
     
     /// Clear success and error messages
@@ -202,6 +250,9 @@ impl eframe::App for AllowanceTrackerApp {
                         ui.label(format!("💵 ${:.2}", self.current_balance));
                     } else {
                         ui.label("No active child");
+                        if ui.button("👤 Select Child").clicked() {
+                            self.show_child_selector = true;
+                        }
                     }
                 });
             });
@@ -271,19 +322,74 @@ impl eframe::App for AllowanceTrackerApp {
                         
                         ui.separator();
                         
-                        // Recent transactions
-                        ui.heading("�� Recent Transactions");
+                        // Recent transactions table
+                        ui.heading("📋 Recent Transactions");
                         if self.calendar_transactions.is_empty() {
                             ui.label("No transactions yet!");
                         } else {
-                            for transaction in &self.calendar_transactions {
+                            // Create a nice table-like display
+                            ui.group(|ui| {
+                                ui.set_min_width(450.0);
+                                
+                                // Table header
                                 ui.horizontal(|ui| {
-                                    ui.label(&transaction.description);
-                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                        ui.label(format!("${:.2}", transaction.amount));
-                                    });
+                                    ui.set_min_height(30.0);
+                                    ui.strong("DATE");
+                                    ui.separator();
+                                    ui.strong("DESCRIPTION");
+                                    ui.separator();
+                                    ui.strong("AMOUNT");
+                                    ui.separator();
+                                    ui.strong("BALANCE");
                                 });
-                            }
+                                
+                                ui.separator();
+                                
+                                // Transaction rows
+                                for transaction in &self.calendar_transactions {
+                                    ui.horizontal(|ui| {
+                                        ui.set_min_height(25.0);
+                                        
+                                        // Date column (simplified)
+                                        let date_str = if let Some(date_part) = transaction.date.split('T').next() {
+                                            // Parse and format date nicely
+                                            if let Ok(parsed_date) = chrono::NaiveDate::parse_from_str(date_part, "%Y-%m-%d") {
+                                                parsed_date.format("%b %d, %Y").to_string()
+                                            } else {
+                                                date_part.to_string()
+                                            }
+                                        } else {
+                                            "Unknown".to_string()
+                                        };
+                                        ui.label(date_str);
+                                        
+                                        ui.separator();
+                                        
+                                        // Description column
+                                        ui.label(&transaction.description);
+                                        
+                                        ui.separator();
+                                        
+                                        // Amount column with color coding
+                                        if transaction.amount >= 0.0 {
+                                            ui.colored_label(
+                                                egui::Color32::from_rgb(34, 139, 34), // Green for positive
+                                                format!("+${:.2}", transaction.amount)
+                                            );
+                                        } else {
+                                            ui.colored_label(
+                                                egui::Color32::from_rgb(220, 20, 60), // Red for negative
+                                                format!("-${:.2}", transaction.amount.abs())
+                                            );
+                                        }
+                                        
+                                        ui.separator();
+                                        
+                                        // Balance column
+                                        ui.label(format!("${:.2}", transaction.balance));
+                                    });
+                                }
+                            });
                         }
                     });
                 });
@@ -325,6 +431,79 @@ impl eframe::App for AllowanceTrackerApp {
                             }
                             if ui.button("Cancel").clicked() {
                                 self.show_spend_money_modal = false;
+                            }
+                        });
+                    });
+            }
+            
+            // Child selector modal
+            if self.show_child_selector {
+                egui::Window::new("👤 Select Child")
+                    .collapsible(false)
+                    .resizable(false)
+                    .show(ctx, |ui| {
+                        ui.heading("Available Children:");
+                        
+                        // List all children
+                        match self.backend.child_service.list_children() {
+                            Ok(children_result) => {
+                                if children_result.children.is_empty() {
+                                    ui.label("No children found!");
+                                    ui.label("Debug: Check if test_data directory exists");
+                                } else {
+                                    for child in children_result.children {
+                                        ui.horizontal(|ui| {
+                                            // Show if this is the current active child
+                                            let is_active = self.current_child.as_ref()
+                                                .map(|c| c.id == child.id)
+                                                .unwrap_or(false);
+                                            
+                                            if is_active {
+                                                ui.label("👑"); // Crown for active child
+                                            } else {
+                                                ui.label("   "); // Spacing
+                                            }
+                                            
+                                            if ui.button(&child.name).clicked() {
+                                                // Set this child as active
+                                                let command = SetActiveChildCommand {
+                                                    child_id: child.id.clone(),
+                                                };
+                                                match self.backend.child_service.set_active_child(command) {
+                                                    Ok(_) => {
+                                                        self.current_child = Some(to_dto(child.clone()));
+                                                        self.load_balance();
+                                                        self.load_calendar_data();
+                                                        self.show_child_selector = false;
+                                                        self.success_message = Some("Child selected successfully!".to_string());
+                                                    }
+                                                    Err(e) => {
+                                                        self.error_message = Some(format!("Failed to select child: {}", e));
+                                                    }
+                                                }
+                                            }
+                                            
+                                            ui.label(child.birthdate.to_string());
+                                        });
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                ui.label(format!("Error loading children: {}", e));
+                                ui.label("Debug: Check backend initialization");
+                            }
+                        }
+                        
+                        ui.separator();
+                        
+                        ui.horizontal(|ui| {
+                            if ui.button("Cancel").clicked() {
+                                self.show_child_selector = false;
+                            }
+                            
+                            if ui.button("🔄 Refresh").clicked() {
+                                // Try to reload the active child
+                                self.load_initial_data();
                             }
                         });
                     });

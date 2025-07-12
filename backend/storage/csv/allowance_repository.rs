@@ -57,12 +57,12 @@ impl AllowanceRepository {
     }
     
     /// Save allowance config to a specific child directory
-    async fn save_allowance_config_to_directory(&self, config: &DomainAllowanceConfig, child_directory: &str) -> Result<()> {
+    fn save_allowance_config_to_directory(&self, config: &DomainAllowanceConfig, child_directory: &str) -> Result<()> {
         let child_dir = self.connection.get_child_directory(child_directory);
         
         // Ensure the child directory exists
         if !child_dir.exists() {
-            fs::create_dir_all(&child_dir)?;
+            std::fs::create_dir_all(&child_dir)?;
             info!("Created child directory for allowance config: {:?}", child_dir);
         }
         
@@ -71,26 +71,16 @@ impl AllowanceRepository {
         
         // Use atomic write pattern: write to temp file, then rename
         let temp_path = yaml_path.with_extension("tmp");
-        fs::write(&temp_path, yaml_content)?;
-        fs::rename(&temp_path, &yaml_path)?;
+        std::fs::write(&temp_path, yaml_content)?;
+        std::fs::rename(&temp_path, &yaml_path)?;
         
         debug!("Saved allowance config for child directory '{}' to {:?}", child_directory, yaml_path);
-        
-        // Git integration: commit the allowance_config.yaml change
-        let action_description = format!("Updated allowance configuration (amount: ${:.2})", config.amount);
-        
-        // This is non-blocking - git errors won't fail the allowance operation
-        let _ = self.git_manager.commit_file_change(
-            &child_dir,
-            "allowance_config.yaml", 
-            &action_description
-        ).await;
         
         Ok(())
     }
     
     /// Load allowance config from a specific child directory
-    async fn load_allowance_config_from_directory(&self, child_directory: &str) -> Result<Option<DomainAllowanceConfig>> {
+    fn load_allowance_config_from_directory(&self, child_directory: &str) -> Result<Option<DomainAllowanceConfig>> {
         let yaml_path = self.get_allowance_config_path(child_directory);
         
         if !yaml_path.exists() {
@@ -98,7 +88,7 @@ impl AllowanceRepository {
             return Ok(None);
         }
         
-        let yaml_content = fs::read_to_string(&yaml_path)?;
+        let yaml_content = std::fs::read_to_string(&yaml_path)?;
         let config: DomainAllowanceConfig = serde_yaml::from_str(&yaml_content)?;
         
         debug!("Loaded allowance config for child directory '{}' from {:?}", child_directory, yaml_path);
@@ -106,7 +96,7 @@ impl AllowanceRepository {
     }
     
     /// Find the child directory that contains a child with the given child_id
-    async fn find_child_directory_by_id(&self, child_id: &str) -> Result<Option<String>> {
+    fn find_child_directory_by_id(&self, child_id: &str) -> Result<Option<String>> {
         let base_dir = self.connection.base_directory();
         
         if !base_dir.exists() {
@@ -114,7 +104,7 @@ impl AllowanceRepository {
         }
         
         // Search through all child directories
-        for entry in fs::read_dir(base_dir)? {
+        for entry in std::fs::read_dir(base_dir)? {
             let entry = entry?;
             let path = entry.path();
             
@@ -130,7 +120,7 @@ impl AllowanceRepository {
             // Check if this directory has a child.yaml with the matching child_id
             let child_yaml_path = path.join("child.yaml");
             if child_yaml_path.exists() {
-                if let Ok(yaml_content) = fs::read_to_string(&child_yaml_path) {
+                if let Ok(yaml_content) = std::fs::read_to_string(&child_yaml_path) {
                     if let Ok(child) = serde_yaml::from_str::<shared::Child>(&yaml_content) {
                         if child.id == child_id {
                             debug!("Found child directory '{}' for child ID '{}'", dir_name, child_id);
@@ -146,7 +136,7 @@ impl AllowanceRepository {
     }
     
     /// Get all child directories that have allowance configs
-    async fn get_all_child_directories_with_allowance_configs(&self) -> Result<Vec<String>> {
+    fn get_all_child_directories_with_allowance_configs(&self) -> Result<Vec<String>> {
         let base_dir = self.connection.base_directory();
         let mut directories = Vec::new();
         
@@ -154,7 +144,7 @@ impl AllowanceRepository {
             return Ok(directories);
         }
         
-        for entry in fs::read_dir(base_dir)? {
+        for entry in std::fs::read_dir(base_dir)? {
             let entry = entry?;
             let path = entry.path();
             
@@ -181,28 +171,79 @@ impl AllowanceRepository {
 
 impl crate::backend::storage::AllowanceStorage for AllowanceRepository {
     fn store_allowance_config(&self, config: &DomainAllowanceConfig) -> Result<()> {
-        // TODO: Make this synchronous - for now return error
-        Err(anyhow::anyhow!("Synchronous allowance storage operations not yet implemented"))
+        // Find the child directory for this child_id
+        let child_directory = match self.find_child_directory_by_id(&config.child_id)? {
+            Some(dir) => dir,
+            None => {
+                return Err(anyhow::anyhow!(
+                    "Cannot store allowance config: child with ID '{}' not found. Create the child first.",
+                    config.child_id
+                ));
+            }
+        };
+        
+        self.save_allowance_config_to_directory(config, &child_directory)?;
+        info!("Stored allowance config for child ID '{}'", config.child_id);
+        Ok(())
     }
     
     fn get_allowance_config(&self, child_id: &str) -> Result<Option<DomainAllowanceConfig>> {
-        // TODO: Make this synchronous - for now return error
-        Err(anyhow::anyhow!("Synchronous allowance storage operations not yet implemented"))
+        // Find the child directory for this child_id
+        let child_directory = match self.find_child_directory_by_id(child_id)? {
+            Some(dir) => dir,
+            None => {
+                debug!("Child with ID '{}' not found when getting allowance config", child_id);
+                return Ok(None);
+            }
+        };
+        
+        self.load_allowance_config_from_directory(&child_directory)
     }
     
     fn update_allowance_config(&self, config: &DomainAllowanceConfig) -> Result<()> {
-        // TODO: Make this synchronous - for now return error
-        Err(anyhow::anyhow!("Synchronous allowance storage operations not yet implemented"))
+        // Update is the same as store for YAML files
+        self.store_allowance_config(config)
     }
     
     fn delete_allowance_config(&self, child_id: &str) -> Result<bool> {
-        // TODO: Make this synchronous - for now return error
-        Err(anyhow::anyhow!("Synchronous allowance storage operations not yet implemented"))
+        // Find the child directory for this child_id
+        let child_directory = match self.find_child_directory_by_id(child_id)? {
+            Some(dir) => dir,
+            None => {
+                debug!("Child with ID '{}' not found when deleting allowance config", child_id);
+                return Ok(false);
+            }
+        };
+        
+        let yaml_path = self.get_allowance_config_path(&child_directory);
+        
+        if yaml_path.exists() {
+            std::fs::remove_file(&yaml_path)?;
+            info!("Deleted allowance config for child ID '{}' from {:?}", child_id, yaml_path);
+            Ok(true)
+        } else {
+            debug!("No allowance config found to delete for child ID '{}'", child_id);
+            Ok(false)
+        }
     }
     
     fn list_allowance_configs(&self) -> Result<Vec<DomainAllowanceConfig>> {
-        // TODO: Make this synchronous - for now return error
-        Err(anyhow::anyhow!("Synchronous allowance storage operations not yet implemented"))
+        let directories = self.get_all_child_directories_with_allowance_configs()?;
+        let mut configs = Vec::new();
+        
+        for directory in directories {
+            if let Ok(Some(config)) = self.load_allowance_config_from_directory(&directory) {
+                configs.push(config);
+            } else {
+                warn!("Failed to load allowance config from directory '{}'", directory);
+            }
+        }
+        
+        // Sort by updated_at timestamp (most recent first)
+        configs.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        
+        info!("Listed {} allowance configs", configs.len());
+        Ok(configs)
     }
 }
 

@@ -29,7 +29,7 @@ fn main() -> Result<(), eframe::Error> {
         options,
         Box::new(|cc| {
             // Enable persistence for window state
-            if let Some(storage) = cc.storage {
+            if let Some(_storage) = cc.storage {
                 info!("Persistence storage available");
             }
 

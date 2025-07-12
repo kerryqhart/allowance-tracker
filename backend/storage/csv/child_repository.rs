@@ -1,5 +1,4 @@
 use anyhow::{Result, Context};
-use async_trait::async_trait;
 use log::{info, warn, debug};
 use std::fs;
 use std::path::PathBuf;
@@ -82,8 +81,8 @@ impl ChildRepository {
         self.connection.base_directory().join("global_config.yaml")
     }
     
-    /// Discover all children by scanning directories
-    async fn discover_children(&self) -> Result<Vec<DomainChild>> {
+    /// Discover all children by scanning directories (synchronous version)
+    fn discover_children(&self) -> Result<Vec<DomainChild>> {
         let base_dir = self.connection.base_directory();
         
         if !base_dir.exists() {
@@ -113,7 +112,7 @@ impl ChildRepository {
             };
             
             // Try to load child from this directory
-            match self.load_child_from_directory(dir_name).await {
+            match self.load_child_from_directory(dir_name) {
                 Ok(Some(child)) => {
                     debug!("Discovered child: {} from directory: {}", child.name, dir_name);
                     children.push(child);
@@ -134,8 +133,8 @@ impl ChildRepository {
         Ok(children)
     }
     
-    /// Load a child from a specific directory
-    async fn load_child_from_directory(&self, directory_name: &str) -> Result<Option<DomainChild>> {
+    /// Load a child from a specific directory (synchronous version)
+    fn load_child_from_directory(&self, directory_name: &str) -> Result<Option<DomainChild>> {
         let yaml_path = self.get_child_yaml_path(directory_name);
         
         if !yaml_path.exists() {
@@ -162,8 +161,8 @@ impl ChildRepository {
         Ok(Some(domain_child))
     }
     
-    /// Save a child to their directory
-    async fn save_child_to_directory(&self, child: &DomainChild, directory_name: &str) -> Result<()> {
+    /// Save a child to their directory (synchronous version)
+    fn save_child_to_directory(&self, child: &DomainChild, directory_name: &str) -> Result<()> {
         // Ensure the child directory exists
         let child_dir = self.connection.get_child_directory(directory_name);
         if !child_dir.exists() {
@@ -171,9 +170,17 @@ impl ChildRepository {
             info!("Created child directory: {:?}", child_dir);
         }
         
+        // Convert domain child to shared child
+        let shared_child = SharedChild {
+            id: child.id.clone(),
+            name: child.name.clone(),
+            birthdate: child.birthdate.to_string(),
+            created_at: child.created_at.to_rfc3339(),
+            updated_at: child.updated_at.to_rfc3339(),
+        };
+        
         // Write child.yaml
         let yaml_path = self.get_child_yaml_path(directory_name);
-        let shared_child = child.clone(); // Direct assignment since removing mapping layer
         let yaml_content = serde_yaml::to_string(&shared_child)?;
         
         // Atomic write using temp file
@@ -183,21 +190,11 @@ impl ChildRepository {
         
         info!("Saved child {} to directory: {}", child.name, directory_name);
         
-        // Git integration: commit the child.yaml change
-        let action_description = format!("Updated child configuration for {}", child.name);
-        
-        // This is non-blocking - git errors won't fail the child operation
-        let _ = self.git_manager.commit_file_change(
-            &child_dir,
-            "child.yaml", 
-            &action_description
-        ).await;
-        
         Ok(())
     }
     
-    /// Get the currently active child directory name from global config
-    async fn get_active_child_directory(&self) -> Result<Option<String>> {
+    /// Get the currently active child directory name from global config (synchronous version)
+    fn get_active_child_directory(&self) -> Result<Option<String>> {
         let global_config_path = self.get_global_config_path();
         
         if !global_config_path.exists() {
@@ -213,8 +210,8 @@ impl ChildRepository {
             .map(|s| s.to_string()))
     }
     
-    /// Set the currently active child directory in global config
-    async fn set_active_child_directory(&self, directory_name: &str) -> Result<()> {
+    /// Set the currently active child directory in global config (synchronous version)
+    fn set_active_child_directory(&self, directory_name: &str) -> Result<()> {
         let global_config_path = self.get_global_config_path();
         
         // Create minimal global config
@@ -233,9 +230,9 @@ impl ChildRepository {
         Ok(())
     }
     
-    /// Find directory name for a child by ID
-    async fn find_directory_by_child_id(&self, child_id: &str) -> Result<Option<String>> {
-        let children = self.discover_children().await?;
+    /// Find directory name for a child by ID (synchronous version)
+    fn find_directory_by_child_id(&self, child_id: &str) -> Result<Option<String>> {
+        let children = self.discover_children()?;
         
         for child in children {
             if child.id == child_id {
@@ -244,7 +241,7 @@ impl ChildRepository {
                 let directory_name = Self::generate_safe_directory_name(&child.name);
                 
                 // Verify this directory actually exists and contains this child
-                if let Ok(Some(loaded_child)) = self.load_child_from_directory(&directory_name).await {
+                if let Ok(Some(loaded_child)) = self.load_child_from_directory(&directory_name) {
                     if loaded_child.id == child_id {
                         return Ok(Some(directory_name));
                     }
@@ -260,44 +257,66 @@ impl crate::backend::storage::ChildStorage for ChildRepository {
     /// Store a new child
     fn store_child(&self, child: &DomainChild) -> Result<()> {
         let dir_name = Self::generate_safe_directory_name(&child.name);
-        // TODO: Make this synchronous - for now return error
-        Err(anyhow::anyhow!("Synchronous storage operations not yet implemented"))
+        self.save_child_to_directory(child, &dir_name)
     }
     
     /// Retrieve a specific child by ID
     fn get_child(&self, child_id: &str) -> Result<Option<DomainChild>> {
-        // TODO: Make this synchronous - for now return error
-        Err(anyhow::anyhow!("Synchronous storage operations not yet implemented"))
+        let children = self.discover_children()?;
+        Ok(children.into_iter().find(|c| c.id == child_id))
     }
     
     /// List all children ordered by name
     fn list_children(&self) -> Result<Vec<DomainChild>> {
-        // TODO: Make this synchronous - for now return error
-        Err(anyhow::anyhow!("Synchronous storage operations not yet implemented"))
+        self.discover_children()
     }
     
     /// Update an existing child
     fn update_child(&self, child: &DomainChild) -> Result<()> {
-        // TODO: Make this synchronous - for now return error
-        Err(anyhow::anyhow!("Synchronous storage operations not yet implemented"))
+        // Find existing child directory to handle name changes
+        if let Some(dir_name) = self.find_directory_by_child_id(&child.id)? {
+            self.save_child_to_directory(child, &dir_name)
+        } else {
+            // This is an update, so the child should exist
+            warn!("Attempted to update a non-existent child: {}", child.id);
+            Err(anyhow::anyhow!("Child not found for update"))
+        }
     }
     
     /// Delete a child by ID
     fn delete_child(&self, child_id: &str) -> Result<()> {
-        // TODO: Make this synchronous - for now return error
-        Err(anyhow::anyhow!("Synchronous storage operations not yet implemented"))
+        if let Some(dir_name) = self.find_directory_by_child_id(child_id)? {
+            let child_dir = self.connection.get_child_directory(&dir_name);
+            if child_dir.exists() {
+                fs::remove_dir_all(&child_dir)?;
+                info!("Deleted child directory: {:?}", child_dir);
+            }
+        } else {
+            warn!("Attempted to delete a non-existent child: {}", child_id);
+        }
+        Ok(())
     }
     
     /// Get the currently active child
     fn get_active_child(&self) -> Result<Option<String>> {
-        // TODO: Make this synchronous - for now return error
-        Err(anyhow::anyhow!("Synchronous storage operations not yet implemented"))
+        // Get the active child directory name
+        if let Some(directory_name) = self.get_active_child_directory()? {
+            // Load the child from that directory to get their ID
+            if let Some(child) = self.load_child_from_directory(&directory_name)? {
+                return Ok(Some(child.id));
+            }
+        }
+        Ok(None)
     }
     
     /// Set the currently active child
     fn set_active_child(&self, child_id: &str) -> Result<()> {
-        // TODO: Make this synchronous - for now return error
-        Err(anyhow::anyhow!("Synchronous storage operations not yet implemented"))
+        // Find the directory name for this child ID
+        if let Some(directory_name) = self.find_directory_by_child_id(child_id)? {
+            self.set_active_child_directory(&directory_name)
+        } else {
+            Err(anyhow::anyhow!("Child not found: {}", child_id))
+        }
     }
 }
 

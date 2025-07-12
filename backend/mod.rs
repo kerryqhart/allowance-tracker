@@ -33,37 +33,50 @@ pub struct Backend {
 impl Backend {
     /// Create a new backend instance with all services
     pub fn new() -> Result<Self> {
-        // For now, use a default temporary path for development
-        let temp_dir = std::env::temp_dir().join("allowance_tracker_dev");
-        std::fs::create_dir_all(&temp_dir)?;
+        // Use test_data directory for egui frontend demo
+        // When running from egui-frontend, we need to go up one level to find test_data
+        let current_dir = std::env::current_dir()?;
+        let test_data_path = if current_dir.file_name().unwrap() == "egui-frontend" {
+            current_dir.parent().unwrap().join("test_data")
+        } else {
+            current_dir.join("test_data")
+        };
         
-        let csv_conn = Arc::new(CsvConnection::new(temp_dir)?);
+        // Create the CSV connection with test data directory
+        println!("🔍 Backend::new() using test_data path: {:?}", test_data_path);
+        let csv_connection = Arc::new(CsvConnection::new(test_data_path)?);
         
-        // Initialize all services
-        let child_service = domain::child_service::ChildService::new(csv_conn.clone());
-        let allowance_service = domain::AllowanceService::new(csv_conn.clone());
-        let balance_service = domain::BalanceService::new(csv_conn.clone());
+        // Create services using the Arc<CsvConnection> pattern
+        let child_service = domain::child_service::ChildService::new(csv_connection.clone());
+        let allowance_service = domain::AllowanceService::new(csv_connection.clone());
+        let balance_service = domain::BalanceService::new(csv_connection.clone());
+        
         let transaction_service = domain::TransactionService::new(
-            csv_conn.clone(),
+            csv_connection.clone(),
             child_service.clone(),
             allowance_service.clone(),
             balance_service.clone(),
         );
+        
+        let calendar_service = domain::CalendarService::new();
+        
         let goal_service = domain::GoalService::new(
-            csv_conn.clone(),
+            csv_connection.clone(),
             child_service.clone(),
             allowance_service.clone(),
             transaction_service.clone(),
             balance_service.clone(),
         );
-        let parental_control_service = domain::ParentalControlService::new(csv_conn.clone());
-        let calendar_service = domain::CalendarService::new();
+        
+        let parental_control_service = domain::ParentalControlService::new(csv_connection.clone());
+        
         let data_directory_service = domain::DataDirectoryService::new(
-            csv_conn.clone(), 
-            Arc::new(child_service.clone())
+            csv_connection.clone(),
+            Arc::new(child_service.clone()),
         );
+        
         let export_service = domain::ExportService::new();
-
+        
         Ok(Backend {
             child_service,
             transaction_service,
