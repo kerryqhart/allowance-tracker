@@ -298,11 +298,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_recalculate_balances_from_date() {
-        let service = create_test_service().await;
+        // Use the same temporary directory for both services
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db = Arc::new(CsvConnection::new(temp_dir.path().to_path_buf()).unwrap());
+        let service = BalanceService::new(db.clone());
         
         // Create a child first
-        let temp_dir = tempfile::tempdir().unwrap();
-        let db = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
         let child_service = crate::backend::domain::child_service::ChildService::new(db);
         let child_result = child_service.create_child(CreateChildCommand {
             name: "Test Child".to_string(),

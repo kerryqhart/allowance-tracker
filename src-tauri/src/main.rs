@@ -569,9 +569,38 @@ mod tests {
     use super::*;
 
     async fn setup_test_app_state() -> AppState {
-        initialize_backend()
-            .await
-            .expect("Failed to initialize backend for test")
+        use crate::backend::storage::CsvConnection;
+        
+        // Use a temporary directory for test isolation
+        let temp_dir = tempfile::tempdir().unwrap();
+        let csv_conn = std::sync::Arc::new(CsvConnection::new(temp_dir.path().to_path_buf()).unwrap());
+        
+        // Create all services with the isolated connection
+        let calendar_service = crate::backend::domain::CalendarService::new();
+        let transaction_table_service = crate::backend::domain::TransactionTableService::new();
+        let money_management_service = crate::backend::domain::MoneyManagementService::new();
+        let child_service = crate::backend::domain::child_service::ChildService::new(csv_conn.clone());
+        let parental_control_service = crate::backend::domain::ParentalControlService::new(csv_conn.clone());
+        let allowance_service = crate::backend::domain::AllowanceService::new(csv_conn.clone());
+        let balance_service = crate::backend::domain::BalanceService::new(csv_conn.clone());
+        let transaction_service = crate::backend::domain::TransactionService::new(csv_conn.clone(), child_service.clone(), allowance_service.clone(), balance_service.clone());
+        let goal_service = crate::backend::domain::GoalService::new(csv_conn.clone(), child_service.clone(), allowance_service.clone(), transaction_service.clone(), balance_service.clone());
+        let data_directory_service = crate::backend::domain::DataDirectoryService::new(csv_conn.clone(), std::sync::Arc::new(child_service.clone()));
+        let export_service = crate::backend::domain::ExportService::new();
+
+        AppState {
+            transaction_service,
+            calendar_service,
+            transaction_table_service,
+            money_management_service,
+            child_service,
+            parental_control_service,
+            allowance_service,
+            balance_service,
+            goal_service,
+            data_directory_service,
+            export_service,
+        }
     }
 
     #[tokio::test]
