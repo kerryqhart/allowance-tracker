@@ -7,8 +7,6 @@ use hooks::{
     use_allowance::use_allowance,
     use_periodic_refresh::use_periodic_refresh_simple,
     use_periodic_refresh::use_periodic_refresh_staggered,
-    use_interaction_detector::use_interaction_detector_simple,
-    use_interaction_detector::use_interaction_detector_debug,
     use_interaction_detector::use_interaction_detector_targeted,
 };
 
@@ -41,7 +39,7 @@ fn app() -> Html {
     // Use custom hooks for data management
     let active_child = use_active_child(&api_client);
     let transactions = use_transactions(&api_client, active_child.state.child_change_trigger);
-    let allowance = use_allowance();
+    let _allowance = use_allowance();
     
     // Calendar refresh trigger - increment when transactions change
     let calendar_refresh_trigger = use_state(|| 0u32);
@@ -91,7 +89,7 @@ fn app() -> Html {
     // Transactions: Every 10 minutes, offset by 5 minutes for load balancing
     
     // APPROACH 1: Calendar prop-based refresh (EXISTING)
-    let calendar_refresh_result = use_periodic_refresh_simple(
+    let _calendar_refresh_result = use_periodic_refresh_simple(
         refresh_calendar_periodic,
         interaction_detector.is_active, // ENABLED - now works without blocking input
     );
@@ -100,7 +98,7 @@ fn app() -> Html {
     // APPROACH 2: Calendar direct callback refresh (REMOVED - prop approach now works)
     
     // Transactions: Every 10 minutes, offset by 5 minutes
-    let transactions_refresh_result = use_periodic_refresh_staggered(
+    let _transactions_refresh_result = use_periodic_refresh_staggered(
         refresh_transactions_periodic,
         interaction_detector.is_active, // ENABLED - now works without blocking input
         300000, // 5 minute stagger (300 seconds)

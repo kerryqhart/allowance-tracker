@@ -1,5 +1,5 @@
 use yew::prelude::*;
-use shared::{CalendarFocusDate, CurrentDateResponse, AllowanceConfig, GetAllowanceConfigRequest, CalendarMonth, CalendarDayType, TransactionType, Goal, GoalCalculation, GetCurrentGoalRequest};
+use shared::{CalendarFocusDate, CurrentDateResponse, AllowanceConfig, GetAllowanceConfigRequest, CalendarMonth, CalendarDayType, TransactionType, Goal, GoalCalculation};
 use crate::services::api::ApiClient;
 use crate::services::logging::Logger;
 use wasm_bindgen_futures::spawn_local;
@@ -49,8 +49,8 @@ pub fn simple_calendar(props: &SimpleCalendarProps) -> Html {
 
     // Helper function to check if a goal chip should be shown on a specific day
     let should_show_goal_chip = |day: u32, month: u32, year: u32, goal: &Option<Goal>, goal_calc: &Option<GoalCalculation>| -> bool {
-        if let (Some(_goal), Some(calc)) = (goal, goal_calc) {
-            if let Some(completion_date) = &calc.projected_completion_date {
+        if let (Some(_goal), Some(_calc)) = (goal, goal_calc) {
+            if let Some(completion_date) = &_calc.projected_completion_date {
                 // Parse the RFC 3339 date to check if it matches this day
                 if let Some(date_part) = completion_date.split('T').next() {
                     if let Ok(parts) = date_part.split('-').collect::<Vec<_>>().try_into() as Result<[&str; 3], _> {

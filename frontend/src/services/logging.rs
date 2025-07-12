@@ -17,22 +17,6 @@ struct LogResponse {
 pub struct Logger;
 
 impl Logger {
-    pub fn debug(message: &str) {
-        Self::log("debug", message, None);
-    }
-
-    pub fn info(message: &str) {
-        Self::log("info", message, None);
-    }
-
-    pub fn warn(message: &str) {
-        Self::log("warn", message, None);
-    }
-
-    pub fn error(message: &str) {
-        Self::log("error", message, None);
-    }
-
     pub fn debug_with_component(component: &str, message: &str) {
         Self::log("debug", message, Some(component.to_string()));
     }

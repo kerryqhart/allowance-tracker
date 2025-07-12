@@ -26,10 +26,7 @@ impl ApiClient {
         }
     }
 
-    /// Create a new API client with a custom base URL
-    pub fn with_base_url(base_url: String) -> Self {
-        Self { base_url }
-    }
+
 
     /// Test connection to the backend
     pub async fn test_connection(&self) -> Result<(), String> {
@@ -367,33 +364,7 @@ impl ApiClient {
         }
     }
 
-    /// Set the calendar focus date
-    pub async fn set_focus_date(&self, month: u32, year: u32) -> Result<UpdateCalendarFocusResponse, String> {
-        let url = format!("{}/api/calendar/focus-date", self.base_url);
-        
-        let request_body = UpdateCalendarFocusRequest { month, year };
 
-        match Request::post(&url)
-            .json(&request_body)
-            .map_err(|e| format!("Failed to serialize request: {}", e))?
-            .send()
-            .await
-        {
-            Ok(response) => {
-                if response.ok() {
-                    match response.json::<UpdateCalendarFocusResponse>().await {
-                        Ok(data) => Ok(data),
-                        Err(e) => Err(format!("Failed to parse response: {}", e)),
-                    }
-                } else {
-                    let error_text = response.text().await
-                        .unwrap_or_else(|_| "Unknown error".to_string());
-                    Err(error_text)
-                }
-            }
-            Err(e) => Err(format!("Network error: {}", e)),
-        }
-    }
 
     /// Navigate to the previous month
     pub async fn navigate_previous_month(&self) -> Result<UpdateCalendarFocusResponse, String> {
@@ -514,61 +485,7 @@ impl ApiClient {
         }
     }
 
-    /// Export transaction data as CSV
-    pub async fn export_data(&self, request: ExportDataRequest) -> Result<ExportDataResponse, String> {
-        let url = format!("{}/api/export/csv", self.base_url);
-        
-        match Request::post(&url)
-            .json(&request)
-            .map_err(|e| format!("Failed to serialize request: {}", e))?
-            .send()
-            .await
-        {
-            Ok(response) => {
-                if response.ok() {
-                    match response.json::<ExportDataResponse>().await {
-                        Ok(data) => Ok(data),
-                        Err(e) => Err(format!("Failed to parse response: {}", e)),
-                    }
-                } else {
-                    let status = response.status();
-                    let error_text = response.text().await
-                        .unwrap_or_else(|_| "Unknown error".to_string());
-                    Err(format!("Server error {}: {}", status, error_text))
-                }
-            }
-            Err(e) => Err(format!("Network error: {}", e)),
-        }
-    }
 
-    /// Write exported data to a file (using backend file writing)
-    pub async fn write_export_file(&self, file_path: &str, content: &str) -> Result<(), String> {
-        let url = format!("{}/api/export/write-file", self.base_url);
-        
-        let request_body = serde_json::json!({
-            "file_path": file_path,
-            "content": content
-        });
-        
-        match Request::post(&url)
-            .json(&request_body)
-            .map_err(|e| format!("Failed to serialize request: {}", e))?
-            .send()
-            .await
-        {
-            Ok(response) => {
-                if response.ok() {
-                    Ok(())
-                } else {
-                    let status = response.status();
-                    let error_text = response.text().await
-                        .unwrap_or_else(|_| "Unknown error".to_string());
-                    Err(format!("Server error {}: {}", status, error_text))
-                }
-            }
-            Err(e) => Err(format!("Network error: {}", e)),
-        }
-    }
 
     /// Export data directly to a path (with optional custom directory)
     pub async fn export_to_path(&self, request: ExportToPathRequest) -> Result<ExportToPathResponse, String> {

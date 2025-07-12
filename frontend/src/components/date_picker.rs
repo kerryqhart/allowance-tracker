@@ -25,7 +25,7 @@ pub fn date_picker(props: &DatePickerProps) -> Html {
     
     // Get current date info
     let current_date = get_current_date();
-    let current_display = get_current_date_display();
+    let _current_display = get_current_date_display();
     
     // Determine display text and actual date value
     let (display_text, actual_date) = match &props.selected_date {
@@ -47,7 +47,7 @@ pub fn date_picker(props: &DatePickerProps) -> Html {
     // Toggle calendar visibility
     let toggle_calendar = {
         let show_calendar = show_calendar.clone();
-        let calendar_ref = calendar_ref.clone();
+        let _calendar_ref = calendar_ref.clone();
         let on_debug = props.on_debug.clone();
         Callback::from(move |_: MouseEvent| {
             let was_open = *show_calendar;

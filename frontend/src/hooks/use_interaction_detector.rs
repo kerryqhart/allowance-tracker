@@ -111,7 +111,7 @@ pub fn use_interaction_detector(
     // Set up event listeners on mount
     {
         let handle_interaction = handle_interaction.clone();
-        let is_mounted = is_mounted.clone();
+        let _is_mounted = is_mounted.clone();
         
         use_effect_with((), move |_| {
             let window = window().expect("should have window");

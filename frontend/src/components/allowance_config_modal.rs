@@ -139,9 +139,9 @@ pub fn allowance_config_modal(props: &AllowanceConfigModalProps) -> Html {
             success_message.set(None);
             
             // Make API call
-            let amount = amount.clone();
-            let day_of_week = day_of_week.clone();
-            let is_active = is_active.clone();
+            let _amount = amount.clone();
+            let _day_of_week = day_of_week.clone();
+            let _is_active = is_active.clone();
             let is_submitting = is_submitting.clone();
             let error_message = error_message.clone();
             let success_message = success_message.clone();

@@ -1,4 +1,4 @@
-use chrono::{DateTime, FixedOffset, Datelike, Timelike};
+use chrono::{DateTime, FixedOffset};
 
 /// Utilities for parsing and formatting dates with robust timezone format handling
 pub struct DateUtils;
@@ -48,29 +48,7 @@ impl DateUtils {
         date_str.to_string()
     }
     
-    /// Parse a date for chart display, returning timestamp in milliseconds
-    /// This is useful for JavaScript chart libraries that expect numeric timestamps
-    pub fn parse_for_chart(date_str: &str) -> Result<i64, String> {
-        match Self::parse_flexible_rfc3339(date_str) {
-            Ok(dt) => Ok(dt.timestamp_millis()),
-            Err(e) => Err(e)
-        }
-    }
-    
-    /// Format a DateTime for display in charts or UI
-    pub fn format_for_display(dt: &DateTime<FixedOffset>) -> String {
-        dt.format("%Y-%m-%d").to_string()
-    }
-    
-    /// Get current date as a formatted string
-    pub fn current_date_string() -> String {
-        let now = js_sys::Date::new_0();
-        let year = now.get_full_year() as i32;
-        let month = (now.get_month() as u32) + 1; // JS months are 0-based
-        let day = now.get_date() as u32;
-        
-        format!("{:04}-{:02}-{:02}", year, month, day)
-    }
+
 }
 
 #[cfg(test)]
@@ -229,7 +207,7 @@ mod tests {
 }
 
 /// Simple helper function for calendar tooltips (calendar uses raw transactions)
-pub fn format_calendar_date(rfc3339_date: &str) -> String {
+pub fn _format_calendar_date(rfc3339_date: &str) -> String {
     if let Some(date_part) = rfc3339_date.split('T').next() {
         if let Ok(parts) = date_part.split('-').collect::<Vec<_>>().try_into() {
             let [year, month, day]: [&str; 3] = parts;
