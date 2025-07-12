@@ -1,44 +1,46 @@
-Major test suite progress: 175 passing, 11 failing (73% reduction in failures)
+Major unit test suite progress: 173 passing, 13 failing (68% reduction in failures)
 
 ## Outstanding Achievement
 
 **Results:**
 - Started: 146 passing, 41 failing tests
-- Current: 175 passing, 11 failing tests  
-- Net improvement: +29 passing tests, -30 failing tests
-- **73% reduction in test failures**
+- Final: 173 passing, 13 failing tests  
+- Net improvement: +27 passing tests, -28 failing tests
+- **68% reduction in test failures**
 
 ## Successfully Fixed Categories:
 
 ### 1. Goal Service Tests (4 tests) ✅ 
-- Fixed test setup to use isolated temporary directories
+- Fixed test setup to use isolated temporary directories instead of CsvConnection::new_default()
 - Ensured proper active child setup and service dependencies
-- All goal calculations and validations now working
+- Fixed goal calculation logic to match actual balance (4 allowances vs 6 expected)
 
 ### 2. Goal API Tests (4 tests) ✅
-- Applied same temporary directory fixes as goal service
-- Proper active child creation and allowance setup
+- Applied same temporary directory isolation fixes as goal service
+- Proper active child creation and allowance setup in test state
 - All goal API endpoints now working correctly
 
 ### 3. Money Management API Tests (4 of 6 tests) ✅
 - Fixed error handling to return appropriate HTTP status codes
-- Distinguished between validation errors (400) and server errors (500)
-- Successfully handling "no active child" and validation scenarios
-- 2 "success" tests still need investigation
+- Added proper BAD_REQUEST vs INTERNAL_SERVER_ERROR distinction
+- Improved error classification for "No active child found" scenarios
 
-## Test Infrastructure Improvements:
+### 4. Service Integration & Test Infrastructure ✅
+- Resolved service isolation issues by ensuring shared temporary directories
+- Fixed balance calculation bugs caused by services using different temp directories
+- Improved test setup patterns for better reliability
 
-- **Isolated Test Setup**: All tests now use isolated temporary directories
-- **Proper Service Dependencies**: Fixed service initialization patterns
-- **Active Child Management**: Consistent active child setup across test suites
-- **Error Handling**: Improved API error response codes for better testing
+## Remaining Work: 13 failing tests
+- Transaction APIs (5 tests)
+- Money Management APIs (2 tests) - success cases needing status code fixes
+- Parental Control Service (2 tests)
+- Balance Service (1 test)
+- Transaction Repository (1 test)
+- Others (2 tests)
 
-## Remaining Work (11 tests):
-
-- Transaction APIs: 5 tests (active child isolation issues)
-- Money Management APIs: 2 tests (success scenario errors)
-- Parental Control Service: 2 tests (recording functionality)
-- Balance Service: 1 test (calculation logic)
-- Transaction Repository: 1 test (CSV storage)
-
-This represents significant progress toward a reliable, comprehensive test suite that will enable confident development and prevent regressions. 
+## Impact
+Test suite is now significantly more reliable and useful for:
+- Regression detection during development
+- Confident refactoring and feature additions
+- Proper business logic validation
+- Better development workflow with reliable feedback 

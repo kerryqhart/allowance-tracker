@@ -88,7 +88,14 @@ pub async fn create_transaction(
         },
         Err(e) => {
             error!("Failed to create transaction: {}", e);
-            (StatusCode::BAD_REQUEST, e.to_string()).into_response()
+            let status = if e.to_string().contains("No active child found") 
+                        || e.to_string().contains("Description cannot be empty")
+                        || e.to_string().contains("validation") {
+                StatusCode::BAD_REQUEST
+            } else {
+                StatusCode::INTERNAL_SERVER_ERROR
+            };
+            (status, e.to_string()).into_response()
         }
     }
 }
@@ -129,6 +136,7 @@ mod tests {
     use axum::http::StatusCode;
     use shared::{CreateTransactionRequest, DeleteTransactionsRequest};
     use std::sync::Arc;
+    use tempfile;
 
     async fn setup_test_state() -> AppState {
         let temp_dir = tempfile::tempdir().unwrap();
