@@ -282,14 +282,19 @@ impl ParentalControlRepository {
 #[async_trait]
 impl crate::backend::storage::ParentalControlStorage for ParentalControlRepository {
     async fn record_parental_control_attempt(&self, child_id: &str, attempted_value: &str, success: bool) -> Result<i64> {
-        // Find the child directory for this child_id
-        let child_directory = match self.find_child_directory_by_id(child_id).await? {
-            Some(dir) => dir,
-            None => {
-                return Err(anyhow::anyhow!(
-                    "Cannot record parental control attempt: child with ID '{}' not found. Create the child first.",
-                    child_id
-                ));
+        // Handle "global" as a special case for parental control attempts
+        let child_directory = if child_id == "global" {
+            "global".to_string()
+        } else {
+            // Find the child directory for this child_id
+            match self.find_child_directory_by_id(child_id).await? {
+                Some(dir) => dir,
+                None => {
+                    return Err(anyhow::anyhow!(
+                        "Cannot record parental control attempt: child with ID '{}' not found. Create the child first.",
+                        child_id
+                    ));
+                }
             }
         };
         
@@ -311,12 +316,17 @@ impl crate::backend::storage::ParentalControlStorage for ParentalControlReposito
     }
     
     async fn get_parental_control_attempts(&self, child_id: &str, limit: Option<u32>) -> Result<Vec<DomainParentalControlAttempt>> {
-        // Find the child directory for this child_id
-        let child_directory = match self.find_child_directory_by_id(child_id).await? {
-            Some(dir) => dir,
-            None => {
-                debug!("Child with ID '{}' not found when getting parental control attempts", child_id);
-                return Ok(Vec::new());
+        // Handle "global" as a special case for parental control attempts
+        let child_directory = if child_id == "global" {
+            "global".to_string()
+        } else {
+            // Find the child directory for this child_id
+            match self.find_child_directory_by_id(child_id).await? {
+                Some(dir) => dir,
+                None => {
+                    debug!("Child with ID '{}' not found when getting parental control attempts", child_id);
+                    return Ok(Vec::new());
+                }
             }
         };
         

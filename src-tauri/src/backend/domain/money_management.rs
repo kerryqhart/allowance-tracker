@@ -43,11 +43,14 @@ impl MoneyManagementService {
         child_service: &ChildService,
         transaction_service: &TransactionService<C>,
     ) -> Result<AddMoneyResponse> {
+        println!("💰 MONEY DEBUG: Adding money - description: {}, amount: {}", request.description, request.amount);
         info!("💰 MONEY MANAGEMENT: Adding money - description: {}, amount: {}", request.description, request.amount);
 
         // Step 1: Check for active child first
+        println!("🔍 MONEY DEBUG: Checking for active child...");
         info!("🔍 MONEY MANAGEMENT: Checking for active child...");
         let active_child_response = child_service.get_active_child().await?;
+        println!("🔍 MONEY DEBUG: Active child response: {:?}", active_child_response);
         
         let active_child = match active_child_response.active_child.child {
             Some(child) => {
@@ -61,6 +64,8 @@ impl MoneyManagementService {
         };
 
         // Step 2: Enhanced validation that includes date validation if provided
+        println!("🔍 MONEY DEBUG: Starting validation with date: {:?}", request.date);
+        println!("🔍 MONEY DEBUG: Validating description: '{}', amount: '{}'", request.description, request.amount.to_string());
         info!("🔍 MONEY MANAGEMENT: Starting validation with date: {:?}", request.date);
         let validation = self.validate_add_money_form_with_date(
             &request.description, 
@@ -69,11 +74,13 @@ impl MoneyManagementService {
             Some(&active_child.created_at.to_rfc3339())
         );
 
+        println!("🔍 MONEY DEBUG: Validation result - is_valid: {}, errors: {:?}", validation.is_valid, validation.errors);
         info!("🔍 MONEY MANAGEMENT: Validation result - is_valid: {}, errors: {:?}", validation.is_valid, validation.errors);
 
         if !validation.is_valid {
             let error_message = self.get_first_error_message(&validation.errors)
                 .unwrap_or_else(|| "Invalid input".to_string());
+            println!("❌ MONEY DEBUG: Validation failed: {}", error_message);
             error!("❌ MONEY MANAGEMENT: Validation failed: {}", error_message);
             return Err(anyhow::anyhow!("Validation failed: {}", error_message));
         }

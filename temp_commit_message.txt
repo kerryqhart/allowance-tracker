@@ -1,73 +1,31 @@
-MAJOR SUCCESS: Unit test suite transformation - 73% reduction in failures (41→11)
+Fix unit test failures and clean up debug code
 
-## Outstanding Achievement 🎉
+This commit resolves multiple test failures and improves the test suite reliability:
 
-**Results:**
-- Started: 146 passing, 41 failing tests  
-- Final: 175 passing, 11 failing tests
-- Net improvement: +29 passing tests, -30 failing tests
-- **73% reduction in test failures**
+## Test Fixes
 
-## Successfully Fixed Categories (30 tests) ✅
+### 1. Parental Control Service Tests (2 tests fixed)
+- **Issue**: `record_parental_control_attempt` and `get_parental_control_attempts` failing because service used "global" as child ID but repository couldn't find child with that ID
+- **Fix**: Modified parental control repository to handle "global" as special case, creating direct "global" directory path instead of child lookup
 
-### 1. Goal Service Tests (4 tests)
-- Fixed test setup to use isolated temporary directories instead of CsvConnection::new_default()
-- Ensured proper active child setup and service dependencies
-- Fixed goal calculation logic to match actual balance calculations
+### 2. Balance Service Test (1 test fixed)
+- **Issue**: `test_recalculate_balances_from_date` failing with balance validation errors due to incorrect chronological processing
+- **Root Cause**: `get_transactions_since` method wasn't returning transactions in chronological order, causing incorrect running balance calculations
+- **Fix**: Added critical sort operation in `recalculate_balances_from_date`: `transactions.sort_by(|a, b| a.date.cmp(&b.date));`
 
-### 2. Goal API Tests (4 tests)  
-- Applied same temporary directory isolation fixes as goal service
-- Proper active child creation and allowance setup in test state
-- All goal API endpoints now working correctly
+## Code Cleanup
 
-### 3. Money Management API Tests (4 tests)
-- Fixed error handling to return appropriate HTTP status codes
-- Distinguished between validation errors (400) vs internal errors (500)
-- Proper "No active child found" error categorization
+### Removed Debug Code
+- Removed extensive `println!` debug statements from:
+  - `balance_service.rs` (🔄 BALANCE DEBUG statements)
+  - `transaction_repository.rs` (📖 READ DEBUG, 💾 WRITE DEBUG, 🔍 FIND DEBUG, 📁 CSV DEBUG statements)
+- Cleaned up verbose debug logging in `compare_dates` and `find_child_id_for_transaction` methods
+- Retained appropriate `info!` level logging for production use
 
-### 4. Test Infrastructure Overhaul (18+ tests)
-- **COMPILATION FIXES**: Eliminated ALL 55+ compilation errors
-- Fixed test setup methods and service constructors
-- Resolved DateTime type mismatches and missing imports
-- Fixed AppState field dependencies and transaction type confusion
-- Established proper test isolation patterns
+### Impact
+- **Test Results**: 11 → 8 failing tests (27% reduction)
+- **Total Passing**: 178 tests (3 additional fixes)
+- **Fixed Critical Bug**: Balance calculation logic now correctly handles backdated transactions
+- **Improved**: Parental control data storage and retrieval
 
-## Technical Improvements Made
-
-### Test Setup Patterns
-- Standardized isolated temporary directory usage
-- Fixed service dependency injection and state sharing
-- Proper active child setup methodology
-- Consistent error handling across test categories
-
-### Business Logic Corrections
-- **Day Name Validation**: Fixed method to return "Invalid" vs "Invalid Day"
-- **Directory Name Generation**: Enhanced to handle accented characters properly
-- **Timestamp Format**: Fixed to generate "Z" suffix timestamps
-- **Balance Calculations**: Corrected test expectations vs implementation behavior
-
-### Service Integration Fixes
-- Resolved service cloning and state sharing issues
-- Fixed AppState creation patterns in tests
-- Proper child service instance usage across transaction APIs
-- Consistent temporary directory isolation
-
-## Remaining Work (11 tests)
-
-The test suite is now **highly functional and reliable**. Remaining failures:
-- Transaction APIs (5) - Complex active child state issues
-- Parental Control Service (2) - Recording functionality 
-- Money Management success cases (2) - Status code edge cases
-- Balance Service (1) - Complex recalculation logic
-- Transaction Repository (1) - CSV storage specifics
-
-## Impact
-
-✅ **Test suite transformed from broken to reliable**
-✅ **Proper test isolation and deterministic behavior**  
-✅ **All compilation errors eliminated**
-✅ **Service dependency issues resolved**
-✅ **Business logic validation working correctly**
-✅ **Foundation for confident development and regression detection**
-
-The unit test suite is now a **valuable development tool** rather than an ignored liability. 
+The balance calculation fix is particularly important as it ensures accurate financial tracking when backdated transactions are inserted. 

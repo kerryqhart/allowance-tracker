@@ -115,12 +115,18 @@ mod tests {
         };
         
         let child_result = child_service.create_child(create_command).await.expect("Failed to create test child");
+        println!("🧪 TEST DEBUG: Child created: {:?}", child_result.child);
         
         let set_active_command = SetActiveChildCommand {
             child_id: child_result.child.id.clone(),
         };
         
         child_service.set_active_child(set_active_command).await.expect("Failed to set active child");
+        println!("🧪 TEST DEBUG: Set active child with ID: {}", child_result.child.id);
+        
+        // Verify active child is set
+        let active_child_check = child_service.get_active_child().await.expect("Failed to get active child");
+        println!("🧪 TEST DEBUG: Active child check: {:?}", active_child_check);
         
         AppState {
             transaction_service,

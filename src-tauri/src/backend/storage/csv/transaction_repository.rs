@@ -36,6 +36,7 @@ impl TransactionRepository {
         self.connection.ensure_transactions_file_exists(child_name)?;
         
         let file_path = self.connection.get_transactions_file_path(child_name);
+        
         let file = File::open(&file_path)?;
         let reader = BufReader::new(file);
         let mut csv_reader = Reader::from_reader(reader);
@@ -305,33 +306,27 @@ impl TransactionRepository {
         match (DateTime::parse_from_rfc3339(date1), DateTime::parse_from_rfc3339(date2)) {
             (Ok(dt1), Ok(dt2)) => {
                 // Compare as datetime objects (automatically handles timezone conversion)
-                let result = if dt1 < dt2 { -1 } else if dt1 > dt2 { 1 } else { 0 };
-                info!("🕐 compare_dates: '{}' vs '{}' -> parsed as {} vs {} -> result: {}", 
-                     date1, date2, dt1, dt2, result);
-                result
+                if dt1 < dt2 { -1 } else if dt1 > dt2 { 1 } else { 0 }
             }
-            (Err(e1), Ok(_)) => {
-                warn!("🕐 compare_dates: Failed to parse date1 '{}': {}", date1, e1);
-                // Fallback to string comparison
-                let result = date1.cmp(date2) as i32;
-                info!("🕐 compare_dates: Using string comparison: '{}' vs '{}' -> {}", date1, date2, result);
-                result
-            }
-            (Ok(_), Err(e2)) => {
-                warn!("🕐 compare_dates: Failed to parse date2 '{}': {}", date2, e2);
-                // Fallback to string comparison
-                let result = date1.cmp(date2) as i32;
-                info!("🕐 compare_dates: Using string comparison: '{}' vs '{}' -> {}", date1, date2, result);
-                result
-            }
-            (Err(e1), Err(e2)) => {
-                warn!("🕐 compare_dates: Failed to parse both dates '{}' and '{}': {} / {}", date1, date2, e1, e2);
+            (Err(_), Ok(_)) | (Ok(_), Err(_)) | (Err(_), Err(_)) => {
                 // Fallback to string comparison if parsing fails
-                let result = date1.cmp(date2) as i32;
-                info!("🕐 compare_dates: Using string comparison: '{}' vs '{}' -> {}", date1, date2, result);
-                result
+                date1.cmp(date2) as i32
             }
         }
+    }
+
+    /// Find which child a transaction belongs to by searching through all child directories
+    async fn find_child_id_for_transaction(&self, transaction_id: &str) -> Result<Option<String>> {
+        let child_ids = self.get_all_child_ids().await?;
+        
+        for child_id in child_ids {
+            let transactions = self.read_transactions_by_id(&child_id).await?;
+            if transactions.iter().any(|t| t.id == transaction_id) {
+                return Ok(Some(child_id));
+            }
+        }
+        
+        Ok(None)
     }
 }
 
@@ -398,66 +393,21 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
         start_date: Option<String>,
         end_date: Option<String>,
     ) -> Result<Vec<DomainTransaction>> {
-        info!("📁 CSV: list_transactions_chronological for child_id={}, start_date={:?}, end_date={:?}", 
-              child_id, start_date, end_date);
-        
         // Convert child ID to child name for directory lookup
         let child_name = self.get_child_directory_name(child_id).await?;
-        info!("📁 CSV: child_id '{}' converted to child_name '{}'", child_id, child_name);
-        
         let child_directory = self.connection.get_child_directory(&child_name);
-        info!("📁 CSV: child_directory = {:?}", child_directory);
-        
         let mut transactions = self.read_transactions(child_directory.to_str().unwrap()).await?;
-        info!("📁 CSV: Raw transactions loaded: {} transactions", transactions.len());
-        
-        for (i, tx) in transactions.iter().enumerate().take(5) {
-            info!("📁 CSV: Raw tx {}: id={}, date={}, amount={}, description={}", 
-                 i + 1, tx.id, tx.date, tx.amount, tx.description);
-        }
-        if transactions.len() > 5 {
-            info!("📁 CSV: ... and {} more raw transactions", transactions.len() - 5);
-        }
         
         transactions.sort_by(|a, b| a.date.cmp(&b.date)); // Sort by date ascending
 
         let mut filtered = transactions;
-        let initial_count = filtered.len();
 
         // Convert date strings to datetime objects for proper comparison
         if let Some(start) = start_date {
-            info!("📁 CSV: Filtering by start_date: {}", start);
-            let before_filter = filtered.len();
-            filtered.retain(|t| {
-                let comparison = self.compare_dates(&t.date, &start);
-                let keeps = comparison >= 0;
-                if !keeps && before_filter <= 10 { // Log first few filtered out
-                    info!("📁 CSV: Filtering OUT transaction {} (date={}) because compare_dates({}, {}) = {}", 
-                         t.id, t.date, t.date, start, comparison);
-                }
-                keeps
-            });
-            info!("📁 CSV: After start_date filter: {} -> {} transactions", before_filter, filtered.len());
+            filtered.retain(|t| self.compare_dates(&t.date, &start) >= 0);
         }
         if let Some(end) = end_date {
-            info!("📁 CSV: Filtering by end_date: {}", end);
-            let before_filter = filtered.len();
-            filtered.retain(|t| {
-                let comparison = self.compare_dates(&t.date, &end);
-                let keeps = comparison <= 0;
-                if !keeps && before_filter <= 10 { // Log first few filtered out
-                    info!("📁 CSV: Filtering OUT transaction {} (date={}) because compare_dates({}, {}) = {} (should be <= 0)", 
-                         t.id, t.date, t.date, end, comparison);
-                }
-                keeps
-            });
-            info!("📁 CSV: After end_date filter: {} -> {} transactions", before_filter, filtered.len());
-        }
-
-        info!("📁 CSV: Final filtered transactions: {} (started with {})", filtered.len(), initial_count);
-        for (i, tx) in filtered.iter().enumerate().take(5) {
-            info!("📁 CSV: Final tx {}: id={}, date={}, amount={}, description={}", 
-                 i + 1, tx.id, tx.date, tx.amount, tx.description);
+            filtered.retain(|t| self.compare_dates(&t.date, &end) <= 0);
         }
 
         Ok(filtered)
@@ -553,26 +503,42 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
     async fn update_transaction_balances(&self, updates: &[(String, f64)]) -> Result<()> {
         info!("Updating multiple transaction balances in CSV");
 
-        // This is inefficient for CSV. It requires finding which child each transaction
-        // belongs to, reading all files, updating, and writing back.
-        // A better approach is to recalculate balances in the service layer if needed.
-        let child_ids = self.get_all_child_ids().await?;
-        for child_id in child_ids {
+        if updates.is_empty() {
+            return Ok(());
+        }
+
+        info!("Updating {} transaction balances", updates.len());
+
+        // Group updates by child_id by looking up each transaction's child
+        let mut child_updates: std::collections::HashMap<String, Vec<(String, f64)>> = std::collections::HashMap::new();
+        
+        for (transaction_id, new_balance) in updates {
+            // Find which child this transaction belongs to
+            let child_id = self.find_child_id_for_transaction(transaction_id).await?;
+            if let Some(child_id) = child_id {
+                child_updates.entry(child_id).or_insert_with(Vec::new).push((transaction_id.clone(), *new_balance));
+            } else {
+                warn!("Could not find child for transaction {}, skipping update", transaction_id);
+            }
+        }
+
+        // Update transactions for each child
+        for (child_id, child_transaction_updates) in child_updates {
             let mut transactions = self.read_transactions_by_id(&child_id).await?;
             let mut needs_write = false;
 
             for transaction in &mut transactions {
-                if let Some(update) = updates.iter().find(|(id, _)| id == &transaction.id) {
+                if let Some(update) = child_transaction_updates.iter().find(|(id, _)| id == &transaction.id) {
                     transaction.balance = update.1;
                     needs_write = true;
                 }
             }
 
             if needs_write {
-                self.write_transactions_by_id(&child_id, &transactions)
-                    .await?;
+                self.write_transactions_by_id(&child_id, &transactions).await?;
             }
         }
+        
         Ok(())
     }
 
