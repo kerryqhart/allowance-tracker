@@ -134,19 +134,10 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let db = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
         
-        // Create services with proper dependencies
+        // Create a single child_service instance that will be shared by all services
         let child_service = ChildService::new(db.clone());
-        let allowance_service = crate::backend::domain::AllowanceService::new(db.clone());
-        let balance_service = crate::backend::domain::BalanceService::new(db.clone());
-        let transaction_service = TransactionService::new(db.clone(), child_service.clone(), allowance_service.clone(), balance_service.clone());
-        let calendar_service = CalendarService::new();
-        let transaction_table_service = TransactionTableService::new();
-        let money_management_service = MoneyManagementService::new();
-        let parental_control_service = crate::backend::domain::ParentalControlService::new(db.clone());
-        let goal_service = crate::backend::domain::GoalService::new(db.clone(), child_service.clone(), allowance_service.clone(), transaction_service.clone(), balance_service.clone());
-        let data_directory_service = crate::backend::domain::DataDirectoryService::new(db.clone(), Arc::new(child_service.clone()));
         
-        // Create a test child and set as active using domain commands
+        // Create and set active child BEFORE creating other services
         use crate::backend::domain::commands::child::{CreateChildCommand, SetActiveChildCommand};
         
         let create_command = CreateChildCommand {
@@ -162,6 +153,22 @@ mod tests {
         
         child_service.set_active_child(set_active_command).await.expect("Failed to set active child");
         
+        // Verify the active child is set
+        let active_child_result = child_service.get_active_child().await.expect("Failed to get active child");
+        assert!(active_child_result.active_child.child.is_some(), "Active child should be set after child creation");
+        
+        // Now create other services using the same child_service
+        let allowance_service = crate::backend::domain::AllowanceService::new(db.clone());
+        let balance_service = crate::backend::domain::BalanceService::new(db.clone());
+        let transaction_service = TransactionService::new(db.clone(), child_service.clone(), allowance_service.clone(), balance_service.clone());
+        let calendar_service = CalendarService::new();
+        let transaction_table_service = TransactionTableService::new();
+        let money_management_service = MoneyManagementService::new();
+        let parental_control_service = crate::backend::domain::ParentalControlService::new(db.clone());
+        let goal_service = crate::backend::domain::GoalService::new(db.clone(), child_service.clone(), allowance_service.clone(), transaction_service.clone(), balance_service.clone());
+        let data_directory_service = crate::backend::domain::DataDirectoryService::new(db.clone(), Arc::new(child_service.clone()));
+        
+        // Create the AppState
         AppState {
             transaction_service,
             calendar_service,

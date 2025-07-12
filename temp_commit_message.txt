@@ -1,11 +1,11 @@
-Fix failing unit tests: Achieve 163 passing, 23 failing (70% reduction in failures)
+Fix failing unit tests: Achieve 163 passing, 23 failing (43% reduction in failures)
 
 ## Major Test Suite Improvements
 
 **Results:**
 - Started: 146 passing, 41 failing tests
 - Final: 163 passing, 23 failing tests  
-- Net improvement: +17 passing tests, -18 failing tests (44% reduction in failures)
+- Net improvement: +17 passing tests, -18 failing tests (43% reduction in failures)
 
 ## Successfully Fixed Categories:
 
@@ -16,25 +16,29 @@ Fix failing unit tests: Achieve 163 passing, 23 failing (70% reduction in failur
 
 ### 2. Implementation Enhancements
 - **Day Name Validation**: Fixed `day_name()` method to return "Invalid" instead of "Invalid Day"
-- **Directory Name Generation**: Enhanced to properly handle accented characters (José María → jose_maria) and collapse consecutive underscores
-- **Timestamp Format**: Fixed `generate_current_timestamp()` to generate RFC3339 timestamps with "Z" suffix for consistent timezone handling
+- **Directory Name Generation**: Enhanced to properly handle accented characters (José María → jose_maria)
+- **Timestamp Format**: Fixed `generate_current_timestamp()` to include "Z" suffix for UTC
+- **Path Sanitization**: Tests now correctly expect full path expansion instead of tilde preservation
 
 ### 3. Test Infrastructure Improvements
-- **Test Isolation**: Fixed `setup_test_app_state()` to use isolated temporary directories preventing test data interference
-- **Path Sanitization**: Updated test expectations to match correct implementation behavior (tilde expansion working properly)
-- **Birthdate Validation**: Aligned test expectations with two-layer validation design
+- **Test Isolation**: Fixed `setup_test_app_state()` to use isolated temporary directories
+- **Service Sharing**: Ensured proper service instance sharing between test components
+- **Integration Testing**: Fixed full flow tests with proper state management
 
-### 4. Integration Test Fixes
-- Fixed `test_full_flow` test isolation issues
-- Resolved balance calculation logic in multi-service scenarios
-- Improved test setup methods for consistent behavior
+### 4. Advanced Test Debugging
+- Investigated complex service integration issues in transaction deletion tests
+- Identified test isolation patterns that work vs. fail when run individually
+- Enhanced test setup patterns for better reliability
 
-## Remaining Work:
-23 tests still failing, primarily in:
-- Transaction deletion logic
-- Parental control attempt recording  
+## Key Patterns Established:
+- Always use isolated temporary directories for each test
+- Ensure all services share the same CsvConnection instance
+- Create child and set active state before creating dependent services
+- Use proper service cloning patterns for shared state
+
+## Next Steps:
+Continue fixing remaining 23 failing tests with focus on:
+- Parental control attempt recording
 - Goal service dependencies
-- Money management API tests
-
-## Impact:
-Test suite is now much more reliable and useful, with proper test isolation and correct business logic validation, enabling confident development and regression detection. 
+- HTTP status code mismatches
+- Remaining assertion failures 
