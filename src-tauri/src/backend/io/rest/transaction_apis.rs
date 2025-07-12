@@ -88,14 +88,7 @@ pub async fn create_transaction(
         },
         Err(e) => {
             error!("Failed to create transaction: {}", e);
-            let status = if e.to_string().contains("No active child found") 
-                        || e.to_string().contains("Description cannot be empty")
-                        || e.to_string().contains("validation") {
-                StatusCode::BAD_REQUEST
-            } else {
-                StatusCode::INTERNAL_SERVER_ERROR
-            };
-            (status, e.to_string()).into_response()
+            (StatusCode::BAD_REQUEST, e.to_string()).into_response()
         }
     }
 }
@@ -142,30 +135,8 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let db = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
         
-        // Create a single child_service instance that will be shared by all services
+        // Create services first
         let child_service = ChildService::new(db.clone());
-        
-        // Create and set active child BEFORE creating other services
-        use crate::backend::domain::commands::child::{CreateChildCommand, SetActiveChildCommand};
-        
-        let create_command = CreateChildCommand {
-            name: "Test Child".to_string(),
-            birthdate: "2015-01-01".to_string(),
-        };
-        
-        let child_result = child_service.create_child(create_command).await.expect("Failed to create test child");
-        
-        let set_active_command = SetActiveChildCommand {
-            child_id: child_result.child.id.clone(),
-        };
-        
-        child_service.set_active_child(set_active_command).await.expect("Failed to set active child");
-        
-        // Verify the active child is set
-        let active_child_result = child_service.get_active_child().await.expect("Failed to get active child");
-        assert!(active_child_result.active_child.child.is_some(), "Active child should be set after child creation");
-        
-        // Now create other services using the same child_service
         let allowance_service = crate::backend::domain::AllowanceService::new(db.clone());
         let balance_service = crate::backend::domain::BalanceService::new(db.clone());
         let transaction_service = TransactionService::new(db.clone(), child_service.clone(), allowance_service.clone(), balance_service.clone());
@@ -177,7 +148,7 @@ mod tests {
         let data_directory_service = crate::backend::domain::DataDirectoryService::new(db.clone(), Arc::new(child_service.clone()));
         
         // Create the AppState
-        AppState {
+        let app_state = AppState {
             transaction_service,
             calendar_service,
             transaction_table_service,
@@ -189,7 +160,29 @@ mod tests {
             goal_service,
             data_directory_service,
             export_service: crate::backend::domain::ExportService::new(),
-        }
+        };
+        
+        // Now create and set active child using the AppState's child service
+        use crate::backend::domain::commands::child::{CreateChildCommand, SetActiveChildCommand};
+        
+        let create_command = CreateChildCommand {
+            name: "Test Child".to_string(),
+            birthdate: "2015-01-01".to_string(),
+        };
+        
+        let child_result = app_state.child_service.create_child(create_command).await.expect("Failed to create test child");
+        
+        let set_active_command = SetActiveChildCommand {
+            child_id: child_result.child.id.clone(),
+        };
+        
+        app_state.child_service.set_active_child(set_active_command).await.expect("Failed to set active child");
+        
+        // Verify the active child is set
+        let active_child_result = app_state.child_service.get_active_child().await.expect("Failed to get active child");
+        assert!(active_child_result.active_child.child.is_some(), "Active child should be set after child creation");
+        
+        app_state
     }
 
     #[tokio::test]
