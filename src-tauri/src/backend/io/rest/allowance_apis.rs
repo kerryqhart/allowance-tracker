@@ -92,7 +92,7 @@ pub async fn update_allowance_config(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::storage::DbConnection;
+    use crate::backend::storage::csv::CsvConnection;
     use crate::backend::domain::{AllowanceService, child_service::ChildService};
     use crate::backend::AppState;
     use axum::http::StatusCode;
@@ -100,17 +100,20 @@ mod tests {
     use std::sync::Arc;
 
     async fn create_test_app_state() -> AppState {
-        let db_conn = Arc::new(DbConnection::init_test().await.expect("Failed to init test DB"));
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db_conn = Arc::new(CsvConnection::new(temp_dir.path()).expect("Failed to init test DB"));
         
-        // Create dummy services (only allowance_service and child_service are used in tests)
-        let transaction_service = crate::backend::domain::TransactionService::new(db_conn.clone());
+        // Create services with proper dependencies
+        let child_service = ChildService::new(db_conn.clone());
+        let allowance_service = AllowanceService::new(db_conn.clone());
+        let balance_service = crate::backend::domain::BalanceService::new(db_conn.clone());
+        let transaction_service = crate::backend::domain::TransactionService::new(db_conn.clone(), child_service.clone(), allowance_service.clone(), balance_service.clone());
         let calendar_service = crate::backend::domain::CalendarService::new();
         let transaction_table_service = crate::backend::domain::TransactionTableService::new();
         let money_management_service = crate::backend::domain::MoneyManagementService::new();
-        let child_service = ChildService::new(db_conn.clone());
         let parental_control_service = crate::backend::domain::ParentalControlService::new(db_conn.clone());
-        let allowance_service = AllowanceService::new(db_conn.clone());
-        let balance_service = crate::backend::domain::BalanceService::new(db_conn);
+        let goal_service = crate::backend::domain::GoalService::new(db_conn.clone());
+        let data_directory_service = crate::backend::domain::DataDirectoryService::new(db_conn);
 
         AppState {
             transaction_service,
@@ -121,6 +124,8 @@ mod tests {
             parental_control_service,
             allowance_service,
             balance_service,
+            goal_service,
+            data_directory_service,
         }
     }
 
@@ -163,18 +168,18 @@ mod tests {
         let app_state = create_test_app_state().await;
         
         // Create a child first
-        let child_request = CreateChildRequest {
+        use crate::backend::domain::commands::child::{CreateChildCommand, SetActiveChildCommand};
+        let child_command = CreateChildCommand {
             name: "Test Child".to_string(),
             birthdate: "2015-01-01".to_string(),
         };
-        let child_response = app_state.child_service.create_child(child_request).await.expect("Failed to create child");
+        let child_result = app_state.child_service.create_child(child_command).await.expect("Failed to create child");
         
         // Set as active child
-        use shared::SetActiveChildRequest;
-        let set_active_request = SetActiveChildRequest {
-            child_id: child_response.child.id,
+        let set_active_command = SetActiveChildCommand {
+            child_id: child_result.child.id,
         };
-        app_state.child_service.set_active_child(set_active_request).await.expect("Failed to set active child");
+        app_state.child_service.set_active_child(set_active_command).await.expect("Failed to set active child");
 
         let request = UpdateAllowanceConfigRequest {
             child_id: None, // Use active child
@@ -197,14 +202,15 @@ mod tests {
         let app_state = create_test_app_state().await;
         
         // Create a child first
-        let child_request = CreateChildRequest {
+        use crate::backend::domain::commands::child::CreateChildCommand;
+        let child_command = CreateChildCommand {
             name: "Test Child".to_string(),
             birthdate: "2015-01-01".to_string(),
         };
-        let child_response = app_state.child_service.create_child(child_request).await.expect("Failed to create child");
+        let child_result = app_state.child_service.create_child(child_command).await.expect("Failed to create child");
 
         let request = UpdateAllowanceConfigRequest {
-            child_id: Some(child_response.child.id),
+            child_id: Some(child_result.child.id),
             amount: 10.0,
             day_of_week: 7, // Invalid day
             is_active: true,

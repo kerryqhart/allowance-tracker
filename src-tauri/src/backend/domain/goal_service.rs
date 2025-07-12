@@ -457,11 +457,12 @@ mod tests {
     use super::*;
     use std::sync::Arc;
     use crate::backend::storage::csv::CsvConnection;
-    use crate::backend::domain::{ChildService, AllowanceService, TransactionService, BalanceService};
+    use crate::backend::domain::{child_service::ChildService, AllowanceService, TransactionService, BalanceService};
 
 use crate::backend::domain::commands::goal::CreateGoalCommand;
 use crate::backend::domain::commands::goal::CancelGoalCommand;
 use crate::backend::domain::commands::goal::GetCurrentGoalCommand;
+use crate::backend::domain::commands::child::CreateChildCommand;
     use chrono::Utc;
 
     async fn create_test_service() -> GoalService {
@@ -478,17 +479,17 @@ use crate::backend::domain::commands::goal::GetCurrentGoalCommand;
 
     async fn create_test_child_and_allowance(service: &GoalService) -> String {
         // Create a test child
-        let child_request = CreateChildRequest {
+        let child_command = CreateChildCommand {
             name: "Test Child".to_string(),
             birthdate: "2010-01-01".to_string(),
         };
         
-        let child_response = service.child_service.create_child(child_request).await
+        let child_result = service.child_service.create_child(child_command).await
             .expect("Failed to create test child");
         
         // Set up allowance
         let allowance_command = crate::backend::domain::commands::allowance::UpdateAllowanceConfigCommand {
-            child_id: Some(child_response.child.id.clone()),
+            child_id: Some(child_result.child.id.clone()),
             amount: 5.0,
             day_of_week: 5, // Friday
             is_active: true,
@@ -497,7 +498,7 @@ use crate::backend::domain::commands::goal::GetCurrentGoalCommand;
         service.allowance_service.update_allowance_config(allowance_command).await
             .expect("Failed to set up allowance");
         
-        child_response.child.id
+        child_result.child.id
     }
 
     #[tokio::test]

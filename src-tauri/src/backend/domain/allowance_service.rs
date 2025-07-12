@@ -359,7 +359,7 @@ impl AllowanceService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::domain::models::child::DomainChild;
+    use crate::backend::domain::models::child::Child as DomainChild;
     use crate::backend::domain::commands::child::CreateChildCommand;
 
     async fn setup_test() -> AllowanceService {
@@ -368,18 +368,17 @@ mod tests {
     }
 
     async fn create_test_child(service: &AllowanceService) -> DomainChild {
-        let request = shared::CreateChildRequest {
+        let command = crate::backend::domain::commands::child::CreateChildCommand {
             name: "Test Child".to_string(),
             birthdate: "2015-01-01".to_string(),
         };
-        let response = service
+        let result = service
             .child_service
-            .create_child(request)
+            .create_child(command)
             .await
             .expect("Failed to create test child");
         
-        // Convert the shared Child to DomainChild
-        crate::backend::io::rest::mappers::child_mapper::ChildMapper::to_domain(response.child)
+        result.child
     }
 
     #[tokio::test]
@@ -424,17 +423,17 @@ mod tests {
         assert_eq!(update_response.allowance_config.day_name(), "Monday");
 
         // Get the config back
-        let get_request = GetAllowanceConfigRequest {
+        let get_command = GetAllowanceConfigCommand {
             child_id: Some(child.id.clone()),
         };
 
-        let get_response = service
-            .get_allowance_config(get_request)
+        let get_result = service
+            .get_allowance_config(get_command)
             .await
             .expect("Failed to get allowance config");
 
-        assert!(get_response.allowance_config.is_some());
-        let config = get_response.allowance_config.unwrap();
+        assert!(get_result.allowance_config.is_some());
+        let config = get_result.allowance_config.unwrap();
         assert_eq!(config.amount, 10.0);
         assert_eq!(config.day_of_week, 1);
         assert_eq!(config.is_active, true);
@@ -487,14 +486,14 @@ mod tests {
         let service = setup_test().await;
         let child = create_test_child(&service).await;
 
-        let request = UpdateAllowanceConfigRequest {
+        let command = UpdateAllowanceConfigCommand {
             child_id: Some(child.id),
             amount: 10.0,
             day_of_week: 7, // Invalid - should be 0-6
             is_active: true,
         };
 
-        let result = service.update_allowance_config(request).await;
+        let result = service.update_allowance_config(command).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Invalid day of week"));
     }
@@ -504,14 +503,14 @@ mod tests {
         let service = setup_test().await;
         let child = create_test_child(&service).await;
 
-        let request = UpdateAllowanceConfigRequest {
+        let command = UpdateAllowanceConfigCommand {
             child_id: Some(child.id),
             amount: -5.0,
             day_of_week: 1,
             is_active: true,
         };
 
-        let result = service.update_allowance_config(request).await;
+        let result = service.update_allowance_config(command).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("cannot be negative"));
     }
@@ -522,7 +521,7 @@ mod tests {
         let child = create_test_child(&service).await;
 
         // Create config first
-        let update_request = UpdateAllowanceConfigRequest {
+        let update_command = UpdateAllowanceConfigCommand {
             child_id: Some(child.id.clone()),
             amount: 10.0,
             day_of_week: 1,
@@ -530,7 +529,7 @@ mod tests {
         };
 
         service
-            .update_allowance_config(update_request)
+            .update_allowance_config(update_command)
             .await
             .expect("Failed to create allowance config");
 
@@ -543,16 +542,16 @@ mod tests {
         assert!(deleted);
 
         // Verify it's gone
-        let get_request = GetAllowanceConfigRequest {
+        let get_command = GetAllowanceConfigCommand {
             child_id: Some(child.id),
         };
 
-        let get_response = service
-            .get_allowance_config(get_request)
+        let get_result = service
+            .get_allowance_config(get_command)
             .await
             .expect("Failed to get allowance config");
 
-        assert!(get_response.allowance_config.is_none());
+        assert!(get_result.allowance_config.is_none());
     }
 
     #[tokio::test]
@@ -561,26 +560,26 @@ mod tests {
         let child1 = create_test_child(&service).await;
 
         // Create child2 with different name to get different ID
-        let request2 = CreateChildRequest {
+        let command2 = crate::backend::domain::commands::child::CreateChildCommand {
             name: "Test Child 2".to_string(),
             birthdate: "2016-01-01".to_string(),
         };
-        let response2 = service
+        let result2 = service
             .child_service
-            .create_child(request2)
+            .create_child(command2)
             .await
             .expect("Failed to create test child 2");
-        let child2 = response2.child;
+        let child2 = result2.child;
 
         // Create configs for both children
-        let request1 = UpdateAllowanceConfigRequest {
+        let command1 = UpdateAllowanceConfigCommand {
             child_id: Some(child1.id),
             amount: 5.0,
             day_of_week: 1,
             is_active: true,
         };
 
-        let request2 = UpdateAllowanceConfigRequest {
+        let command2 = UpdateAllowanceConfigCommand {
             child_id: Some(child2.id),
             amount: 10.0,
             day_of_week: 5,
@@ -588,12 +587,12 @@ mod tests {
         };
 
         service
-            .update_allowance_config(request1)
+            .update_allowance_config(command1)
             .await
             .expect("Failed to create config 1");
 
         service
-            .update_allowance_config(request2)
+            .update_allowance_config(command2)
             .await
             .expect("Failed to create config 2");
 
@@ -623,8 +622,8 @@ mod tests {
             amount: 10.0,
             day_of_week: 0,
             is_active: true,
-            created_at: "test".to_string(),
-            updated_at: "test".to_string(),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
         };
 
         let days = [
@@ -684,7 +683,7 @@ mod tests {
         let child = create_test_child(&service).await;
 
         // Create inactive allowance config
-        let request = UpdateAllowanceConfigRequest {
+        let command = UpdateAllowanceConfigCommand {
             child_id: Some(child.id.clone()),
             amount: 10.0,
             day_of_week: 1, // Monday
@@ -692,7 +691,7 @@ mod tests {
         };
 
         service
-            .update_allowance_config(request)
+            .update_allowance_config(command)
             .await
             .expect("Failed to create allowance config");
 
@@ -714,7 +713,7 @@ mod tests {
 
         // Create active allowance config for every day (day_of_week: 0-6)
         // We'll use Sunday (0) for testing
-        let request = UpdateAllowanceConfigRequest {
+        let command = UpdateAllowanceConfigCommand {
             child_id: Some(child.id.clone()),
             amount: 5.0,
             day_of_week: 0, // Sunday
@@ -722,7 +721,7 @@ mod tests {
         };
 
         service
-            .update_allowance_config(request)
+            .update_allowance_config(command)
             .await
             .expect("Failed to create allowance config");
 
@@ -801,14 +800,14 @@ mod tests {
         let test_date = Local::now().date_naive();
         
         // Create a mock allowance transaction for today
-        let transaction = Transaction {
+        let transaction = DomainTransaction {
             id: "test_allowance_123".to_string(),
             child_id: child.id.clone(),
             date: format!("{}T12:00:00-05:00", test_date.format("%Y-%m-%d")),
             description: "Weekly allowance".to_string(),
             amount: 5.0,
             balance: 5.0,
-            transaction_type: TransactionType::Income,
+            transaction_type: DomainTransactionType::Income,
         };
 
         // Store the transaction
@@ -834,14 +833,14 @@ mod tests {
         let test_date = Local::now().date_naive();
         
         // Create a non-allowance transaction for today
-        let transaction = Transaction {
+        let transaction = DomainTransaction {
             id: "test_expense_123".to_string(),
             child_id: child.id.clone(),
             date: format!("{}T12:00:00-05:00", test_date.format("%Y-%m-%d")),
             description: "Bought candy".to_string(),
             amount: -2.0, // Negative amount (expense)
             balance: 3.0,
-            transaction_type: TransactionType::Expense,
+            transaction_type: DomainTransactionType::Expense,
         };
 
         // Store the transaction

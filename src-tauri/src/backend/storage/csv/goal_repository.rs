@@ -412,12 +412,12 @@ mod tests {
     async fn test_store_and_get_goal() {
         let (goal_repo, _child_repo, _temp_dir, child) = setup_test_repo_with_child().await;
         
-        let goal = Goal {
+        let goal = DomainGoal {
             id: "goal::test".to_string(),
             child_id: child.id.clone(),
             description: "Buy new toy".to_string(),
             target_amount: 25.0,
-            state: GoalState::Active,
+            state: DomainGoalState::Active,
             created_at: Utc::now().to_rfc3339(),
             updated_at: Utc::now().to_rfc3339(),
         };
@@ -433,19 +433,19 @@ mod tests {
         assert_eq!(retrieved_goal.id, goal.id);
         assert_eq!(retrieved_goal.description, goal.description);
         assert_eq!(retrieved_goal.target_amount, goal.target_amount);
-        assert_eq!(retrieved_goal.state, GoalState::Active);
+        assert_eq!(retrieved_goal.state, DomainGoalState::Active);
     }
 
     #[tokio::test]
     async fn test_cancel_goal() {
         let (goal_repo, _child_repo, _temp_dir, child) = setup_test_repo_with_child().await;
         
-        let goal = Goal {
+        let goal = DomainGoal {
             id: "goal::test".to_string(),
             child_id: child.id.clone(),
             description: "Buy new toy".to_string(),
             target_amount: 25.0,
-            state: GoalState::Active,
+            state: DomainGoalState::Active,
             created_at: Utc::now().to_rfc3339(),
             updated_at: Utc::now().to_rfc3339(),
         };
@@ -458,7 +458,7 @@ mod tests {
             .expect("Failed to cancel goal")
             .expect("Cancelled goal should be returned");
         
-        assert_eq!(cancelled_goal.state, GoalState::Cancelled);
+        assert_eq!(cancelled_goal.state, DomainGoalState::Cancelled);
         
         // Should no longer have an active goal
         let current_goal = goal_repo.get_current_goal(&child.id).await
@@ -471,22 +471,22 @@ mod tests {
         let (goal_repo, _child_repo, _temp_dir, child) = setup_test_repo_with_child().await;
         
         // Create multiple goals over time
-        let goal1 = Goal {
+        let goal1 = DomainGoal {
             id: "goal::1".to_string(),
             child_id: child.id.clone(),
             description: "First goal".to_string(),
             target_amount: 10.0,
-            state: GoalState::Active,
+            state: DomainGoalState::Active,
             created_at: "2025-01-01T00:00:00Z".to_string(),
             updated_at: "2025-01-01T00:00:00Z".to_string(),
         };
         
-        let goal2 = Goal {
+        let goal2 = DomainGoal {
             id: "goal::2".to_string(),
             child_id: child.id.clone(),
             description: "Second goal".to_string(),
             target_amount: 20.0,
-            state: GoalState::Completed,
+            state: DomainGoalState::Completed,
             created_at: "2025-01-02T00:00:00Z".to_string(),
             updated_at: "2025-01-02T00:00:00Z".to_string(),
         };
@@ -511,12 +511,12 @@ mod tests {
         // Initially no active goal
         assert!(!goal_repo.has_active_goal(&child.id).await.expect("Failed to check active goal"));
         
-        let goal = Goal {
+        let goal = DomainGoal {
             id: "goal::test".to_string(),
             child_id: child.id.clone(),
             description: "Test goal".to_string(),
             target_amount: 25.0,
-            state: GoalState::Active,
+            state: DomainGoalState::Active,
             created_at: Utc::now().to_rfc3339(),
             updated_at: Utc::now().to_rfc3339(),
         };

@@ -1,26 +1,13 @@
-fix(tests): Major Test Suite Cleanup - Storage & Domain Layer Migrations
+Fix Tauri build error: Simplify crate structure to binary-only
 
-**✅ COMPLETED MIGRATIONS:**
-- Storage Layer: All repository tests now use DomainChild instead of shared::Child  
-- Child Service: All tests migrated to use domain commands (CreateChildCommand, UpdateChildCommand, etc.)
-- Result Access: Fixed all tests to access nested result structures (.child, .children, .active_child)
+- Remove mixed library+binary configuration from Cargo.toml that was causing 
+  "crate `tauri` required to be available in rlib format" error
+- Consolidate all code from lib.rs into main.rs for simpler project structure
+- Update binary configuration to use standard Tauri app layout
+- Remove unused lib.rs file
+- Fix test function calls to match actual initialize_backend() signature
 
-**🔧 TEST INFRASTRUCTURE FIXES:**
-- AllowanceRepository tests: Use DomainChild with proper chrono::NaiveDate
-- ParentalControlRepository tests: Domain model integration
-- GlobalConfigRepository tests: Domain Child creation patterns  
-- GoalRepository tests: Complete domain model adoption
-- ChildService tests: Domain command patterns throughout
+This resolves the build compilation error and adopts a more standard 
+Tauri project structure. Application functionality remains unchanged.
 
-**⚡ ARCHITECTURE VALIDATION:**
-- Main codebase: ✅ Compiles successfully (warnings only)
-- Storage Layer: ✅ Zero shared dependencies  
-- Domain Layer: ✅ Pure business logic
-- API Boundaries: ✅ Clean mapping patterns
-
-**🚧 REMAINING TEST WORK:**
-- Update DbConnection → CsvConnection in service tests
-- Fix service constructor patterns for new dependencies
-- Convert remaining shared DTOs to domain commands in API tests
-
-**Impact:** Test suite errors reduced from 126 to manageable subset. Core architecture migration complete and validated. 
+Build now completes successfully with only warnings (no errors). 

@@ -229,7 +229,7 @@ pub async fn spend_money(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::storage::DbConnection;
+    use crate::backend::storage::csv::CsvConnection;
     use crate::backend::domain::{TransactionService, CalendarService, TransactionTableService, MoneyManagementService, child_service::ChildService};
     use crate::backend::AppState;
     use axum::http::StatusCode;
@@ -237,41 +237,48 @@ mod tests {
     use std::sync::Arc;
 
     async fn setup_test_state() -> AppState {
-        let db = Arc::new(DbConnection::init_test().await.unwrap());
-        let transaction_service = TransactionService::new(db.clone());
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
+        
+        // Create services with proper dependencies
+        let child_service = ChildService::new(db.clone());
+        let allowance_service = crate::backend::domain::AllowanceService::new(db.clone());
+        let balance_service = crate::backend::domain::BalanceService::new(db.clone());
+        let transaction_service = TransactionService::new(db.clone(), child_service.clone(), allowance_service.clone(), balance_service.clone());
         let calendar_service = CalendarService::new();
         let transaction_table_service = TransactionTableService::new();
         let money_management_service = MoneyManagementService::new();
-        let child_service = ChildService::new(db.clone());
         let parental_control_service = crate::backend::domain::ParentalControlService::new(db.clone());
-        let allowance_service = crate::backend::domain::AllowanceService::new(db.clone());
-        let balance_service = crate::backend::domain::BalanceService::new(db);
+        let goal_service = crate::backend::domain::GoalService::new(db.clone());
+        let data_directory_service = crate::backend::domain::DataDirectoryService::new(db.clone());
         
-        // Create a test child and set as active using ChildService
-        use shared::{CreateChildRequest, SetActiveChildRequest};
+        // Create a test child and set as active using domain commands
+        use crate::backend::domain::commands::child::{CreateChildCommand, SetActiveChildCommand};
         
-        let create_request = CreateChildRequest {
+        let create_command = CreateChildCommand {
             name: "Test Child".to_string(),
             birthdate: "2015-01-01".to_string(),
         };
         
-        let child_response = child_service.create_child(create_request).await.expect("Failed to create test child");
+        let child_result = child_service.create_child(create_command).await.expect("Failed to create test child");
         
-        let set_active_request = SetActiveChildRequest {
-            child_id: child_response.child.id.clone(),
+        let set_active_command = SetActiveChildCommand {
+            child_id: child_result.child.id.clone(),
         };
         
-        child_service.set_active_child(set_active_request).await.expect("Failed to set active child");
+        child_service.set_active_child(set_active_command).await.expect("Failed to set active child");
         
         AppState {
-            transaction_service: Arc::new(transaction_service),
-            calendar_service: Arc::new(calendar_service),
-            transaction_table_service: Arc::new(transaction_table_service),
-            money_management_service: Arc::new(money_management_service),
-            child_service: Arc::new(child_service),
-            parental_control_service: Arc::new(parental_control_service),
-            allowance_service: Arc::new(allowance_service),
-            balance_service: Arc::new(balance_service),
+            transaction_service,
+            calendar_service,
+            transaction_table_service,
+            money_management_service,
+            child_service,
+            parental_control_service,
+            allowance_service,
+            balance_service,
+            goal_service,
+            data_directory_service,
         }
     }
 
@@ -290,24 +297,31 @@ mod tests {
     #[tokio::test]
     async fn test_add_money_no_active_child() {
         // Create an app state without an active child
-        let db = Arc::new(DbConnection::init_test().await.unwrap());
-        let transaction_service = TransactionService::new(db.clone());
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
+        
+        let child_service = ChildService::new(db.clone());
+        let allowance_service = crate::backend::domain::AllowanceService::new(db.clone());
+        let balance_service = crate::backend::domain::BalanceService::new(db.clone());
+        let transaction_service = TransactionService::new(db.clone(), child_service.clone(), allowance_service.clone(), balance_service.clone());
         let calendar_service = CalendarService::new();
         let transaction_table_service = TransactionTableService::new();
         let money_management_service = MoneyManagementService::new();
-        let child_service = ChildService::new(db.clone());
         let parental_control_service = crate::backend::domain::ParentalControlService::new(db.clone());
-        let allowance_service = crate::backend::domain::AllowanceService::new(db.clone());
-        let balance_service = crate::backend::domain::BalanceService::new(db);
+        let goal_service = crate::backend::domain::GoalService::new(db.clone());
+        let data_directory_service = crate::backend::domain::DataDirectoryService::new(db.clone());
+        
         let state = AppState {
-            transaction_service: Arc::new(transaction_service),
-            calendar_service: Arc::new(calendar_service),
-            transaction_table_service: Arc::new(transaction_table_service),
-            money_management_service: Arc::new(money_management_service),
-            child_service: Arc::new(child_service),
-            parental_control_service: Arc::new(parental_control_service),
-            allowance_service: Arc::new(allowance_service),
-            balance_service: Arc::new(balance_service),
+            transaction_service,
+            calendar_service,
+            transaction_table_service,
+            money_management_service,
+            child_service,
+            parental_control_service,
+            allowance_service,
+            balance_service,
+            goal_service,
+            data_directory_service,
         };
 
         let request = AddMoneyRequest {
@@ -334,24 +348,31 @@ mod tests {
     #[tokio::test]
     async fn test_spend_money_no_active_child() {
         // Create an app state without an active child
-        let db = Arc::new(DbConnection::init_test().await.unwrap());
-        let transaction_service = TransactionService::new(db.clone());
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
+        
+        let child_service = ChildService::new(db.clone());
+        let allowance_service = crate::backend::domain::AllowanceService::new(db.clone());
+        let balance_service = crate::backend::domain::BalanceService::new(db.clone());
+        let transaction_service = TransactionService::new(db.clone(), child_service.clone(), allowance_service.clone(), balance_service.clone());
         let calendar_service = CalendarService::new();
         let transaction_table_service = TransactionTableService::new();
         let money_management_service = MoneyManagementService::new();
-        let child_service = ChildService::new(db.clone());
         let parental_control_service = crate::backend::domain::ParentalControlService::new(db.clone());
-        let allowance_service = crate::backend::domain::AllowanceService::new(db.clone());
-        let balance_service = crate::backend::domain::BalanceService::new(db);
+        let goal_service = crate::backend::domain::GoalService::new(db.clone());
+        let data_directory_service = crate::backend::domain::DataDirectoryService::new(db.clone());
+        
         let state = AppState {
-            transaction_service: Arc::new(transaction_service),
-            calendar_service: Arc::new(calendar_service),
-            transaction_table_service: Arc::new(transaction_table_service),
-            money_management_service: Arc::new(money_management_service),
-            child_service: Arc::new(child_service),
-            parental_control_service: Arc::new(parental_control_service),
-            allowance_service: Arc::new(allowance_service),
-            balance_service: Arc::new(balance_service),
+            transaction_service,
+            calendar_service,
+            transaction_table_service,
+            money_management_service,
+            child_service,
+            parental_control_service,
+            allowance_service,
+            balance_service,
+            goal_service,
+            data_directory_service,
         };
 
         let request = SpendMoneyRequest {

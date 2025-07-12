@@ -61,7 +61,7 @@ pub async fn validate_parental_control_answer(
 mod tests {
     use super::*;
     use crate::backend::{
-        storage::DbConnection,
+        storage::csv::CsvConnection,
         domain::{TransactionService, CalendarService, TransactionTableService, MoneyManagementService, child_service::ChildService, ParentalControlService},
     };
     use axum::{
@@ -73,20 +73,27 @@ mod tests {
     use tower::util::ServiceExt; // for `oneshot`
 
     async fn setup_test_app() -> Router {
-        let db = Arc::new(DbConnection::init_test().await.expect("Failed to create test database"));
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db = Arc::new(CsvConnection::new(temp_dir.path()).expect("Failed to create test database"));
         
+        let child_service = ChildService::new(db.clone());
         let allowance_service = crate::backend::domain::AllowanceService::new(db.clone());
         let balance_service = crate::backend::domain::BalanceService::new(db.clone());
+        let transaction_service = TransactionService::new(db.clone(), child_service.clone(), allowance_service.clone(), balance_service.clone());
+        let goal_service = crate::backend::domain::GoalService::new(db.clone());
+        let data_directory_service = crate::backend::domain::DataDirectoryService::new(db.clone());
         
         let app_state = AppState {
-            transaction_service: TransactionService::new(db.clone()),
+            transaction_service,
             calendar_service: CalendarService::new(),
             transaction_table_service: TransactionTableService::new(),
             money_management_service: MoneyManagementService::new(),
-            child_service: ChildService::new(db.clone()),
+            child_service,
             parental_control_service: ParentalControlService::new(db),
             allowance_service,
             balance_service,
+            goal_service,
+            data_directory_service,
         };
 
         router().with_state(app_state)

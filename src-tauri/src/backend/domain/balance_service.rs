@@ -206,6 +206,7 @@ impl<C: Connection> BalanceService<C> {
 mod tests {
     use super::*;
     use crate::backend::storage::csv::CsvConnection;
+    use crate::backend::domain::commands::child::CreateChildCommand;
     use shared::{Transaction, TransactionType};
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -243,11 +244,11 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let db = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
         let child_service = crate::backend::domain::child_service::ChildService::new(db);
-        let child_response = child_service.create_child(shared::CreateChildRequest {
+        let child_result = child_service.create_child(CreateChildCommand {
             name: "Test Child".to_string(),
             birthdate: "2015-01-01".to_string(),
         }).await.unwrap();
-        let child_id = &child_response.child.id;
+        let child_id = &child_result.child.id;
 
         // Create a transaction before our target date
         create_test_transaction(&service, child_id, "2025-01-10T10:00:00-05:00", "Previous transaction", 50.0, 50.0).await;
@@ -264,11 +265,11 @@ mod tests {
         let child_service = crate::backend::domain::child_service::ChildService::new(
             Arc::new(service.get_db_connection().clone())
         );
-        let child_response = child_service.create_child(shared::CreateChildRequest {
+        let child_result = child_service.create_child(CreateChildCommand {
             name: "Test Child".to_string(),
             birthdate: "2015-01-01".to_string(),
         }).await.unwrap();
-        let child_id = &child_response.child.id;
+        let child_id = &child_result.child.id;
 
         let starting_balance = service.calculate_starting_balance(child_id, "2025-01-15T10:00:00-05:00").await.unwrap();
         assert_eq!(starting_balance, 0.0);
@@ -282,11 +283,11 @@ mod tests {
         let child_service = crate::backend::domain::child_service::ChildService::new(
             Arc::new(service.get_db_connection().clone())
         );
-        let child_response = child_service.create_child(shared::CreateChildRequest {
+        let child_result = child_service.create_child(CreateChildCommand {
             name: "Test Child".to_string(),
             birthdate: "2015-01-01".to_string(),
         }).await.unwrap();
-        let child_id = &child_response.child.id;
+        let child_id = &child_result.child.id;
 
         // Create a previous transaction
         create_test_transaction(&service, child_id, "2025-01-10T10:00:00-05:00", "Previous", 30.0, 30.0).await;
@@ -303,11 +304,11 @@ mod tests {
         let child_service = crate::backend::domain::child_service::ChildService::new(
             Arc::new(service.get_db_connection().clone())
         );
-        let child_response = child_service.create_child(shared::CreateChildRequest {
+        let child_result = child_service.create_child(CreateChildCommand {
             name: "Test Child".to_string(),
             birthdate: "2015-01-01".to_string(),
         }).await.unwrap();
-        let child_id = &child_response.child.id;
+        let child_id = &child_result.child.id;
 
         // Create transactions with initially correct balances
         create_test_transaction(&service, child_id, "2025-01-10T10:00:00-05:00", "First", 100.0, 100.0).await;
@@ -350,11 +351,11 @@ mod tests {
         let child_service = crate::backend::domain::child_service::ChildService::new(
             Arc::new(service.get_db_connection().clone())
         );
-        let child_response = child_service.create_child(shared::CreateChildRequest {
+        let child_result = child_service.create_child(CreateChildCommand {
             name: "Test Child".to_string(),
             birthdate: "2015-01-01".to_string(),
         }).await.unwrap();
-        let child_id = &child_response.child.id;
+        let child_id = &child_result.child.id;
 
         // Create a transaction after our test date
         create_test_transaction(&service, child_id, "2025-01-20T10:00:00-05:00", "Future transaction", 100.0, 100.0).await;
@@ -376,11 +377,11 @@ mod tests {
         let child_service = crate::backend::domain::child_service::ChildService::new(
             Arc::new(service.get_db_connection().clone())
         );
-        let child_response = child_service.create_child(shared::CreateChildRequest {
+        let child_result = child_service.create_child(CreateChildCommand {
             name: "Test Child".to_string(),
             birthdate: "2015-01-01".to_string(),
         }).await.unwrap();
-        let child_id = &child_response.child.id;
+        let child_id = &child_result.child.id;
 
         // Create transactions with correct balances
         create_test_transaction(&service, child_id, "2025-01-10T10:00:00-05:00", "First", 100.0, 100.0).await;
@@ -405,11 +406,11 @@ mod tests {
         let child_service = crate::backend::domain::child_service::ChildService::new(
             Arc::new(service.get_db_connection().clone())
         );
-        let child_response = child_service.create_child(shared::CreateChildRequest {
+        let child_result = child_service.create_child(CreateChildCommand {
             name: "Test Child".to_string(),
             birthdate: "2015-01-01".to_string(),
         }).await.unwrap();
-        let child_id = &child_response.child.id;
+        let child_id = &child_result.child.id;
 
         // Create transactions with intentionally incorrect balances
         create_test_transaction(&service, child_id, "2025-01-10T10:00:00-05:00", "First", 100.0, 100.0).await;

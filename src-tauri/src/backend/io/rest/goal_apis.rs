@@ -219,21 +219,24 @@ mod tests {
 
     async fn create_test_child_with_allowance(app_state: &AppState) -> String {
         // Create a test child
-        let child_request = CreateChildRequest {
+        let child_command = crate::backend::domain::commands::child::CreateChildCommand {
             name: "Test Child".to_string(),
             birthdate: "2010-01-01".to_string(),
         };
         
-        let child_response = app_state.child_service.create_child(child_request).await
+        let child_result = app_state.child_service.create_child(child_command).await
             .expect("Failed to create test child");
         
         // Set as active child
-        app_state.child_service.set_active_child(&child_response.child.id).await
+        let set_active_command = crate::backend::domain::commands::child::SetActiveChildCommand {
+            child_id: child_result.child.id.clone(),
+        };
+        app_state.child_service.set_active_child(set_active_command).await
             .expect("Failed to set active child");
         
         // Set up allowance
         let allowance_command = crate::backend::domain::commands::allowance::UpdateAllowanceConfigCommand {
-            child_id: Some(child_response.child.id.clone()),
+            child_id: Some(child_result.child.id.clone()),
             amount: 5.0,
             day_of_week: 5, // Friday
             is_active: true,
@@ -242,7 +245,7 @@ mod tests {
         app_state.allowance_service.update_allowance_config(allowance_command).await
             .expect("Failed to set up allowance");
         
-        child_response.child.id
+        child_result.child.id
     }
 
     #[tokio::test]

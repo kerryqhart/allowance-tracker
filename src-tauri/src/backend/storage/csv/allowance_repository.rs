@@ -290,14 +290,14 @@ mod tests {
     async fn test_store_and_get_allowance_config() {
         let (repo, _child_repo, _temp_dir, child) = setup_test_repo_with_child().await;
         
-        let config = AllowanceConfig {
+        let config = DomainAllowanceConfig {
             id: "allowance::1234567890::98765".to_string(),
             child_id: child.id.clone(),
             amount: 10.0,
             day_of_week: 1, // Monday
             is_active: true,
-            created_at: Utc::now().to_rfc3339(),
-            updated_at: Utc::now().to_rfc3339(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
         };
         
         // Store the config
@@ -319,14 +319,14 @@ mod tests {
     async fn test_update_allowance_config() {
         let (repo, _child_repo, _temp_dir, child) = setup_test_repo_with_child().await;
         
-        let mut config = AllowanceConfig {
+        let mut config = DomainAllowanceConfig {
             id: "allowance::1234567890::98765".to_string(),
             child_id: child.id.clone(),
             amount: 10.0,
             day_of_week: 1, // Monday
             is_active: true,
-            created_at: Utc::now().to_rfc3339(),
-            updated_at: Utc::now().to_rfc3339(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
         };
         
         // Store the initial config
@@ -335,7 +335,7 @@ mod tests {
         // Update the config
         config.amount = 15.0;
         config.day_of_week = 5; // Friday
-        config.updated_at = Utc::now().to_rfc3339();
+        config.updated_at = Utc::now();
         
         repo.update_allowance_config(&config).await.unwrap();
         
@@ -349,14 +349,14 @@ mod tests {
     async fn test_delete_allowance_config() {
         let (repo, _child_repo, _temp_dir, child) = setup_test_repo_with_child().await;
         
-        let config = AllowanceConfig {
+        let config = DomainAllowanceConfig {
             id: "allowance::1234567890::98765".to_string(),
             child_id: child.id.clone(),
             amount: 10.0,
             day_of_week: 1, // Monday
             is_active: true,
-            created_at: Utc::now().to_rfc3339(),
-            updated_at: Utc::now().to_rfc3339(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
         };
         
         // Store the config
@@ -392,24 +392,24 @@ mod tests {
         child_repo.store_child(&child2).await.unwrap();
         
         // Create configs for both children
-        let config1 = AllowanceConfig {
+        let config1 = DomainAllowanceConfig {
             id: "allowance::1234567890::98765".to_string(),
             child_id: child1.id.clone(),
             amount: 10.0,
             day_of_week: 1,
             is_active: true,
-            created_at: Utc::now().to_rfc3339(),
-            updated_at: Utc::now().to_rfc3339(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
         };
         
-        let config2 = AllowanceConfig {
+        let config2 = DomainAllowanceConfig {
             id: "allowance::2345678901::87654".to_string(),
             child_id: child2.id.clone(),
             amount: 15.0,
             day_of_week: 5,
             is_active: false,
-            created_at: Utc::now().to_rfc3339(),
-            updated_at: Utc::now().to_rfc3339(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
         };
         
         repo.store_allowance_config(&config1).await.unwrap();
@@ -429,14 +429,14 @@ mod tests {
     async fn test_store_config_for_nonexistent_child() {
         let (repo, _child_repo, _temp_dir, _child) = setup_test_repo_with_child().await;
         
-        let config = AllowanceConfig {
+        let config = DomainAllowanceConfig {
             id: "allowance::9999999999::98765".to_string(),
             child_id: "child::nonexistent".to_string(),
             amount: 10.0,
             day_of_week: 1,
             is_active: true,
-            created_at: Utc::now().to_rfc3339(),
-            updated_at: Utc::now().to_rfc3339(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
         };
         
         // Storing config for nonexistent child should fail
