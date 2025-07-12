@@ -1,0 +1,22 @@
+Remove unused dependencies: sqlx, once_cell, lazy_static
+
+- Remove sqlx dependency from workspace and src-tauri/Cargo.toml
+  - No longer building libsqlite3-sys, sqlx-core, sqlx-sqlite, sqlx-macros
+  - Eliminates unnecessary SQLite compilation and dependencies
+- Remove once_cell dependency from src-tauri/Cargo.toml (unused)
+- Remove lazy_static dependency from src-tauri/Cargo.toml (unused)
+
+Benefits:
+- Faster build times
+- Smaller dependency tree
+- Cleaner codebase with only required dependencies
+- Reduced binary size
+
+All retained dependencies are actively used:
+- csv: CSV file operations
+- serde_yaml: Configuration handling
+- git2: Version control features
+- fs_extra: Directory operations
+- async-trait: Async trait implementations
+- axum: Embedded REST API server
+- tower/tower-http: HTTP middleware and CORS 
