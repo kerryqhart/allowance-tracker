@@ -42,32 +42,15 @@ async fn get_calendar_month(
 ) -> impl IntoResponse {
     info!("🗓️ GET /api/calendar - request: {:?}", request);
 
-    let days_in_month = state.calendar_service.days_in_month(request.month, request.year);
-    info!("🗓️ Days in month {}/{}: {}", request.month, request.year, days_in_month);
-
-    // Calculate end date for target month
-    let end_date = format!("{:04}-{:02}-{:02}T23:59:59Z", 
-                          request.year, request.month, days_in_month);
-    info!("🗓️ Query end date: {}", end_date);
-
-    let domain_query = TransactionListQuery {
-        after: None,
-        limit: Some(10000),
-        start_date: None,
-        end_date: Some(end_date.clone()),
+    // Use the domain service to get transactions for calendar (including future allowances)
+    let query = crate::backend::domain::commands::transactions::CalendarTransactionsQuery {
+        month: request.month,
+        year: request.year,
     };
-    info!("🗓️ Domain query: {:?}", domain_query);
 
-    let result = match state.transaction_service.list_transactions_domain(domain_query).await {
+    let result = match state.transaction_service.list_transactions_for_calendar(query).await {
         Ok(res) => {
-            info!("🗓️ Raw domain transactions loaded: {} transactions", res.transactions.len());
-            for (i, tx) in res.transactions.iter().enumerate().take(5) {
-                info!("🗓️ Transaction {}: id={}, date={}, amount={}, description={}", 
-                     i + 1, tx.id, tx.date, tx.amount, tx.description);
-            }
-            if res.transactions.len() > 5 {
-                info!("🗓️ ... and {} more transactions", res.transactions.len() - 5);
-            }
+            info!("🗓️ Domain service returned {} transactions for calendar", res.transactions.len());
             res
         },
         Err(e) => {
@@ -83,7 +66,7 @@ async fn get_calendar_month(
         .map(TransactionMapper::to_dto)
         .collect();
     
-    info!("🗓️ DTO transactions for calendar: {} transactions", dto_transactions.len());
+    info!("🗓️ Total transactions for calendar: {} transactions", dto_transactions.len());
     for (i, tx) in dto_transactions.iter().enumerate().take(5) {
         info!("🗓️ DTO Transaction {}: id={}, date={}, amount={}, description={}", 
              i + 1, tx.id, tx.date, tx.amount, tx.description);

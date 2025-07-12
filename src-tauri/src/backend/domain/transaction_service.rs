@@ -12,7 +12,7 @@ use crate::backend::{
     io::rest::mappers::transaction_mapper::TransactionMapper,
     storage::{Connection, TransactionStorage},
 };
-use crate::backend::domain::commands::transactions::{CreateTransactionCommand, TransactionListQuery, TransactionListResult, DeleteTransactionsCommand, DeleteTransactionsResult, PaginationInfo as DomainPagination};
+use crate::backend::domain::commands::transactions::{CreateTransactionCommand, TransactionListQuery, TransactionListResult, DeleteTransactionsCommand, DeleteTransactionsResult, PaginationInfo as DomainPagination, CalendarTransactionsQuery, CalendarTransactionsResult};
 use anyhow::{anyhow, Result};
 use chrono::{Local, NaiveDate};
 use log::{error, info};
@@ -175,6 +175,89 @@ impl<C: Connection> TransactionService<C> {
         query: TransactionListQuery,
     ) -> Result<TransactionListResult> {
         self.list_transactions_domain(query).await
+    }
+
+    /// List transactions for calendar display, including future allowances
+    /// This method orchestrates getting historical transactions and generating
+    /// future allowances for the specified month
+    pub async fn list_transactions_for_calendar(
+        &self,
+        query: CalendarTransactionsQuery,
+    ) -> Result<CalendarTransactionsResult> {
+        info!("🗓️ Getting transactions for calendar: month={}, year={}", query.month, query.year);
+
+        // Get the active child
+        let active_child = self.get_active_child().await?;
+
+        // Calculate days in month for end date
+        let days_in_month = match query.month {
+            1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+            4 | 6 | 9 | 11 => 30,
+            2 => {
+                // Check for leap year
+                let year = query.year as i32;
+                if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) {
+                    29
+                } else {
+                    28
+                }
+            }
+            _ => return Err(anyhow!("Invalid month: {}", query.month)),
+        };
+
+        // Get historical transactions up to the end of the requested month
+        let end_date = format!("{:04}-{:02}-{:02}T23:59:59Z", query.year, query.month, days_in_month);
+        info!("🗓️ Fetching historical transactions up to: {}", end_date);
+
+        let transaction_query = TransactionListQuery {
+            after: None,
+            limit: Some(10000), // Get all transactions for calendar
+            start_date: None,
+            end_date: Some(end_date),
+        };
+
+        let transaction_result = self.list_transactions_domain(transaction_query).await?;
+        let mut all_transactions = transaction_result.transactions;
+        
+        info!("🗓️ Found {} historical transactions", all_transactions.len());
+
+        // Generate future allowances for the requested month
+        let start_date = match NaiveDate::from_ymd_opt(query.year as i32, query.month, 1) {
+            Some(date) => date,
+            None => return Err(anyhow!("Invalid date: {}/{}", query.month, query.year)),
+        };
+        
+        let end_date = match NaiveDate::from_ymd_opt(query.year as i32, query.month, days_in_month) {
+            Some(date) => date,
+            None => return Err(anyhow!("Invalid end date: {}/{}/{}", query.month, days_in_month, query.year)),
+        };
+
+        info!("🗓️ Generating future allowances for child {} from {} to {}", 
+              active_child.id, start_date, end_date);
+
+        match self.allowance_service.generate_future_allowance_transactions(&active_child.id, start_date, end_date).await {
+            Ok(future_allowances) => {
+                info!("🗓️ Generated {} future allowances", future_allowances.len());
+                for (i, allowance) in future_allowances.iter().enumerate().take(3) {
+                    info!("🗓️ Future allowance {}: id={}, date={}, amount={}", 
+                         i + 1, allowance.id, allowance.date, allowance.amount);
+                }
+                if future_allowances.len() > 3 {
+                    info!("🗓️ ... and {} more future allowances", future_allowances.len() - 3);
+                }
+                all_transactions.extend(future_allowances);
+            },
+            Err(e) => {
+                error!("❌ Failed to generate future allowances: {}", e);
+                // Continue without future allowances rather than failing
+            }
+        }
+
+        info!("🗓️ Total transactions for calendar: {}", all_transactions.len());
+
+        Ok(CalendarTransactionsResult {
+            transactions: all_transactions,
+        })
     }
 
     pub async fn delete_transactions_domain(

@@ -26,6 +26,13 @@ pub mod transactions {
         pub end_date: Option<String>,
     }
 
+    /// Query parameters for getting transactions for calendar display.
+    #[derive(Debug, Clone)]
+    pub struct CalendarTransactionsQuery {
+        pub month: u32,
+        pub year: u32,
+    }
+
     /// Command for deleting multiple transactions.
     #[derive(Debug, Clone)]
     pub struct DeleteTransactionsCommand {
@@ -44,6 +51,12 @@ pub mod transactions {
     pub struct TransactionListResult {
         pub transactions: Vec<DomainTransaction>,
         pub pagination: PaginationInfo,
+    }
+
+    /// Result of getting transactions for calendar display.
+    #[derive(Debug, Clone)]
+    pub struct CalendarTransactionsResult {
+        pub transactions: Vec<DomainTransaction>,
     }
 
     /// Result of deleting transactions.

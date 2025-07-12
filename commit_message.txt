@@ -1,13 +1,12 @@
-Fix Tauri build error: Simplify crate structure to binary-only
+feat: Add future allowance chips to calendar view
 
-- Remove mixed library+binary configuration from Cargo.toml that was causing 
-  "crate `tauri` required to be available in rlib format" error
-- Consolidate all code from lib.rs into main.rs for simpler project structure
-- Update binary configuration to use standard Tauri app layout
-- Remove unused lib.rs file
-- Fix test function calls to match actual initialize_backend() signature
+- Add `list_transactions_for_calendar()` method to TransactionService domain layer
+- Add CalendarTransactionsQuery and CalendarTransactionsResult command structs
+- Simplify calendar REST API to make single domain service call (1:1 mapping)
+- Fix future allowance chips not showing by moving orchestration logic to domain layer
 
-This resolves the build compilation error and adopts a more standard 
-Tauri project structure. Application functionality remains unchanged.
+The calendar now properly displays future allowance transactions alongside historical ones.
+Calendar API now follows proper architecture with REST API mapping 1:1 to domain methods.
 
-Build now completes successfully with only warnings (no errors). 
+Logs show calendar generating 2 future allowances for July 18th and 25th (Fridays) 
+along with 8 historical transactions, totaling 10 transactions for calendar display. 
