@@ -204,6 +204,8 @@ mod tests {
         let transaction_table_service = TransactionTableService::new();
         let money_management_service = MoneyManagementService::new();
         let parental_control_service = crate::backend::domain::ParentalControlService::new(db.clone());
+        let data_directory_service = crate::backend::domain::DataDirectoryService::new(db.clone(), std::sync::Arc::new(child_service.clone()));
+        let export_service = crate::backend::domain::ExportService::new();
         
         AppState {
             transaction_service,
@@ -213,7 +215,10 @@ mod tests {
             child_service,
             parental_control_service,
             allowance_service,
+            balance_service,
             goal_service,
+            data_directory_service,
+            export_service,
         }
     }
 

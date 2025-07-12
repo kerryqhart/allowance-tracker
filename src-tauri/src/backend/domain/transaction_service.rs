@@ -467,18 +467,19 @@ impl<C: Connection> TransactionService<C> {
 mod tests {
     use super::*;
     use crate::backend::{
-        domain::models::child::Child as DomainChild,
+        domain::{
+            models::child::Child as DomainChild,
+            commands::child::{CreateChildCommand, SetActiveChildCommand},
+        },
         storage::{
-            csv::{child_repository::ChildRepository, connection::CsvConnection},
-            ChildStorage,
+            csv::{connection::CsvConnection},
         },
     };
     // Tests now use domain models instead of shared types
 
     async fn create_test_service() -> (TransactionService<CsvConnection>, Arc<CsvConnection>) {
-        let connection = Arc::new(CsvConnection::new_for_test().await.unwrap());
-        let child_repo = ChildRepository::new(connection.clone());
-        let child_service = ChildService::new(child_repo);
+        let connection = Arc::new(CsvConnection::new_for_testing().await.unwrap());
+        let child_service = ChildService::new(connection.clone());
         let allowance_service = AllowanceService::new(connection.clone());
         let balance_service = BalanceService::new(connection.clone());
         let transaction_service = TransactionService::new(
@@ -491,28 +492,27 @@ mod tests {
     }
 
     async fn create_test_child(
-        child_repo: &ChildRepository,
+        child_service: &ChildService,
         child_name: &str,
     ) -> Result<DomainChild> {
-        let child = DomainChild {
-            id: child_name.to_string(),
+        let create_child_command = CreateChildCommand {
             name: child_name.to_string(),
             birthdate: "2015-01-01".to_string(),
-            created_at: "2025-01-01T00:00:00Z".to_string(),
-            updated_at: "2025-01-01T00:00:00Z".to_string(),
         };
-        child_repo.add_child(&child).await?;
-        Ok(child)
+        let result = child_service.create_child(create_child_command).await?;
+        Ok(result.child)
     }
 
     #[tokio::test]
     async fn test_create_transaction_basic() {
-        let (service, conn) = create_test_service().await;
-        let child_repo = conn.create_child_repository();
-        let _test_child = create_test_child(&child_repo, "test_child").await.unwrap();
+        let (service, _conn) = create_test_service().await;
+        let test_child = create_test_child(&service.child_service, "test_child").await.unwrap();
+        let set_active_command = SetActiveChildCommand {
+            child_id: test_child.id.clone(),
+        };
         service
             .child_service
-            .set_active_child("test_child".to_string())
+            .set_active_child(set_active_command)
             .await
             .unwrap();
 

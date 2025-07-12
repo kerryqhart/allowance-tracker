@@ -636,8 +636,8 @@ mod tests {
             amount: 10.0,
             day_of_week: 0,
             is_active: true,
-            created_at: chrono::Utc::now(),
-            updated_at: chrono::Utc::now(),
+            created_at: chrono::Utc::now().to_rfc3339(),
+            updated_at: chrono::Utc::now().to_rfc3339(),
         };
 
         let days = [

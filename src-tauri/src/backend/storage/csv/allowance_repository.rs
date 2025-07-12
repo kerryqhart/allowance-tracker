@@ -296,8 +296,8 @@ mod tests {
             amount: 10.0,
             day_of_week: 1, // Monday
             is_active: true,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
+            created_at: Utc::now().to_rfc3339(),
+            updated_at: Utc::now().to_rfc3339(),
         };
         
         // Store the config
@@ -325,8 +325,8 @@ mod tests {
             amount: 10.0,
             day_of_week: 1, // Monday
             is_active: true,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
+            created_at: Utc::now().to_rfc3339(),
+            updated_at: Utc::now().to_rfc3339(),
         };
         
         // Store the initial config
@@ -335,7 +335,7 @@ mod tests {
         // Update the config
         config.amount = 15.0;
         config.day_of_week = 5; // Friday
-        config.updated_at = Utc::now();
+        config.updated_at = Utc::now().to_rfc3339();
         
         repo.update_allowance_config(&config).await.unwrap();
         
@@ -355,8 +355,8 @@ mod tests {
             amount: 10.0,
             day_of_week: 1, // Monday
             is_active: true,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
+            created_at: Utc::now().to_rfc3339(),
+            updated_at: Utc::now().to_rfc3339(),
         };
         
         // Store the config
@@ -398,8 +398,8 @@ mod tests {
             amount: 10.0,
             day_of_week: 1,
             is_active: true,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
+            created_at: Utc::now().to_rfc3339(),
+            updated_at: Utc::now().to_rfc3339(),
         };
         
         let config2 = DomainAllowanceConfig {
@@ -408,8 +408,8 @@ mod tests {
             amount: 15.0,
             day_of_week: 5,
             is_active: false,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
+            created_at: Utc::now().to_rfc3339(),
+            updated_at: Utc::now().to_rfc3339(),
         };
         
         repo.store_allowance_config(&config1).await.unwrap();
@@ -435,8 +435,8 @@ mod tests {
             amount: 10.0,
             day_of_week: 1,
             is_active: true,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
+            created_at: Utc::now().to_rfc3339(),
+            updated_at: Utc::now().to_rfc3339(),
         };
         
         // Storing config for nonexistent child should fail

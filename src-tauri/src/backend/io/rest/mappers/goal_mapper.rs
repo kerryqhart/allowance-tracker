@@ -155,7 +155,7 @@ mod tests {
         assert_eq!(domain_goal.child_id, shared_goal.child_id);
         assert_eq!(domain_goal.description, shared_goal.description);
         assert_eq!(domain_goal.target_amount, shared_goal.target_amount);
-        assert_eq!(domain_goal.state, shared_goal.state);
+        assert_eq!(domain_goal.state, GoalMapper::goal_state_to_domain(shared_goal.state));
         assert_eq!(domain_goal.created_at, shared_goal.created_at);
         assert_eq!(domain_goal.updated_at, shared_goal.updated_at);
     }
@@ -169,7 +169,7 @@ mod tests {
         assert_eq!(shared_goal.child_id, domain_goal.child_id);
         assert_eq!(shared_goal.description, domain_goal.description);
         assert_eq!(shared_goal.target_amount, domain_goal.target_amount);
-        assert_eq!(shared_goal.state, domain_goal.state);
+        assert_eq!(shared_goal.state, GoalMapper::goal_state_to_dto(domain_goal.state));
         assert_eq!(shared_goal.created_at, domain_goal.created_at);
         assert_eq!(shared_goal.updated_at, domain_goal.updated_at);
     }

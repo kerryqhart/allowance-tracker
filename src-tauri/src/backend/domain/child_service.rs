@@ -250,7 +250,7 @@ mod tests {
 
     async fn setup_test() -> ChildService {
         let temp_dir = tempdir().unwrap();
-        let conn = CsvConnection::new(temp_dir.path().to_path_buf()).await.unwrap();
+        let conn = CsvConnection::new(temp_dir.path().to_path_buf()).unwrap();
         ChildService::new(Arc::new(conn))
     }
 

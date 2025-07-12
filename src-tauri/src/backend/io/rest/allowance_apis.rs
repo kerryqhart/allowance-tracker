@@ -112,8 +112,8 @@ mod tests {
         let transaction_table_service = crate::backend::domain::TransactionTableService::new();
         let money_management_service = crate::backend::domain::MoneyManagementService::new();
         let parental_control_service = crate::backend::domain::ParentalControlService::new(db_conn.clone());
-        let goal_service = crate::backend::domain::GoalService::new(db_conn.clone());
-        let data_directory_service = crate::backend::domain::DataDirectoryService::new(db_conn);
+        let goal_service = crate::backend::domain::GoalService::new(db_conn.clone(), child_service.clone(), allowance_service.clone(), transaction_service.clone(), balance_service.clone());
+        let data_directory_service = crate::backend::domain::DataDirectoryService::new(db_conn, Arc::new(child_service.clone()));
 
         AppState {
             transaction_service,
@@ -126,6 +126,7 @@ mod tests {
             balance_service,
             goal_service,
             data_directory_service,
+            export_service: crate::backend::domain::ExportService::new(),
         }
     }
 

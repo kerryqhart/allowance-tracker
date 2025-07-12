@@ -577,37 +577,38 @@ mod tests {
     #[tokio::test]
     async fn test_full_flow() {
         let app_state = setup_test_app_state().await;
-        let app_state_tauri = tauri::State::from(app_state);
 
-        // 1. Create a child
-        let create_child_req = CreateChildRequest {
+        // 1. Create a child directly using the domain services
+        let create_child_command = crate::backend::domain::commands::child::CreateChildCommand {
             name: "Test Child".to_string(),
             birthdate: "2015-01-01".to_string(),
         };
-        let create_child_res = create_child(app_state_tauri.clone(), create_child_req)
-            .await
-            .unwrap();
+        let create_child_res = app_state.child_service.create_child(create_child_command).await.unwrap();
         let child_id = create_child_res.child.id;
 
         // 2. Set active child
-        let set_active_req = SetActiveChildRequest { child_id: child_id.clone() };
-        set_active_child(app_state_tauri.clone(), set_active_req)
-            .await
-            .unwrap();
+        let set_active_command = crate::backend::domain::commands::child::SetActiveChildCommand {
+            child_id: child_id.clone(),
+        };
+        app_state.child_service.set_active_child(set_active_command).await.unwrap();
 
         // 3. Add money
-        let add_money_req = AddMoneyRequest {
-            amount: 100.0,
+        let add_money_command = crate::backend::domain::commands::transactions::CreateTransactionCommand {
             description: "Initial deposit".to_string(),
+            amount: 100.0,
             date: None,
         };
-        add_money(app_state_tauri.clone(), add_money_req)
-            .await
-            .unwrap();
+        app_state.transaction_service.create_transaction(add_money_command).await.unwrap();
 
         // 4. Check transactions
-        let transactions = get_transactions(app_state_tauri.clone(), None).await.unwrap();
-        assert_eq!(transactions.formatted_transactions.len(), 1);
-        assert_eq!(transactions.formatted_transactions[0].amount, 100.0);
+        let query = crate::backend::domain::commands::transactions::TransactionListQuery {
+            after: None,
+            limit: Some(10),
+            start_date: None,
+            end_date: None,
+        };
+        let transactions = app_state.transaction_service.list_transactions(query).await.unwrap();
+        assert_eq!(transactions.transactions.len(), 1);
+        assert_eq!(transactions.transactions[0].amount, 100.0);
     }
 }

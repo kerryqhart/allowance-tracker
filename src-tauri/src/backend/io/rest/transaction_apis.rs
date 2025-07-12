@@ -143,8 +143,8 @@ mod tests {
         let transaction_table_service = TransactionTableService::new();
         let money_management_service = MoneyManagementService::new();
         let parental_control_service = crate::backend::domain::ParentalControlService::new(db.clone());
-        let goal_service = crate::backend::domain::GoalService::new(db.clone());
-        let data_directory_service = crate::backend::domain::DataDirectoryService::new(db.clone());
+        let goal_service = crate::backend::domain::GoalService::new(db.clone(), child_service.clone(), allowance_service.clone(), transaction_service.clone(), balance_service.clone());
+        let data_directory_service = crate::backend::domain::DataDirectoryService::new(db.clone(), Arc::new(child_service.clone()));
         
         // Create a test child and set as active using domain commands
         use crate::backend::domain::commands::child::{CreateChildCommand, SetActiveChildCommand};
@@ -173,6 +173,7 @@ mod tests {
             balance_service,
             goal_service,
             data_directory_service,
+            export_service: crate::backend::domain::ExportService::new(),
         }
     }
 

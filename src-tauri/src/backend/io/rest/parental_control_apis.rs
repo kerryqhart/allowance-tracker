@@ -80,8 +80,8 @@ mod tests {
         let allowance_service = crate::backend::domain::AllowanceService::new(db.clone());
         let balance_service = crate::backend::domain::BalanceService::new(db.clone());
         let transaction_service = TransactionService::new(db.clone(), child_service.clone(), allowance_service.clone(), balance_service.clone());
-        let goal_service = crate::backend::domain::GoalService::new(db.clone());
-        let data_directory_service = crate::backend::domain::DataDirectoryService::new(db.clone());
+        let goal_service = crate::backend::domain::GoalService::new(db.clone(), child_service.clone(), allowance_service.clone(), transaction_service.clone(), balance_service.clone());
+        let data_directory_service = crate::backend::domain::DataDirectoryService::new(db.clone(), Arc::new(child_service.clone()));
         
         let app_state = AppState {
             transaction_service,
@@ -94,6 +94,7 @@ mod tests {
             balance_service,
             goal_service,
             data_directory_service,
+            export_service: crate::backend::domain::ExportService::new(),
         };
 
         router().with_state(app_state)
