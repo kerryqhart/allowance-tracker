@@ -83,109 +83,21 @@ pub async fn export_transactions_csv(
 ) -> impl IntoResponse {
     info!("POST /api/export/csv - request: {:?}", request);
 
-    let child_id_to_use = if let Some(id) = request.child_id {
-        id
-    } else {
-        match state.child_service.get_active_child().await {
-            Ok(response) => {
-                if let Some(child) = response.active_child.child {
-                    child.id
-                } else {
-                    return (StatusCode::BAD_REQUEST, Json("No active child set and no child_id provided")).into_response();
-                }
-            },
-            Err(e) => {
-                error!("Failed to get active child for export: {}", e);
-                return (StatusCode::INTERNAL_SERVER_ERROR, "Error retrieving active child").into_response();
-            }
+    // Use the new orchestration method from export service
+    match state.export_service.export_transactions_csv(
+        request,
+        &state.child_service,
+        &state.transaction_service,
+    ).await {
+        Ok(response) => {
+            info!("✅ Export CSV operation completed successfully");
+            (StatusCode::OK, Json(response)).into_response()
         }
-    };
-
-    // Get the child details for the filename
-    let get_child_command = crate::backend::domain::commands::child::GetChildCommand {
-        child_id: child_id_to_use.clone(),
-    };
-    let child = match state.child_service.get_child(get_child_command).await {
-        Ok(result) => match result.child {
-            Some(child) => child,
-            None => {
-                error!("Child not found: {}", child_id_to_use);
-                return (StatusCode::NOT_FOUND, "Child not found").into_response();
-            }
-        },
         Err(e) => {
-            error!("Failed to get child details: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "Error retrieving child details").into_response();
+            error!("❌ Failed to export transactions: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, "Failed to export transactions").into_response()
         }
-    };
-
-    // Get all transactions for the child (no pagination for export)
-    let domain_query = TransactionListQuery {
-        after: None,
-        limit: Some(10000),
-        start_date: None,
-        end_date: None,
-    };
-
-    let domain_res = match state.transaction_service.list_transactions_domain(domain_query).await {
-        Ok(res) => res,
-        Err(e) => {
-            error!("Failed to get transactions for export: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "Error retrieving transactions").into_response();
-        }
-    };
-
-    let mut transactions: Vec<Transaction> = domain_res
-        .transactions
-        .into_iter()
-        .map(TransactionMapper::to_dto)
-        .collect();
-    // Sort chronologically (oldest first)
-    transactions.sort_by(|a, b| a.date.cmp(&b.date));
-
-    // Generate CSV content
-    let mut csv_content = String::new();
-    csv_content.push_str("transaction_id,transaction_date,description,amount\n");
-
-    for (index, transaction) in transactions.iter().enumerate() {
-        // Parse the date and format as yyyy/mm/dd
-        let formatted_date = match DateTime::parse_from_rfc3339(&transaction.date) {
-            Ok(dt) => dt.format("%Y/%m/%d").to_string(),
-            Err(_) => {
-                // Fallback to original date if parsing fails
-                transaction.date.clone()
-            }
-        };
-
-        // Format the CSV row
-        let row = format!(
-            "{},{},\"{}\",{:.2}\n",
-            index + 1, // Simple incrementing integer as requested
-            formatted_date,
-            transaction.description.replace("\"", "\"\""), // Escape quotes in description
-            transaction.amount
-        );
-        csv_content.push_str(&row);
     }
-
-    // Generate filename with current date
-    let now = Utc::now();
-    let filename = format!(
-        "{}_transactions_{}.csv",
-        child.name.replace(" ", "_").to_lowercase(),
-        now.format("%Y%m%d")
-    );
-
-    let response = ExportDataResponse {
-        csv_content,
-        filename,
-        transaction_count: transactions.len(),
-        child_name: child.name,
-    };
-
-    info!("Successfully exported {} transactions for child: {} - generated CSV content ({} bytes) with filename: {}", 
-          response.transaction_count, response.child_name, response.csv_content.len(), response.filename);
-    (StatusCode::OK, Json(response)).into_response()
 }
 
 /// Write exported data to a file
@@ -221,192 +133,27 @@ pub async fn export_to_path(
 ) -> impl IntoResponse {
     info!("POST /api/export/to-path - custom_path: {:?}", request.custom_path);
 
-    // First, get the export data
-    let export_request = ExportDataRequest {
-        child_id: request.child_id.clone(),
-    };
-
-    // Generate the CSV content using existing logic
-    let export_response = match export_transactions_csv_internal(state, export_request).await {
-        Ok(response) => response,
+    // Use the new orchestration method from export service
+    match state.export_service.export_to_path(
+        request,
+        &state.child_service,
+        &state.transaction_service,
+    ).await {
+        Ok(response) => {
+            info!("✅ Export to path operation completed successfully");
+            (StatusCode::OK, Json(response)).into_response()
+        }
         Err(e) => {
-            error!("Failed to generate export data: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, Json(ExportToPathResponse {
+            error!("❌ Failed to export to path: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(ExportToPathResponse {
                 success: false,
-                message: format!("Failed to generate export data: {}", e),
+                message: format!("Failed to export to path: {}", e),
                 file_path: String::new(),
                 transaction_count: 0,
                 child_name: String::new(),
-            })).into_response();
-        }
-    };
-
-    // Determine the export directory
-    let export_dir = match request.custom_path.clone() {
-        Some(custom_path) if !custom_path.trim().is_empty() => {
-            // Basic path sanitization: remove quotes, trim whitespace, handle common issues
-            let cleaned_path = sanitize_path(&custom_path);
-            std::path::PathBuf::from(cleaned_path)
-        }
-        _ => {
-            // Use default location: Documents folder
-            match dirs::document_dir() {
-                Some(docs_dir) => docs_dir,
-                None => {
-                    // Fallback to home directory if Documents not available
-                    match dirs::home_dir() {
-                        Some(home_dir) => home_dir,
-                        None => {
-                            error!("Could not determine default export directory");
-                            return (StatusCode::INTERNAL_SERVER_ERROR, Json(ExportToPathResponse {
-                                success: false,
-                                message: "Failed to determine export directory".to_string(),
-                                file_path: String::new(),
-                                transaction_count: 0,
-                                child_name: String::new(),
-                            })).into_response();
-                        }
-                    }
-                }
-            }
-        }
-    };
-
-    // Create the full file path
-    let file_path = export_dir.join(&export_response.filename);
-    
-    // Ensure the directory exists
-    if let Some(parent_dir) = file_path.parent() {
-        if let Err(e) = fs::create_dir_all(parent_dir) {
-            error!("Failed to create export directory {:?}: {}", parent_dir, e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, Json(ExportToPathResponse {
-                success: false,
-                message: format!("Failed to create export directory: {}", e),
-                file_path: parent_dir.to_string_lossy().to_string(),
-                transaction_count: 0,
-                child_name: String::new(),
-            })).into_response();
-        }
-    }
-
-    // Write the file
-    match fs::write(&file_path, &export_response.csv_content) {
-        Ok(_) => {
-            let file_path_str = file_path.to_string_lossy().to_string();
-            info!("Successfully exported {} transactions for {} to: {}", 
-                  export_response.transaction_count, export_response.child_name, file_path_str);
-            
-            (StatusCode::OK, Json(ExportToPathResponse {
-                success: true,
-                message: format!("File exported successfully to: {}", file_path_str),
-                file_path: file_path_str,
-                transaction_count: export_response.transaction_count,
-                child_name: export_response.child_name,
-            })).into_response()
-        }
-        Err(e) => {
-            error!("Failed to write export file to {:?}: {}", file_path, e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(ExportToPathResponse {
-                success: false,
-                message: format!("Failed to write export file: {}", e),
-                file_path: file_path.to_string_lossy().to_string(),
-                transaction_count: 0,
-                child_name: String::new(),
             })).into_response()
         }
     }
-}
-
-// Helper function to extract the main logic for reuse
-async fn export_transactions_csv_internal(
-    state: AppState,
-    request: ExportDataRequest,
-) -> Result<ExportDataResponse, String> {
-    let child_id_to_use = if let Some(id) = request.child_id {
-        id
-    } else {
-        match state.child_service.get_active_child().await {
-            Ok(response) => {
-                if let Some(child) = response.active_child.child {
-                    child.id
-                } else {
-                    return Err("No active child found".to_string());
-                }
-            },
-            Err(e) => return Err(format!("Failed to get active child: {}", e)),
-        }
-    };
-
-    // Get the child details for the filename
-    let get_child_command = crate::backend::domain::commands::child::GetChildCommand {
-        child_id: child_id_to_use.clone(),
-    };
-    let child = match state.child_service.get_child(get_child_command).await {
-        Ok(result) => match result.child {
-            Some(child) => child,
-            None => return Err(format!("Child not found: {}", child_id_to_use)),
-        },
-        Err(e) => return Err(format!("Failed to get child details: {}", e)),
-    };
-
-    let domain_query = TransactionListQuery {
-        after: None,
-        limit: Some(10000),
-        start_date: None,
-        end_date: None,
-    };
-
-    let domain_res = match state.transaction_service.list_transactions_domain(domain_query).await {
-        Ok(res) => res,
-        Err(e) => return Err(format!("Failed to get transactions: {}", e)),
-    };
-    let mut transactions: Vec<Transaction> = domain_res
-        .transactions
-        .into_iter()
-        .map(TransactionMapper::to_dto)
-        .collect();
-    // Sort chronologically
-    transactions.sort_by(|a, b| a.date.cmp(&b.date));
-
-    // Generate CSV content
-    let mut csv_content = String::new();
-    csv_content.push_str("transaction_id,transaction_date,description,amount\n");
-
-    for (index, transaction) in transactions.iter().enumerate() {
-        // Parse the date and format as yyyy/mm/dd
-        let formatted_date = match DateTime::parse_from_rfc3339(&transaction.date) {
-            Ok(dt) => dt.format("%Y/%m/%d").to_string(),
-            Err(_) => {
-                // Fallback to original date if parsing fails
-                transaction.date.clone()
-            }
-        };
-
-        // Format the CSV row
-        let row = format!(
-            "{},{},\"{}\",{:.2}\n",
-            index + 1, // Simple incrementing integer as requested
-            formatted_date,
-            transaction.description.replace("\"", "\"\""), // Escape quotes in description
-            transaction.amount
-        );
-        csv_content.push_str(&row);
-    }
-
-    // Generate filename with current date
-    let now = Utc::now();
-    let filename = format!(
-        "{}_transactions_{}.csv",
-        child.name.replace(" ", "_").to_lowercase(),
-        now.format("%Y%m%d")
-    );
-
-    Ok(ExportDataResponse {
-        csv_content,
-        filename,
-        transaction_count: transactions.len(),
-        child_name: child.name,
-    })
 }
 
 #[cfg(test)]

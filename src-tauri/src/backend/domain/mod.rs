@@ -62,6 +62,7 @@ pub mod allowance_service;
 pub mod balance_service;
 pub mod goal_service;
 pub mod data_directory_service;
+pub mod export_service;
 pub mod commands;
 pub mod models;
 
@@ -74,4 +75,5 @@ pub use allowance_service::*;
 pub use balance_service::*;
 pub use goal_service::*;
 pub use data_directory_service::*;
+pub use export_service::*;
 pub use commands::*; 

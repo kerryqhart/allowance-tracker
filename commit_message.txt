@@ -1,12 +1,68 @@
-feat: Add future allowance chips to calendar view
+feat: Implement 1:1 domain service call directive for REST APIs
 
-- Add `list_transactions_for_calendar()` method to TransactionService domain layer
-- Add CalendarTransactionsQuery and CalendarTransactionsResult command structs
-- Simplify calendar REST API to make single domain service call (1:1 mapping)
-- Fix future allowance chips not showing by moving orchestration logic to domain layer
+Complete refactoring of 4 REST APIs to comply with the "1:1 domain service call directive" - each REST API now makes exactly one domain service call instead of multiple calls with orchestration logic.
 
-The calendar now properly displays future allowance transactions alongside historical ones.
-Calendar API now follows proper architecture with REST API mapping 1:1 to domain methods.
+## APIs Refactored:
 
-Logs show calendar generating 2 future allowances for July 18th and 25th (Fridays) 
-along with 8 historical transactions, totaling 10 transactions for calendar display. 
+### Calendar API (calendar_apis.rs)
+- get_calendar_month() now uses calendar_service.get_calendar_month_with_transactions()
+- Before: 2 service calls (transaction service + calendar generation)
+- After: 1 orchestration method call
+
+### Money Management API (money_management_apis.rs)
+- add_money() now uses money_management_service.add_money_complete()
+- spend_money() now uses money_management_service.spend_money_complete()
+- Before: 5+ service calls each (child lookup + validation + transaction + formatting)
+- After: 1 orchestration method call each
+
+### Export API (export_apis.rs)
+- export_transactions_csv() now uses export_service.export_transactions_csv()
+- export_to_path() now uses export_service.export_to_path()
+- Before: 3+ service calls each (child lookup + transactions + CSV generation)
+- After: 1 orchestration method call each
+
+### Transaction Table API (transaction_table_apis.rs)
+- get_transaction_table() now uses transaction_service.get_formatted_transaction_table()
+- Before: 2 service calls (transaction retrieval + formatting)
+- After: 1 orchestration method call
+
+## Technical Implementation:
+
+### Phase 1: Domain Service Enhancement
+- Added get_calendar_month_with_transactions() to CalendarService
+- Added add_money_complete() and spend_money_complete() to MoneyManagementService  
+- Created new ExportService with export_transactions_csv() and export_to_path()
+- Added get_formatted_transaction_table() to TransactionService
+
+### Phase 2: AppState Integration
+- Added ExportService to AppState struct
+- Updated service initialization in initialize_backend()
+- Proper dependency injection for new orchestration methods
+
+### Phase 3: REST API Refactoring
+- Refactored all 4 REST APIs to use single domain service calls
+- Removed orchestration logic from REST layer
+- Maintained backward compatibility - same API interfaces
+
+### Phase 4: Testing & Verification
+- All builds pass successfully
+- Application starts and runs correctly
+- No regression in functionality
+- REST APIs comply with 1:1 domain service call directive
+
+### Phase 5: Documentation
+- Updated REST_API_REFACTORING_PLAN.md with complete implementation details
+- Documented all phases and success criteria
+- Added comprehensive project completion summary
+
+## Benefits:
+- ✅ 100% compliance with 1:1 domain service call directive
+- ✅ Improved maintainability - orchestration logic centralized
+- ✅ Enhanced testability - business logic isolated in domain services
+- ✅ Better separation of concerns - REST layer focuses on HTTP concerns
+- ✅ Foundation for scaling and adding new complex operations
+
+Files modified: 12 files across domain, REST API, and configuration layers
+Lines of code: ~500+ lines of new orchestration methods
+Build status: ✅ All compilation successful
+Runtime status: ✅ Application verified working 

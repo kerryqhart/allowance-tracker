@@ -9,7 +9,14 @@ use shared::{Transaction, TransactionType, CalendarMonth, CalendarDay, CalendarD
 use std::collections::HashMap;
 use chrono::{Local, Datelike};
 use std::sync::{Arc, Mutex};
-use log;
+use log::{self, info, error};
+
+// Add imports for the new orchestration method
+use crate::backend::domain::transaction_service::TransactionService;
+use crate::backend::domain::commands::transactions::CalendarTransactionsQuery;
+use crate::backend::io::rest::mappers::transaction_mapper::TransactionMapper;
+use crate::backend::storage::Connection;
+use anyhow::Result;
 
 /// Calendar service that handles all calendar-related business logic
 #[derive(Clone)]
@@ -25,6 +32,48 @@ impl CalendarService {
         Self {
             current_focus_date: Arc::new(Mutex::new(CalendarFocusDate::default())),
         }
+    }
+
+    /// Get calendar month with transactions - orchestrates transaction retrieval and calendar generation
+    /// This method moves the orchestration logic from the REST API layer into the domain layer
+    pub async fn get_calendar_month_with_transactions<C: Connection>(
+        &self,
+        month: u32,
+        year: u32,
+        transaction_service: &TransactionService<C>,
+    ) -> Result<CalendarMonth> {
+        info!("🗓️ CALENDAR: Getting calendar month with transactions for {}/{}", month, year);
+
+        // Step 1: Get transactions for calendar (including future allowances)
+        let query = CalendarTransactionsQuery { month, year };
+        
+        let result = transaction_service.list_transactions_for_calendar(query).await?;
+        
+        info!("🗓️ CALENDAR: Domain service returned {} transactions for calendar", result.transactions.len());
+
+        // Step 2: Convert domain transactions to DTOs for calendar service
+        let dto_transactions: Vec<Transaction> = result
+            .transactions
+            .into_iter()
+            .map(TransactionMapper::to_dto)
+            .collect();
+        
+        info!("🗓️ CALENDAR: Total transactions for calendar: {} transactions", dto_transactions.len());
+        for (i, tx) in dto_transactions.iter().enumerate().take(5) {
+            info!("🗓️ CALENDAR: DTO Transaction {}: id={}, date={}, amount={}, description={}", 
+                 i + 1, tx.id, tx.date, tx.amount, tx.description);
+        }
+
+        // Step 3: Generate calendar month using existing method
+        let calendar_month = self.generate_calendar_month(month, year, dto_transactions);
+        
+        info!("🗓️ CALENDAR: Generated calendar with {} days", calendar_month.days.len());
+        let total_transaction_count: usize = calendar_month.days.iter()
+            .map(|day| day.transactions.len())
+            .sum();
+        info!("🗓️ CALENDAR: Total transactions in calendar days: {}", total_transaction_count);
+
+        Ok(calendar_month)
     }
 
     /// Generate a calendar month view with transaction data and future allowances

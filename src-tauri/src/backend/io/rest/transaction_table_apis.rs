@@ -40,30 +40,17 @@ async fn get_transaction_table(
         end_date: None,
     };
 
-    match state.transaction_service.list_transactions_domain(domain_query).await {
-        Ok(result) => {
-            let dto_transactions: Vec<Transaction> = result
-                .transactions
-                .into_iter()
-                .map(TransactionMapper::to_dto)
-                .collect();
-
-            let formatted_transactions = state
-                .transaction_table_service
-                .format_transactions_for_table(&dto_transactions);
-
-            let table_response = TransactionTableResponse {
-                formatted_transactions,
-                pagination: PaginationInfo {
-                    has_more: result.pagination.has_more,
-                    next_cursor: result.pagination.next_cursor,
-                },
-            };
-
+    // Use the new orchestration method from transaction service
+    match state.transaction_service.get_formatted_transaction_table(
+        domain_query,
+        &state.transaction_table_service,
+    ).await {
+        Ok(table_response) => {
+            info!("✅ Transaction table operation completed successfully");
             (StatusCode::OK, Json(table_response)).into_response()
         }
         Err(e) => {
-            error!("Failed to get transaction table data: {}", e);
+            error!("❌ Failed to get transaction table data: {}", e);
             (StatusCode::INTERNAL_SERVER_ERROR, "Error getting transaction table").into_response()
         }
     }

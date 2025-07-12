@@ -42,49 +42,26 @@ async fn get_calendar_month(
 ) -> impl IntoResponse {
     info!("🗓️ GET /api/calendar - request: {:?}", request);
 
-    // Use the domain service to get transactions for calendar (including future allowances)
-    let query = crate::backend::domain::commands::transactions::CalendarTransactionsQuery {
-        month: request.month,
-        year: request.year,
-    };
-
-    let result = match state.transaction_service.list_transactions_for_calendar(query).await {
-        Ok(res) => {
-            info!("🗓️ Domain service returned {} transactions for calendar", res.transactions.len());
-            res
-        },
-        Err(e) => {
-            error!("❌ Failed to get transactions for calendar: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, "Error getting transactions").into_response();
-        }
-    };
-
-    // Convert domain transactions to DTOs for calendar service
-    let dto_transactions: Vec<Transaction> = result
-        .transactions
-        .into_iter()
-        .map(TransactionMapper::to_dto)
-        .collect();
-    
-    info!("🗓️ Total transactions for calendar: {} transactions", dto_transactions.len());
-    for (i, tx) in dto_transactions.iter().enumerate().take(5) {
-        info!("🗓️ DTO Transaction {}: id={}, date={}, amount={}, description={}", 
-             i + 1, tx.id, tx.date, tx.amount, tx.description);
-    }
-
-    let calendar_month = state.calendar_service.generate_calendar_month(
+    // Use the new orchestration method from calendar service
+    match state.calendar_service.get_calendar_month_with_transactions(
         request.month,
         request.year,
-        dto_transactions,
-    );
-    
-    info!("🗓️ Generated calendar with {} days", calendar_month.days.len());
-    let total_transaction_count: usize = calendar_month.days.iter()
-        .map(|day| day.transactions.len())
-        .sum();
-    info!("🗓️ Total transactions in calendar days: {}", total_transaction_count);
-
-    (StatusCode::OK, Json(calendar_month)).into_response()
+        &state.transaction_service,
+    ).await {
+        Ok(calendar_month) => {
+            info!("✅ Calendar generated with {} days", calendar_month.days.len());
+            let total_transaction_count: usize = calendar_month.days.iter()
+                .map(|day| day.transactions.len())
+                .sum();
+            info!("🗓️ Total transactions in calendar days: {}", total_transaction_count);
+            
+            (StatusCode::OK, Json(calendar_month)).into_response()
+        }
+        Err(e) => {
+            error!("❌ Failed to get calendar data: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, "Error getting calendar data").into_response()
+        }
+    }
 }
 
 /// Get current date information from the backend

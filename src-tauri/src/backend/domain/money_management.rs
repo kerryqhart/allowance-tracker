@@ -7,12 +7,20 @@
 
 use anyhow::Result;
 use shared::{
-    AddMoneyRequest, CreateTransactionRequest, MoneyFormState, MoneyFormValidation,
-    MoneyManagementConfig, MoneyValidationError, SpendMoneyRequest,
+    AddMoneyRequest, AddMoneyResponse, SpendMoneyRequest, SpendMoneyResponse,
+    CreateTransactionRequest, MoneyFormState, MoneyFormValidation,
+    MoneyManagementConfig, MoneyValidationError,
 };
 use chrono::{DateTime, Utc, Duration, FixedOffset, NaiveDate, TimeZone};
 use time::OffsetDateTime;
 use crate::backend::domain::commands::transactions::CreateTransactionCommand;
+use log::{info, error};
+
+// Add imports for the new orchestration methods
+use crate::backend::domain::child_service::ChildService;
+use crate::backend::domain::transaction_service::TransactionService;
+use crate::backend::io::rest::mappers::transaction_mapper::TransactionMapper;
+use crate::backend::storage::Connection;
 
 /// Money management service that handles all money-related business logic
 #[derive(Clone)]
@@ -25,6 +33,194 @@ impl MoneyManagementService {
         Self {
             config: MoneyManagementConfig::default(),
         }
+    }
+
+    /// Add money with complete orchestration - handles all business logic for adding money
+    /// This method moves the orchestration logic from the REST API layer into the domain layer
+    pub async fn add_money_complete<C: Connection>(
+        &self,
+        request: AddMoneyRequest,
+        child_service: &ChildService,
+        transaction_service: &TransactionService<C>,
+    ) -> Result<AddMoneyResponse> {
+        info!("💰 MONEY MANAGEMENT: Adding money - description: {}, amount: {}", request.description, request.amount);
+
+        // Step 1: Check for active child first
+        info!("🔍 MONEY MANAGEMENT: Checking for active child...");
+        let active_child_response = child_service.get_active_child().await?;
+        
+        let active_child = match active_child_response.active_child.child {
+            Some(child) => {
+                info!("✅ MONEY MANAGEMENT: Active child found: {}", child.id);
+                child
+            },
+            None => {
+                error!("❌ MONEY MANAGEMENT: No active child found for add money operation");
+                return Err(anyhow::anyhow!("No active child found. Please select a child first."));
+            }
+        };
+
+        // Step 2: Enhanced validation that includes date validation if provided
+        info!("🔍 MONEY MANAGEMENT: Starting validation with date: {:?}", request.date);
+        let validation = self.validate_add_money_form_with_date(
+            &request.description, 
+            &request.amount.to_string(),
+            request.date.as_deref(),
+            Some(&active_child.created_at.to_rfc3339())
+        );
+
+        info!("🔍 MONEY MANAGEMENT: Validation result - is_valid: {}, errors: {:?}", validation.is_valid, validation.errors);
+
+        if !validation.is_valid {
+            let error_message = self.get_first_error_message(&validation.errors)
+                .unwrap_or_else(|| "Invalid input".to_string());
+            error!("❌ MONEY MANAGEMENT: Validation failed: {}", error_message);
+            return Err(anyhow::anyhow!("Validation failed: {}", error_message));
+        }
+
+        // Step 3: Convert to CreateTransactionRequest
+        info!("🔄 MONEY MANAGEMENT: Converting to CreateTransactionRequest...");
+        let create_request = self.to_create_transaction_request(request.clone());
+        info!("✅ MONEY MANAGEMENT: CreateTransactionRequest: {:?}", create_request);
+
+        // Step 4: Convert DTO to domain command and create transaction
+        let cmd = CreateTransactionCommand {
+            description: create_request.description.clone(),
+            amount: create_request.amount,
+            date: create_request.date.clone(),
+        };
+
+        info!("🚀 MONEY MANAGEMENT: Creating transaction via TransactionService...");
+        let domain_tx = transaction_service.create_transaction_domain(cmd).await?;
+        
+        let transaction = TransactionMapper::to_dto(domain_tx);
+        info!("✅ MONEY MANAGEMENT: Transaction created successfully: {:?}", transaction);
+        
+        // Step 5: Generate success message with backdated handling
+        let success_message = if let Some(date) = &request.date {
+            // Check if this was a backdated transaction
+            match self.is_backdated_transaction(date) {
+                Ok(true) => {
+                    info!("📅 MONEY MANAGEMENT: This was a backdated transaction");
+                    format!("🎉 {} added successfully (backdated to {})!", 
+                                  self.format_positive_amount(transaction.amount),
+                                  date)
+                },
+                _ => {
+                    info!("📅 MONEY MANAGEMENT: This was a current-date transaction");
+                    self.generate_success_message(transaction.amount)
+                }
+            }
+        } else {
+            info!("📅 MONEY MANAGEMENT: No date provided, using current date");
+            self.generate_success_message(transaction.amount)
+        };
+        
+        let formatted_amount = self.format_positive_amount(transaction.amount);
+
+        let response = AddMoneyResponse {
+            transaction_id: transaction.id,
+            success_message: success_message.clone(),
+            new_balance: transaction.balance,
+            formatted_amount,
+        };
+
+        info!("✅ MONEY MANAGEMENT: Sending success response: {:?}", response);
+        Ok(response)
+    }
+
+    /// Spend money with complete orchestration - handles all business logic for spending money
+    /// This method moves the orchestration logic from the REST API layer into the domain layer
+    pub async fn spend_money_complete<C: Connection>(
+        &self,
+        request: SpendMoneyRequest,
+        child_service: &ChildService,
+        transaction_service: &TransactionService<C>,
+    ) -> Result<SpendMoneyResponse> {
+        info!("💸 MONEY MANAGEMENT: Spending money - description: {}, amount: {}", request.description, request.amount);
+
+        // Step 1: Check for active child first
+        info!("🔍 MONEY MANAGEMENT: Checking for active child...");
+        let active_child_response = child_service.get_active_child().await?;
+        
+        let active_child = match active_child_response.active_child.child {
+            Some(child) => {
+                info!("✅ MONEY MANAGEMENT: Active child found: {}", child.id);
+                child
+            },
+            None => {
+                error!("❌ MONEY MANAGEMENT: No active child found for spend money operation");
+                return Err(anyhow::anyhow!("No active child found. Please select a child first."));
+            }
+        };
+
+        // Step 2: Enhanced validation that includes date validation if provided
+        info!("🔍 MONEY MANAGEMENT: Starting validation with date: {:?}", request.date);
+        let validation = self.validate_spend_money_form_with_date(
+            &request.description, 
+            &request.amount.to_string(),
+            request.date.as_deref(),
+            Some(&active_child.created_at.to_rfc3339())
+        );
+
+        info!("🔍 MONEY MANAGEMENT: Validation result - is_valid: {}, errors: {:?}", validation.is_valid, validation.errors);
+
+        if !validation.is_valid {
+            let error_message = self.get_first_error_message(&validation.errors)
+                .unwrap_or_else(|| "Invalid input".to_string());
+            error!("❌ MONEY MANAGEMENT: Validation failed: {}", error_message);
+            return Err(anyhow::anyhow!("Validation failed: {}", error_message));
+        }
+
+        // Step 3: Convert to CreateTransactionRequest (this will make the amount negative)
+        info!("🔄 MONEY MANAGEMENT: Converting to CreateTransactionRequest...");
+        let create_request = self.spend_to_create_transaction_request(request.clone());
+        info!("✅ MONEY MANAGEMENT: CreateTransactionRequest: {:?}", create_request);
+
+        // Step 4: Convert DTO to domain command and create transaction
+        let cmd = CreateTransactionCommand {
+            description: create_request.description.clone(),
+            amount: create_request.amount,
+            date: create_request.date.clone(),
+        };
+
+        info!("🚀 MONEY MANAGEMENT: Creating transaction via TransactionService...");
+        let domain_tx = transaction_service.create_transaction_domain(cmd).await?;
+        
+        let transaction = TransactionMapper::to_dto(domain_tx);
+        info!("✅ MONEY MANAGEMENT: Transaction created successfully: {:?}", transaction);
+        
+        // Step 5: Generate success message with backdated handling
+        let success_message = if let Some(date) = &request.date {
+            // Check if this was a backdated transaction
+            match self.is_backdated_transaction(date) {
+                Ok(true) => {
+                    info!("📅 MONEY MANAGEMENT: This was a backdated transaction");
+                    format!("💸 {} spent successfully (backdated to {})!", 
+                                  self.format_amount(request.amount.abs()),
+                                  date)
+                },
+                _ => {
+                    info!("📅 MONEY MANAGEMENT: This was a current-date transaction");
+                    self.generate_spend_success_message(request.amount)
+                }
+            }
+        } else {
+            info!("📅 MONEY MANAGEMENT: No date provided, using current date");
+            self.generate_spend_success_message(request.amount)
+        };
+        
+        let formatted_amount = self.format_negative_amount(request.amount);
+
+        let response = SpendMoneyResponse {
+            transaction_id: transaction.id,
+            success_message: success_message.clone(),
+            new_balance: transaction.balance,
+            formatted_amount,
+        };
+
+        info!("✅ MONEY MANAGEMENT: Sending success response: {:?}", response);
+        Ok(response)
     }
 
     pub fn with_config(config: MoneyManagementConfig) -> Self {

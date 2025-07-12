@@ -45,7 +45,7 @@ use axum::{
 };
 use tower_http::cors::{Any, CorsLayer};
 use anyhow::Result;
-use crate::backend::domain::{TransactionService, CalendarService, TransactionTableService, MoneyManagementService, child_service::ChildService, ParentalControlService, AllowanceService, BalanceService, GoalService, DataDirectoryService};
+use crate::backend::domain::{TransactionService, CalendarService, TransactionTableService, MoneyManagementService, child_service::ChildService, ParentalControlService, AllowanceService, BalanceService, GoalService, DataDirectoryService, ExportService};
 use crate::backend::storage::CsvConnection;
 use log::info;
 
@@ -64,6 +64,7 @@ pub struct AppState {
     pub balance_service: BalanceService<CsvConnection>,
     pub goal_service: GoalService,
     pub data_directory_service: DataDirectoryService,
+    pub export_service: ExportService,
 }
 
 /// Initialize the backend with all required services
@@ -84,7 +85,8 @@ pub async fn initialize_backend() -> Result<AppState> {
     let balance_service = BalanceService::new(csv_conn.clone());
     let transaction_service = TransactionService::new(csv_conn.clone(), child_service.clone(), allowance_service.clone(), balance_service.clone());
     let goal_service = GoalService::new(csv_conn.clone(), child_service.clone(), allowance_service.clone(), transaction_service.clone(), balance_service.clone());
-    let data_directory_service = DataDirectoryService::new(csv_conn, std::sync::Arc::new(child_service.clone()));
+    let data_directory_service = DataDirectoryService::new(csv_conn.clone(), std::sync::Arc::new(child_service.clone()));
+    let export_service = ExportService::new();
 
     info!("Setting up application state");
     let app_state = AppState {
@@ -98,6 +100,7 @@ pub async fn initialize_backend() -> Result<AppState> {
         balance_service,
         goal_service,
         data_directory_service,
+        export_service,
     };
 
     Ok(app_state)

@@ -16,6 +16,10 @@ use crate::backend::domain::commands::transactions::{CreateTransactionCommand, T
 use anyhow::{anyhow, Result};
 use chrono::{Local, NaiveDate};
 use log::{error, info};
+
+// Add imports for the new orchestration method
+use crate::backend::domain::transaction_table::TransactionTableService;
+use shared::{TransactionTableResponse, PaginationInfo, Transaction};
 // Note: Shared types are now only used at the boundary, converted via mappers
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -175,6 +179,44 @@ impl<C: Connection> TransactionService<C> {
         query: TransactionListQuery,
     ) -> Result<TransactionListResult> {
         self.list_transactions_domain(query).await
+    }
+
+    /// Get formatted transaction table with complete orchestration
+    /// This method moves the orchestration logic from the REST API layer into the domain layer
+    pub async fn get_formatted_transaction_table(
+        &self,
+        query: TransactionListQuery,
+        table_service: &TransactionTableService,
+    ) -> Result<TransactionTableResponse> {
+        info!("📊 TRANSACTION TABLE: Getting formatted transaction table");
+
+        // Step 1: Get transactions from domain service
+        let result = self.list_transactions_domain(query).await?;
+
+        // Step 2: Convert domain transactions to DTOs
+        let dto_transactions: Vec<Transaction> = result
+            .transactions
+            .into_iter()
+            .map(TransactionMapper::to_dto)
+            .collect();
+
+        info!("📊 TRANSACTION TABLE: Retrieved {} transactions for table", dto_transactions.len());
+
+        // Step 3: Format transactions for table display
+        let formatted_transactions = table_service.format_transactions_for_table(&dto_transactions);
+
+        // Step 4: Create complete response
+        let table_response = TransactionTableResponse {
+            formatted_transactions,
+            pagination: PaginationInfo {
+                has_more: result.pagination.has_more,
+                next_cursor: result.pagination.next_cursor,
+            },
+        };
+
+        info!("✅ TRANSACTION TABLE: Successfully formatted {} transactions for table display", table_response.formatted_transactions.len());
+
+        Ok(table_response)
     }
 
     /// List transactions for calendar display, including future allowances
