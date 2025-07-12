@@ -77,7 +77,7 @@ mod tests {
 
     async fn setup_test_state() -> AppState {
         let temp_dir = tempfile::tempdir().unwrap();
-        let db = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
+        let db = Arc::new(CsvConnection::new(temp_dir.path().to_path_buf()).unwrap());
         
         // Create services with proper dependencies
         let child_service = ChildService::new(db.clone());
@@ -138,7 +138,7 @@ mod tests {
     async fn test_add_money_no_active_child() {
         // Create an app state without an active child
         let temp_dir = tempfile::tempdir().unwrap();
-        let db = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
+        let db = Arc::new(CsvConnection::new(temp_dir.path().to_path_buf()).unwrap());
         
         let child_service = ChildService::new(db.clone());
         let allowance_service = crate::backend::domain::AllowanceService::new(db.clone());
@@ -190,7 +190,7 @@ mod tests {
     async fn test_spend_money_no_active_child() {
         // Create an app state without an active child
         let temp_dir = tempfile::tempdir().unwrap();
-        let db = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
+        let db = Arc::new(CsvConnection::new(temp_dir.path().to_path_buf()).unwrap());
         
         let child_service = ChildService::new(db.clone());
         let allowance_service = crate::backend::domain::AllowanceService::new(db.clone());

@@ -28,30 +28,47 @@ impl ChildRepository {
     /// Generate a safe filesystem identifier from a child name
     /// Converts "Emma Smith" -> "Emma_Smith", "José María" -> "Jose_Maria", etc.
     pub fn generate_safe_directory_name(child_name: &str) -> String {
-        child_name
+        let result = child_name
             .chars()
             .map(|c| {
-                if c.is_alphanumeric() {
-                    c.to_ascii_lowercase()
-                } else if c.is_whitespace() {
+                if c.is_whitespace() {
                     '_'
                 } else {
-                    // Replace accented characters and special chars
+                    // Replace accented characters and special chars first
                     match c {
-                        'á' | 'à' | 'ä' | 'â' => 'a',
-                        'é' | 'è' | 'ë' | 'ê' => 'e',
-                        'í' | 'ì' | 'ï' | 'î' => 'i',
-                        'ó' | 'ò' | 'ö' | 'ô' => 'o',
-                        'ú' | 'ù' | 'ü' | 'û' => 'u',
-                        'ñ' => 'n',
-                        'ç' => 'c',
+                        'á' | 'à' | 'ä' | 'â' | 'Á' | 'À' | 'Ä' | 'Â' => 'a',
+                        'é' | 'è' | 'ë' | 'ê' | 'É' | 'È' | 'Ë' | 'Ê' => 'e',
+                        'í' | 'ì' | 'ï' | 'î' | 'Í' | 'Ì' | 'Ï' | 'Î' => 'i',
+                        'ó' | 'ò' | 'ö' | 'ô' | 'Ó' | 'Ò' | 'Ö' | 'Ô' => 'o',
+                        'ú' | 'ù' | 'ü' | 'û' | 'Ú' | 'Ù' | 'Ü' | 'Û' => 'u',
+                        'ñ' | 'Ñ' => 'n',
+                        'ç' | 'Ç' => 'c',
+                        c if c.is_ascii_alphanumeric() => c.to_ascii_lowercase(),
+                        '#' => '_', // Handle common special chars like #
+                        '-' => '_', // Handle dashes
                         _ => '_',
                     }
                 }
             })
-            .collect::<String>()
-            .trim_matches('_')
-            .to_string()
+            .collect::<String>();
+        
+        // Collapse consecutive underscores into single underscores
+        let mut collapsed = String::new();
+        let mut last_was_underscore = false;
+        
+        for c in result.chars() {
+            if c == '_' {
+                if !last_was_underscore {
+                    collapsed.push('_');
+                }
+                last_was_underscore = true;
+            } else {
+                collapsed.push(c);
+                last_was_underscore = false;
+            }
+        }
+        
+        collapsed.trim_matches('_').to_string()
     }
     
     /// Get the path to a child's YAML configuration file

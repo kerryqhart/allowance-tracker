@@ -28,7 +28,7 @@ impl AllowanceConfig {
             4 => "Thursday",
             5 => "Friday",
             6 => "Saturday",
-            _ => "Invalid Day",
+            _ => "Invalid",
         }
     }
     

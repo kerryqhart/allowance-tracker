@@ -375,10 +375,12 @@ mod tests {
     use super::*;
     use crate::backend::domain::models::child::Child as DomainChild;
     use crate::backend::domain::commands::child::CreateChildCommand;
+    use tempfile::tempdir;
 
     async fn setup_test() -> AllowanceService {
-        let db = Arc::new(CsvConnection::new_default().expect("Failed to init test DB"));
-        AllowanceService::new(db)
+        let temp_dir = tempdir().unwrap();
+        let conn = CsvConnection::new(temp_dir.path().to_path_buf()).unwrap();
+        AllowanceService::new(Arc::new(conn))
     }
 
     async fn create_test_child(service: &AllowanceService) -> DomainChild {

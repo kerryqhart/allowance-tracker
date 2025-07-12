@@ -33,7 +33,7 @@ impl ParentalControlAttempt {
     
     /// Generate a new timestamp for the current moment
     pub fn generate_current_timestamp() -> String {
-        Utc::now().to_rfc3339()
+        Utc::now().format("%Y-%m-%dT%H:%M:%S%.fZ").to_string()
     }
     
     /// Check if the attempt was successful

@@ -281,9 +281,12 @@ mod tests {
     fn test_sanitize_path() {
         let service = ExportService::new();
         
-        // Test quote removal
-        assert_eq!(service.sanitize_path("\"~/Documents\""), "~/Documents");
-        assert_eq!(service.sanitize_path("'~/Documents'"), "~/Documents");
+        // Test quote removal and tilde expansion
+        let home_dir = dirs::home_dir().unwrap().to_string_lossy().to_string();
+        let expected_documents = std::path::PathBuf::from(&home_dir).join("Documents").to_string_lossy().to_string();
+        
+        assert_eq!(service.sanitize_path("\"~/Documents\""), expected_documents);
+        assert_eq!(service.sanitize_path("'~/Documents'"), expected_documents);
         
         // Test space handling
         assert_eq!(service.sanitize_path("  /path/to/dir  "), "/path/to/dir");
