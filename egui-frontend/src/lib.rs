@@ -14,4 +14,7 @@
 
 // Include the backend module
 #[path = "../../backend/mod.rs"]
-pub mod backend; 
+pub mod backend;
+
+// Include the UI module
+pub mod ui; 

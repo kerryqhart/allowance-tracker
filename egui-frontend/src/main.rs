@@ -4,7 +4,7 @@ use log::{info, error};
 
 mod app;
 
-use app::AllowanceTrackerApp;
+use allowance_tracker_egui::ui::AllowanceTrackerApp;
 
 fn main() -> Result<(), eframe::Error> {
     // Initialize logging for debugging
