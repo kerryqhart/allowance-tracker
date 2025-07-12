@@ -84,12 +84,19 @@ impl AllowanceTrackerApp {
     
     /// Render the main content area
     fn render_main_content(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            // Left side - Calendar
+        ui.vertical(|ui| {
+            // Top - Calendar
             self.render_calendar_section(ui);
             
-            // Right side - Forms and transactions
-            self.render_actions_section(ui);
+            ui.add_space(10.0);
+            
+            // Middle - Transactions table
+            self.render_transactions_section(ui);
+            
+            ui.add_space(10.0);
+            
+            // Bottom - Money management cards
+            self.render_money_management_section(ui);
         });
     }
     
@@ -97,82 +104,122 @@ impl AllowanceTrackerApp {
     fn render_calendar_section(&mut self, ui: &mut egui::Ui) {
         ui.group(|ui| {
             ui.vertical(|ui| {
-                ui.label(egui::RichText::new("📅 Calendar")
-                    .font(egui::FontId::new(24.0, egui::FontFamily::Proportional))
-                    .strong());
-                
-                // Calendar month/year selector
-                ui.horizontal(|ui| {
-                    if ui.button(egui::RichText::new("⬅")
-                        .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))).clicked() {
-                        if self.selected_month == 1 {
-                            self.selected_month = 12;
-                            self.selected_year -= 1;
-                        } else {
-                            self.selected_month -= 1;
-                        }
-                        self.load_calendar_data();
-                    }
-                    
-                    ui.label(format!("{}/{}", self.selected_month, self.selected_year));
-                    
-                    if ui.button(egui::RichText::new("➡")
-                        .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))).clicked() {
-                        if self.selected_month == 12 {
-                            self.selected_month = 1;
-                            self.selected_year += 1;
-                        } else {
-                            self.selected_month += 1;
-                        }
-                        self.load_calendar_data();
-                    }
+                // Center the calendar title
+                ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+                    ui.label(egui::RichText::new("📅 Calendar")
+                        .font(egui::FontId::new(24.0, egui::FontFamily::Proportional))
+                        .strong());
                 });
                 
-                // Calendar grid placeholder
-                ui.label(egui::RichText::new("📝 Calendar grid will go here")
-                    .font(egui::FontId::new(14.0, egui::FontFamily::Proportional)));
-                ui.label(egui::RichText::new("🎯 This will show transaction chips on each day")
-                    .font(egui::FontId::new(14.0, egui::FontFamily::Proportional)));
+                ui.add_space(10.0);
+                
+                // Center the month/year selector
+                ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+                    ui.horizontal(|ui| {
+                        if ui.button(egui::RichText::new("⬅")
+                            .font(egui::FontId::new(20.0, egui::FontFamily::Proportional))).clicked() {
+                            if self.selected_month == 1 {
+                                self.selected_month = 12;
+                                self.selected_year -= 1;
+                            } else {
+                                self.selected_month -= 1;
+                            }
+                            self.load_calendar_data();
+                        }
+                        
+                        ui.add_space(20.0);
+                        
+                        ui.label(egui::RichText::new(format!("{}/{}", self.selected_month, self.selected_year))
+                            .font(egui::FontId::new(18.0, egui::FontFamily::Proportional))
+                            .strong());
+                        
+                        ui.add_space(20.0);
+                        
+                        if ui.button(egui::RichText::new("➡")
+                            .font(egui::FontId::new(20.0, egui::FontFamily::Proportional))).clicked() {
+                            if self.selected_month == 12 {
+                                self.selected_month = 1;
+                                self.selected_year += 1;
+                            } else {
+                                self.selected_month += 1;
+                            }
+                            self.load_calendar_data();
+                        }
+                    });
+                });
+                
+                ui.add_space(10.0);
+                
+                // Calendar grid placeholder - centered
+                ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+                    ui.label(egui::RichText::new("📝 Calendar grid will go here")
+                        .font(egui::FontId::new(14.0, egui::FontFamily::Proportional)));
+                    ui.label(egui::RichText::new("🎯 This will show transaction chips on each day")
+                        .font(egui::FontId::new(14.0, egui::FontFamily::Proportional)));
+                });
             });
         });
     }
     
-    /// Render the actions section
-    fn render_actions_section(&mut self, ui: &mut egui::Ui) {
+    /// Render the transactions section
+    fn render_transactions_section(&mut self, ui: &mut egui::Ui) {
         ui.group(|ui| {
             ui.vertical(|ui| {
-                ui.label(egui::RichText::new("💰 Money Actions")
-                    .font(egui::FontId::new(24.0, egui::FontFamily::Proportional))
-                    .strong());
-                
-                // Add money button
-                if ui.button(egui::RichText::new("💵 Add Money")
-                    .font(egui::FontId::new(18.0, egui::FontFamily::Proportional))).clicked() {
-                    self.show_add_money_modal = true;
-                }
-                
-                // Spend money button
-                if ui.button(egui::RichText::new("🛍️ Spend Money")
-                    .font(egui::FontId::new(18.0, egui::FontFamily::Proportional))).clicked() {
-                    self.show_spend_money_modal = true;
-                }
-                
-                // Child selector button if no active child
-                if self.current_child.is_none() {
-                    if ui.button(egui::RichText::new("👤 Select Child")
-                        .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))).clicked() {
-                        self.show_child_selector = true;
-                    }
-                }
-                
-                ui.separator();
-                
-                // Recent transactions table
                 ui.label(egui::RichText::new("📋 Recent Transactions")
                     .font(egui::FontId::new(24.0, egui::FontFamily::Proportional))
                     .strong());
                 
                 render_transaction_table(ui, &self.calendar_transactions);
+            });
+        });
+    }
+    
+    /// Render the money management section
+    fn render_money_management_section(&mut self, ui: &mut egui::Ui) {
+        ui.group(|ui| {
+            ui.vertical(|ui| {
+                // Center the title
+                ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+                    ui.label(egui::RichText::new("💰 Money Actions")
+                        .font(egui::FontId::new(24.0, egui::FontFamily::Proportional))
+                        .strong());
+                });
+                
+                ui.add_space(10.0);
+                
+                // Center the action buttons
+                ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+                    ui.horizontal(|ui| {
+                        // Add money button - make it larger and more prominent
+                        if ui.add_sized([150.0, 50.0], egui::Button::new(
+                            egui::RichText::new("💵 Add Money")
+                                .font(egui::FontId::new(18.0, egui::FontFamily::Proportional))
+                        )).clicked() {
+                            self.show_add_money_modal = true;
+                        }
+                        
+                        ui.add_space(20.0);
+                        
+                        // Spend money button - make it larger and more prominent
+                        if ui.add_sized([150.0, 50.0], egui::Button::new(
+                            egui::RichText::new("🛍️ Spend Money")
+                                .font(egui::FontId::new(18.0, egui::FontFamily::Proportional))
+                        )).clicked() {
+                            self.show_spend_money_modal = true;
+                        }
+                        
+                        // Child selector button if no active child
+                        if self.current_child.is_none() {
+                            ui.add_space(20.0);
+                            if ui.add_sized([150.0, 50.0], egui::Button::new(
+                                egui::RichText::new("👤 Select Child")
+                                    .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))
+                            )).clicked() {
+                                self.show_child_selector = true;
+                            }
+                        }
+                    });
+                });
             });
         });
     }
