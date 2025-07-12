@@ -5,7 +5,7 @@ use std::io;
 use chrono::Utc;
 use crate::backend::storage::traits::Connection;
 use log::{info, warn, error, debug};
-use fs_extra::dir::{CopyOptions, copy as copy_dir};
+
 use std::sync::{Arc, Mutex};
 
 /// CsvConnection manages file paths and ensures CSV files exist for each child
@@ -500,6 +500,7 @@ impl CsvConnection {
     }
     
     /// Get the default data directory path
+    #[allow(dead_code)]
     fn get_default_data_directory() -> Result<PathBuf> {
         let home_dir = std::env::var("HOME")
             .or_else(|_| std::env::var("USERPROFILE"))

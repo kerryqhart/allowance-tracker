@@ -1,4 +1,4 @@
-use anyhow::{Result, Context};
+use anyhow::Result;
 use log::{info, warn, debug};
 use std::fs;
 use std::path::PathBuf;
@@ -13,6 +13,7 @@ use serde_yaml;
 #[derive(Clone)]
 pub struct ChildRepository {
     connection: Arc<CsvConnection>,
+    #[allow(dead_code)]
     git_manager: GitManager,
 }
 

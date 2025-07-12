@@ -9,7 +9,7 @@ use shared::{Transaction, TransactionType, CalendarMonth, CalendarDay, CalendarD
 use std::collections::HashMap;
 use chrono::{Local, Datelike};
 use std::sync::{Arc, Mutex};
-use log::{self, info, error};
+use log::{self, info};
 
 // Add imports for the new orchestration method
 use crate::backend::domain::transaction_service::TransactionService;

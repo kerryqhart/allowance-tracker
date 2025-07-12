@@ -1,7 +1,7 @@
 use anyhow::Result;
 // Removed async_trait - no longer needed for synchronous operations
 use csv::{Reader, Writer};
-use log::{info, warn, error};
+use log::{info, warn};
 use std::fs::{File, OpenOptions};
 use std::io::{BufReader, BufWriter};
 use std::sync::Arc;
@@ -304,7 +304,7 @@ impl TransactionRepository {
     
     /// Compare two date strings properly handling different timezones
     fn compare_dates(&self, date1: &str, date2: &str) -> i32 {
-        use chrono::{DateTime, FixedOffset};
+        use chrono::DateTime;
         
         // Try to parse both dates as RFC3339 datetime objects
         match (DateTime::parse_from_rfc3339(date1), DateTime::parse_from_rfc3339(date2)) {

@@ -5,7 +5,7 @@
 //! and validation rules.
 
 use serde::{Deserialize, Serialize};
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 
 /// Domain model for a parental control attempt
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

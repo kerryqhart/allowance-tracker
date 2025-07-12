@@ -23,11 +23,11 @@
 //! - Human-readable YAML format
 
 use anyhow::Result;
-use async_trait::async_trait;
+
 use log::{info, warn, debug};
-use std::fs;
+
 use std::path::PathBuf;
-use std::sync::Arc;
+
 use crate::backend::domain::models::allowance::AllowanceConfig as DomainAllowanceConfig;
 use super::connection::CsvConnection;
 use crate::backend::storage::GitManager;
@@ -37,6 +37,7 @@ use serde_yaml;
 #[derive(Clone)]
 pub struct AllowanceRepository {
     connection: CsvConnection,
+    #[allow(dead_code)]
     git_manager: GitManager,
 }
 

@@ -26,20 +26,22 @@
 //! ).await?;
 //! ```
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
 // Temporarily disabled git2 to avoid OpenSSL build issues
 // use git2::{Repository, Signature, IndexAddOption, Oid};
-use log::{info, warn, error, debug};
+use log::{info, debug};
 use std::path::{Path, PathBuf};
-use std::fs;
+
 
 /// Git manager for handling local repository operations
 /// NOTE: Temporarily simplified to avoid git2/OpenSSL build issues
 #[derive(Clone)]
 pub struct GitManager {
     /// Default author name for commits
+    #[allow(dead_code)]
     author_name: String,
     /// Default author email for commits
+    #[allow(dead_code)]
     author_email: String,
 }
 

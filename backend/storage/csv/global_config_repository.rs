@@ -38,7 +38,7 @@ use log::{info, debug};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use std::sync::Arc;
+
 use super::connection::CsvConnection;
 
 /// Global configuration structure

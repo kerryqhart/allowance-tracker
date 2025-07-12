@@ -21,8 +21,8 @@
 //! - Proper error handling for edge cases
 
 use anyhow::Result;
-use chrono::{Utc, NaiveDate, Duration, Local, Datelike};
-use log::{info, warn, error};
+use chrono::{Utc, Duration, Local, Datelike};
+use log::info;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -45,6 +45,7 @@ pub struct GoalService {
     child_service: ChildService,
     allowance_service: AllowanceService,
     transaction_service: TransactionService<CsvConnection>,
+    #[allow(dead_code)]
     balance_service: BalanceService<CsvConnection>,
 }
 

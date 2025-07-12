@@ -1,5 +1,5 @@
 use anyhow::Result;
-use log::{info, warn, error};
+use log::{info, error};
 use std::sync::Arc;
 
 use crate::backend::storage::csv::{CsvConnection, ParentalControlRepository};
@@ -42,7 +42,7 @@ impl ParentalControlService {
         let is_correct = attempted_answer.to_lowercase() == self.correct_answer;
 
         // Store the attempt
-        let attempt_id = match self.parental_control_repository.record_parental_control_attempt(
+        let _attempt_id = match self.parental_control_repository.record_parental_control_attempt(
             "global",
             attempted_answer,
             is_correct,

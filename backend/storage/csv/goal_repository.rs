@@ -35,10 +35,10 @@
 //! - Full goal history preservation
 
 use anyhow::Result;
-use async_trait::async_trait;
-use chrono::Utc;
+
+
 use csv::{Reader, Writer};
-use log::{info, debug, warn};
+use log::{debug, warn};
 use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
 use std::io::{BufReader, BufWriter};
@@ -97,8 +97,11 @@ impl TryFrom<GoalRecord> for DomainGoal {
 /// CSV-based goal repository using per-child CSV files
 #[derive(Clone)]
 pub struct GoalRepository {
+    #[allow(dead_code)]
     connection: CsvConnection,
+    #[allow(dead_code)]
     child_repository: ChildRepository,
+    #[allow(dead_code)]
     git_manager: GitManager,
 }
 
@@ -114,6 +117,7 @@ impl GoalRepository {
     }
     
     /// Get the goals CSV file path for a specific child directory
+    #[allow(dead_code)]
     fn get_goals_file_path(&self, child_directory: &str) -> PathBuf {
         self.connection
             .get_child_directory(child_directory)
@@ -121,6 +125,7 @@ impl GoalRepository {
     }
     
     /// Find the child directory that contains a child with the given child_id
+    #[allow(dead_code)]
     async fn find_child_directory(&self, child_id: &str) -> Result<Option<String>> {
         let children = self.child_repository.list_children()?;
         
@@ -134,6 +139,7 @@ impl GoalRepository {
     }
     
     /// Ensure the goals CSV file exists for a child directory
+    #[allow(dead_code)]
     fn ensure_goals_file_exists(&self, child_directory: &str) -> Result<()> {
         let child_dir = self.connection.get_child_directory(child_directory);
         
@@ -155,6 +161,7 @@ impl GoalRepository {
     }
     
     /// Read all goals for a child from their CSV file
+    #[allow(dead_code)]
     async fn read_goals(&self, child_directory: &str) -> Result<Vec<DomainGoal>> {
         self.ensure_goals_file_exists(child_directory)?;
         
@@ -193,6 +200,7 @@ impl GoalRepository {
     }
     
     /// Write all goals for a child to their CSV file
+    #[allow(dead_code)]
     async fn write_goals(&self, child_directory: &str, goals: &[DomainGoal]) -> Result<()> {
         let goals_file_path = self.get_goals_file_path(child_directory);
         let temp_file_path = goals_file_path.with_extension("csv.tmp");
@@ -225,6 +233,7 @@ impl GoalRepository {
     }
     
     /// Append a new goal to the CSV file (more efficient than rewriting entire file)
+    #[allow(dead_code)]
     async fn append_goal(&self, child_directory: &str, goal: &DomainGoal) -> Result<()> {
         self.ensure_goals_file_exists(child_directory)?;
         
@@ -258,37 +267,37 @@ impl GoalRepository {
 }
 
 impl crate::backend::storage::GoalStorage for GoalRepository {
-    fn store_goal(&self, goal: &DomainGoal) -> Result<()> {
+    fn store_goal(&self, _goal: &DomainGoal) -> Result<()> {
         // TODO: Make this synchronous - for now return error
         Err(anyhow::anyhow!("Synchronous goal storage operations not yet implemented"))
     }
     
-    fn get_current_goal(&self, child_id: &str) -> Result<Option<DomainGoal>> {
+    fn get_current_goal(&self, _child_id: &str) -> Result<Option<DomainGoal>> {
         // TODO: Make this synchronous - for now return error
         Err(anyhow::anyhow!("Synchronous goal storage operations not yet implemented"))
     }
     
-    fn list_goals(&self, child_id: &str, limit: Option<u32>) -> Result<Vec<DomainGoal>> {
+    fn list_goals(&self, _child_id: &str, _limit: Option<u32>) -> Result<Vec<DomainGoal>> {
         // TODO: Make this synchronous - for now return error
         Err(anyhow::anyhow!("Synchronous goal storage operations not yet implemented"))
     }
     
-    fn update_goal(&self, goal: &DomainGoal) -> Result<()> {
+    fn update_goal(&self, _goal: &DomainGoal) -> Result<()> {
         // TODO: Make this synchronous - for now return error
         Err(anyhow::anyhow!("Synchronous goal storage operations not yet implemented"))
     }
     
-    fn cancel_current_goal(&self, child_id: &str) -> Result<Option<DomainGoal>> {
+    fn cancel_current_goal(&self, _child_id: &str) -> Result<Option<DomainGoal>> {
         // TODO: Make this synchronous - for now return error
         Err(anyhow::anyhow!("Synchronous goal storage operations not yet implemented"))
     }
     
-    fn complete_current_goal(&self, child_id: &str) -> Result<Option<DomainGoal>> {
+    fn complete_current_goal(&self, _child_id: &str) -> Result<Option<DomainGoal>> {
         // TODO: Make this synchronous - for now return error
         Err(anyhow::anyhow!("Synchronous goal storage operations not yet implemented"))
     }
     
-    fn has_active_goal(&self, child_id: &str) -> Result<bool> {
+    fn has_active_goal(&self, _child_id: &str) -> Result<bool> {
         // TODO: Make this synchronous - for now return error
         Err(anyhow::anyhow!("Synchronous goal storage operations not yet implemented"))
     }

@@ -52,6 +52,7 @@ pub struct AllowanceTrackerApp {
     success_message: Option<String>,
     
     // Calendar state
+    #[allow(dead_code)]
     calendar_loading: bool,
     calendar_transactions: Vec<Transaction>,
     selected_month: u32,
@@ -61,7 +62,9 @@ pub struct AllowanceTrackerApp {
     show_add_money_modal: bool,
     show_spend_money_modal: bool,
     show_child_selector: bool,
+    #[allow(dead_code)]
     show_settings_menu: bool,
+    #[allow(dead_code)]
     show_allowance_config_modal: bool,
     
     // Form states
@@ -179,6 +182,7 @@ impl AllowanceTrackerApp {
     }
     
     /// Clear success and error messages
+    #[allow(dead_code)]
     fn clear_messages(&mut self) {
         self.error_message = None;
         self.success_message = None;

@@ -33,15 +33,15 @@
 //! - Chronological ordering (most recent first)
 
 use anyhow::Result;
-use async_trait::async_trait;
-use chrono::Utc;
+
+
 use csv::{Reader, Writer};
 use log::{info, debug};
 use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
 use std::io::{BufReader, BufWriter};
 use std::path::PathBuf;
-use std::sync::Arc;
+
 use crate::backend::domain::models::parental_control_attempt::ParentalControlAttempt as DomainParentalControlAttempt;
 use super::connection::CsvConnection;
 use crate::backend::storage::GitManager;
@@ -69,7 +69,9 @@ impl From<ParentalControlAttemptRecord> for DomainParentalControlAttempt {
 /// CSV-based parental control repository using per-child CSV files
 #[derive(Clone)]
 pub struct ParentalControlRepository {
+    #[allow(dead_code)]
     connection: CsvConnection,
+    #[allow(dead_code)]
     git_manager: GitManager,
 }
 
@@ -83,6 +85,7 @@ impl ParentalControlRepository {
     }
     
     /// Get the parental control attempts CSV file path for a specific child directory
+    #[allow(dead_code)]
     fn get_parental_control_file_path(&self, child_directory: &str) -> PathBuf {
         self.connection
             .get_child_directory(child_directory)
@@ -90,6 +93,7 @@ impl ParentalControlRepository {
     }
     
     /// Find the child directory that contains a child with the given child_id
+    #[allow(dead_code)]
     async fn find_child_directory_by_id(&self, child_id: &str) -> Result<Option<String>> {
         let base_dir = self.connection.base_directory();
         
@@ -130,6 +134,7 @@ impl ParentalControlRepository {
     }
     
     /// Get all child directories that exist
+    #[allow(dead_code)]
     async fn get_all_child_directories(&self) -> Result<Vec<String>> {
         let base_dir = self.connection.base_directory();
         let mut directories = Vec::new();
@@ -163,6 +168,7 @@ impl ParentalControlRepository {
     }
     
     /// Get the next available ID for a specific child's parental control attempts file
+    #[allow(dead_code)]
     async fn get_next_id(&self, child_directory: &str) -> Result<i64> {
         let csv_path = self.get_parental_control_file_path(child_directory);
         
@@ -190,6 +196,7 @@ impl ParentalControlRepository {
     }
     
     /// Append a parental control attempt to a specific child's CSV file
+    #[allow(dead_code)]
     async fn append_parental_control_attempt(&self, child_directory: &str, record: &ParentalControlAttemptRecord) -> Result<()> {
         let child_dir = self.connection.get_child_directory(child_directory);
         
@@ -241,6 +248,7 @@ impl ParentalControlRepository {
     }
     
     /// Load parental control attempts from a specific child's CSV file
+    #[allow(dead_code)]
     async fn load_parental_control_attempts_from_directory(&self, child_directory: &str, limit: Option<u32>) -> Result<Vec<DomainParentalControlAttempt>> {
         let csv_path = self.get_parental_control_file_path(child_directory);
         
@@ -281,17 +289,17 @@ impl ParentalControlRepository {
 }
 
 impl crate::backend::storage::ParentalControlStorage for ParentalControlRepository {
-    fn record_parental_control_attempt(&self, child_id: &str, attempted_value: &str, success: bool) -> Result<i64> {
+    fn record_parental_control_attempt(&self, _child_id: &str, _attempted_value: &str, _success: bool) -> Result<i64> {
         // TODO: Make this synchronous - for now return error
         Err(anyhow::anyhow!("Synchronous parental control storage operations not yet implemented"))
     }
 
-    fn get_parental_control_attempts(&self, child_id: &str, limit: Option<u32>) -> Result<Vec<DomainParentalControlAttempt>> {
+    fn get_parental_control_attempts(&self, _child_id: &str, _limit: Option<u32>) -> Result<Vec<DomainParentalControlAttempt>> {
         // TODO: Make this synchronous - for now return error
         Err(anyhow::anyhow!("Synchronous parental control storage operations not yet implemented"))
     }
 
-    fn get_all_parental_control_attempts(&self, limit: Option<u32>) -> Result<Vec<DomainParentalControlAttempt>> {
+    fn get_all_parental_control_attempts(&self, _limit: Option<u32>) -> Result<Vec<DomainParentalControlAttempt>> {
         // TODO: Make this synchronous - for now return error
         Err(anyhow::anyhow!("Synchronous parental control storage operations not yet implemented"))
     }
