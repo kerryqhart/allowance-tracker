@@ -336,14 +336,13 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
     async fn store_transaction(&self, transaction: &DomainTransaction) -> Result<()> {
         // Convert child ID to child name for directory lookup
         let child_name = self.get_child_directory_name(&transaction.child_id).await?;
-        let child_directory = self.connection.get_child_directory(&child_name);
-        let mut transactions = self.read_transactions(child_directory.to_str().unwrap()).await.unwrap_or_default();
+        let mut transactions = self.read_transactions(&child_name).await.unwrap_or_default();
         if let Some(pos) = transactions.iter().position(|t| t.id == transaction.id) {
             transactions[pos] = transaction.clone();
         } else {
             transactions.push(transaction.clone());
         }
-        self.write_transactions(child_directory.to_str().unwrap(), &transactions).await
+        self.write_transactions(&child_name, &transactions).await
     }
 
     async fn get_transaction(
@@ -353,9 +352,8 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
     ) -> Result<Option<DomainTransaction>> {
         // Convert child ID to child name for directory lookup
         let child_name = self.get_child_directory_name(child_id).await?;
-        let child_directory = self.connection.get_child_directory(&child_name);
         Ok(self
-            .read_transactions(child_directory.to_str().unwrap())
+            .read_transactions(&child_name)
             .await?
             .into_iter()
             .find(|t| t.id == transaction_id))
@@ -369,8 +367,7 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
     ) -> Result<Vec<DomainTransaction>> {
         // Convert child ID to child name for directory lookup
         let child_name = self.get_child_directory_name(child_id).await?;
-        let child_directory = self.connection.get_child_directory(&child_name);
-        let mut transactions = self.read_transactions(child_directory.to_str().unwrap()).await?;
+        let mut transactions = self.read_transactions(&child_name).await?;
         transactions.sort_by(|a, b| b.date.cmp(&a.date)); // Sort by date descending
 
         let mut result = transactions;
@@ -396,8 +393,7 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
     ) -> Result<Vec<DomainTransaction>> {
         // Convert child ID to child name for directory lookup
         let child_name = self.get_child_directory_name(child_id).await?;
-        let child_directory = self.connection.get_child_directory(&child_name);
-        let mut transactions = self.read_transactions(child_directory.to_str().unwrap()).await?;
+        let mut transactions = self.read_transactions(&child_name).await?;
         
         transactions.sort_by(|a, b| a.date.cmp(&b.date)); // Sort by date ascending
 
@@ -447,11 +443,10 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
     async fn delete_transactions(&self, child_id: &str, transaction_ids: &[String]) -> Result<u32> {
         // Convert child ID to child name for directory lookup
         let child_name = self.get_child_directory_name(child_id).await?;
-        let child_directory = self.connection.get_child_directory(&child_name);
-        let mut transactions = self.read_transactions(child_directory.to_str().unwrap()).await?;
+        let mut transactions = self.read_transactions(&child_name).await?;
         let initial_len = transactions.len();
         transactions.retain(|t| !transaction_ids.contains(&t.id));
-        self.write_transactions(child_directory.to_str().unwrap(), &transactions)
+        self.write_transactions(&child_name, &transactions)
             .await?;
         Ok((initial_len - transactions.len()) as u32)
     }
@@ -469,8 +464,7 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
     ) -> Result<Vec<DomainTransaction>> {
         // Convert child ID to child name for directory lookup
         let child_name = self.get_child_directory_name(child_id).await?;
-        let child_directory = self.connection.get_child_directory(&child_name);
-        let mut transactions = self.read_transactions(child_directory.to_str().unwrap()).await?;
+        let mut transactions = self.read_transactions(&child_name).await?;
         transactions.retain(|t| self.compare_dates(&t.date, date) >= 0);
         Ok(transactions)
     }
@@ -482,8 +476,7 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
     ) -> Result<Option<DomainTransaction>> {
         // Convert child ID to child name for directory lookup
         let child_name = self.get_child_directory_name(child_id).await?;
-        let child_directory = self.connection.get_child_directory(&child_name);
-        let mut transactions = self.read_transactions(child_directory.to_str().unwrap()).await?;
+        let mut transactions = self.read_transactions(&child_name).await?;
         transactions.retain(|t| self.compare_dates(&t.date, date) < 0);
         transactions.sort_by(|a, b| b.date.cmp(&a.date));
         Ok(transactions.into_iter().next())
