@@ -5,6 +5,113 @@ use allowance_tracker_egui::backend::{Backend};
 use allowance_tracker_egui::backend::domain::commands::transactions::TransactionListQuery;
 use allowance_tracker_egui::backend::domain::commands::child::SetActiveChildCommand;
 use eframe::egui;
+use egui_extras::{TableBuilder, Column};
+use std::path::Path;
+
+/// Helper function to load system fonts on macOS
+fn load_system_font(font_name: &str) -> Option<Vec<u8>> {
+    // macOS system font directories
+    let font_paths = [
+        format!("/System/Library/Fonts/{}.ttc", font_name),
+        format!("/System/Library/Fonts/{}.ttf", font_name),
+        format!("/Library/Fonts/{}.ttc", font_name),
+        format!("/Library/Fonts/{}.ttf", font_name),
+        format!("/System/Library/Fonts/Supplemental/{}.ttf", font_name),
+        format!("/System/Library/Fonts/Supplemental/{}.ttc", font_name),
+    ];
+    
+    for path in &font_paths {
+        if Path::new(path).exists() {
+            match std::fs::read(path) {
+                Ok(font_data) => {
+                    info!("🎨 Successfully loaded font: {}", path);
+                    return Some(font_data);
+                }
+                Err(e) => {
+                    warn!("Failed to read font file {}: {}", path, e);
+                }
+            }
+        }
+    }
+    
+    warn!("Could not find font: {}", font_name);
+    None
+}
+
+/// Helper function to load Apple Color Emoji font on macOS
+fn load_emoji_font() -> Option<Vec<u8>> {
+    // Apple Color Emoji is typically in a specific location
+    let emoji_paths = [
+        "/System/Library/Fonts/Apple Color Emoji.ttc",
+        "/System/Library/Fonts/Supplemental/Apple Color Emoji.ttc",
+    ];
+    
+    for path in &emoji_paths {
+        if Path::new(path).exists() {
+            match std::fs::read(path) {
+                Ok(font_data) => {
+                    info!("🎨 Successfully loaded emoji font: {}", path);
+                    return Some(font_data);
+                }
+                Err(e) => {
+                    warn!("Failed to read emoji font file {}: {}", path, e);
+                }
+            }
+        }
+    }
+    
+    warn!("Could not find Apple Color Emoji font");
+    None
+}
+
+/// Setup custom fonts including Chalkboard and Apple Color Emoji
+fn setup_custom_fonts(ctx: &egui::Context) {
+    let mut fonts = egui::FontDefinitions::default();
+    
+    // Try to load Chalkboard font
+    if let Some(font_data) = load_system_font("Chalkboard") {
+        fonts.font_data.insert(
+            "Chalkboard".to_owned(),
+            egui::FontData::from_owned(font_data),
+        );
+        
+        // Create a new font family for Chalkboard
+        fonts.families.insert(
+            egui::FontFamily::Name("Chalkboard".into()),
+            vec!["Chalkboard".to_owned()],
+        );
+        
+        info!("✅ Chalkboard font loaded successfully!");
+    } else {
+        warn!("⚠️ Could not load Chalkboard font, using default fonts");
+    }
+    
+    // Try to load Apple Color Emoji font and add it to default fonts (not Chalkboard)
+    if let Some(emoji_data) = load_emoji_font() {
+        fonts.font_data.insert(
+            "AppleColorEmoji".to_owned(),
+            egui::FontData::from_owned(emoji_data),
+        );
+        
+        // Add emoji font as fallback to default system fonts only
+        if let Some(proportional_fonts) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
+            proportional_fonts.push("AppleColorEmoji".to_owned());
+            info!("✅ Added emoji support to Proportional font family");
+        }
+        
+        if let Some(monospace_fonts) = fonts.families.get_mut(&egui::FontFamily::Monospace) {
+            monospace_fonts.push("AppleColorEmoji".to_owned());
+            info!("✅ Added emoji support to Monospace font family");
+        }
+        
+        info!("✅ Apple Color Emoji font loaded and added to default fonts!");
+    } else {
+        warn!("⚠️ Could not load Apple Color Emoji font");
+    }
+    
+    // Set the fonts
+    ctx.set_fonts(fonts);
+}
 
 /// Helper function to convert domain child to shared child
 pub fn to_dto(child: allowance_tracker_egui::backend::domain::models::child::Child) -> Child {
@@ -76,8 +183,11 @@ pub struct AllowanceTrackerApp {
 
 impl AllowanceTrackerApp {
     /// Create a new allowance tracker app
-    pub fn new() -> Result<Self, anyhow::Error> {
+    pub fn new(cc: &eframe::CreationContext<'_>) -> Result<Self, anyhow::Error> {
         info!("🚀 Initializing AllowanceTrackerApp");
+        
+        // Setup custom fonts including Chalkboard
+        setup_custom_fonts(&cc.egui_ctx);
         
         let backend = Backend::new()?;
         
@@ -187,6 +297,15 @@ impl AllowanceTrackerApp {
         self.error_message = None;
         self.success_message = None;
     }
+    
+    /// Draw solid purple background for header columns
+    fn draw_solid_purple_background(&self, ui: &mut egui::Ui, rect: egui::Rect) {
+        // Use the nice purple color from the original BALANCE header
+        let purple_color = egui::Color32::from_rgb(186, 85, 211);
+        
+        // Draw solid purple background for this column
+        ui.painter().rect_filled(rect, egui::Rounding::ZERO, purple_color);
+    }
 }
 
 impl eframe::App for AllowanceTrackerApp {
@@ -200,18 +319,25 @@ impl eframe::App for AllowanceTrackerApp {
             style.visuals.panel_fill = egui::Color32::from_rgb(250, 250, 250); // Light gray panels
             style.visuals.button_frame = true;
             
-            // Larger text for readability
+            // Use Chalkboard font family if available, otherwise fall back to Proportional
+            let font_family = if ctx.fonts(|fonts| fonts.families().contains(&egui::FontFamily::Name("Chalkboard".into()))) {
+                egui::FontFamily::Name("Chalkboard".into())
+            } else {
+                egui::FontFamily::Proportional
+            };
+            
+            // Larger text for readability with Chalkboard font
             style.text_styles.insert(
                 egui::TextStyle::Heading,
-                egui::FontId::new(28.0, egui::FontFamily::Proportional),
+                egui::FontId::new(28.0, font_family.clone()),
             );
             style.text_styles.insert(
                 egui::TextStyle::Body,
-                egui::FontId::new(16.0, egui::FontFamily::Proportional),
+                egui::FontId::new(16.0, font_family.clone()),
             );
             style.text_styles.insert(
                 egui::TextStyle::Button,
-                egui::FontId::new(18.0, egui::FontFamily::Proportional),
+                egui::FontId::new(18.0, font_family.clone()),
             );
             
             // Rounded corners and padding
@@ -247,14 +373,21 @@ impl eframe::App for AllowanceTrackerApp {
             
             // Header
             ui.horizontal(|ui| {
-                ui.heading("💰 My Allowance Tracker");
+                // Use Proportional font for emoji-containing text
+                ui.label(egui::RichText::new("💰 My Allowance Tracker")
+                    .font(egui::FontId::new(28.0, egui::FontFamily::Proportional))
+                    .strong());
+                    
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if let Some(child) = &self.current_child {
-                        ui.label(format!("👤 {}", child.name));
-                        ui.label(format!("💵 ${:.2}", self.current_balance));
+                        ui.label(egui::RichText::new(format!("👤 {}", child.name))
+                            .font(egui::FontId::new(16.0, egui::FontFamily::Proportional)));
+                        ui.label(egui::RichText::new(format!("💵 ${:.2}", self.current_balance))
+                            .font(egui::FontId::new(16.0, egui::FontFamily::Proportional)));
                     } else {
                         ui.label("No active child");
-                        if ui.button("👤 Select Child").clicked() {
+                        if ui.button(egui::RichText::new("👤 Select Child")
+                            .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))).clicked() {
                             self.show_child_selector = true;
                         }
                     }
@@ -276,11 +409,14 @@ impl eframe::App for AllowanceTrackerApp {
                 // Left side - Calendar
                 ui.group(|ui| {
                     ui.vertical(|ui| {
-                        ui.heading("📅 Calendar");
+                        ui.label(egui::RichText::new("📅 Calendar")
+                            .font(egui::FontId::new(24.0, egui::FontFamily::Proportional))
+                            .strong());
                         
                         // Calendar month/year selector
                         ui.horizontal(|ui| {
-                            if ui.button("⬅").clicked() {
+                            if ui.button(egui::RichText::new("⬅")
+                                .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))).clicked() {
                                 if self.selected_month == 1 {
                                     self.selected_month = 12;
                                     self.selected_year -= 1;
@@ -292,7 +428,8 @@ impl eframe::App for AllowanceTrackerApp {
                             
                             ui.label(format!("{}/{}", self.selected_month, self.selected_year));
                             
-                            if ui.button("➡").clicked() {
+                            if ui.button(egui::RichText::new("➡")
+                                .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))).clicked() {
                                 if self.selected_month == 12 {
                                     self.selected_month = 1;
                                     self.selected_year += 1;
@@ -304,87 +441,195 @@ impl eframe::App for AllowanceTrackerApp {
                         });
                         
                         // Calendar grid placeholder
-                        ui.label("📝 Calendar grid will go here");
-                        ui.label("🎯 This will show transaction chips on each day");
+                        ui.label(egui::RichText::new("📝 Calendar grid will go here")
+                            .font(egui::FontId::new(14.0, egui::FontFamily::Proportional)));
+                        ui.label(egui::RichText::new("🎯 This will show transaction chips on each day")
+                            .font(egui::FontId::new(14.0, egui::FontFamily::Proportional)));
                     });
                 });
                 
                 // Right side - Forms and transactions
                 ui.group(|ui| {
                     ui.vertical(|ui| {
-                        ui.heading("💰 Money Actions");
+                        ui.label(egui::RichText::new("💰 Money Actions")
+                            .font(egui::FontId::new(24.0, egui::FontFamily::Proportional))
+                            .strong());
                         
                         // Add money button
-                        if ui.button("💵 Add Money").clicked() {
+                        if ui.button(egui::RichText::new("💵 Add Money")
+                            .font(egui::FontId::new(18.0, egui::FontFamily::Proportional))).clicked() {
                             self.show_add_money_modal = true;
                         }
                         
                         // Spend money button
-                        if ui.button("🛍️ Spend Money").clicked() {
+                        if ui.button(egui::RichText::new("🛍️ Spend Money")
+                            .font(egui::FontId::new(18.0, egui::FontFamily::Proportional))).clicked() {
                             self.show_spend_money_modal = true;
                         }
                         
                         ui.separator();
                         
                         // Recent transactions table
-                        ui.heading("📋 Recent Transactions");
+                        ui.label(egui::RichText::new("📋 Recent Transactions")
+                            .font(egui::FontId::new(24.0, egui::FontFamily::Proportional))
+                            .strong());
                         if self.calendar_transactions.is_empty() {
                             ui.label("No transactions yet!");
                         } else {
-                            // Create a properly formatted table using Grid
-                            ui.group(|ui| {
-                                ui.set_min_width(550.0);
-                                
-                                // Use Grid for proper table layout with striped rows
-                                egui::Grid::new("transactions_table")
-                                    .striped(true)
-                                    .spacing([12.0, 8.0])
-                                    .min_col_width(90.0)
-                                    .show(ui, |ui| {
-                                        // Table header with bold styling
-                                        ui.strong("DATE");
-                                        ui.strong("DESCRIPTION");
-                                        ui.strong("AMOUNT");
-                                        ui.strong("BALANCE");
-                                        ui.end_row();
+                            // Check if Chalkboard font is available (outside of table closures)
+                            let font_family = if ui.ctx().fonts(|fonts| fonts.families().contains(&egui::FontFamily::Name("Chalkboard".into()))) {
+                                egui::FontFamily::Name("Chalkboard".into())
+                            } else {
+                                egui::FontFamily::Proportional
+                            };
+                            
+                            // Create a kid-friendly table using proper TableBuilder
+                            TableBuilder::new(ui)
+                                .striped(true)
+                                .resizable(false)
+                                .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+                                .column(Column::exact(150.0))  // DATE column
+                                .column(Column::exact(200.0))  // DESCRIPTION column  
+                                .column(Column::exact(100.0))  // AMOUNT column
+                                .column(Column::exact(100.0))  // BALANCE column
+                                .header(60.0, |mut header| {
+                                    
+                                    // Solid purple header using header.col()
+                                    header.col(|ui| {
+                                        // Draw solid purple background for this column
+                                        let rect = ui.max_rect();
+                                        self.draw_solid_purple_background(ui, rect);
                                         
-                                        // Transaction rows
-                                        for transaction in &self.calendar_transactions {
-                                            // Date column (formatted nicely)
-                                            let date_str = if let Some(date_part) = transaction.date.split('T').next() {
-                                                // Parse and format date nicely
-                                                if let Ok(parsed_date) = chrono::NaiveDate::parse_from_str(date_part, "%Y-%m-%d") {
-                                                    parsed_date.format("%b %d, %Y").to_string()
-                                                } else {
-                                                    date_part.to_string()
-                                                }
-                                            } else {
-                                                "Unknown".to_string()
-                                            };
-                                            ui.label(date_str);
-                                            
-                                            // Description column
-                                            ui.label(&transaction.description);
-                                            
-                                            // Amount column with color coding
-                                            if transaction.amount >= 0.0 {
-                                                ui.colored_label(
-                                                    egui::Color32::from_rgb(34, 139, 34), // Green for positive
-                                                    format!("+${:.2}", transaction.amount)
-                                                );
-                                            } else {
-                                                ui.colored_label(
-                                                    egui::Color32::from_rgb(220, 20, 60), // Red for negative
-                                                    format!("-${:.2}", transaction.amount.abs())
-                                                );
-                                            }
-                                            
-                                            // Balance column
-                                            ui.label(format!("${:.2}", transaction.balance));
-                                            ui.end_row();
-                                        }
+                                        // Add proper padding around the text
+                                        ui.with_layout(egui::Layout::centered_and_justified(egui::Direction::LeftToRight), |ui| {
+                                            ui.add_space(10.0);
+                                            ui.colored_label(egui::Color32::WHITE, 
+                                                egui::RichText::new("DATE")
+                                                    .font(egui::FontId::new(20.0, font_family.clone()))
+                                                    .strong()
+                                            );
+                                            ui.add_space(10.0);
+                                        });
                                     });
-                            });
+                                    header.col(|ui| {
+                                        let rect = ui.max_rect();
+                                        self.draw_solid_purple_background(ui, rect);
+                                        
+                                        // Add proper padding around the text
+                                        ui.with_layout(egui::Layout::centered_and_justified(egui::Direction::LeftToRight), |ui| {
+                                            ui.add_space(10.0);
+                                            ui.colored_label(egui::Color32::WHITE, 
+                                                egui::RichText::new("DESCRIPTION")
+                                                    .font(egui::FontId::new(20.0, font_family.clone()))
+                                                    .strong()
+                                            );
+                                            ui.add_space(10.0);
+                                        });
+                                    });
+                                    header.col(|ui| {
+                                        let rect = ui.max_rect();
+                                        self.draw_solid_purple_background(ui, rect);
+                                        
+                                        // Add proper padding around the text
+                                        ui.with_layout(egui::Layout::centered_and_justified(egui::Direction::LeftToRight), |ui| {
+                                            ui.add_space(10.0);
+                                            ui.colored_label(egui::Color32::WHITE, 
+                                                egui::RichText::new("AMOUNT")
+                                                    .font(egui::FontId::new(20.0, font_family.clone()))
+                                                    .strong()
+                                            );
+                                            ui.add_space(10.0);
+                                        });
+                                    });
+                                    header.col(|ui| {
+                                        let rect = ui.max_rect();
+                                        self.draw_solid_purple_background(ui, rect);
+                                        
+                                        // Add proper padding around the text
+                                        ui.with_layout(egui::Layout::centered_and_justified(egui::Direction::LeftToRight), |ui| {
+                                            ui.add_space(10.0);
+                                            ui.colored_label(egui::Color32::WHITE, 
+                                                egui::RichText::new("BALANCE")
+                                                    .font(egui::FontId::new(20.0, font_family.clone()))
+                                                    .strong()
+                                            );
+                                            ui.add_space(10.0);
+                                        });
+                                    });
+                                })
+                                .body(|mut body| {
+                                    for transaction in &self.calendar_transactions {
+                                        body.row(45.0, |mut row| {
+                                            // Date column (formatted with full month name)
+                                            row.col(|ui| {
+                                                let date_str = if let Some(date_part) = transaction.date.split('T').next() {
+                                                    // Parse and format date with full month name
+                                                    if let Ok(parsed_date) = chrono::NaiveDate::parse_from_str(date_part, "%Y-%m-%d") {
+                                                        parsed_date.format("%B %d, %Y").to_string()  // Full month name
+                                                    } else {
+                                                        date_part.to_string()
+                                                    }
+                                                } else {
+                                                    "Unknown".to_string()
+                                                };
+                                                
+                                                // Add vertical centering and padding
+                                                ui.with_layout(egui::Layout::centered_and_justified(egui::Direction::LeftToRight), |ui| {
+                                                    ui.add_space(8.0);
+                                                    ui.label(egui::RichText::new(date_str)
+                                                        .font(egui::FontId::new(14.0, font_family.clone()))
+                                                        .strong());
+                                                    ui.add_space(8.0);
+                                                });
+                                            });
+                                            
+                                            // Description column with bolder text
+                                            row.col(|ui| {
+                                                ui.with_layout(egui::Layout::centered_and_justified(egui::Direction::LeftToRight), |ui| {
+                                                    ui.add_space(8.0);
+                                                    ui.label(egui::RichText::new(&transaction.description)
+                                                        .font(egui::FontId::new(14.0, font_family.clone()))
+                                                        .strong());
+                                                    ui.add_space(8.0);
+                                                });
+                                            });
+                                            
+                                            // Amount column with color coding and bold text
+                                            row.col(|ui| {
+                                                ui.with_layout(egui::Layout::centered_and_justified(egui::Direction::LeftToRight), |ui| {
+                                                    ui.add_space(8.0);
+                                                    if transaction.amount >= 0.0 {
+                                                        ui.colored_label(
+                                                            egui::Color32::from_rgb(34, 139, 34), // Green for positive
+                                                            egui::RichText::new(format!("+${:.2}", transaction.amount))
+                                                                .font(egui::FontId::new(14.0, font_family.clone()))
+                                                                .strong()
+                                                        );
+                                                    } else {
+                                                        ui.colored_label(
+                                                            egui::Color32::from_rgb(220, 20, 60), // Red for negative
+                                                            egui::RichText::new(format!("-${:.2}", transaction.amount.abs()))
+                                                                .font(egui::FontId::new(14.0, font_family.clone()))
+                                                                .strong()
+                                                        );
+                                                    }
+                                                    ui.add_space(8.0);
+                                                });
+                                            });
+                                            
+                                            // Balance column with bold text
+                                            row.col(|ui| {
+                                                ui.with_layout(egui::Layout::centered_and_justified(egui::Direction::LeftToRight), |ui| {
+                                                    ui.add_space(8.0);
+                                                    ui.label(egui::RichText::new(format!("${:.2}", transaction.balance))
+                                                        .font(egui::FontId::new(14.0, font_family.clone()))
+                                                        .strong());
+                                                    ui.add_space(8.0);
+                                                });
+                                            });
+                                        });
+                                    }
+                                });
                         }
                     });
                 });
@@ -433,11 +678,13 @@ impl eframe::App for AllowanceTrackerApp {
             
             // Child selector modal
             if self.show_child_selector {
-                egui::Window::new("👤 Select Child")
+                egui::Window::new("Select Child")
                     .collapsible(false)
                     .resizable(false)
                     .show(ctx, |ui| {
-                        ui.heading("Available Children:");
+                        ui.label(egui::RichText::new("👤 Available Children:")
+                            .font(egui::FontId::new(20.0, egui::FontFamily::Proportional))
+                            .strong());
                         
                         // List all children
                         match self.backend.child_service.list_children() {
@@ -454,7 +701,8 @@ impl eframe::App for AllowanceTrackerApp {
                                                 .unwrap_or(false);
                                             
                                             if is_active {
-                                                ui.label("👑"); // Crown for active child
+                                                ui.label(egui::RichText::new("👑")
+                                                    .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))); // Crown for active child
                                             } else {
                                                 ui.label("   "); // Spacing
                                             }
@@ -496,7 +744,8 @@ impl eframe::App for AllowanceTrackerApp {
                                 self.show_child_selector = false;
                             }
                             
-                            if ui.button("🔄 Refresh").clicked() {
+                            if ui.button(egui::RichText::new("🔄 Refresh")
+                                .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))).clicked() {
                                 // Try to reload the active child
                                 self.load_initial_data();
                             }

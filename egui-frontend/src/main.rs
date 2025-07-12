@@ -34,7 +34,7 @@ fn main() -> Result<(), eframe::Error> {
             }
 
             // Initialize the app
-            match AllowanceTrackerApp::new() {
+            match AllowanceTrackerApp::new(cc) {
                 Ok(app) => {
                     info!("Successfully initialized Allowance Tracker app");
                     Ok(Box::new(app))
