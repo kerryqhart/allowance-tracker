@@ -557,25 +557,17 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
 mod tests {
     use super::*;
     use crate::backend::storage::TransactionStorage;
+    use crate::backend::storage::csv::test_utils::{TestEnvironment, RepositoryTestHelper};
     
-    async fn setup_test_repo() -> (TransactionRepository, impl Fn() -> Result<()>) {
-        let connection = CsvConnection::new_for_testing().await.unwrap();
-        let cleanup_dir = connection.base_directory().to_path_buf();
-        let repo = TransactionRepository::new(connection);
-        
-        let cleanup = move || {
-            if cleanup_dir.exists() {
-                std::fs::remove_dir_all(&cleanup_dir)?;
-            }
-            Ok(())
-        };
-        
-        (repo, cleanup)
+    async fn setup_test_repo() -> Result<(TransactionRepository, TestEnvironment)> {
+        let env = TestEnvironment::new().await?;
+        let repo = TransactionRepository::new(env.connection.clone());
+        Ok((repo, env))
     }
     
     #[tokio::test]
-    async fn test_compare_dates_timezone_fix() {
-        let (repo, _cleanup) = setup_test_repo().await;
+    async fn test_compare_dates_timezone_fix() -> Result<()> {
+        let (repo, _env) = setup_test_repo().await?;
         
         // Test the exact scenario from the bug report
         let cdt_transaction_date = "2025-06-15T00:00:00-0500"; // CDT transaction
@@ -596,11 +588,13 @@ mod tests {
         let invalid_date = "invalid-date";
         let result3 = repo.compare_dates(invalid_date, utc_query_end_date);
         println!("Test: compare_dates('{}', '{}') = {} (fallback)", invalid_date, utc_query_end_date, result3);
+        
+        Ok(())
     }
     
     #[tokio::test]
-    async fn test_store_and_retrieve_transaction() {
-        let (repo, cleanup) = setup_test_repo().await;
+    async fn test_store_and_retrieve_transaction() -> Result<()> {
+        let (repo, _env) = setup_test_repo().await?;
         
         let transaction = DomainTransaction {
             id: "test_tx_001".to_string(),
@@ -613,10 +607,10 @@ mod tests {
         };
         
         // Store transaction
-        repo.store_transaction(&transaction).await.unwrap();
+        repo.store_transaction(&transaction).await?;
         
         // Retrieve transaction
-        let retrieved = repo.get_transaction("test_child", "test_tx_001").await.unwrap();
+        let retrieved = repo.get_transaction("test_child", "test_tx_001").await?;
         assert!(retrieved.is_some());
         
         let retrieved = retrieved.unwrap();
@@ -624,12 +618,12 @@ mod tests {
         assert_eq!(retrieved.description, "Test transaction");
         assert_eq!(retrieved.amount, 25.50);
         
-        cleanup().unwrap();
+        Ok(())
     }
     
     #[tokio::test]
-    async fn test_list_transactions_with_pagination() {
-        let (repo, cleanup) = setup_test_repo().await;
+    async fn test_list_transactions_with_pagination() -> Result<()> {
+        let (repo, _env) = setup_test_repo().await?;
         
         // Store multiple transactions
         for i in 1..=5 {
@@ -643,11 +637,11 @@ mod tests {
                 transaction_type: DomainTransactionType::Income,
             };
             
-            repo.store_transaction(&transaction).await.unwrap();
+            repo.store_transaction(&transaction).await?;
         }
         
         // Test listing with limit
-        let transactions = repo.list_transactions("test_child", Some(3), None).await.unwrap();
+        let transactions = repo.list_transactions("test_child", Some(3), None).await?;
         assert_eq!(transactions.len(), 3);
         
         // Should be ordered by date descending (most recent first)
@@ -655,27 +649,19 @@ mod tests {
         assert_eq!(transactions[1].id, "tx_004");
         assert_eq!(transactions[2].id, "tx_003");
         
-        cleanup().unwrap();
+        Ok(())
     }
     
     #[tokio::test]
-    async fn test_delete_transaction() {
-        let (repo, cleanup) = setup_test_repo().await;
+    async fn test_delete_transaction() -> Result<()> {
+        let helper = RepositoryTestHelper::new().await?;
         
-        // Create a child first (this is missing in the original test!)
-        use crate::backend::domain::commands::child::CreateChildCommand;
-        use crate::backend::domain::child_service::ChildService;
-        let child_service = ChildService::new(std::sync::Arc::new(repo.connection.clone()));
-        let create_command = CreateChildCommand {
-            name: "Test Child".to_string(),
-            birthdate: "2015-01-01".to_string(),
-        };
-        let child_result = child_service.create_child(create_command).await.unwrap();
-        let child_id = child_result.child.id;
+        // Create a test child using the helper
+        let child = helper.create_test_child("Test Child", "delete_test_123").await?;
         
         let transaction = DomainTransaction {
             id: "to_delete".to_string(),
-            child_id: child_id.clone(),
+            child_id: child.id.clone(),
             date: "2024-01-15T10:30:00Z".to_string(),
             description: "Will be deleted".to_string(),
             amount: 100.0,
@@ -684,20 +670,20 @@ mod tests {
         };
         
         // Store transaction
-        repo.store_transaction(&transaction).await.unwrap();
+        helper.transaction_repo.store_transaction(&transaction).await?;
         
         // Verify it exists
-        let retrieved = repo.get_transaction(&child_id, "to_delete").await.unwrap();
+        let retrieved = helper.transaction_repo.get_transaction(&child.id, "to_delete").await?;
         assert!(retrieved.is_some());
         
         // Delete transaction
-        let deleted = repo.delete_transaction(&child_id, "to_delete").await.unwrap();
+        let deleted = helper.transaction_repo.delete_transaction(&child.id, "to_delete").await?;
         assert!(deleted);
         
         // Verify it's gone
-        let retrieved = repo.get_transaction(&child_id, "to_delete").await.unwrap();
+        let retrieved = helper.transaction_repo.get_transaction(&child.id, "to_delete").await?;
         assert!(retrieved.is_none());
         
-        cleanup().unwrap();
+        Ok(())
     }
 } 

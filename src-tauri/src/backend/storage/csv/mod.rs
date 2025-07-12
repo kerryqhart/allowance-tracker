@@ -28,6 +28,9 @@ pub mod parental_control_repository;
 pub mod global_config_repository;
 pub mod goal_repository;
 
+#[cfg(test)]
+pub mod test_utils;
+
 pub use connection::CsvConnection;
 pub use transaction_repository::TransactionRepository;
 pub use child_repository::ChildRepository;
