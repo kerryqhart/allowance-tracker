@@ -36,7 +36,14 @@ pub async fn add_money(
         }
         Err(e) => {
             error!("❌ Failed to add money: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, "Failed to add money").into_response()
+            let status = if e.to_string().contains("No active child found") 
+                        || e.to_string().contains("Amount must be positive")
+                        || e.to_string().contains("Description cannot be empty") {
+                StatusCode::BAD_REQUEST
+            } else {
+                StatusCode::INTERNAL_SERVER_ERROR
+            };
+            (status, "Failed to add money").into_response()
         }
     }
 }
@@ -60,7 +67,14 @@ pub async fn spend_money(
         }
         Err(e) => {
             error!("❌ Failed to spend money: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, "Failed to spend money").into_response()
+            let status = if e.to_string().contains("No active child found") 
+                        || e.to_string().contains("Amount must be positive")
+                        || e.to_string().contains("Description cannot be empty") {
+                StatusCode::BAD_REQUEST
+            } else {
+                StatusCode::INTERNAL_SERVER_ERROR
+            };
+            (status, "Failed to spend money").into_response()
         }
     }
 }
@@ -74,6 +88,7 @@ mod tests {
     use axum::http::StatusCode;
     use shared::{AddMoneyRequest, SpendMoneyRequest};
     use std::sync::Arc;
+    use tempfile;
 
     async fn setup_test_state() -> AppState {
         let temp_dir = tempfile::tempdir().unwrap();

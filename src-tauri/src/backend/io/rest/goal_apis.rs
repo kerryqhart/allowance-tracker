@@ -190,9 +190,11 @@ mod tests {
     use axum::http::StatusCode;
     use shared::{CreateGoalRequest, UpdateGoalRequest, CreateChildRequest};
     use std::sync::Arc;
+    use tempfile;
 
     async fn setup_test_app_state() -> AppState {
-        let db = Arc::new(CsvConnection::new_default().expect("Failed to init test DB"));
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let db = Arc::new(CsvConnection::new(temp_dir.path()).expect("Failed to init test DB"));
         
         // Create all required services
         let child_service = ChildService::new(db.clone());
