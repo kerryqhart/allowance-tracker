@@ -24,7 +24,7 @@ impl DataDirectoryService {
     }
 
     /// Get the current data directory path for a child
-    pub async fn get_current_directory(&self, child_id: Option<String>) -> Result<GetDataDirectoryResponse> {
+    pub fn get_current_directory(&self, child_id: Option<String>) -> Result<GetDataDirectoryResponse> {
         info!("Getting current data directory for child_id: {:?}", child_id);
 
         let child_id_to_use = if let Some(id) = child_id {
@@ -45,7 +45,7 @@ impl DataDirectoryService {
     }
 
     /// Relocate child's data directory to a new location
-    pub async fn relocate_directory(
+    pub fn relocate_directory(
         &self,
         request: RelocateDataDirectoryRequest,
     ) -> Result<RelocateDataDirectoryResponse> {
@@ -83,7 +83,7 @@ impl DataDirectoryService {
     }
 
     /// Revert child's data directory back to the default location
-    pub async fn revert_directory(
+    pub fn revert_directory(
         &self,
         request: RevertDataDirectoryRequest,
     ) -> Result<RevertDataDirectoryResponse> {

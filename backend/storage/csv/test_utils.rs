@@ -33,7 +33,7 @@ pub struct TestEnvironment {
 
 impl TestEnvironment {
     /// Create a new test environment with automatic cleanup
-    pub async fn new() -> Result<Self> {
+    pub fn new() -> Result<Self> {
         let temp_dir = TempDir::new()?;
         let base_path = temp_dir.path().to_path_buf();
         let connection = CsvConnection::new(&base_path)?;
@@ -46,7 +46,7 @@ impl TestEnvironment {
     }
     
     /// Create a new test environment with a custom prefix for debugging
-    pub async fn new_with_prefix(prefix: &str) -> Result<Self> {
+    pub fn new_with_prefix(prefix: &str) -> Result<Self> {
         let temp_dir = TempDir::with_prefix(prefix)?;
         let base_path = temp_dir.path().to_path_buf();
         let connection = CsvConnection::new(&base_path)?;
@@ -93,8 +93,8 @@ pub struct RepositoryTestHelper {
 
 impl RepositoryTestHelper {
     /// Create a new repository test helper with all repositories
-    pub async fn new() -> Result<Self> {
-        let env = TestEnvironment::new().await?;
+    pub fn new() -> Result<Self> {
+        let env = TestEnvironment::new()?;
         
         let transaction_repo = TransactionRepository::new(env.connection.clone());
         let child_repo = ChildRepository::new(Arc::new(env.connection.clone()));
@@ -115,8 +115,8 @@ impl RepositoryTestHelper {
     }
     
     /// Create a new repository test helper with a custom prefix for debugging
-    pub async fn new_with_prefix(prefix: &str) -> Result<Self> {
-        let env = TestEnvironment::new_with_prefix(prefix).await?;
+    pub fn new_with_prefix(prefix: &str) -> Result<Self> {
+        let env = TestEnvironment::new_with_prefix(prefix)?;
         
         let transaction_repo = TransactionRepository::new(env.connection.clone());
         let child_repo = ChildRepository::new(Arc::new(env.connection.clone()));
@@ -137,7 +137,7 @@ impl RepositoryTestHelper {
     }
     
     /// Create a test child and return it
-    pub async fn create_test_child(&self, name: &str, id_suffix: &str) -> Result<DomainChild> {
+    pub fn create_test_child(&self, name: &str, id_suffix: &str) -> Result<DomainChild> {
         let child = DomainChild {
             id: format!("child::{}", id_suffix),
             name: name.to_string(),
@@ -146,12 +146,12 @@ impl RepositoryTestHelper {
             updated_at: Utc::now(),
         };
         
-        self.child_repo.store_child(&child).await?;
+        self.child_repo.store_child(&child)?;
         Ok(child)
     }
     
     /// Create a test child with custom birthdate and return it
-    pub async fn create_test_child_with_birthdate(
+    pub fn create_test_child_with_birthdate(
         &self, 
         name: &str, 
         id_suffix: &str, 
@@ -165,7 +165,7 @@ impl RepositoryTestHelper {
             updated_at: Utc::now(),
         };
         
-        self.child_repo.store_child(&child).await?;
+        self.child_repo.store_child(&child)?;
         Ok(child)
     }
 }

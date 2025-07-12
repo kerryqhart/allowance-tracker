@@ -68,7 +68,7 @@ impl GoalService {
     }
 
     /// Create a new goal
-    pub async fn create_goal(&self, command: CreateGoalCommand) -> Result<CreateGoalResult> {
+    pub fn create_goal(&self, command: CreateGoalCommand) -> Result<CreateGoalResult> {
         info!("Creating goal: {:?}", command);
 
         // Validate description
@@ -103,7 +103,7 @@ impl GoalService {
         }
 
         // Get current balance to validate goal is achievable
-        let current_balance = self.get_current_balance(&child_id).await?;
+        let current_balance = self.get_current_balance(&child_id)?;
         if current_balance >= command.target_amount {
             return Err(anyhow::anyhow!("Target amount (${:.2}) must be greater than current balance (${:.2})", 
                                      command.target_amount, current_balance));
@@ -131,7 +131,7 @@ impl GoalService {
         self.goal_repository.store_goal(&domain_goal)?;
 
         // Calculate completion projection
-        let calculation = self.calculate_goal_completion(&child_id, command.target_amount).await?;
+        let calculation = self.calculate_goal_completion(&child_id, command.target_amount)?;
 
         info!("Successfully created goal: {}", domain_goal.id);
 
@@ -143,7 +143,7 @@ impl GoalService {
     }
 
     /// Get current active goal with calculations
-    pub async fn get_current_goal(&self, command: GetCurrentGoalCommand) -> Result<GetCurrentGoalResult> {
+    pub fn get_current_goal(&self, command: GetCurrentGoalCommand) -> Result<GetCurrentGoalResult> {
         info!("Getting current goal: {:?}", command);
 
         // Get child ID
@@ -170,7 +170,7 @@ impl GoalService {
         
         // Calculate completion projection if goal exists
         let calculation = if let Some(ref goal) = current_goal_domain {
-            Some(self.calculate_goal_completion(&child_id, goal.target_amount).await?)
+            Some(self.calculate_goal_completion(&child_id, goal.target_amount)?)
         } else {
             None
         };
@@ -182,7 +182,7 @@ impl GoalService {
     }
 
     /// Update current active goal
-    pub async fn update_goal(&self, command: UpdateGoalCommand) -> Result<UpdateGoalResult> {
+    pub fn update_goal(&self, command: UpdateGoalCommand) -> Result<UpdateGoalResult> {
         info!("Updating goal: {:?}", command);
 
         // Get child ID
@@ -221,7 +221,7 @@ impl GoalService {
             }
             
             // Validate target amount is greater than current balance
-            let current_balance = self.get_current_balance(&child_id).await?;
+            let current_balance = self.get_current_balance(&child_id)?;
             if current_balance >= target_amount {
                 return Err(anyhow::anyhow!("Target amount (${:.2}) must be greater than current balance (${:.2})", 
                                          target_amount, current_balance));
@@ -237,7 +237,7 @@ impl GoalService {
         self.goal_repository.update_goal(&current_goal_domain)?;
 
         // Calculate new completion projection
-        let calculation = self.calculate_goal_completion(&child_id, current_goal_domain.target_amount).await?;
+        let calculation = self.calculate_goal_completion(&child_id, current_goal_domain.target_amount)?;
 
         info!("Successfully updated goal: {}", current_goal_domain.id);
 
@@ -249,7 +249,7 @@ impl GoalService {
     }
 
     /// Cancel current active goal
-    pub async fn cancel_goal(&self, command: CancelGoalCommand) -> Result<CancelGoalResult> {
+    pub fn cancel_goal(&self, command: CancelGoalCommand) -> Result<CancelGoalResult> {
         info!("Cancelling goal: {:?}", command);
 
         // Get child ID
@@ -280,7 +280,7 @@ impl GoalService {
     }
 
     /// Get goal history for a child
-    pub async fn get_goal_history(&self, command: GetGoalHistoryCommand) -> Result<GetGoalHistoryResult> {
+    pub fn get_goal_history(&self, command: GetGoalHistoryCommand) -> Result<GetGoalHistoryResult> {
         info!("Getting goal history: {:?}", command);
 
         // Get child ID
@@ -308,7 +308,7 @@ impl GoalService {
     }
 
     /// Check if current balance meets any active goal and auto-complete if so
-    pub async fn check_and_complete_goals(&self, child_id: &str) -> Result<Option<DomainGoal>> {
+    pub fn check_and_complete_goals(&self, child_id: &str) -> Result<Option<DomainGoal>> {
         info!("Checking for goal completion for child: {}", child_id);
 
         // Get current active goal (returns domain Goal)
@@ -321,7 +321,7 @@ impl GoalService {
         };
 
         // Get current balance
-        let current_balance = self.get_current_balance(child_id).await?;
+        let current_balance = self.get_current_balance(child_id)?;
 
         // Check if goal is completed
         if current_balance >= current_goal_domain.target_amount {
@@ -338,11 +338,11 @@ impl GoalService {
     }
 
     /// Calculate goal completion projection
-    async fn calculate_goal_completion(&self, child_id: &str, target_amount: f64) -> Result<GoalCalculation> {
+    fn calculate_goal_completion(&self, child_id: &str, target_amount: f64) -> Result<GoalCalculation> {
         info!("Calculating goal completion for child: {}, target: ${:.2}", child_id, target_amount);
 
         // Get current balance
-        let current_balance = self.get_current_balance(child_id).await?;
+        let current_balance = self.get_current_balance(child_id)?;
         let amount_needed = target_amount - current_balance;
 
         // If already at target, return immediately
@@ -433,7 +433,7 @@ impl GoalService {
     }
 
     /// Get current balance for a child
-    async fn get_current_balance(&self, _child_id: &str) -> Result<f64> {
+    fn get_current_balance(&self, _child_id: &str) -> Result<f64> {
         // Get the latest transaction to get current balance
         let query = TransactionListQuery {
             after: None,

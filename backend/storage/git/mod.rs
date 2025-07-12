@@ -61,49 +61,49 @@ impl GitManager {
     }
 
     /// Initialize a git repository in the specified directory (no-op version)
-    pub async fn init_repo<P: AsRef<Path>>(&self, repo_path: P) -> Result<()> {
+    pub fn init_repo<P: AsRef<Path>>(&self, repo_path: P) -> Result<()> {
         let repo_path = repo_path.as_ref();
         debug!("Would initialize git repository at: {:?} (no-op)", repo_path);
         Ok(())
     }
 
     /// Ensure a git repository exists at the specified path (no-op version)
-    pub async fn ensure_repo_exists<P: AsRef<Path>>(&self, repo_path: P) -> Result<()> {
+    pub fn ensure_repo_exists<P: AsRef<Path>>(&self, repo_path: P) -> Result<()> {
         let repo_path = repo_path.as_ref();
         debug!("Would ensure git repository exists at: {:?} (no-op)", repo_path);
         Ok(())
     }
 
     /// Stage a specific file for commit (no-op version)
-    pub async fn add_file<P: AsRef<Path>>(&self, repo_path: P, file_path: &str) -> Result<()> {
+    pub fn add_file<P: AsRef<Path>>(&self, repo_path: P, file_path: &str) -> Result<()> {
         let repo_path = repo_path.as_ref();
         debug!("Would stage file '{}' in repository: {:?} (no-op)", file_path, repo_path);
         Ok(())
     }
 
     /// Stage all changes in the repository (no-op version)
-    pub async fn add_all<P: AsRef<Path>>(&self, repo_path: P) -> Result<()> {
+    pub fn add_all<P: AsRef<Path>>(&self, repo_path: P) -> Result<()> {
         let repo_path = repo_path.as_ref();
         debug!("Would stage all changes in repository: {:?} (no-op)", repo_path);
         Ok(())
     }
 
     /// Create a commit with the staged changes (no-op version)
-    pub async fn commit<P: AsRef<Path>>(&self, repo_path: P, message: &str) -> Result<String> {
+    pub fn commit<P: AsRef<Path>>(&self, repo_path: P, message: &str) -> Result<String> {
         let repo_path = repo_path.as_ref();
         debug!("Would create commit in repository: {:?} with message: {} (no-op)", repo_path, message);
         Ok("fake-commit-id".to_string())
     }
 
     /// Check if repository has uncommitted changes (no-op version)
-    pub async fn has_uncommitted_changes<P: AsRef<Path>>(&self, repo_path: P) -> Result<bool> {
+    pub fn has_uncommitted_changes<P: AsRef<Path>>(&self, repo_path: P) -> Result<bool> {
         let repo_path = repo_path.as_ref();
         debug!("Would check for uncommitted changes in repository: {:?} (no-op)", repo_path);
         Ok(false) // Always report no changes in no-op mode
     }
 
-    /// Commit file changes with staging (async version)
-    pub async fn commit_file_change<P: AsRef<Path>>(
+    /// Commit file changes with staging (sync version)
+    pub fn commit_file_change<P: AsRef<Path>>(
         &self, 
         repo_path: P, 
         filename: &str, 

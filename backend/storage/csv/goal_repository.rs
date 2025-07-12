@@ -216,7 +216,7 @@ impl GoalRepository {
         std::fs::rename(&temp_file_path, &goals_file_path)?;
         
         // Git commit if enabled
-        if let Err(e) = self.git_manager.commit_file_change(&self.connection.get_child_directory(child_directory), "goals.csv", &format!("Updated goals for child directory: {}", child_directory)).await {
+        if let Err(e) = self.git_manager.commit_file_change(&self.connection.get_child_directory(child_directory), "goals.csv", &format!("Updated goals for child directory: {}", child_directory)) {
             debug!("Git commit failed (this is OK in development): {}", e);
         }
         
@@ -248,7 +248,7 @@ impl GoalRepository {
         csv_writer.flush()?;
         
         // Git commit if enabled
-        if let Err(e) = self.git_manager.commit_file_change(&self.connection.get_child_directory(child_directory), "goals.csv", &format!("Added new goal for child directory: {}", child_directory)).await {
+        if let Err(e) = self.git_manager.commit_file_change(&self.connection.get_child_directory(child_directory), "goals.csv", &format!("Added new goal for child directory: {}", child_directory)) {
             debug!("Git commit failed (this is OK in development): {}", e);
         }
         

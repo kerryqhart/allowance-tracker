@@ -72,7 +72,7 @@ impl CsvConnection {
     }
     
     /// Create a new CSV connection for testing with a unique directory
-    pub async fn new_for_testing() -> Result<Self> {
+    pub fn new_for_testing() -> Result<Self> {
         // Create a unique test directory using timestamp
         let timestamp = Utc::now().timestamp_millis();
         let test_dir = PathBuf::from(format!("test_data_{}", timestamp));

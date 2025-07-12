@@ -235,7 +235,7 @@ impl ParentalControlRepository {
             &child_dir,
             "parental_control_attempts.csv", 
             &action_description
-        ).await;
+        );
         
         Ok(())
     }

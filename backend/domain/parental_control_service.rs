@@ -34,7 +34,7 @@ impl ParentalControlService {
     }
 
     /// Validate a parental control answer
-    pub async fn validate_answer(&self, command: ValidateParentalControlCommand) -> Result<ValidateParentalControlResult> {
+    pub fn validate_answer(&self, command: ValidateParentalControlCommand) -> Result<ValidateParentalControlResult> {
         let attempted_answer = command.answer.trim();
         info!("Validating parental control answer (length: {})", attempted_answer.len());
 
@@ -79,7 +79,7 @@ impl ParentalControlService {
     }
 
     /// Get recent validation attempts for monitoring
-    pub async fn get_recent_attempts(&self, limit: Option<u32>) -> Result<Vec<crate::backend::domain::models::parental_control_attempt::ParentalControlAttempt>> {
+    pub fn get_recent_attempts(&self, limit: Option<u32>) -> Result<Vec<crate::backend::domain::models::parental_control_attempt::ParentalControlAttempt>> {
         info!("Retrieving recent parental control attempts (limit: {:?})", limit);
         
         let attempts = self.parental_control_repository.get_parental_control_attempts(
@@ -92,7 +92,7 @@ impl ParentalControlService {
     }
 
     /// Get validation statistics
-    pub async fn get_validation_stats(&self) -> Result<ParentalControlStats> {
+    pub fn get_validation_stats(&self) -> Result<ParentalControlStats> {
         info!("Calculating parental control validation statistics");
         
         let all_attempts = self.parental_control_repository.get_parental_control_attempts(
