@@ -43,6 +43,7 @@ use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
 use std::io::{BufReader, BufWriter};
 use std::path::PathBuf;
+use std::sync::Arc;
 use crate::backend::domain::models::goal::{DomainGoal, DomainGoalState};
 use super::connection::CsvConnection;
 use super::child_repository::ChildRepository;
@@ -104,7 +105,7 @@ pub struct GoalRepository {
 impl GoalRepository {
     /// Create a new CSV goal repository
     pub fn new(connection: CsvConnection) -> Self {
-        let child_repository = ChildRepository::new(connection.clone());
+        let child_repository = ChildRepository::new(Arc::new(connection.clone()));
         Self { 
             connection,
             child_repository,
@@ -392,7 +393,7 @@ mod tests {
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
         let connection = CsvConnection::new(temp_dir.path()).expect("Failed to create connection");
         let goal_repo = GoalRepository::new(connection.clone());
-        let child_repo = ChildRepository::new(connection);
+        let child_repo = ChildRepository::new(Arc::new(connection));
         
         // Create a test child first
         let child = DomainChild {

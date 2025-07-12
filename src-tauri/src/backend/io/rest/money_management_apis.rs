@@ -37,8 +37,9 @@ pub async fn add_money(
         Err(e) => {
             error!("❌ Failed to add money: {}", e);
             let status = if e.to_string().contains("No active child found") 
-                        || e.to_string().contains("Amount must be positive")
-                        || e.to_string().contains("Description cannot be empty") {
+                        || e.to_string().contains("Amount must be greater than 0")
+                        || e.to_string().contains("Please enter a description")
+                        || e.to_string().contains("Validation failed") {
                 StatusCode::BAD_REQUEST
             } else {
                 StatusCode::INTERNAL_SERVER_ERROR
@@ -68,8 +69,9 @@ pub async fn spend_money(
         Err(e) => {
             error!("❌ Failed to spend money: {}", e);
             let status = if e.to_string().contains("No active child found") 
-                        || e.to_string().contains("Amount must be positive")
-                        || e.to_string().contains("Description cannot be empty") {
+                        || e.to_string().contains("Amount must be greater than 0")
+                        || e.to_string().contains("Please enter a description")
+                        || e.to_string().contains("Validation failed") {
                 StatusCode::BAD_REQUEST
             } else {
                 StatusCode::INTERNAL_SERVER_ERROR
@@ -90,7 +92,7 @@ mod tests {
     use std::sync::Arc;
     use tempfile;
 
-    async fn setup_test_state() -> AppState {
+    async fn setup_test_state() -> (AppState, tempfile::TempDir) {
         let temp_dir = tempfile::tempdir().unwrap();
         let db = Arc::new(CsvConnection::new(temp_dir.path().to_path_buf()).unwrap());
         
@@ -128,7 +130,9 @@ mod tests {
         let active_child_check = child_service.get_active_child().await.expect("Failed to get active child");
         println!("🧪 TEST DEBUG: Active child check: {:?}", active_child_check);
         
-        AppState {
+
+        
+        (AppState {
             transaction_service,
             calendar_service,
             transaction_table_service,
@@ -140,12 +144,12 @@ mod tests {
             goal_service,
             data_directory_service,
             export_service: crate::backend::domain::ExportService::new(),
-        }
+        }, temp_dir)
     }
 
     #[tokio::test]
     async fn test_add_money_success() {
-        let state = setup_test_state().await;
+        let (state, _temp_dir) = setup_test_state().await;
         let request = AddMoneyRequest {
             amount: 50.0,
             description: "Test deposit".to_string(),
@@ -197,7 +201,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_spend_money_success() {
-        let state = setup_test_state().await;
+        let (state, _temp_dir) = setup_test_state().await;
         let request = SpendMoneyRequest {
             amount: 20.0,
             description: "Test withdrawal".to_string(),
@@ -249,7 +253,7 @@ mod tests {
     
     #[tokio::test]
     async fn test_add_money_invalid_input() {
-        let state = setup_test_state().await;
+        let (state, _temp_dir) = setup_test_state().await;
         let request = AddMoneyRequest {
             amount: -10.0, // Invalid amount
             description: "".to_string(), // Invalid description
@@ -261,7 +265,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_spend_money_invalid_input() {
-        let state = setup_test_state().await;
+        let (state, _temp_dir) = setup_test_state().await;
         let request = SpendMoneyRequest {
             amount: 0.0, // Invalid amount
             description: " ".to_string(), // Invalid description

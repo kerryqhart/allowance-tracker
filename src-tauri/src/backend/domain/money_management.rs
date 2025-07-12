@@ -43,14 +43,13 @@ impl MoneyManagementService {
         child_service: &ChildService,
         transaction_service: &TransactionService<C>,
     ) -> Result<AddMoneyResponse> {
-        println!("💰 MONEY DEBUG: Adding money - description: {}, amount: {}", request.description, request.amount);
+
         info!("💰 MONEY MANAGEMENT: Adding money - description: {}, amount: {}", request.description, request.amount);
 
         // Step 1: Check for active child first
-        println!("🔍 MONEY DEBUG: Checking for active child...");
         info!("🔍 MONEY MANAGEMENT: Checking for active child...");
         let active_child_response = child_service.get_active_child().await?;
-        println!("🔍 MONEY DEBUG: Active child response: {:?}", active_child_response);
+        // We need to access the connection somehow to debug further
         
         let active_child = match active_child_response.active_child.child {
             Some(child) => {

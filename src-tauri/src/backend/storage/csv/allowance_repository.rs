@@ -27,6 +27,7 @@ use async_trait::async_trait;
 use log::{info, warn, debug};
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Arc;
 use crate::backend::domain::models::allowance::AllowanceConfig as DomainAllowanceConfig;
 use super::connection::CsvConnection;
 use crate::backend::storage::GitManager;
@@ -270,7 +271,7 @@ mod tests {
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
         let connection = CsvConnection::new(temp_dir.path()).expect("Failed to create connection");
         let allowance_repo = AllowanceRepository::new(connection.clone());
-        let child_repo = ChildRepository::new(connection);
+        let child_repo = ChildRepository::new(Arc::new(connection));
         
         // Create a test child first
         let child = DomainChild {

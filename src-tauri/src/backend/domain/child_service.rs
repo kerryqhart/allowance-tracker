@@ -21,7 +21,7 @@ pub struct ChildService {
 impl ChildService {
     /// Create a new ChildService
     pub fn new(csv_conn: Arc<CsvConnection>) -> Self {
-        let child_repository = ChildRepository::new((*csv_conn).clone());
+        let child_repository = ChildRepository::new(csv_conn);
         Self { child_repository }
     }
 

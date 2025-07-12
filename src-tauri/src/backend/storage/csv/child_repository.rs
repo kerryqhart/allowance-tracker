@@ -3,6 +3,7 @@ use async_trait::async_trait;
 use log::{info, warn, debug};
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Arc;
 use shared::Child as SharedChild;
 use crate::backend::domain::models::child::Child as DomainChild;
 use super::connection::CsvConnection;
@@ -12,13 +13,13 @@ use serde_yaml;
 /// CSV-based child repository using filesystem discovery
 #[derive(Clone)]
 pub struct ChildRepository {
-    connection: CsvConnection,
+    connection: Arc<CsvConnection>,
     git_manager: GitManager,
 }
 
 impl ChildRepository {
     /// Create a new CSV child repository
-    pub fn new(connection: CsvConnection) -> Self {
+    pub fn new(connection: Arc<CsvConnection>) -> Self {
         Self { 
             connection,
             git_manager: GitManager::new(),
@@ -143,7 +144,6 @@ impl ChildRepository {
         
         let yaml_content = fs::read_to_string(&yaml_path)?;
         let shared_child: SharedChild = serde_yaml::from_str(&yaml_content)?;
-        
         let domain_child = crate::backend::io::rest::mappers::child_mapper::ChildMapper::to_domain(shared_child)
             .context("Failed to map shared child to domain child")?;
 
@@ -326,7 +326,7 @@ mod tests {
     async fn setup_test_repo() -> (ChildRepository, TempDir) {
         let temp_dir = TempDir::new().unwrap();
         let connection = CsvConnection::new(temp_dir.path()).unwrap();
-        let repo = ChildRepository::new(connection);
+        let repo = ChildRepository::new(Arc::new(connection));
         (repo, temp_dir)
     }
     

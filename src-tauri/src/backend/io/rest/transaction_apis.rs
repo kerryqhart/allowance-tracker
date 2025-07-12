@@ -131,7 +131,7 @@ mod tests {
     use std::sync::Arc;
     use tempfile;
 
-    async fn setup_test_state() -> AppState {
+    async fn setup_test_state() -> (AppState, tempfile::TempDir) {
         let temp_dir = tempfile::tempdir().unwrap();
         let db = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
         
@@ -182,12 +182,12 @@ mod tests {
         let active_child_result = app_state.child_service.get_active_child().await.expect("Failed to get active child");
         assert!(active_child_result.active_child.child.is_some(), "Active child should be set after child creation");
         
-        app_state
+        (app_state, temp_dir)
     }
 
     #[tokio::test]
     async fn test_create_transaction_handler() {
-        let state = setup_test_state().await;
+        let (state, _temp_dir) = setup_test_state().await;
         
         let request = CreateTransactionRequest {
             description: "Test transaction".to_string(),
@@ -202,7 +202,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_transaction_validation_error() {
-        let state = setup_test_state().await;
+        let (state, _temp_dir) = setup_test_state().await;
         
         // Test with empty description (should fail validation)
         let request = CreateTransactionRequest {
@@ -218,7 +218,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_transaction_with_custom_date() {
-        let state = setup_test_state().await;
+        let (state, _temp_dir) = setup_test_state().await;
         
         let request = CreateTransactionRequest {
             description: "Custom date transaction".to_string(),
@@ -233,7 +233,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_transactions_handler() {
-        let state = setup_test_state().await;
+        let (state, _temp_dir) = setup_test_state().await;
         
         // Create some test transactions with small delays to avoid duplicate IDs
         use crate::backend::domain::commands::transactions::CreateTransactionCommand;
@@ -266,7 +266,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_transactions_empty_list() {
-        let state = setup_test_state().await;
+        let (state, _temp_dir) = setup_test_state().await;
         
         let delete_request = DeleteTransactionsRequest {
             transaction_ids: vec![],
@@ -278,7 +278,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_transactions_not_found() {
-        let state = setup_test_state().await;
+        let (state, _temp_dir) = setup_test_state().await;
         
         let delete_request = DeleteTransactionsRequest {
             transaction_ids: vec!["nonexistent".to_string()],

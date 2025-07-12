@@ -4,6 +4,7 @@ use csv::{Reader, Writer};
 use log::{info, warn, error};
 use std::fs::{File, OpenOptions};
 use std::io::{BufReader, BufWriter};
+use std::sync::Arc;
 use crate::backend::domain::models::transaction::{
     Transaction as DomainTransaction, TransactionType as DomainTransactionType,
 };
@@ -22,7 +23,7 @@ pub struct TransactionRepository {
 impl TransactionRepository {
     /// Create a new CSV transaction repository
     pub fn new(connection: CsvConnection) -> Self {
-        let child_repository = ChildRepository::new(connection.clone());
+        let child_repository = ChildRepository::new(Arc::new(connection.clone()));
         let git_manager = GitManager::new();
         Self { 
             connection,
@@ -668,9 +669,20 @@ mod tests {
     async fn test_delete_transaction() {
         let (repo, cleanup) = setup_test_repo().await;
         
+        // Create a child first (this is missing in the original test!)
+        use crate::backend::domain::commands::child::CreateChildCommand;
+        use crate::backend::domain::child_service::ChildService;
+        let child_service = ChildService::new(std::sync::Arc::new(repo.connection.clone()));
+        let create_command = CreateChildCommand {
+            name: "Test Child".to_string(),
+            birthdate: "2015-01-01".to_string(),
+        };
+        let child_result = child_service.create_child(create_command).await.unwrap();
+        let child_id = child_result.child.id;
+        
         let transaction = DomainTransaction {
             id: "to_delete".to_string(),
-            child_id: "test_child".to_string(),
+            child_id: child_id.clone(),
             date: "2024-01-15T10:30:00Z".to_string(),
             description: "Will be deleted".to_string(),
             amount: 100.0,
@@ -682,15 +694,15 @@ mod tests {
         repo.store_transaction(&transaction).await.unwrap();
         
         // Verify it exists
-        let retrieved = repo.get_transaction("test_child", "to_delete").await.unwrap();
+        let retrieved = repo.get_transaction(&child_id, "to_delete").await.unwrap();
         assert!(retrieved.is_some());
         
         // Delete transaction
-        let deleted = repo.delete_transaction("test_child", "to_delete").await.unwrap();
+        let deleted = repo.delete_transaction(&child_id, "to_delete").await.unwrap();
         assert!(deleted);
         
         // Verify it's gone
-        let retrieved = repo.get_transaction("test_child", "to_delete").await.unwrap();
+        let retrieved = repo.get_transaction(&child_id, "to_delete").await.unwrap();
         assert!(retrieved.is_none());
         
         cleanup().unwrap();

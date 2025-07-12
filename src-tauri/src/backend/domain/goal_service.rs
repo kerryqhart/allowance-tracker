@@ -601,15 +601,16 @@ use crate::backend::domain::commands::child::CreateChildCommand;
         let command = CreateGoalCommand {
             child_id: Some(child_id),
             description: "Buy expensive toy".to_string(),
-            target_amount: 30.0, // With $5 allowances and some existing balance, should need 4 allowances
+            target_amount: 30.0, // With $5 allowances and current balance, calculate allowances needed
         };
         
         let result = service.create_goal(command).await.expect("Failed to create goal");
         
-        // The calculation accounts for current balance, so with $10 current balance:
-        // Amount needed: $30 - $10 = $20
-        // Allowances needed: $20 / $5 = 4 allowances
-        assert_eq!(result.calculation.allowances_needed, 4);
+        // The calculation works as follows:
+        // Current balance: $5.00 (from initial allowance setup)
+        // Amount needed: $30.00 - $5.00 = $25.00
+        // Allowances needed: ceil($25.00 / $5.00) = 5 allowances
+        assert_eq!(result.calculation.allowances_needed, 5);
         assert!(result.calculation.is_achievable);
         assert!(result.calculation.projected_completion_date.is_some());
         assert!(!result.calculation.exceeds_time_limit);

@@ -38,6 +38,7 @@ use log::{info, debug};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Arc;
 use super::connection::CsvConnection;
 
 /// Global configuration structure
@@ -206,7 +207,7 @@ mod tests {
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
         let connection = CsvConnection::new(temp_dir.path()).expect("Failed to create connection");
         let global_config_repo = GlobalConfigRepository::new(connection.clone());
-        let child_repo = ChildRepository::new(connection);
+        let child_repo = ChildRepository::new(Arc::new(connection));
         
         (global_config_repo, child_repo, temp_dir)
     }
