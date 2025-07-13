@@ -91,7 +91,7 @@ impl CsvChildRepository {
             };
             
             // Try to load child from this directory
-            match self.load_child_from_directory(dir_name).await {
+            match self.load_child_from_directory(dir_name) {
                 Ok(Some(child)) => {
                     debug!("Discovered child: {} from directory: {}", child.name, dir_name);
                     children.push(child);
@@ -188,7 +188,7 @@ impl CsvChildRepository {
     
     /// Find directory name for a child by ID
     async fn find_directory_by_child_id(&self, child_id: &str) -> Result<Option<String>> {
-        let children = self.discover_children().await?;
+        let children = self.discover_children()?;
         
         for child in children {
             if child.id == child_id {
@@ -197,7 +197,7 @@ impl CsvChildRepository {
                 let directory_name = Self::generate_safe_directory_name(&child.name);
                 
                 // Verify this directory actually exists and contains this child
-                if let Ok(Some(loaded_child)) = self.load_child_from_directory(&directory_name).await {
+                if let Ok(Some(loaded_child)) = self.load_child_from_directory(&directory_name) {
                     if loaded_child.id == child_id {
                         return Ok(Some(directory_name));
                     }
@@ -214,25 +214,25 @@ impl ChildRepository for CsvChildRepository {
     /// Store a new child
     async fn store_child(&self, child: &DomainChild) -> Result<()> {
         let dir_name = Self::generate_safe_directory_name(&child.name);
-        self.save_child_to_directory(child, &dir_name).await
+        self.save_child_to_directory(child, &dir_name)
     }
     
     /// Retrieve a specific child by ID
     async fn get_child(&self, child_id: &str) -> Result<Option<DomainChild>> {
-        let children = self.discover_children().await?;
+        let children = self.discover_children()?;
         Ok(children.into_iter().find(|c| c.id == child_id))
     }
     
     /// List all children ordered by name
     async fn list_children(&self) -> Result<Vec<DomainChild>> {
-        self.discover_children().await
+        self.discover_children()
     }
     
     /// Update an existing child
     async fn update_child(&self, child: &DomainChild) -> Result<()> {
         // Find existing child directory to handle name changes
-        if let Some(dir_name) = self.find_directory_by_child_id(&child.id).await? {
-            self.save_child_to_directory(child, &dir_name).await
+        if let Some(dir_name) = self.find_directory_by_child_id(&child.id)? {
+            self.save_child_to_directory(child, &dir_name)
         } else {
             // This is an update, so the child should exist
             warn!("Attempted to update a non-existent child: {}", child.id);
@@ -242,7 +242,7 @@ impl ChildRepository for CsvChildRepository {
 
     /// Delete a child by ID
     async fn delete_child(&self, child_id: &str) -> Result<()> {
-        if let Some(dir_name) = self.find_directory_by_child_id(child_id).await? {
+        if let Some(dir_name) = self.find_directory_by_child_id(child_id)? {
             let child_dir = self.connection.get_child_directory(&dir_name);
             if child_dir.exists() {
                 fs::remove_dir_all(&child_dir)?;
@@ -256,8 +256,8 @@ impl ChildRepository for CsvChildRepository {
 
     /// Get the currently active child ID
     async fn get_active_child(&self) -> Result<Option<String>> {
-        if let Some(dir_name) = self.get_active_child_directory().await? {
-            if let Ok(Some(child)) = self.load_child_from_directory(&dir_name).await {
+        if let Some(dir_name) = self.get_active_child_directory()? {
+            if let Ok(Some(child)) = self.load_child_from_directory(&dir_name) {
                 Ok(Some(child.id))
             } else {
                 Ok(None)
@@ -269,8 +269,8 @@ impl ChildRepository for CsvChildRepository {
 
     /// Set the currently active child
     async fn set_active_child(&self, child_id: &str) -> Result<()> {
-        if let Some(dir_name) = self.find_directory_by_child_id(child_id).await? {
-            self.set_active_child_directory(&dir_name).await
+        if let Some(dir_name) = self.find_directory_by_child_id(child_id)? {
+            self.set_active_child_directory(&dir_name)
         } else {
             Err(anyhow::anyhow!("Child not found to set as active"))
         }
@@ -284,7 +284,7 @@ mod tests {
     use chrono::NaiveDate;
     use crate::backend::storage::traits::ChildRepository;
 
-    async fn setup_test_repo() -> (CsvChildRepository, TempDir) {
+    fn setup_test_repo() -> (CsvChildRepository, TempDir) {
         let temp_dir = TempDir::new().unwrap();
         let connection = CsvConnection::new(temp_dir.path()).unwrap();
         (CsvChildRepository::new(connection), temp_dir)
@@ -297,9 +297,9 @@ mod tests {
         assert_eq!(CsvChildRepository::generate_safe_directory_name("  Test-Name "), "test_name");
     }
 
-    #[tokio::test]
-    async fn test_store_and_discover_child() {
-        let (repo, _temp_dir) = setup_test_repo().await;
+    #[test]
+    fn test_store_and_discover_child() {
+        let (repo, _temp_dir) = setup_test_repo();
         let child = DomainChild {
             id: "child1".to_string(),
             name: "Test Child".to_string(),
@@ -307,16 +307,16 @@ mod tests {
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
-        repo.store_child(&child).await.unwrap();
+        repo.store_child(&child).unwrap();
 
-        let children = repo.discover_children().await.unwrap();
+        let children = repo.discover_children().unwrap();
         assert_eq!(children.len(), 1);
         assert_eq!(children[0].id, "child1");
     }
 
-    #[tokio::test]
-    async fn test_active_child_management() {
-        let (repo, _temp_dir) = setup_test_repo().await;
+    #[test]
+    fn test_active_child_management() {
+        let (repo, _temp_dir) = setup_test_repo();
         let child = DomainChild {
             id: "child1".to_string(),
             name: "Test Child".to_string(),
@@ -324,10 +324,10 @@ mod tests {
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
-        repo.store_child(&child).await.unwrap();
+        repo.store_child(&child).unwrap();
 
-        repo.set_active_child("child1").await.unwrap();
-        let active_id = repo.get_active_child().await.unwrap();
+        repo.set_active_child("child1").unwrap();
+        let active_id = repo.get_active_child().unwrap();
         assert_eq!(active_id, Some("child1".to_string()));
     }
 } 

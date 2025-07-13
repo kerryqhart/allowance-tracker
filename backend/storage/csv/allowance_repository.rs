@@ -256,8 +256,9 @@ mod tests {
     use crate::backend::domain::models::child::Child as DomainChild;
     use crate::backend::storage::{ChildStorage, AllowanceStorage};
     use crate::backend::storage::csv::ChildRepository;
+    use std::sync::Arc;
 
-    async fn setup_test_repo_with_child() -> (AllowanceRepository, ChildRepository, TempDir, DomainChild) {
+    fn setup_test_repo_with_child() -> (AllowanceRepository, ChildRepository, TempDir, DomainChild) {
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
         let connection = CsvConnection::new(temp_dir.path()).expect("Failed to create connection");
         let allowance_repo = AllowanceRepository::new(connection.clone());
@@ -272,14 +273,14 @@ mod tests {
             updated_at: Utc::now(),
         };
         
-        child_repo.store_child(&child).await.expect("Failed to create test child");
+        child_repo.store_child(&child).expect("Failed to create test child");
         
         (allowance_repo, child_repo, temp_dir, child)
     }
 
-    #[tokio::test]
-    async fn test_store_and_get_allowance_config() {
-        let (repo, _child_repo, _temp_dir, child) = setup_test_repo_with_child().await;
+    #[test]
+    fn test_store_and_get_allowance_config() {
+        let (repo, _child_repo, _temp_dir, child) = setup_test_repo_with_child();
         
         let config = DomainAllowanceConfig {
             id: "allowance::1234567890::98765".to_string(),
@@ -292,10 +293,10 @@ mod tests {
         };
         
         // Store the config
-        repo.store_allowance_config(&config).await.unwrap();
+        repo.store_allowance_config(&config).unwrap();
         
         // Retrieve the config
-        let retrieved = repo.get_allowance_config(&child.id).await.unwrap();
+        let retrieved = repo.get_allowance_config(&child.id).unwrap();
         assert!(retrieved.is_some());
         
         let retrieved_config = retrieved.unwrap();
@@ -306,9 +307,9 @@ mod tests {
         assert_eq!(retrieved_config.is_active, config.is_active);
     }
 
-    #[tokio::test]
-    async fn test_update_allowance_config() {
-        let (repo, _child_repo, _temp_dir, child) = setup_test_repo_with_child().await;
+    #[test]
+    fn test_update_allowance_config() {
+        let (repo, _child_repo, _temp_dir, child) = setup_test_repo_with_child();
         
         let mut config = DomainAllowanceConfig {
             id: "allowance::1234567890::98765".to_string(),
@@ -321,24 +322,24 @@ mod tests {
         };
         
         // Store the initial config
-        repo.store_allowance_config(&config).await.unwrap();
+        repo.store_allowance_config(&config).unwrap();
         
         // Update the config
         config.amount = 15.0;
         config.day_of_week = 5; // Friday
         config.updated_at = Utc::now().to_rfc3339();
         
-        repo.update_allowance_config(&config).await.unwrap();
+        repo.update_allowance_config(&config).unwrap();
         
         // Verify the update
-        let retrieved = repo.get_allowance_config(&child.id).await.unwrap().unwrap();
+        let retrieved = repo.get_allowance_config(&child.id).unwrap().unwrap();
         assert_eq!(retrieved.amount, 15.0);
         assert_eq!(retrieved.day_of_week, 5);
     }
 
-    #[tokio::test]
-    async fn test_delete_allowance_config() {
-        let (repo, _child_repo, _temp_dir, child) = setup_test_repo_with_child().await;
+    #[test]
+    fn test_delete_allowance_config() {
+        let (repo, _child_repo, _temp_dir, child) = setup_test_repo_with_child();
         
         let config = DomainAllowanceConfig {
             id: "allowance::1234567890::98765".to_string(),
@@ -351,26 +352,26 @@ mod tests {
         };
         
         // Store the config
-        repo.store_allowance_config(&config).await.unwrap();
+        repo.store_allowance_config(&config).unwrap();
         
         // Verify it exists
-        assert!(repo.get_allowance_config(&child.id).await.unwrap().is_some());
+        assert!(repo.get_allowance_config(&child.id).unwrap().is_some());
         
         // Delete the config
-        let deleted = repo.delete_allowance_config(&child.id).await.unwrap();
+        let deleted = repo.delete_allowance_config(&child.id).unwrap();
         assert!(deleted);
         
         // Verify it's gone
-        assert!(repo.get_allowance_config(&child.id).await.unwrap().is_none());
+        assert!(repo.get_allowance_config(&child.id).unwrap().is_none());
         
         // Deleting again should return false
-        let deleted_again = repo.delete_allowance_config(&child.id).await.unwrap();
+        let deleted_again = repo.delete_allowance_config(&child.id).unwrap();
         assert!(!deleted_again);
     }
 
-    #[tokio::test]
-    async fn test_list_allowance_configs() {
-        let (repo, child_repo, _temp_dir, child1) = setup_test_repo_with_child().await;
+    #[test]
+    fn test_list_allowance_configs() {
+        let (repo, child_repo, _temp_dir, child1) = setup_test_repo_with_child();
         
         // Create a second child
         let child2 = DomainChild {
@@ -380,7 +381,7 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };
-        child_repo.store_child(&child2).await.unwrap();
+        child_repo.store_child(&child2).unwrap();
         
         // Create configs for both children
         let config1 = DomainAllowanceConfig {
@@ -403,11 +404,11 @@ mod tests {
             updated_at: Utc::now().to_rfc3339(),
         };
         
-        repo.store_allowance_config(&config1).await.unwrap();
-        repo.store_allowance_config(&config2).await.unwrap();
+        repo.store_allowance_config(&config1).unwrap();
+        repo.store_allowance_config(&config2).unwrap();
         
         // List all configs
-        let configs = repo.list_allowance_configs().await.unwrap();
+        let configs = repo.list_allowance_configs().unwrap();
         assert_eq!(configs.len(), 2);
         
         // Verify both configs are present
@@ -416,9 +417,9 @@ mod tests {
         assert!(child_ids.contains(&&child2.id));
     }
 
-    #[tokio::test]
-    async fn test_store_config_for_nonexistent_child() {
-        let (repo, _child_repo, _temp_dir, _child) = setup_test_repo_with_child().await;
+    #[test]
+    fn test_store_config_for_nonexistent_child() {
+        let (repo, _child_repo, _temp_dir, _child) = setup_test_repo_with_child();
         
         let config = DomainAllowanceConfig {
             id: "allowance::9999999999::98765".to_string(),
@@ -431,7 +432,7 @@ mod tests {
         };
         
         // Storing config for nonexistent child should fail
-        let result = repo.store_allowance_config(&config).await;
+        let result = repo.store_allowance_config(&config);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("child with ID"));
     }

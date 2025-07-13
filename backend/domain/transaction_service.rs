@@ -430,8 +430,8 @@ mod tests {
     };
     // Tests now use domain models instead of shared types
 
-    async fn create_test_service() -> (TransactionService<CsvConnection>, Arc<CsvConnection>) {
-        let connection = Arc::new(CsvConnection::new_for_testing().await.unwrap());
+    fn create_test_service() -> (TransactionService<CsvConnection>, Arc<CsvConnection>) {
+        let connection = Arc::new(CsvConnection::new_for_testing().unwrap());
         let child_service = ChildService::new(connection.clone());
         let allowance_service = AllowanceService::new(connection.clone());
         let balance_service = BalanceService::new(connection.clone());
@@ -444,7 +444,7 @@ mod tests {
         (transaction_service, connection)
     }
 
-    async fn create_test_child(
+    fn create_test_child(
         child_service: &ChildService,
         child_name: &str,
     ) -> Result<DomainChild> {
@@ -452,21 +452,21 @@ mod tests {
             name: child_name.to_string(),
             birthdate: "2015-01-01".to_string(),
         };
-        let result = child_service.create_child(create_child_command).await?;
+        let result = child_service.create_child(create_child_command)?;
         Ok(result.child)
     }
 
-    #[tokio::test]
-    async fn test_create_transaction_basic() {
-        let (service, _conn) = create_test_service().await;
-        let test_child = create_test_child(&service.child_service, "test_child").await.unwrap();
+    #[test]
+    fn test_create_transaction_basic() {
+        let (service, _conn) = create_test_service();
+        let test_child = create_test_child(&service.child_service, "test_child").unwrap();
         let set_active_command = SetActiveChildCommand {
             child_id: test_child.id.clone(),
         };
         service
             .child_service
             .set_active_child(set_active_command)
-            .await
+            
             .unwrap();
 
         let cmd = CreateTransactionCommand {
@@ -474,7 +474,7 @@ mod tests {
             description: "Test transaction".to_string(),
             date: None,
         };
-        let transaction = service.create_transaction(cmd).await.unwrap();
+        let transaction = service.create_transaction(cmd).unwrap();
         assert_eq!(transaction.amount, 10.0);
         assert_eq!(transaction.description, "Test transaction");
         assert_eq!(transaction.balance, 10.0);

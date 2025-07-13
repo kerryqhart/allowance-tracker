@@ -1,7 +1,0 @@
-warning: profiles for the non root package will be ignored, specify profiles at the workspace root:
-package:   /Users/kerryh/Library/Mobile Documents/com~apple~CloudDocs/Documents/Code/windsurf_try/allowance-tracker/egui-frontend/Cargo.toml
-workspace: /Users/kerryh/Library/Mobile Documents/com~apple~CloudDocs/Documents/Code/windsurf_try/allowance-tracker/Cargo.toml
-   Compiling allowance-tracker-egui v0.1.0 (/Users/kerryh/Library/Mobile Documents/com~apple~CloudDocs/Documents/Code/windsurf_try/allowance-tracker/egui-frontend)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 3.85s
-     Running `/Users/kerryh/Library/Mobile Documents/com~apple~CloudDocs/Documents/Code/windsurf_try/allowance-tracker/target/debug/allowance-tracker-egui`
-🔍 Backend::new() using real data path: "/Users/kerryh/Documents/Allowance Tracker"

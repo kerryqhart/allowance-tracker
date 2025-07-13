@@ -210,35 +210,41 @@ mod tests {
     use crate::backend::domain::models::transaction::{Transaction, TransactionType};
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    async fn create_test_service() -> BalanceService<CsvConnection> {
+    fn create_test_service() -> BalanceService<CsvConnection> {
         let temp_dir = tempfile::tempdir().unwrap();
         let db = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
         BalanceService::new(db)
     }
 
-    async fn create_test_transaction(service: &BalanceService<CsvConnection>, child_id: &str, date: &str, description: &str, amount: f64, balance: f64) -> Transaction {
+    fn create_test_transaction(service: &BalanceService<CsvConnection>, child_id: &str, date: &str, description: &str, amount: f64, balance: f64) -> Transaction {
         let now_millis = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_millis() as u64;
         
+        let parsed_date = chrono::DateTime::parse_from_rfc3339(date)
+            .unwrap_or_else(|_| {
+                chrono::DateTime::parse_from_str(&format!("{}T12:00:00-05:00", date), "%Y-%m-%dT%H:%M:%S%z")
+                    .expect("Failed to parse date")
+            });
+        
         let transaction = Transaction {
             id: Transaction::generate_id(amount, now_millis),
             child_id: child_id.to_string(),
-            date: date.to_string(),
+            date: parsed_date,
             description: description.to_string(),
             amount,
             balance,
             transaction_type: if amount >= 0.0 { TransactionType::Income } else { TransactionType::Expense },
         };
 
-        service.transaction_repository.store_transaction(&transaction).await.unwrap();
+        service.transaction_repository.store_transaction(&transaction).unwrap();
         transaction
     }
 
-    #[tokio::test]
-    async fn test_calculate_starting_balance_with_previous_transaction() {
-        let service = create_test_service().await;
+    #[test]
+    fn test_calculate_starting_balance_with_previous_transaction() {
+        let service = create_test_service();
         
         // Create a child first
         let temp_dir = tempfile::tempdir().unwrap();
@@ -247,19 +253,19 @@ mod tests {
         let child_result = child_service.create_child(CreateChildCommand {
             name: "Test Child".to_string(),
             birthdate: "2015-01-01".to_string(),
-        }).await.unwrap();
+        }).unwrap();
         let child_id = &child_result.child.id;
 
         // Create a transaction before our target date
-        create_test_transaction(&service, child_id, "2025-01-10T10:00:00-05:00", "Previous transaction", 50.0, 50.0).await;
+        create_test_transaction(&service, child_id, "2025-01-10T10:00:00-05:00", "Previous transaction", 50.0, 50.0);
 
-        let starting_balance = service.calculate_starting_balance(child_id, "2025-01-15T10:00:00-05:00").await.unwrap();
+        let starting_balance = service.calculate_starting_balance(child_id, "2025-01-15T10:00:00-05:00").unwrap();
         assert_eq!(starting_balance, 50.0);
     }
 
-    #[tokio::test]
-    async fn test_calculate_starting_balance_no_previous_transaction() {
-        let service = create_test_service().await;
+    #[test]
+    fn test_calculate_starting_balance_no_previous_transaction() {
+        let service = create_test_service();
         
         // Create a child first
         let temp_dir = tempfile::tempdir().unwrap();
@@ -268,16 +274,16 @@ mod tests {
         let child_result = child_service.create_child(CreateChildCommand {
             name: "Test Child".to_string(),
             birthdate: "2015-01-01".to_string(),
-        }).await.unwrap();
+        }).unwrap();
         let child_id = &child_result.child.id;
 
-        let starting_balance = service.calculate_starting_balance(child_id, "2025-01-15T10:00:00-05:00").await.unwrap();
+        let starting_balance = service.calculate_starting_balance(child_id, "2025-01-15T10:00:00-05:00").unwrap();
         assert_eq!(starting_balance, 0.0);
     }
 
-    #[tokio::test]
-    async fn test_calculate_balance_for_new_transaction() {
-        let service = create_test_service().await;
+    #[test]
+    fn test_calculate_balance_for_new_transaction() {
+        let service = create_test_service();
         
         // Create a child first
         let temp_dir = tempfile::tempdir().unwrap();
@@ -286,18 +292,18 @@ mod tests {
         let child_result = child_service.create_child(CreateChildCommand {
             name: "Test Child".to_string(),
             birthdate: "2015-01-01".to_string(),
-        }).await.unwrap();
+        }).unwrap();
         let child_id = &child_result.child.id;
 
         // Create a previous transaction
-        create_test_transaction(&service, child_id, "2025-01-10T10:00:00-05:00", "Previous", 30.0, 30.0).await;
+        create_test_transaction(&service, child_id, "2025-01-10T10:00:00-05:00", "Previous", 30.0, 30.0);
 
-        let new_balance = service.calculate_balance_for_new_transaction(child_id, "2025-01-15T10:00:00-05:00", 20.0).await.unwrap();
+        let new_balance = service.calculate_balance_for_new_transaction(child_id, "2025-01-15T10:00:00-05:00", 20.0).unwrap();
         assert_eq!(new_balance, 50.0); // 30 + 20
     }
 
-    #[tokio::test]
-    async fn test_recalculate_balances_from_date() {
+    #[test]
+    fn test_recalculate_balances_from_date() {
         // Fresh test: Test balance recalculation after inserting a backdated transaction
         
         // Set up test environment with shared connection
@@ -310,29 +316,26 @@ mod tests {
         let child_result = child_service.create_child(CreateChildCommand {
             name: "Test Child".to_string(),
             birthdate: "2015-01-01".to_string(),
-        }).await.unwrap();
+        }).unwrap();
         let child_id = &child_result.child.id;
 
         println!("🧪 TEST: Setting up initial transactions with correct balances");
         
         // Step 1: Create sequential transactions with correct balances
-        let tx1 = create_test_transaction(&balance_service, child_id, "2025-01-10T10:00:00-05:00", "First", 100.0, 100.0).await;
-        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        let tx1 = create_test_transaction(&balance_service, child_id, "2025-01-10T10:00:00-05:00", "First", 100.0, 100.0);
         
-        let tx2 = create_test_transaction(&balance_service, child_id, "2025-01-15T10:00:00-05:00", "Second", -20.0, 80.0).await;
-        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        let tx2 = create_test_transaction(&balance_service, child_id, "2025-01-15T10:00:00-05:00", "Second", -20.0, 80.0);
         
-        let tx3 = create_test_transaction(&balance_service, child_id, "2025-01-20T10:00:00-05:00", "Third", 50.0, 130.0).await;
-        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        let tx3 = create_test_transaction(&balance_service, child_id, "2025-01-20T10:00:00-05:00", "Third", 50.0, 130.0);
 
         println!("🧪 TEST: Initial balances - tx1: {}, tx2: {}, tx3: {}", tx1.balance, tx2.balance, tx3.balance);
         
         // Step 2: Verify initial balances are correct
-        let initial_errors = balance_service.validate_all_balances(child_id).await.unwrap();
+        let initial_errors = balance_service.validate_all_balances(child_id).unwrap();
         assert!(initial_errors.is_empty(), "Initial balances should be correct: {:?}", initial_errors);
 
         // Step 3: Insert a backdated transaction between tx1 and tx2
-        let backdated_tx = create_test_transaction(&balance_service, child_id, "2025-01-12T10:00:00-05:00", "Backdated", 25.0, 125.0).await;
+        let backdated_tx = create_test_transaction(&balance_service, child_id, "2025-01-12T10:00:00-05:00", "Backdated", 25.0, 125.0);
         println!("🧪 TEST: Inserted backdated transaction: {}", backdated_tx.balance);
         
         // Step 4: At this point, tx2 and tx3 have wrong balances because of the backdated insertion
@@ -341,21 +344,21 @@ mod tests {
         
         // Step 5: Recalculate balances from the backdated transaction date
         println!("🧪 TEST: Recalculating balances from backdated transaction date");
-        let updated_count = balance_service.recalculate_balances_from_date(child_id, "2025-01-12T10:00:00-05:00").await.unwrap();
+        let updated_count = balance_service.recalculate_balances_from_date(child_id, "2025-01-12T10:00:00-05:00").unwrap();
         
         // Should update 3 transactions: backdated + 2 subsequent
         assert_eq!(updated_count, 3, "Should have updated 3 transactions (backdated + 2 subsequent)");
 
         // Step 6: Validate that all balances are now correct
-        let final_errors = balance_service.validate_all_balances(child_id).await.unwrap();
+        let final_errors = balance_service.validate_all_balances(child_id).unwrap();
         assert!(final_errors.is_empty(), "Final balance validation should pass: {:?}", final_errors);
         
         println!("🧪 TEST: Balance recalculation test passed!");
     }
 
-    #[tokio::test]
-    async fn test_requires_balance_recalculation() {
-        let service = create_test_service().await;
+    #[test]
+    fn test_requires_balance_recalculation() {
+        let service = create_test_service();
         
         // Create a child first
         let temp_dir = tempfile::tempdir().unwrap();
@@ -364,24 +367,24 @@ mod tests {
         let child_result = child_service.create_child(CreateChildCommand {
             name: "Test Child".to_string(),
             birthdate: "2015-01-01".to_string(),
-        }).await.unwrap();
+        }).unwrap();
         let child_id = &child_result.child.id;
 
         // Create a transaction after our test date
-        create_test_transaction(&service, child_id, "2025-01-20T10:00:00-05:00", "Future transaction", 100.0, 100.0).await;
+        create_test_transaction(&service, child_id, "2025-01-20T10:00:00-05:00", "Future transaction", 100.0, 100.0);
 
         // Check if inserting at an earlier date requires recalculation
-        let requires_recalc = service.requires_balance_recalculation(child_id, "2025-01-15T10:00:00-05:00").await.unwrap();
+        let requires_recalc = service.requires_balance_recalculation(child_id, "2025-01-15T10:00:00-05:00").unwrap();
         assert!(requires_recalc);
 
         // Check if inserting after the last transaction doesn't require recalculation
-        let no_recalc_needed = service.requires_balance_recalculation(child_id, "2025-01-25T10:00:00-05:00").await.unwrap();
+        let no_recalc_needed = service.requires_balance_recalculation(child_id, "2025-01-25T10:00:00-05:00").unwrap();
         assert!(!no_recalc_needed);
     }
 
-    #[tokio::test]
-    async fn test_validate_all_balances_correct() {
-        let service = create_test_service().await;
+    #[test]
+    fn test_validate_all_balances_correct() {
+        let service = create_test_service();
         
         // Create a child first
         let temp_dir = tempfile::tempdir().unwrap();
@@ -390,27 +393,23 @@ mod tests {
         let child_result = child_service.create_child(CreateChildCommand {
             name: "Test Child".to_string(),
             birthdate: "2015-01-01".to_string(),
-        }).await.unwrap();
+        }).unwrap();
         let child_id = &child_result.child.id;
 
         // Create transactions with correct balances
-        create_test_transaction(&service, child_id, "2025-01-10T10:00:00-05:00", "First", 100.0, 100.0).await;
+        create_test_transaction(&service, child_id, "2025-01-10T10:00:00-05:00", "First", 100.0, 100.0);
         
-        tokio::time::sleep(tokio::time::Duration::from_millis(2)).await;
+        create_test_transaction(&service, child_id, "2025-01-15T10:00:00-05:00", "Second", -30.0, 70.0);
         
-        create_test_transaction(&service, child_id, "2025-01-15T10:00:00-05:00", "Second", -30.0, 70.0).await;
-        
-        tokio::time::sleep(tokio::time::Duration::from_millis(2)).await;
-        
-        create_test_transaction(&service, child_id, "2025-01-20T10:00:00-05:00", "Third", 20.0, 90.0).await;
+        create_test_transaction(&service, child_id, "2025-01-20T10:00:00-05:00", "Third", 20.0, 90.0);
 
-        let errors = service.validate_all_balances(child_id).await.unwrap();
+        let errors = service.validate_all_balances(child_id).unwrap();
         assert!(errors.is_empty());
     }
 
-    #[tokio::test]
-    async fn test_validate_all_balances_incorrect() {
-        let service = create_test_service().await;
+    #[test]
+    fn test_validate_all_balances_incorrect() {
+        let service = create_test_service();
         
         // Create a child first
         let temp_dir = tempfile::tempdir().unwrap();
@@ -419,21 +418,17 @@ mod tests {
         let child_result = child_service.create_child(CreateChildCommand {
             name: "Test Child".to_string(),
             birthdate: "2015-01-01".to_string(),
-        }).await.unwrap();
+        }).unwrap();
         let child_id = &child_result.child.id;
 
         // Create transactions with intentionally incorrect balances
-        create_test_transaction(&service, child_id, "2025-01-10T10:00:00-05:00", "First", 100.0, 100.0).await;
+        create_test_transaction(&service, child_id, "2025-01-10T10:00:00-05:00", "First", 100.0, 100.0);
         
-        tokio::time::sleep(tokio::time::Duration::from_millis(2)).await;
+        create_test_transaction(&service, child_id, "2025-01-15T10:00:00-05:00", "Second", -30.0, 75.0); // Should be 70.0
         
-        create_test_transaction(&service, child_id, "2025-01-15T10:00:00-05:00", "Second", -30.0, 75.0).await; // Should be 70.0
-        
-        tokio::time::sleep(tokio::time::Duration::from_millis(2)).await;
-        
-        create_test_transaction(&service, child_id, "2025-01-20T10:00:00-05:00", "Third", 20.0, 85.0).await; // Should be 90.0
+        create_test_transaction(&service, child_id, "2025-01-20T10:00:00-05:00", "Third", 20.0, 85.0); // Should be 90.0
 
-        let errors = service.validate_all_balances(child_id).await.unwrap();
+        let errors = service.validate_all_balances(child_id).unwrap();
         assert_eq!(errors.len(), 2); // Two incorrect balances
     }
 } 

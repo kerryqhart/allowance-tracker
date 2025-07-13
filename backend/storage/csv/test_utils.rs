@@ -223,8 +223,8 @@ pub fn cleanup_orphaned_test_directories() -> Result<()> {
 /// Usage:
 /// ```rust
 /// test_with_cleanup!(test_my_feature, {
-///     let helper = RepositoryTestHelper::new().await?;
-///     let child = helper.create_test_child("Test Child", "123").await?;
+///     let helper = RepositoryTestHelper::new()?;
+///     let child = helper.create_test_child("Test Child", "123")?;
 ///     // ... test code ...
 ///     assert_eq!(child.name, "Test Child");
 /// });
@@ -232,13 +232,13 @@ pub fn cleanup_orphaned_test_directories() -> Result<()> {
 #[macro_export]
 macro_rules! test_with_cleanup {
     ($test_name:ident, $test_body:block) => {
-        #[tokio::test]
+        #[test]
         async fn $test_name() -> anyhow::Result<()> {
             // Clean up any orphaned directories first
             $crate::backend::storage::csv::test_utils::cleanup_orphaned_test_directories()?;
             
             // Run the test
-            let result: anyhow::Result<()> = async move $test_body.await;
+            let result: anyhow::Result<()> = async move $test_body;
             
             // Return result (cleanup happens automatically via RAII)
             result
@@ -250,13 +250,13 @@ macro_rules! test_with_cleanup {
 mod tests {
     use super::*;
     
-    #[tokio::test]
-    async fn test_environment_cleanup() -> Result<()> {
+    #[test]
+    fn test_environment_cleanup() -> Result<()> {
         let base_path;
         
         // Create and use test environment
         {
-            let env = TestEnvironment::new().await?;
+            let env = TestEnvironment::new()?;
             base_path = env.base_directory().to_path_buf();
             
             // Verify directory exists
@@ -273,17 +273,17 @@ mod tests {
         Ok(())
     }
     
-    #[tokio::test]
-    async fn test_repository_helper() -> Result<()> {
-        let helper = RepositoryTestHelper::new().await?;
+    #[test]
+    fn test_repository_helper() -> Result<()> {
+        let helper = RepositoryTestHelper::new()?;
         
         // Test child creation
-        let child = helper.create_test_child("Test Child", "123").await?;
+        let child = helper.create_test_child("Test Child", "123")?;
         assert_eq!(child.name, "Test Child");
         assert_eq!(child.id, "child::123");
         
         // Verify child was stored
-        let retrieved = helper.child_repo.get_child(&child.id).await?;
+        let retrieved = helper.child_repo.get_child(&child.id)?;
         assert!(retrieved.is_some());
         assert_eq!(retrieved.unwrap().name, "Test Child");
         

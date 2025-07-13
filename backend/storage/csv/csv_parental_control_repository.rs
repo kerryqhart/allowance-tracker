@@ -212,7 +212,7 @@ impl ParentalControlRepository for CsvParentalControlRepository {
             child_id, success
         );
 
-        let next_id = self.get_next_id(child_id).await?;
+        let next_id = self.get_next_id(child_id)?;
         let record = ParentalControlAttemptRecord {
             id: next_id,
             attempted_value: attempted_value.to_string(),
@@ -220,7 +220,7 @@ impl ParentalControlRepository for CsvParentalControlRepository {
             success,
         };
         
-        self.append_parental_control_attempt(child_id, &record).await?;
+        self.append_parental_control_attempt(child_id, &record)?;
         
         Ok(next_id)
     }
@@ -230,7 +230,7 @@ impl ParentalControlRepository for CsvParentalControlRepository {
         child_id: &str,
         limit: Option<u32>,
     ) -> Result<Vec<shared::ParentalControlAttempt>> {
-        let mut attempts = self.read_attempts(child_id).await?;
+        let mut attempts = self.read_attempts(child_id)?;
         
         // Sort by timestamp descending to get the most recent attempts
         attempts.sort_by(|a: &shared::ParentalControlAttempt, b: &shared::ParentalControlAttempt| b.timestamp.cmp(&a.timestamp));
@@ -246,11 +246,11 @@ impl ParentalControlRepository for CsvParentalControlRepository {
     async fn get_all_parental_control_attempts(
         &self,
     ) -> Result<Vec<shared::ParentalControlAttempt>> {
-        let child_ids = self.connection.get_all_child_ids().await?;
+        let child_ids = self.connection.get_all_child_ids()?;
         let mut all_attempts = Vec::new();
 
         for child_id in child_ids {
-            let attempts = self.read_attempts(&child_id).await?;
+            let attempts = self.read_attempts(&child_id)?;
             all_attempts.extend(attempts);
         }
 
@@ -268,7 +268,7 @@ mod tests {
     use shared::Child;
     use tempfile::TempDir;
 
-    async fn setup_test_repo_with_child() -> (CsvParentalControlRepository, CsvChildRepository, TempDir, Child) {
+    fn setup_test_repo_with_child() -> (CsvParentalControlRepository, CsvChildRepository, TempDir, Child) {
         let temp_dir = TempDir::new().unwrap();
         let connection = CsvConnection::new(temp_dir.path()).unwrap();
         let repo = CsvParentalControlRepository::new(connection.clone());
@@ -279,70 +279,69 @@ mod tests {
             name: "Test Child".to_string(),
             birthdate: "2010-01-01".to_string(),
         };
-        child_repo.store_child(&child.into()).await.unwrap();
+        child_repo.store_child(&child.into()).unwrap();
 
         (repo, child_repo, temp_dir, child)
     }
 
-    #[tokio::test]
-    async fn test_record_and_get_parental_control_attempts() {
-        let (repo, _child_repo, _temp_dir, child) = setup_test_repo_with_child().await;
+    #[test]
+    fn test_record_and_get_parental_control_attempts() {
+        let (repo, _child_repo, _temp_dir, child) = setup_test_repo_with_child();
 
-        repo.record_parental_control_attempt(&child.id, "wrong", false).await.unwrap();
-        repo.record_parental_control_attempt(&child.id, "right", true).await.unwrap();
+        repo.record_parental_control_attempt(&child.id, "wrong", false).unwrap();
+        repo.record_parental_control_attempt(&child.id, "right", true).unwrap();
 
-        let attempts = repo.get_parental_control_attempts(&child.id, None).await.unwrap();
+        let attempts = repo.get_parental_control_attempts(&child.id, None).unwrap();
         assert_eq!(attempts.len(), 2);
         assert_eq!(attempts[0].success, true);
         assert_eq!(attempts[1].success, false);
     }
 
-    #[tokio::test]
-    async fn test_get_parental_control_attempts_with_limit() {
-        let (repo, _child_repo, _temp_dir, child) = setup_test_repo_with_child().await;
+    #[test]
+    fn test_get_parental_control_attempts_with_limit() {
+        let (repo, _child_repo, _temp_dir, child) = setup_test_repo_with_child();
 
         for i in 0..5 {
-            repo.record_parental_control_attempt(&child.id, &format!("attempt {}", i), i % 2 == 0).await.unwrap();
+            repo.record_parental_control_attempt(&child.id, &format!("attempt {}", i), i % 2 == 0).unwrap();
         }
 
-        let attempts = repo.get_parental_control_attempts(&child.id, Some(3)).await.unwrap();
+        let attempts = repo.get_parental_control_attempts(&child.id, Some(3)).unwrap();
         assert_eq!(attempts.len(), 3);
         assert_eq!(attempts[0].attempted_value, "attempt 4");
     }
 
-    #[tokio::test]
-    async fn test_get_all_parental_control_attempts() {
-        let (repo, child_repo, _temp_dir, _child1) = setup_test_repo_with_child().await;
+    #[test]
+    fn test_get_all_parental_control_attempts() {
+        let (repo, child_repo, _temp_dir, _child1) = setup_test_repo_with_child();
 
         let child2 = Child {
             id: "child2".to_string(),
             name: "Another Child".to_string(),
             birthdate: "2012-02-02".to_string(),
         };
-        child_repo.store_child(&child2.clone().into()).await.unwrap();
+        child_repo.store_child(&child2.clone().into()).unwrap();
 
-        repo.record_parental_control_attempt("child1", "c1a1", true).await.unwrap();
-        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-        repo.record_parental_control_attempt("child2", "c2a1", false).await.unwrap();
+        repo.record_parental_control_attempt("child1", "c1a1", true).unwrap();
+        repo.record_parental_control_attempt("child2", "c2a1", false).unwrap();
 
-        let all_attempts = repo.get_all_parental_control_attempts(None).await.unwrap();
+        let all_attempts = repo.get_all_parental_control_attempts(None).unwrap();
         assert_eq!(all_attempts.len(), 2);
         assert_eq!(all_attempts[0].attempted_value, "c2a1");
         assert_eq!(all_attempts[1].attempted_value, "c1a1");
     }
 
-    #[tokio::test]
-    async fn test_record_attempt_for_nonexistent_child() {
-        let (repo, _child_repo, _temp_dir, _child) = setup_test_repo_with_child().await;
-        let result = repo.record_parental_control_attempt("nonexistent", "value", true).await;
+    #[test]
+    fn test_record_attempt_for_nonexistent_child() {
+        let (repo, _child_repo, _temp_dir, _child) = setup_test_repo_with_child();
+        let result = repo.record_parental_control_attempt("nonexistent", "value", true);
         // This should succeed as it will create the directory
         assert!(result.is_ok());
     }
 
-    #[tokio::test]
-    async fn test_get_attempts_for_nonexistent_child() {
-        let (repo, _child_repo, _temp_dir, _child) = setup_test_repo_with_child().await;
-        let attempts = repo.get_parental_control_attempts("nonexistent", None).await.unwrap();
+    #[test]
+    fn test_get_attempts_for_nonexistent_child() {
+        let (repo, _child_repo, _temp_dir, _child) = setup_test_repo_with_child();
+        let attempts = repo.get_parental_control_attempts("nonexistent", None).unwrap();
         assert!(attempts.is_empty());
     }
 } 

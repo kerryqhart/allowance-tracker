@@ -311,7 +311,7 @@ mod tests {
     use crate::backend::domain::models::child::Child as DomainChild;
     use crate::backend::storage::GoalStorage;
 
-    async fn setup_test_repo_with_child() -> (GoalRepository, ChildRepository, TempDir, DomainChild) {
+    fn setup_test_repo_with_child() -> (GoalRepository, ChildRepository, TempDir, DomainChild) {
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
         let connection = CsvConnection::new(temp_dir.path()).expect("Failed to create connection");
         let goal_repo = GoalRepository::new(connection.clone());
@@ -326,14 +326,14 @@ mod tests {
             updated_at: Utc::now(),
         };
         
-        child_repo.store_child(&child).await.expect("Failed to create test child");
+        child_repo.store_child(&child).expect("Failed to create test child");
         
         (goal_repo, child_repo, temp_dir, child)
     }
 
-    #[tokio::test]
-    async fn test_store_and_get_goal() {
-        let (goal_repo, _child_repo, _temp_dir, child) = setup_test_repo_with_child().await;
+    #[test]
+    fn test_store_and_get_goal() {
+        let (goal_repo, _child_repo, _temp_dir, child) = setup_test_repo_with_child();
         
         let goal = DomainGoal {
             id: "goal::test".to_string(),
@@ -346,10 +346,10 @@ mod tests {
         };
         
         // Store goal
-        goal_repo.store_goal(&goal).await.expect("Failed to store goal");
+        goal_repo.store_goal(&goal).expect("Failed to store goal");
         
         // Retrieve goal
-        let retrieved_goal = goal_repo.get_current_goal(&child.id).await
+        let retrieved_goal = goal_repo.get_current_goal(&child.id)
             .expect("Failed to get goal")
             .expect("Goal should exist");
         
@@ -359,9 +359,9 @@ mod tests {
         assert_eq!(retrieved_goal.state, DomainGoalState::Active);
     }
 
-    #[tokio::test]
-    async fn test_cancel_goal() {
-        let (goal_repo, _child_repo, _temp_dir, child) = setup_test_repo_with_child().await;
+    #[test]
+    fn test_cancel_goal() {
+        let (goal_repo, _child_repo, _temp_dir, child) = setup_test_repo_with_child();
         
         let goal = DomainGoal {
             id: "goal::test".to_string(),
@@ -374,24 +374,24 @@ mod tests {
         };
         
         // Store active goal
-        goal_repo.store_goal(&goal).await.expect("Failed to store goal");
+        goal_repo.store_goal(&goal).expect("Failed to store goal");
         
         // Cancel goal
-        let cancelled_goal = goal_repo.cancel_current_goal(&child.id).await
+        let cancelled_goal = goal_repo.cancel_current_goal(&child.id)
             .expect("Failed to cancel goal")
             .expect("Cancelled goal should be returned");
         
         assert_eq!(cancelled_goal.state, DomainGoalState::Cancelled);
         
         // Should no longer have an active goal
-        let current_goal = goal_repo.get_current_goal(&child.id).await
+        let current_goal = goal_repo.get_current_goal(&child.id)
             .expect("Failed to get current goal");
         assert!(current_goal.is_none());
     }
 
-    #[tokio::test]
-    async fn test_goal_history() {
-        let (goal_repo, _child_repo, _temp_dir, child) = setup_test_repo_with_child().await;
+    #[test]
+    fn test_goal_history() {
+        let (goal_repo, _child_repo, _temp_dir, child) = setup_test_repo_with_child();
         
         // Create multiple goals over time
         let goal1 = DomainGoal {
@@ -414,11 +414,11 @@ mod tests {
             updated_at: "2025-01-02T00:00:00Z".to_string(),
         };
         
-        goal_repo.store_goal(&goal1).await.expect("Failed to store goal1");
-        goal_repo.store_goal(&goal2).await.expect("Failed to store goal2");
+        goal_repo.store_goal(&goal1).expect("Failed to store goal1");
+        goal_repo.store_goal(&goal2).expect("Failed to store goal2");
         
         // Get history
-        let history = goal_repo.list_goals(&child.id, None).await
+        let history = goal_repo.list_goals(&child.id, None)
             .expect("Failed to get goal history");
         
         assert_eq!(history.len(), 2);
@@ -427,12 +427,12 @@ mod tests {
         assert_eq!(history[1].id, "goal::1");
     }
 
-    #[tokio::test]
-    async fn test_has_active_goal() {
-        let (goal_repo, _child_repo, _temp_dir, child) = setup_test_repo_with_child().await;
+    #[test]
+    fn test_has_active_goal() {
+        let (goal_repo, _child_repo, _temp_dir, child) = setup_test_repo_with_child();
         
         // Initially no active goal
-        assert!(!goal_repo.has_active_goal(&child.id).await.expect("Failed to check active goal"));
+        assert!(!goal_repo.has_active_goal(&child.id).expect("Failed to check active goal"));
         
         let goal = DomainGoal {
             id: "goal::test".to_string(),
@@ -445,15 +445,15 @@ mod tests {
         };
         
         // Store active goal
-        goal_repo.store_goal(&goal).await.expect("Failed to store goal");
+        goal_repo.store_goal(&goal).expect("Failed to store goal");
         
         // Now should have active goal
-        assert!(goal_repo.has_active_goal(&child.id).await.expect("Failed to check active goal"));
+        assert!(goal_repo.has_active_goal(&child.id).expect("Failed to check active goal"));
         
         // Cancel the goal
-        goal_repo.cancel_current_goal(&child.id).await.expect("Failed to cancel goal");
+        goal_repo.cancel_current_goal(&child.id).expect("Failed to cancel goal");
         
         // Should no longer have active goal
-        assert!(!goal_repo.has_active_goal(&child.id).await.expect("Failed to check active goal"));
+        assert!(!goal_repo.has_active_goal(&child.id).expect("Failed to check active goal"));
     }
 } 

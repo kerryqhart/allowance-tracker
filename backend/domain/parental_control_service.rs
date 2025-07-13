@@ -136,28 +136,28 @@ mod tests {
     use super::*;
     use crate::backend::storage::csv::CsvConnection;
 
-    async fn setup_test() -> ParentalControlService {
+    fn setup_test() -> ParentalControlService {
         let temp_dir = tempfile::tempdir().unwrap();
         let db = Arc::new(CsvConnection::new(temp_dir.path()).expect("Failed to create test database"));
         ParentalControlService::new(db)
     }
 
-    #[tokio::test]
-    async fn test_correct_answer_validation() {
-        let service = setup_test().await;
+    #[test]
+    fn test_correct_answer_validation() {
+        let service = setup_test();
         
         let command = ValidateParentalControlCommand {
             answer: "ice cold".to_string(),
         };
         
-        let response = service.validate_answer(command).await.unwrap();
+        let response = service.validate_answer(command).unwrap();
         assert!(response.success);
         assert!(response.message.contains("Access granted"));
     }
 
-    #[tokio::test]
-    async fn test_case_insensitive_validation() {
-        let service = setup_test().await;
+    #[test]
+    fn test_case_insensitive_validation() {
+        let service = setup_test();
         
         let test_cases = vec![
             "ICE COLD",
@@ -172,14 +172,14 @@ mod tests {
                 answer: answer.to_string(),
             };
             
-            let response = service.validate_answer(command).await.unwrap();
+            let response = service.validate_answer(command).unwrap();
             assert!(response.success, "Answer '{}' should be accepted", answer);
         }
     }
 
-    #[tokio::test]
-    async fn test_whitespace_handling() {
-        let service = setup_test().await;
+    #[test]
+    fn test_whitespace_handling() {
+        let service = setup_test();
         
         let test_cases = vec![
             "  ice cold  ",
@@ -193,14 +193,14 @@ mod tests {
                 answer: answer.to_string(),
             };
             
-            let response = service.validate_answer(command).await.unwrap();
+            let response = service.validate_answer(command).unwrap();
             assert!(response.success, "Answer '{}' should be accepted", answer);
         }
     }
 
-    #[tokio::test]
-    async fn test_incorrect_answer_validation() {
-        let service = setup_test().await;
+    #[test]
+    fn test_incorrect_answer_validation() {
+        let service = setup_test();
         
         let test_cases = vec![
             "wrong answer",
@@ -217,34 +217,34 @@ mod tests {
                 answer: answer.to_string(),
             };
             
-            let response = service.validate_answer(command).await.unwrap();
+            let response = service.validate_answer(command).unwrap();
             assert!(!response.success, "Answer '{}' should be rejected", answer);
             assert!(response.message.contains("Incorrect answer"));
         }
     }
 
-    #[tokio::test]
-    async fn test_attempts_are_recorded() {
-        let service = setup_test().await;
+    #[test]
+    fn test_attempts_are_recorded() {
+        let service = setup_test();
         
         // Initially no attempts
-        let initial_attempts = service.get_recent_attempts(None).await.unwrap();
+        let initial_attempts = service.get_recent_attempts(None).unwrap();
         assert_eq!(initial_attempts.len(), 0);
         
         // Make a correct attempt
         let correct_command = ValidateParentalControlCommand {
             answer: "ice cold".to_string(),
         };
-        service.validate_answer(correct_command).await.unwrap();
+        service.validate_answer(correct_command).unwrap();
         
         // Make an incorrect attempt
         let incorrect_command = ValidateParentalControlCommand {
             answer: "wrong".to_string(),
         };
-        service.validate_answer(incorrect_command).await.unwrap();
+        service.validate_answer(incorrect_command).unwrap();
         
         // Check attempts were recorded
-        let attempts = service.get_recent_attempts(None).await.unwrap();
+        let attempts = service.get_recent_attempts(None).unwrap();
         assert_eq!(attempts.len(), 2);
         
         // Check the most recent attempt (should be the incorrect one)
@@ -256,12 +256,12 @@ mod tests {
         assert!(attempts[1].success);
     }
 
-    #[tokio::test]
-    async fn test_validation_stats() {
-        let service = setup_test().await;
+    #[test]
+    fn test_validation_stats() {
+        let service = setup_test();
         
         // Initially no stats
-        let initial_stats = service.get_validation_stats().await.unwrap();
+        let initial_stats = service.get_validation_stats().unwrap();
         assert_eq!(initial_stats.total_attempts, 0);
         assert_eq!(initial_stats.success_rate, 0.0);
         
@@ -278,19 +278,19 @@ mod tests {
             let command = ValidateParentalControlCommand {
                 answer: answer.to_string(),
             };
-            service.validate_answer(command).await.unwrap();
+            service.validate_answer(command).unwrap();
         }
         
         // Check stats
-        let stats = service.get_validation_stats().await.unwrap();
+        let stats = service.get_validation_stats().unwrap();
         assert_eq!(stats.total_attempts, 5);
         assert_eq!(stats.successful_attempts, 3);
         assert_eq!(stats.failed_attempts, 2);
         assert_eq!(stats.success_rate, 60.0); // 3/5 * 100
     }
 
-    #[tokio::test]
-    async fn test_custom_answer() {
+    #[test]
+    fn test_custom_answer() {
         let temp_dir = tempfile::tempdir().unwrap();
         let db = Arc::new(CsvConnection::new(temp_dir.path()).expect("Failed to create test database"));
         let service = ParentalControlService::with_answer(db, "custom answer".to_string());
@@ -299,14 +299,14 @@ mod tests {
         let correct_command = ValidateParentalControlCommand {
             answer: "custom answer".to_string(),
         };
-        let response = service.validate_answer(correct_command).await.unwrap();
+        let response = service.validate_answer(correct_command).unwrap();
         assert!(response.success);
         
         // Test default answer should fail
         let default_command = ValidateParentalControlCommand {
             answer: "ice cold".to_string(),
         };
-        let response = service.validate_answer(default_command).await.unwrap();
+        let response = service.validate_answer(default_command).unwrap();
         assert!(!response.success);
     }
 } 

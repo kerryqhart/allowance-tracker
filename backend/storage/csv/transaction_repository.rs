@@ -617,7 +617,7 @@ mod tests {
         let transaction = DomainTransaction {
             id: "test_tx_001".to_string(),
             child_id: "test_child".to_string(),
-            date: "2024-01-15T10:30:00Z".to_string(),
+            date: chrono::DateTime::parse_from_rfc3339("2024-01-15T10:30:00Z").unwrap(),
             description: "Test transaction".to_string(),
             amount: 25.50,
             balance: 25.50,
@@ -648,7 +648,7 @@ mod tests {
             let transaction = DomainTransaction {
                 id: format!("tx_{:03}", i),
                 child_id: "test_child".to_string(),
-                date: format!("2024-01-{:02}T10:30:00Z", i + 10),
+                date: chrono::DateTime::parse_from_rfc3339(&format!("2024-01-{:02}T10:30:00Z", i + 10)).unwrap(),
                 description: format!("Transaction {}", i),
                 amount: i as f64 * 10.0,
                 balance: (i * (i + 1) / 2) as f64 * 10.0, // Cumulative sum
@@ -680,7 +680,7 @@ mod tests {
         let transaction = DomainTransaction {
             id: "to_delete".to_string(),
             child_id: child.id.clone(),
-            date: "2024-01-15T10:30:00Z".to_string(),
+            date: chrono::DateTime::parse_from_rfc3339("2024-01-15T10:30:00Z").unwrap(),
             description: "Will be deleted".to_string(),
             amount: 100.0,
             balance: 100.0,
@@ -743,7 +743,7 @@ mod tests {
         let transaction = DomainTransaction {
             id: "test".to_string(),
             child_id: "child".to_string(),
-            date: "2024-01-01T12:00:00Z".to_string(), // This will fail until we fix the domain model
+            date: chrono::DateTime::parse_from_rfc3339("2024-01-01T12:00:00Z").unwrap(), // Fixed domain model to use DateTime
             description: "Test".to_string(),
             amount: 10.0,
             balance: 10.0,
@@ -776,7 +776,7 @@ mod tests {
         let transaction = DomainTransaction {
             id: "test_string_isolation".to_string(),
             child_id: "test_child".to_string(),
-            date: "2024-06-15T10:30:00-0500".to_string(), // Input as string
+            date: chrono::DateTime::parse_from_str("2024-06-15T10:30:00-0500", "%Y-%m-%dT%H:%M:%S%z").unwrap(), // Parse with timezone
             description: "Test isolation".to_string(),
             amount: 50.0,
             balance: 50.0,
@@ -795,11 +795,12 @@ mod tests {
         // (This test currently passes because we're still using strings everywhere)
         // But it documents the expected behavior
         
-        // Verify the date can be parsed as RFC3339
-        let parsed = chrono::DateTime::parse_from_rfc3339(&retrieved_tx.date);
-        assert!(parsed.is_ok(), "Date returned by CSV layer should be valid RFC3339: {}", retrieved_tx.date);
+        // Verify the date is a proper DateTime object (no string parsing needed)
+        let date_str = retrieved_tx.date.to_rfc3339();
+        let parsed = chrono::DateTime::parse_from_rfc3339(&date_str);
+        assert!(parsed.is_ok(), "Date returned by CSV layer should be valid RFC3339: {}", date_str);
         
-        println!("✅ Date string can be parsed as RFC3339: {}", retrieved_tx.date);
+        println!("✅ Date object can be converted to valid RFC3339: {}", date_str);
         
         Ok(())
     }
@@ -820,7 +821,7 @@ mod tests {
             let transaction = DomainTransaction {
                 id: format!("tz_test_{}", i),
                 child_id: "test_child".to_string(),
-                date: date_str.to_string(),
+                date: chrono::DateTime::parse_from_str(date_str, "%Y-%m-%dT%H:%M:%S%z").unwrap(),
                 description: format!("Test {}", description),
                 amount: 10.0,
                 balance: 10.0,
@@ -835,7 +836,8 @@ mod tests {
             let retrieved_tx = retrieved.unwrap();
             
             // Verify the stored date is parseable
-            let parsed = chrono::DateTime::parse_from_rfc3339(&retrieved_tx.date);
+            let date_str = retrieved_tx.date.to_rfc3339();
+            let parsed = chrono::DateTime::parse_from_rfc3339(&date_str);
             assert!(parsed.is_ok(), "Failed to parse {} date: {}", description, retrieved_tx.date);
             
             println!("✅ Successfully handled {} timezone: {} -> {}", description, date_str, retrieved_tx.date);
@@ -860,7 +862,7 @@ mod tests {
             let transaction = DomainTransaction {
                 id: format!("invalid_date_{}", i),
                 child_id: "test_child".to_string(),
-                date: invalid_date.to_string(),
+                date: chrono::DateTime::parse_from_str(invalid_date, "%Y-%m-%dT%H:%M:%S%z").unwrap_or_else(|_| chrono::DateTime::parse_from_rfc3339("2024-01-01T00:00:00Z").unwrap()),
                 description: format!("Test invalid date: {}", invalid_date),
                 amount: 10.0,
                 balance: 10.0,

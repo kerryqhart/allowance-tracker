@@ -382,13 +382,13 @@ mod tests {
     use crate::backend::domain::commands::child::CreateChildCommand;
     use tempfile::tempdir;
 
-    async fn setup_test() -> AllowanceService {
+    fn setup_test() -> AllowanceService {
         let temp_dir = tempdir().unwrap();
         let conn = CsvConnection::new(temp_dir.path().to_path_buf()).unwrap();
         AllowanceService::new(Arc::new(conn))
     }
 
-    async fn create_test_child(service: &AllowanceService) -> DomainChild {
+    fn create_test_child(service: &AllowanceService) -> DomainChild {
         let command = crate::backend::domain::commands::child::CreateChildCommand {
             name: "Test Child".to_string(),
             birthdate: "2015-01-01".to_string(),
@@ -396,16 +396,16 @@ mod tests {
         let result = service
             .child_service
             .create_child(command)
-            .await
+            
             .expect("Failed to create test child");
         
         result.child
     }
 
-    #[tokio::test]
-    async fn test_get_allowance_config_not_found() {
-        let service = setup_test().await;
-        let child = create_test_child(&service).await;
+    #[test]
+    fn test_get_allowance_config_not_found() {
+        let service = setup_test();
+        let child = create_test_child(&service);
 
         let command = GetAllowanceConfigCommand {
             child_id: Some(child.id),
@@ -413,16 +413,16 @@ mod tests {
 
         let response = service
             .get_allowance_config(command)
-            .await
+            
             .expect("Failed to get allowance config");
 
         assert!(response.allowance_config.is_none());
     }
 
-    #[tokio::test]
-    async fn test_update_and_get_allowance_config() {
-        let service = setup_test().await;
-        let child = create_test_child(&service).await;
+    #[test]
+    fn test_update_and_get_allowance_config() {
+        let service = setup_test();
+        let child = create_test_child(&service);
 
         // Create allowance config
         let update_command = UpdateAllowanceConfigCommand {
@@ -434,7 +434,7 @@ mod tests {
 
         let update_response = service
             .update_allowance_config(update_command)
-            .await
+            
             .expect("Failed to update allowance config");
 
         assert_eq!(update_response.allowance_config.amount, 10.0);
@@ -450,7 +450,7 @@ mod tests {
 
         let get_result = service
             .get_allowance_config(get_command)
-            .await
+            
             .expect("Failed to get allowance config");
 
         assert!(get_result.allowance_config.is_some());
@@ -461,10 +461,10 @@ mod tests {
         assert_eq!(config.child_id, child.id);
     }
 
-    #[tokio::test]
-    async fn test_update_existing_allowance_config() {
-        let service = setup_test().await;
-        let child = create_test_child(&service).await;
+    #[test]
+    fn test_update_existing_allowance_config() {
+        let service = setup_test();
+        let child = create_test_child(&service);
 
         // Create initial config
         let initial_command = UpdateAllowanceConfigCommand {
@@ -476,7 +476,7 @@ mod tests {
 
         let initial_response = service
             .update_allowance_config(initial_command)
-            .await
+            
             .expect("Failed to create initial allowance config");
 
         let initial_id = initial_response.allowance_config.id.clone();
@@ -491,7 +491,7 @@ mod tests {
 
         let update_response = service
             .update_allowance_config(update_command)
-            .await
+            
             .expect("Failed to update allowance config");
 
         // Should have same ID but updated values
@@ -502,10 +502,10 @@ mod tests {
         assert_eq!(update_response.allowance_config.day_name(), "Saturday");
     }
 
-    #[tokio::test]
-    async fn test_invalid_day_of_week() {
-        let service = setup_test().await;
-        let child = create_test_child(&service).await;
+    #[test]
+    fn test_invalid_day_of_week() {
+        let service = setup_test();
+        let child = create_test_child(&service);
 
         let command = UpdateAllowanceConfigCommand {
             child_id: Some(child.id),
@@ -514,15 +514,15 @@ mod tests {
             is_active: true,
         };
 
-        let result = service.update_allowance_config(command).await;
+        let result = service.update_allowance_config(command);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Invalid day of week"));
     }
 
-    #[tokio::test]
-    async fn test_negative_amount() {
-        let service = setup_test().await;
-        let child = create_test_child(&service).await;
+    #[test]
+    fn test_negative_amount() {
+        let service = setup_test();
+        let child = create_test_child(&service);
 
         let command = UpdateAllowanceConfigCommand {
             child_id: Some(child.id),
@@ -531,15 +531,15 @@ mod tests {
             is_active: true,
         };
 
-        let result = service.update_allowance_config(command).await;
+        let result = service.update_allowance_config(command);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("cannot be negative"));
     }
 
-    #[tokio::test]
-    async fn test_delete_allowance_config() {
-        let service = setup_test().await;
-        let child = create_test_child(&service).await;
+    #[test]
+    fn test_delete_allowance_config() {
+        let service = setup_test();
+        let child = create_test_child(&service);
 
         // Create config first
         let update_command = UpdateAllowanceConfigCommand {
@@ -551,13 +551,13 @@ mod tests {
 
         service
             .update_allowance_config(update_command)
-            .await
+            
             .expect("Failed to create allowance config");
 
         // Delete it
         let deleted = service
             .delete_allowance_config(&child.id)
-            .await
+            
             .expect("Failed to delete allowance config");
 
         assert!(deleted);
@@ -569,16 +569,16 @@ mod tests {
 
         let get_result = service
             .get_allowance_config(get_command)
-            .await
+            
             .expect("Failed to get allowance config");
 
         assert!(get_result.allowance_config.is_none());
     }
 
-    #[tokio::test]
-    async fn test_list_allowance_configs() {
-        let service = setup_test().await;
-        let child1 = create_test_child(&service).await;
+    #[test]
+    fn test_list_allowance_configs() {
+        let service = setup_test();
+        let child1 = create_test_child(&service);
 
         // Create child2 with different name to get different ID
         let command2 = crate::backend::domain::commands::child::CreateChildCommand {
@@ -588,7 +588,7 @@ mod tests {
         let result2 = service
             .child_service
             .create_child(command2)
-            .await
+            
             .expect("Failed to create test child 2");
         let child2 = result2.child;
 
@@ -609,18 +609,18 @@ mod tests {
 
         service
             .update_allowance_config(command1)
-            .await
+            
             .expect("Failed to create config 1");
 
         service
             .update_allowance_config(command2)
-            .await
+            
             .expect("Failed to create config 2");
 
         // List all configs
         let configs = service
             .list_allowance_configs()
-            .await
+            
             .expect("Failed to list configs");
 
         assert_eq!(configs.len(), 2);
@@ -635,8 +635,8 @@ mod tests {
         assert_eq!(config2.is_active, false);
     }
 
-    #[tokio::test]
-    async fn test_allowance_config_day_names() {
+    #[test]
+    fn test_allowance_config_day_names() {
         let config = AllowanceConfig {
             id: "test".to_string(),
             child_id: "test".to_string(),
@@ -665,8 +665,8 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_is_valid_day_of_week() {
+    #[test]
+    fn test_is_valid_day_of_week() {
         assert!(AllowanceConfig::is_valid_day_of_week(0));
         assert!(AllowanceConfig::is_valid_day_of_week(1));
         assert!(AllowanceConfig::is_valid_day_of_week(6));
@@ -674,34 +674,34 @@ mod tests {
         assert!(!AllowanceConfig::is_valid_day_of_week(255));
     }
 
-    #[tokio::test]
-    async fn test_generate_id() {
+    #[test]
+    fn test_generate_id() {
         let child_id = "child123";
         let timestamp = 1234567890u64;
         let id = AllowanceConfig::generate_id(child_id, timestamp);
         assert_eq!(id, "allowance::child123::1234567890");
     }
 
-    #[tokio::test]
-    async fn test_get_pending_allowance_dates_no_config() {
-        let service = setup_test().await;
-        let child = create_test_child(&service).await;
+    #[test]
+    fn test_get_pending_allowance_dates_no_config() {
+        let service = setup_test();
+        let child = create_test_child(&service);
 
         let from_date = Local::now().date_naive() - chrono::Duration::days(7);
         let to_date = Local::now().date_naive();
 
         let pending = service
             .get_pending_allowance_dates(&child.id, from_date, to_date)
-            .await
+            
             .expect("Failed to get pending allowances");
 
         assert!(pending.is_empty(), "Should have no pending allowances without config");
     }
 
-    #[tokio::test]
-    async fn test_get_pending_allowance_dates_inactive_config() {
-        let service = setup_test().await;
-        let child = create_test_child(&service).await;
+    #[test]
+    fn test_get_pending_allowance_dates_inactive_config() {
+        let service = setup_test();
+        let child = create_test_child(&service);
 
         // Create inactive allowance config
         let command = UpdateAllowanceConfigCommand {
@@ -713,7 +713,7 @@ mod tests {
 
         service
             .update_allowance_config(command)
-            .await
+            
             .expect("Failed to create allowance config");
 
         let from_date = Local::now().date_naive() - chrono::Duration::days(7);
@@ -721,16 +721,16 @@ mod tests {
 
         let pending = service
             .get_pending_allowance_dates(&child.id, from_date, to_date)
-            .await
+            
             .expect("Failed to get pending allowances");
 
         assert!(pending.is_empty(), "Should have no pending allowances with inactive config");
     }
 
-    #[tokio::test]
-    async fn test_get_pending_allowance_dates_with_config() {
-        let service = setup_test().await;
-        let child = create_test_child(&service).await;
+    #[test]
+    fn test_get_pending_allowance_dates_with_config() {
+        let service = setup_test();
+        let child = create_test_child(&service);
 
         // Create active allowance config for every day (day_of_week: 0-6)
         // We'll use Sunday (0) for testing
@@ -743,7 +743,7 @@ mod tests {
 
         service
             .update_allowance_config(command)
-            .await
+            
             .expect("Failed to create allowance config");
 
         // Test a 7-day range that includes at least one Sunday
@@ -753,7 +753,7 @@ mod tests {
 
         let pending = service
             .get_pending_allowance_dates(&child.id, from_date, to_date)
-            .await
+            
             .expect("Failed to get pending allowances");
 
         // Count how many Sundays are in the range (should be at least 1)
@@ -778,8 +778,8 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_is_allowance_day() {
+    #[test]
+    fn test_is_allowance_day() {
         // Test different days of week
         let monday = NaiveDate::from_ymd_opt(2025, 6, 30).unwrap(); // Known Monday
         let tuesday = NaiveDate::from_ymd_opt(2025, 7, 1).unwrap(); // Known Tuesday
@@ -799,24 +799,24 @@ mod tests {
         assert!(!AllowanceService::is_allowance_day(sunday, 6)); // Sunday is not Saturday
     }
 
-    #[tokio::test]
-    async fn test_has_allowance_for_date_no_transactions() {
-        let service = setup_test().await;
-        let child = create_test_child(&service).await;
+    #[test]
+    fn test_has_allowance_for_date_no_transactions() {
+        let service = setup_test();
+        let child = create_test_child(&service);
 
         let test_date = Local::now().date_naive();
         let has_allowance = service
             .has_allowance_for_date(&child.id, test_date)
-            .await
+            
             .expect("Failed to check allowance for date");
 
         assert!(!has_allowance, "Should not have allowance when no transactions exist");
     }
 
-    #[tokio::test]
-    async fn test_has_allowance_for_date_with_allowance() {
-        let service = setup_test().await;
-        let child = create_test_child(&service).await;
+    #[test]
+    fn test_has_allowance_for_date_with_allowance() {
+        let service = setup_test();
+        let child = create_test_child(&service);
 
         let test_date = Local::now().date_naive();
         
@@ -824,7 +824,7 @@ mod tests {
         let transaction = DomainTransaction {
             id: "test_allowance_123".to_string(),
             child_id: child.id.clone(),
-            date: format!("{}T12:00:00-05:00", test_date.format("%Y-%m-%d")),
+            date: chrono::DateTime::parse_from_str(&format!("{}T12:00:00-05:00", test_date.format("%Y-%m-%d")), "%Y-%m-%dT%H:%M:%S%z").expect("Failed to parse date"),
             description: "Weekly allowance".to_string(),
             amount: 5.0,
             balance: 5.0,
@@ -835,21 +835,21 @@ mod tests {
         service
             .transaction_repository
             .store_transaction(&transaction)
-            .await
+            
             .expect("Failed to store test transaction");
 
         let has_allowance = service
             .has_allowance_for_date(&child.id, test_date)
-            .await
+            
             .expect("Failed to check allowance for date");
 
         assert!(has_allowance, "Should detect existing allowance transaction");
     }
 
-    #[tokio::test]
-    async fn test_has_allowance_for_date_with_non_allowance_transaction() {
-        let service = setup_test().await;
-        let child = create_test_child(&service).await;
+    #[test]
+    fn test_has_allowance_for_date_with_non_allowance_transaction() {
+        let service = setup_test();
+        let child = create_test_child(&service);
 
         let test_date = Local::now().date_naive();
         
@@ -857,7 +857,7 @@ mod tests {
         let transaction = DomainTransaction {
             id: "test_expense_123".to_string(),
             child_id: child.id.clone(),
-            date: format!("{}T12:00:00-05:00", test_date.format("%Y-%m-%d")),
+            date: chrono::DateTime::parse_from_str(&format!("{}T12:00:00-05:00", test_date.format("%Y-%m-%d")), "%Y-%m-%dT%H:%M:%S%z").expect("Failed to parse date"),
             description: "Bought candy".to_string(),
             amount: -2.0, // Negative amount (expense)
             balance: 3.0,
@@ -868,12 +868,12 @@ mod tests {
         service
             .transaction_repository
             .store_transaction(&transaction)
-            .await
+            
             .expect("Failed to store test transaction");
 
         let has_allowance = service
             .has_allowance_for_date(&child.id, test_date)
-            .await
+            
             .expect("Failed to check allowance for date");
 
         assert!(!has_allowance, "Should not detect allowance from non-allowance transaction");

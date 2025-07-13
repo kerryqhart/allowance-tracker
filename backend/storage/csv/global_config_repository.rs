@@ -70,13 +70,13 @@ impl Default for GlobalConfig {
 #[async_trait]
 pub trait GlobalConfigStorage: Send + Sync {
     /// Get the global configuration
-    async fn get_global_config(&self) -> Result<GlobalConfig>;
+    fn get_global_config(&self) -> Result<GlobalConfig>;
     
     /// Set the active child directory
-    async fn set_active_child_directory(&self, child_directory: Option<String>) -> Result<()>;
+    fn set_active_child_directory(&self, child_directory: Option<String>) -> Result<()>;
     
     /// Update the global configuration
-    async fn update_global_config(&self, config: &GlobalConfig) -> Result<()>;
+    fn update_global_config(&self, config: &GlobalConfig) -> Result<()>;
 }
 
 /// CSV-based global config repository using a single YAML file
@@ -97,7 +97,7 @@ impl GlobalConfigRepository {
     }
     
     /// Load global config from file, creating default if it doesn't exist
-    async fn load_or_create_global_config(&self) -> Result<GlobalConfig> {
+    fn load_or_create_global_config(&self) -> Result<GlobalConfig> {
         let config_path = self.get_global_config_path();
         
         if config_path.exists() {
@@ -108,14 +108,14 @@ impl GlobalConfigRepository {
         } else {
             // Create default config
             let config = GlobalConfig::default();
-            self.save_global_config(&config).await?;
+            self.save_global_config(&config)?;
             info!("Created default global config at {:?}", config_path);
             Ok(config)
         }
     }
     
     /// Save global config to file
-    async fn save_global_config(&self, config: &GlobalConfig) -> Result<()> {
+    fn save_global_config(&self, config: &GlobalConfig) -> Result<()> {
         let config_path = self.get_global_config_path();
         let base_dir = self.connection.base_directory();
         
@@ -137,23 +137,22 @@ impl GlobalConfigRepository {
     }
     
     /// Validate that a child directory exists
-    async fn validate_child_directory(&self, child_directory: &str) -> Result<bool> {
+    fn validate_child_directory(&self, child_directory: &str) -> Result<bool> {
         let child_dir_path = self.connection.get_child_directory(child_directory);
         let child_yaml_path = child_dir_path.join("child.yaml");
         Ok(child_yaml_path.exists())
     }
 }
 
-#[async_trait]
 impl GlobalConfigStorage for GlobalConfigRepository {
-    async fn get_global_config(&self) -> Result<GlobalConfig> {
-        self.load_or_create_global_config().await
+    fn get_global_config(&self) -> Result<GlobalConfig> {
+        self.load_or_create_global_config()
     }
     
-    async fn set_active_child_directory(&self, child_directory: Option<String>) -> Result<()> {
+    fn set_active_child_directory(&self, child_directory: Option<String>) -> Result<()> {
         // Validate child directory exists if provided
         if let Some(ref dir) = child_directory {
-            if !self.validate_child_directory(dir).await? {
+            if !self.validate_child_directory(dir)? {
                 return Err(anyhow::anyhow!(
                     "Cannot set active child: directory '{}' does not exist or does not contain a valid child",
                     dir
@@ -161,11 +160,11 @@ impl GlobalConfigStorage for GlobalConfigRepository {
             }
         }
         
-        let mut config = self.load_or_create_global_config().await?;
+        let mut config = self.load_or_create_global_config()?;
         config.active_child_directory = child_directory.clone();
         config.updated_at = Utc::now().to_rfc3339();
         
-        self.save_global_config(&config).await?;
+        self.save_global_config(&config)?;
         
         match child_directory {
             Some(dir) => info!("Set active child directory to '{}'", dir),
@@ -175,10 +174,10 @@ impl GlobalConfigStorage for GlobalConfigRepository {
         Ok(())
     }
     
-    async fn update_global_config(&self, config: &GlobalConfig) -> Result<()> {
+    fn update_global_config(&self, config: &GlobalConfig) -> Result<()> {
         // Validate child directory if set
         if let Some(ref dir) = config.active_child_directory {
-            if !self.validate_child_directory(dir).await? {
+            if !self.validate_child_directory(dir)? {
                 return Err(anyhow::anyhow!(
                     "Invalid child directory in config: '{}' does not exist or does not contain a valid child",
                     dir
@@ -189,7 +188,7 @@ impl GlobalConfigStorage for GlobalConfigRepository {
         let mut updated_config = config.clone();
         updated_config.updated_at = Utc::now().to_rfc3339();
         
-        self.save_global_config(&updated_config).await?;
+        self.save_global_config(&updated_config)?;
         info!("Updated global config");
         Ok(())
     }
@@ -202,8 +201,9 @@ mod tests {
     use crate::backend::domain::models::child::Child as DomainChild;
     use crate::backend::storage::ChildStorage;
     use crate::backend::storage::csv::ChildRepository;
+    use std::sync::Arc;
 
-    async fn setup_test_repo() -> (GlobalConfigRepository, ChildRepository, TempDir) {
+    fn setup_test_repo() -> (GlobalConfigRepository, ChildRepository, TempDir) {
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
         let connection = CsvConnection::new(temp_dir.path()).expect("Failed to create connection");
         let global_config_repo = GlobalConfigRepository::new(connection.clone());
@@ -212,20 +212,20 @@ mod tests {
         (global_config_repo, child_repo, temp_dir)
     }
 
-    #[tokio::test]
-    async fn test_get_global_config_creates_default() {
-        let (repo, _child_repo, _temp_dir) = setup_test_repo().await;
+    #[test]
+    fn test_get_global_config_creates_default() {
+        let (repo, _child_repo, _temp_dir) = setup_test_repo();
         
-        let config = repo.get_global_config().await.unwrap();
+        let config = repo.get_global_config().unwrap();
         assert_eq!(config.active_child_directory, None);
         assert_eq!(config.data_format_version, "1.0");
         assert!(!config.created_at.is_empty());
         assert!(!config.updated_at.is_empty());
     }
 
-    #[tokio::test]
-    async fn test_set_active_child_directory() {
-        let (repo, child_repo, _temp_dir) = setup_test_repo().await;
+    #[test]
+    fn test_set_active_child_directory() {
+        let (repo, child_repo, _temp_dir) = setup_test_repo();
         
         // Create a test child first
         let child = DomainChild {
@@ -235,19 +235,19 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };
-        child_repo.store_child(&child).await.unwrap();
+        child_repo.store_child(&child).unwrap();
         
         // Set active child directory
-        repo.set_active_child_directory(Some("test_child".to_string())).await.unwrap();
+        repo.set_active_child_directory(Some("test_child".to_string())).unwrap();
         
         // Verify it was set
-        let config = repo.get_global_config().await.unwrap();
+        let config = repo.get_global_config().unwrap();
         assert_eq!(config.active_child_directory, Some("test_child".to_string()));
     }
 
-    #[tokio::test]
-    async fn test_clear_active_child_directory() {
-        let (repo, child_repo, _temp_dir) = setup_test_repo().await;
+    #[test]
+    fn test_clear_active_child_directory() {
+        let (repo, child_repo, _temp_dir) = setup_test_repo();
         
         // Create and set a child first
         let child = DomainChild {
@@ -257,50 +257,49 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };
-        child_repo.store_child(&child).await.unwrap();
-        repo.set_active_child_directory(Some("test_child".to_string())).await.unwrap();
+        child_repo.store_child(&child).unwrap();
+        repo.set_active_child_directory(Some("test_child".to_string())).unwrap();
         
         // Clear the active child
-        repo.set_active_child_directory(None).await.unwrap();
+        repo.set_active_child_directory(None).unwrap();
         
         // Verify it was cleared
-        let config = repo.get_global_config().await.unwrap();
+        let config = repo.get_global_config().unwrap();
         assert_eq!(config.active_child_directory, None);
     }
 
-    #[tokio::test]
-    async fn test_set_invalid_child_directory() {
-        let (repo, _child_repo, _temp_dir) = setup_test_repo().await;
+    #[test]
+    fn test_set_invalid_child_directory() {
+        let (repo, _child_repo, _temp_dir) = setup_test_repo();
         
         // Try to set non-existent child directory
-        let result = repo.set_active_child_directory(Some("nonexistent_child".to_string())).await;
+        let result = repo.set_active_child_directory(Some("nonexistent_child".to_string()));
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("does not exist"));
     }
 
-    #[tokio::test]
-    async fn test_update_global_config() {
-        let (repo, _child_repo, _temp_dir) = setup_test_repo().await;
+    #[test]
+    fn test_update_global_config() {
+        let (repo, _child_repo, _temp_dir) = setup_test_repo();
         
         // Get initial config
-        let mut config = repo.get_global_config().await.unwrap();
+        let mut config = repo.get_global_config().unwrap();
         let initial_updated_at = config.updated_at.clone();
         
         // Modify and update
         config.data_format_version = "2.0".to_string();
-        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await; // Ensure timestamp difference
         
-        repo.update_global_config(&config).await.unwrap();
+        repo.update_global_config(&config).unwrap();
         
         // Verify update
-        let updated_config = repo.get_global_config().await.unwrap();
+        let updated_config = repo.get_global_config().unwrap();
         assert_eq!(updated_config.data_format_version, "2.0");
         assert_ne!(updated_config.updated_at, initial_updated_at);
     }
 
-    #[tokio::test]
-    async fn test_config_persistence() {
-        let (repo, child_repo, temp_dir) = setup_test_repo().await;
+    #[test]
+    fn test_config_persistence() {
+        let (repo, child_repo, temp_dir) = setup_test_repo();
         
         // Create a child and set as active
         let child = DomainChild {
@@ -310,15 +309,15 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };
-        child_repo.store_child(&child).await.unwrap();
-        repo.set_active_child_directory(Some("test_child".to_string())).await.unwrap();
+        child_repo.store_child(&child).unwrap();
+        repo.set_active_child_directory(Some("test_child".to_string())).unwrap();
         
         // Create a new repository instance (simulating app restart)
         let connection2 = CsvConnection::new(temp_dir.path()).unwrap();
         let repo2 = GlobalConfigRepository::new(connection2);
         
         // Verify config persisted
-        let config = repo2.get_global_config().await.unwrap();
+        let config = repo2.get_global_config().unwrap();
         assert_eq!(config.active_child_directory, Some("test_child".to_string()));
     }
 } 

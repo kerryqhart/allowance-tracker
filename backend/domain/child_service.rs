@@ -248,92 +248,92 @@ mod tests {
         DeleteChildCommand, SetActiveChildCommand
     };
 
-    async fn setup_test() -> ChildService {
+    fn setup_test() -> ChildService {
         let temp_dir = tempdir().unwrap();
         let conn = CsvConnection::new(temp_dir.path().to_path_buf()).unwrap();
         ChildService::new(Arc::new(conn))
     }
 
-    #[tokio::test]
-    async fn test_create_child() {
-        let service = setup_test().await;
+    #[test]
+    fn test_create_child() {
+        let service = setup_test();
         let command = CreateChildCommand {
             name: "  Test Child ".to_string(),
             birthdate: "2015-05-20".to_string(),
         };
 
-        let result = service.create_child(command).await.unwrap();
+        let result = service.create_child(command).unwrap();
         assert_eq!(result.child.name, "Test Child");
         assert_eq!(result.child.birthdate.to_string(), "2015-05-20");
     }
 
-    #[tokio::test]
-    async fn test_create_child_validation() {
-        let service = setup_test().await;
+    #[test]
+    fn test_create_child_validation() {
+        let service = setup_test();
         
         let cmd_empty_name = CreateChildCommand { name: " ".to_string(), birthdate: "2010-01-01".to_string() };
-        assert!(service.create_child(cmd_empty_name).await.is_err());
+        assert!(service.create_child(cmd_empty_name).is_err());
 
         let cmd_long_name = CreateChildCommand { name: "a".repeat(101), birthdate: "2010-01-01".to_string() };
-        assert!(service.create_child(cmd_long_name).await.is_err());
+        assert!(service.create_child(cmd_long_name).is_err());
         
         let cmd_bad_date = CreateChildCommand { name: "Bad Date".to_string(), birthdate: "2010/01/01".to_string() };
-        assert!(service.create_child(cmd_bad_date).await.is_err());
+        assert!(service.create_child(cmd_bad_date).is_err());
     }
 
-    #[tokio::test]
-    async fn test_get_child() {
-        let service = setup_test().await;
+    #[test]
+    fn test_get_child() {
+        let service = setup_test();
         let create_cmd = CreateChildCommand {
             name: "Test Child".to_string(),
             birthdate: "2010-01-01".to_string(),
         };
-        let created_child_result = service.create_child(create_cmd).await.unwrap();
+        let created_child_result = service.create_child(create_cmd).unwrap();
         
         let get_cmd = GetChildCommand { child_id: created_child_result.child.id.clone() };
-        let retrieved_child_result = service.get_child(get_cmd).await.unwrap();
+        let retrieved_child_result = service.get_child(get_cmd).unwrap();
         let retrieved_child = retrieved_child_result.child.unwrap();
         assert_eq!(retrieved_child.id, created_child_result.child.id);
         assert_eq!(retrieved_child.name, "Test Child");
 
-        let children_result = service.list_children().await.unwrap();
+        let children_result = service.list_children().unwrap();
         assert_eq!(children_result.children.len(), 1);
         assert_eq!(children_result.children[0].name, "Test Child");
     }
 
-    #[tokio::test]
-    async fn test_get_nonexistent_child() {
-        let service = setup_test().await;
+    #[test]
+    fn test_get_nonexistent_child() {
+        let service = setup_test();
         let get_cmd = GetChildCommand { child_id: "non-existent-id".to_string() };
-        let result = service.get_child(get_cmd).await.unwrap();
+        let result = service.get_child(get_cmd).unwrap();
         assert!(result.child.is_none());
     }
 
-    #[tokio::test]
-    async fn test_list_children() {
-        let service = setup_test().await;
+    #[test]
+    fn test_list_children() {
+        let service = setup_test();
 
         // Create a few children
         let cmd1 = CreateChildCommand { name: "Alice".to_string(), birthdate: "2010-01-01".to_string() };
         let cmd2 = CreateChildCommand { name: "Bob".to_string(), birthdate: "2012-02-02".to_string() };
-        service.create_child(cmd1).await.unwrap();
-        service.create_child(cmd2).await.unwrap();
+        service.create_child(cmd1).unwrap();
+        service.create_child(cmd2).unwrap();
 
-        let response = service.list_children().await.unwrap();
+        let response = service.list_children().unwrap();
 
         assert_eq!(response.children.len(), 2);
         assert!(response.children.iter().any(|c| c.name == "Alice"));
         assert!(response.children.iter().any(|c| c.name == "Bob"));
     }
 
-    #[tokio::test]
-    async fn test_update_child() {
-        let service = setup_test().await;
+    #[test]
+    fn test_update_child() {
+        let service = setup_test();
         let create_cmd = CreateChildCommand {
             name: "Original Name".to_string(),
             birthdate: "2010-01-01".to_string(),
         };
-        let created_child_result = service.create_child(create_cmd).await.unwrap();
+        let created_child_result = service.create_child(create_cmd).unwrap();
 
         let update_cmd = UpdateChildCommand {
             child_id: created_child_result.child.id.clone(),
@@ -341,52 +341,52 @@ mod tests {
             birthdate: Some("2011-02-02".to_string()),
         };
 
-        let updated_child_result = service.update_child(update_cmd).await.unwrap();
+        let updated_child_result = service.update_child(update_cmd).unwrap();
         assert_eq!(updated_child_result.child.name, "Updated Name");
         assert_eq!(updated_child_result.child.birthdate.to_string(), "2011-02-02");
         assert!(updated_child_result.child.updated_at > created_child_result.child.created_at);
     }
 
-    #[tokio::test]
-    async fn test_update_nonexistent_child() {
-        let service = setup_test().await;
+    #[test]
+    fn test_update_nonexistent_child() {
+        let service = setup_test();
         let update_cmd = UpdateChildCommand {
             child_id: "non-existent-id".to_string(),
             name: Some("New Name".to_string()),
             birthdate: None,
         };
-        let result = service.update_child(update_cmd).await;
+        let result = service.update_child(update_cmd);
         assert!(result.is_err());
     }
 
-    #[tokio::test]
-    async fn test_delete_child() {
-        let service = setup_test().await;
+    #[test]
+    fn test_delete_child() {
+        let service = setup_test();
         let create_cmd = CreateChildCommand {
             name: "To Be Deleted".to_string(),
             birthdate: "2010-01-01".to_string(),
         };
-        let created_child_result = service.create_child(create_cmd).await.unwrap();
+        let created_child_result = service.create_child(create_cmd).unwrap();
 
         let delete_cmd = DeleteChildCommand { child_id: created_child_result.child.id.clone() };
-        service.delete_child(delete_cmd).await.unwrap();
+        service.delete_child(delete_cmd).unwrap();
         
         let get_cmd = GetChildCommand { child_id: created_child_result.child.id };
-        let retrieved_child_result = service.get_child(get_cmd).await.unwrap();
+        let retrieved_child_result = service.get_child(get_cmd).unwrap();
         assert!(retrieved_child_result.child.is_none());
     }
 
-    #[tokio::test]
-    async fn test_delete_nonexistent_child() {
-        let service = setup_test().await;
+    #[test]
+    fn test_delete_nonexistent_child() {
+        let service = setup_test();
         let delete_cmd = DeleteChildCommand { child_id: "non-existent-id".to_string() };
-        let result = service.delete_child(delete_cmd).await;
+        let result = service.delete_child(delete_cmd);
         assert!(result.is_err());
     }
 
-    #[tokio::test]
-    async fn test_validate_birthdate() {
-        let service = setup_test().await;
+    #[test]
+    fn test_validate_birthdate() {
+        let service = setup_test();
         
         // Valid dates should pass basic validation
         service.validate_birthdate("2020-01-15").unwrap();
@@ -405,29 +405,29 @@ mod tests {
     }
 
     /// Get active child when none is set
-    #[tokio::test]
-    async fn test_get_active_child_when_none_set() {
-        let service = setup_test().await;
-        let response = service.get_active_child().await.unwrap();
+    #[test]
+    fn test_get_active_child_when_none_set() {
+        let service = setup_test();
+        let response = service.get_active_child().unwrap();
         assert!(response.active_child.child.is_none());
     }
 
     /// Set and get the active child
-    #[tokio::test]
-    async fn test_set_and_get_active_child() {
-        let service = setup_test().await;
+    #[test]
+    fn test_set_and_get_active_child() {
+        let service = setup_test();
 
         // Create a child first
         let create_cmd = CreateChildCommand { name: "Charlie".to_string(), birthdate: "2015-03-03".to_string() };
-        let created_child_resp = service.create_child(create_cmd).await.unwrap();
+        let created_child_resp = service.create_child(create_cmd).unwrap();
         let child_id = created_child_resp.child.id;
 
         // Set the active child
         let set_active_cmd = SetActiveChildCommand { child_id: child_id.clone() };
-        let _ = service.set_active_child(set_active_cmd).await.unwrap();
+        let _ = service.set_active_child(set_active_cmd).unwrap();
 
         // Get the active child
-        let active_child_resp = service.get_active_child().await.unwrap();
+        let active_child_resp = service.get_active_child().unwrap();
         
         assert!(active_child_resp.active_child.child.is_some());
         let active_child = active_child_resp.active_child.child.unwrap();
@@ -436,64 +436,64 @@ mod tests {
     }
 
     /// Try to set a non-existent child as active
-    #[tokio::test]
-    async fn test_set_active_child_with_nonexistent_child() {
-        let service = setup_test().await;
+    #[test]
+    fn test_set_active_child_with_nonexistent_child() {
+        let service = setup_test();
         let set_active_cmd = SetActiveChildCommand { child_id: "non-existent-id".to_string() };
-        let result = service.set_active_child(set_active_cmd).await;
+        let result = service.set_active_child(set_active_cmd);
         assert!(result.is_err());
     }
 
     /// Test that the active child is correctly updated when a new child is set as active
-    #[tokio::test]
-    async fn test_update_active_child() {
-        let service = setup_test().await;
+    #[test]
+    fn test_update_active_child() {
+        let service = setup_test();
 
         // Create two children
         let child1_cmd = CreateChildCommand { name: "Dave".to_string(), birthdate: "2018-04-04".to_string() };
-        let child1_resp = service.create_child(child1_cmd).await.unwrap();
+        let child1_resp = service.create_child(child1_cmd).unwrap();
         let child1_id = child1_resp.child.id;
 
         let child2_cmd = CreateChildCommand { name: "Eve".to_string(), birthdate: "2020-05-05".to_string() };
-        let child2_resp = service.create_child(child2_cmd).await.unwrap();
+        let child2_resp = service.create_child(child2_cmd).unwrap();
         let child2_id = child2_resp.child.id;
 
         // Set child1 as active
         let set_active_cmd1 = SetActiveChildCommand { child_id: child1_id.clone() };
-        service.set_active_child(set_active_cmd1).await.unwrap();
-        let active_child_resp1 = service.get_active_child().await.unwrap();
+        service.set_active_child(set_active_cmd1).unwrap();
+        let active_child_resp1 = service.get_active_child().unwrap();
         assert_eq!(active_child_resp1.active_child.child.as_ref().unwrap().id, child1_id);
 
         // Set child2 as active
         let set_active_cmd2 = SetActiveChildCommand { child_id: child2_id.clone() };
-        service.set_active_child(set_active_cmd2).await.unwrap();
-        let active_child_resp2 = service.get_active_child().await.unwrap();
+        service.set_active_child(set_active_cmd2).unwrap();
+        let active_child_resp2 = service.get_active_child().unwrap();
         assert_eq!(active_child_resp2.active_child.child.as_ref().unwrap().id, child2_id);
         assert_eq!(active_child_resp2.active_child.child.as_ref().unwrap().name, "Eve");
     }
 
     /// Ensure get_active_child returns None if the active child has been deleted
-    #[tokio::test]
-    async fn test_active_child_after_child_deletion() {
-        let service = setup_test().await;
+    #[test]
+    fn test_active_child_after_child_deletion() {
+        let service = setup_test();
 
         // Create a child and set it as active
         let create_cmd = CreateChildCommand { name: "Frank".to_string(), birthdate: "2021-06-06".to_string() };
-        let created_child_resp = service.create_child(create_cmd).await.unwrap();
+        let created_child_resp = service.create_child(create_cmd).unwrap();
         let child_id = created_child_resp.child.id;
         let set_active_cmd = SetActiveChildCommand { child_id: child_id.clone() };
-        service.set_active_child(set_active_cmd).await.unwrap();
+        service.set_active_child(set_active_cmd).unwrap();
 
         // Ensure it's the active child
-        let active_child_resp = service.get_active_child().await.unwrap();
+        let active_child_resp = service.get_active_child().unwrap();
         assert_eq!(active_child_resp.active_child.child.as_ref().unwrap().id, child_id);
 
         // Delete the child
         let delete_cmd = DeleteChildCommand { child_id: child_id.clone() };
-        service.delete_child(delete_cmd).await.unwrap();
+        service.delete_child(delete_cmd).unwrap();
 
         // Now, getting active child should return None as the underlying child is gone
-        let active_child_resp_after_delete = service.get_active_child().await.unwrap();
+        let active_child_resp_after_delete = service.get_active_child().unwrap();
         assert!(active_child_resp_after_delete.active_child.child.is_none());
     }
 }

@@ -58,31 +58,31 @@ impl CsvAllowanceRepository {
 #[async_trait]
 impl AllowanceStorage for CsvAllowanceRepository {
     async fn store_allowance_config(&self, config: &DomainAllowanceConfig) -> Result<()> {
-        let mut configs = self.read_configs().await?;
+        let mut configs = self.read_configs()?;
         configs.insert(config.child_id.clone(), config.clone());
-        self.write_configs(&configs).await
+        self.write_configs(&configs)
     }
 
     async fn get_allowance_config(&self, child_id: &str) -> Result<Option<DomainAllowanceConfig>> {
-        let configs = self.read_configs().await?;
+        let configs = self.read_configs()?;
         Ok(configs.get(child_id).cloned())
     }
 
     async fn update_allowance_config(&self, config: &DomainAllowanceConfig) -> Result<()> {
-        self.store_allowance_config(config).await
+        self.store_allowance_config(config)
     }
 
     async fn delete_allowance_config(&self, child_id: &str) -> Result<bool> {
-        let mut configs = self.read_configs().await?;
+        let mut configs = self.read_configs()?;
         let was_present = configs.remove(child_id).is_some();
         if was_present {
-            self.write_configs(&configs).await?;
+            self.write_configs(&configs)?;
         }
         Ok(was_present)
     }
 
     async fn list_allowance_configs(&self) -> Result<Vec<DomainAllowanceConfig>> {
-        let configs = self.read_configs().await?;
+        let configs = self.read_configs()?;
         Ok(configs.values().cloned().collect())
     }
 }

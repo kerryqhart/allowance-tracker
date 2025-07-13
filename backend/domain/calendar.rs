@@ -435,10 +435,16 @@ mod tests {
     use super::*;
 
     fn create_test_transaction(date: &str, amount: f64, balance: f64, description: &str) -> Transaction {
+        let parsed_date = chrono::DateTime::parse_from_rfc3339(date)
+            .unwrap_or_else(|_| {
+                chrono::DateTime::parse_from_str(&format!("{}T12:00:00-05:00", date), "%Y-%m-%dT%H:%M:%S%z")
+                    .expect("Failed to parse date")
+            });
+            
         Transaction {
             id: format!("test_{}", date),
             child_id: "test_child_id".to_string(),
-            date: date.to_string(),
+            date: parsed_date,
             description: description.to_string(),
             amount,
             balance,

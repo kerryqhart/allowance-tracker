@@ -635,7 +635,7 @@ mod tests {
     use tempfile::TempDir;
     
     /// Helper to create a test connection with a temporary directory
-    async fn create_test_connection() -> Result<(CsvConnection, TempDir)> {
+    fn create_test_connection() -> Result<(CsvConnection, TempDir)> {
         let temp_dir = TempDir::new()?;
         let connection = CsvConnection::new(temp_dir.path())?;
         Ok((connection, temp_dir))
@@ -649,10 +649,10 @@ mod tests {
         Ok(complex_path)
     }
     
-    #[tokio::test]
-    async fn test_path_unescaping_functionality() -> Result<()> {
+    #[test]
+    fn test_path_unescaping_functionality() -> Result<()> {
         // Test the path unescaping logic that's built into relocate_child_data_directory
-        let (_connection, temp_dir) = create_test_connection().await?;
+        let (_connection, temp_dir) = create_test_connection()?;
         
         // Create a test file to verify the unescaping works
         let escaped_input = format!("{}{}Documents{}com\\~apple\\~CloudDocs{}Kids{}Child\\'s\\ Money", 
@@ -703,9 +703,9 @@ mod tests {
         Ok(())
     }
     
-    #[tokio::test] 
-    async fn test_relocate_child_data_directory_with_escaped_path() -> Result<()> {
-        let (connection, temp_dir) = create_test_connection().await?;
+    #[test] 
+    fn test_relocate_child_data_directory_with_escaped_path() -> Result<()> {
+        let (connection, temp_dir) = create_test_connection()?;
         let child_name = "test_child";
         
         // Create test child data
@@ -750,9 +750,9 @@ mod tests {
         Ok(())
     }
     
-    #[tokio::test]
-    async fn test_revert_after_escaped_path_relocation() -> Result<()> {
-        let (connection, temp_dir) = create_test_connection().await?;
+    #[test]
+    fn test_revert_after_escaped_path_relocation() -> Result<()> {
+        let (connection, temp_dir) = create_test_connection()?;
         let child_name = "test_child";
         
         // Create test child data
@@ -787,9 +787,9 @@ mod tests {
         Ok(())
     }
     
-    #[tokio::test]
-    async fn test_complex_escaped_path_like_real_scenario() -> Result<()> {
-        let (connection, temp_dir) = create_test_connection().await?;
+    #[test]
+    fn test_complex_escaped_path_like_real_scenario() -> Result<()> {
+        let (connection, temp_dir) = create_test_connection()?;
         let child_name = "test_child";
         
         // Create test child data
@@ -846,9 +846,9 @@ mod tests {
         Ok(())
     }
     
-    #[tokio::test]
-    async fn test_no_op_when_same_path_with_escapes() -> Result<()> {
-        let (connection, temp_dir) = create_test_connection().await?;
+    #[test]
+    fn test_no_op_when_same_path_with_escapes() -> Result<()> {
+        let (connection, temp_dir) = create_test_connection()?;
         let child_name = "test_child";
         
         // Create test child data
@@ -871,9 +871,9 @@ mod tests {
         Ok(())
     }
     
-    #[tokio::test]
-    async fn test_error_handling_with_invalid_escaped_path() -> Result<()> {
-        let (connection, _temp_dir) = create_test_connection().await?;
+    #[test]
+    fn test_error_handling_with_invalid_escaped_path() -> Result<()> {
+        let (connection, _temp_dir) = create_test_connection()?;
         let child_name = "test_child";
         
         // Create test child data

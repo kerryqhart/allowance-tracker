@@ -52,7 +52,6 @@ dirs = "6.0.0"
 
 [dev-dependencies]
 tempfile = "3.0"
-tokio = { version = "1.0", features = ["full"] }
 
 [profile.dev]
 opt-level = 1  # Faster debug builds for better egui performance

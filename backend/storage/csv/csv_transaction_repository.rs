@@ -211,9 +211,9 @@ impl CsvTransactionRepository {
 #[async_trait]
 impl TransactionRepository for CsvTransactionRepository {
     async fn store_transaction(&self, transaction: &DomainTransaction) -> Result<()> {
-        let mut transactions = self.read_transactions(&transaction.child_id).await?;
+        let mut transactions = self.read_transactions(&transaction.child_id)?;
         transactions.push(transaction.clone());
-        self.write_transactions(&transaction.child_id, &transactions).await
+        self.write_transactions(&transaction.child_id, &transactions)
     }
 
     async fn get_transaction(
@@ -221,7 +221,7 @@ impl TransactionRepository for CsvTransactionRepository {
         child_id: &str,
         transaction_id: &str,
     ) -> Result<Option<DomainTransaction>> {
-        let transactions = self.read_transactions(child_id).await?;
+        let transactions = self.read_transactions(child_id)?;
         Ok(transactions.into_iter().find(|t| t.id == transaction_id))
     }
 
@@ -231,7 +231,7 @@ impl TransactionRepository for CsvTransactionRepository {
         limit: Option<u32>,
         after: Option<String>,
     ) -> Result<Vec<DomainTransaction>> {
-        let mut transactions = self.read_transactions(child_id).await?;
+        let mut transactions = self.read_transactions(child_id)?;
         transactions.sort_by(|a, b| b.date.cmp(&a.date));
 
         let start_index = after
@@ -246,7 +246,7 @@ impl TransactionRepository for CsvTransactionRepository {
     }
 
     async fn get_transactions_after_date(&self, child_id: &str, date: &str) -> Result<Vec<DomainTransaction>> {
-        let mut transactions = self.read_transactions(child_id).await?;
+        let mut transactions = self.read_transactions(child_id)?;
         transactions.retain(|t| self.compare_dates(&t.date, date) >= 0);
         Ok(transactions)
     }
@@ -256,44 +256,44 @@ impl TransactionRepository for CsvTransactionRepository {
         child_id: &str,
         date: &str,
     ) -> Result<Vec<DomainTransaction>> {
-        let mut transactions = self.read_transactions(child_id).await?;
+        let mut transactions = self.read_transactions(child_id)?;
         transactions.retain(|t| self.compare_dates(&t.date, date) < 0);
         Ok(transactions)
     }
 
     async fn update_transaction(&self, transaction: &DomainTransaction) -> Result<()> {
-        let mut transactions = self.read_transactions(&transaction.child_id).await?;
+        let mut transactions = self.read_transactions(&transaction.child_id)?;
         if let Some(index) = transactions.iter().position(|t| t.id == transaction.id) {
             transactions[index] = transaction.clone();
-            self.write_transactions(&transaction.child_id, &transactions).await?;
+            self.write_transactions(&transaction.child_id, &transactions)?;
         }
         Ok(())
     }
 
     async fn delete_transaction(&self, child_id: &str, transaction_id: &str) -> Result<bool> {
-        let mut transactions = self.read_transactions(child_id).await?;
+        let mut transactions = self.read_transactions(child_id)?;
         let initial_len = transactions.len();
         transactions.retain(|t| t.id != transaction_id);
         let was_deleted = transactions.len() < initial_len;
         if was_deleted {
-            self.write_transactions(child_id, &transactions).await?;
+            self.write_transactions(child_id, &transactions)?;
         }
         Ok(was_deleted)
     }
 
     async fn delete_transactions(&self, child_id: &str, transaction_ids: &[String]) -> Result<u32> {
-        let mut transactions = self.read_transactions(child_id).await?;
+        let mut transactions = self.read_transactions(child_id)?;
         let initial_len = transactions.len();
         transactions.retain(|t| !transaction_ids.contains(&t.id));
         let deleted_count = (initial_len - transactions.len()) as u32;
         if deleted_count > 0 {
-            self.write_transactions(child_id, &transactions).await?;
+            self.write_transactions(child_id, &transactions)?;
         }
         Ok(deleted_count)
     }
 
     async fn get_latest_transaction(&self, child_id: &str) -> Result<Option<DomainTransaction>> {
-        let mut transactions = self.read_transactions(child_id).await?;
+        let mut transactions = self.read_transactions(child_id)?;
         transactions.sort_by(|a, b| b.date.cmp(&a.date));
         Ok(transactions.into_iter().next())
     }
@@ -303,7 +303,7 @@ impl TransactionRepository for CsvTransactionRepository {
         child_id: &str,
         date: &str,
     ) -> Result<Vec<DomainTransaction>> {
-        let mut transactions = self.read_transactions(child_id).await?;
+        let mut transactions = self.read_transactions(child_id)?;
         transactions.retain(|t| self.compare_dates(&t.date, date) >= 0);
         transactions.sort_by(|a, b| a.date.cmp(&b.date));
         Ok(transactions)
@@ -314,7 +314,7 @@ impl TransactionRepository for CsvTransactionRepository {
         child_id: &str,
         date: &str,
     ) -> Result<Option<DomainTransaction>> {
-        let mut transactions = self.read_transactions(child_id).await?;
+        let mut transactions = self.read_transactions(child_id)?;
         transactions.retain(|t| self.compare_dates(&t.date, date) < 0);
         transactions.sort_by(|a, b| b.date.cmp(&a.date));
         Ok(transactions.into_iter().next())
@@ -326,12 +326,12 @@ impl TransactionRepository for CsvTransactionRepository {
         new_balance: f64,
     ) -> Result<()> {
         // This is inefficient but necessary for CSV. Find the right child first.
-        let child_id = self.find_child_for_transaction(transaction_id).await?;
+        let child_id = self.find_child_for_transaction(transaction_id)?;
         if let Some(child_id) = child_id {
-            let mut transactions = self.read_transactions(&child_id).await?;
+            let mut transactions = self.read_transactions(&child_id)?;
             if let Some(transaction) = transactions.iter_mut().find(|t| t.id == transaction_id) {
                 transaction.balance = new_balance;
-                self.write_transactions(&child_id, &transactions).await?;
+                self.write_transactions(&child_id, &transactions)?;
             }
         }
         Ok(())
@@ -341,9 +341,9 @@ impl TransactionRepository for CsvTransactionRepository {
         let mut child_transactions: std::collections::HashMap<String, Vec<DomainTransaction>> = std::collections::HashMap::new();
 
         for (transaction_id, _) in updates {
-            if let Some(child_id) = self.find_child_for_transaction(transaction_id).await? {
+            if let Some(child_id) = self.find_child_for_transaction(transaction_id)? {
                 if !child_transactions.contains_key(&child_id) {
-                    child_transactions.insert(child_id.clone(), self.read_transactions(&child_id).await?);
+                    child_transactions.insert(child_id.clone(), self.read_transactions(&child_id)?);
                 }
             }
         }
@@ -354,7 +354,7 @@ impl TransactionRepository for CsvTransactionRepository {
                     transaction.balance = *new_balance;
                 }
             }
-            self.write_transactions(child_id, transactions).await?;
+            self.write_transactions(child_id, transactions)?;
         }
 
         Ok(())
@@ -365,7 +365,7 @@ impl TransactionRepository for CsvTransactionRepository {
         child_id: &str,
         transaction_ids: &[String],
     ) -> Result<Vec<String>> {
-        let transactions = self.read_transactions(child_id).await?;
+        let transactions = self.read_transactions(child_id)?;
         let found_ids: Vec<String> = transactions
             .iter()
             .filter_map(|t| {
@@ -416,7 +416,7 @@ mod tests {
     use crate::backend::storage::csv::connection::CsvConnection;
     use tempfile::tempdir;
 
-    async fn setup_test_repo() -> (CsvTransactionRepository, impl Fn() -> Result<()>) {
+    fn setup_test_repo() -> (CsvTransactionRepository, impl Fn() -> Result<()>) {
         let temp_dir = tempdir().unwrap();
         let connection = CsvConnection::new(temp_dir.path().to_path_buf()).unwrap();
         let repo = CsvTransactionRepository::new(connection);
@@ -427,9 +427,9 @@ mod tests {
         (repo, cleanup)
     }
 
-    #[tokio::test]
-    async fn test_store_and_retrieve_transaction() {
-        let (repo, _cleanup) = setup_test_repo().await;
+    #[test]
+    fn test_store_and_retrieve_transaction() {
+        let (repo, _cleanup) = setup_test_repo();
         let transaction = DomainTransaction {
             id: "tx1".to_string(),
             child_id: "child1".to_string(),
@@ -439,14 +439,14 @@ mod tests {
             balance: 10.0,
             transaction_type: DomainTransactionType::Income,
         };
-        repo.store_transaction(&transaction).await.unwrap();
-        let retrieved = repo.get_transaction("child1", "tx1").await.unwrap();
+        repo.store_transaction(&transaction).unwrap();
+        let retrieved = repo.get_transaction("child1", "tx1").unwrap();
         assert_eq!(retrieved.as_ref().map(|t| &t.id), Some(&transaction.id));
     }
 
-    #[tokio::test]
-    async fn test_list_transactions_with_pagination() {
-        let (repo, _cleanup) = setup_test_repo().await;
+    #[test]
+    fn test_list_transactions_with_pagination() {
+        let (repo, _cleanup) = setup_test_repo();
         for i in 0..10 {
             let transaction = DomainTransaction {
                 id: format!("tx{}", i),
@@ -457,22 +457,22 @@ mod tests {
                 balance: 10.0,
                 transaction_type: DomainTransactionType::Income,
             };
-            repo.store_transaction(&transaction).await.unwrap();
+            repo.store_transaction(&transaction).unwrap();
         }
 
-        let page1 = repo.list_transactions("child1", Some(5), None).await.unwrap();
+        let page1 = repo.list_transactions("child1", Some(5), None).unwrap();
         assert_eq!(page1.len(), 5);
         assert_eq!(page1[0].id, "tx9");
 
         let last_id = page1.last().unwrap().id.clone();
-        let page2 = repo.list_transactions("child1", Some(5), Some(last_id)).await.unwrap();
+        let page2 = repo.list_transactions("child1", Some(5), Some(last_id)).unwrap();
         assert_eq!(page2.len(), 5);
         assert_eq!(page2[0].id, "tx4");
     }
 
-    #[tokio::test]
-    async fn test_delete_transaction() {
-        let (repo, _cleanup) = setup_test_repo().await;
+    #[test]
+    fn test_delete_transaction() {
+        let (repo, _cleanup) = setup_test_repo();
         let transaction = DomainTransaction {
             id: "tx1".to_string(),
             child_id: "child1".to_string(),
@@ -482,10 +482,10 @@ mod tests {
             balance: 10.0,
             transaction_type: DomainTransactionType::Income,
         };
-        repo.store_transaction(&transaction).await.unwrap();
-        let was_deleted = repo.delete_transaction("child1", "tx1").await.unwrap();
+        repo.store_transaction(&transaction).unwrap();
+        let was_deleted = repo.delete_transaction("child1", "tx1").unwrap();
         assert!(was_deleted);
-        let retrieved = repo.get_transaction("child1", "tx1").await.unwrap();
+        let retrieved = repo.get_transaction("child1", "tx1").unwrap();
         assert!(retrieved.is_none());
     }
 } 

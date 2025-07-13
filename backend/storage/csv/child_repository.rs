@@ -338,24 +338,24 @@ mod tests {
     use tempfile::TempDir;
     use crate::backend::storage::ChildStorage;
     
-    async fn setup_test_repo() -> (ChildRepository, TempDir) {
+    fn setup_test_repo() -> (ChildRepository, TempDir) {
         let temp_dir = TempDir::new().unwrap();
         let connection = CsvConnection::new(temp_dir.path()).unwrap();
         let repo = ChildRepository::new(Arc::new(connection));
         (repo, temp_dir)
     }
     
-    #[tokio::test]
-    async fn test_generate_safe_directory_name() {
+    #[test]
+    fn test_generate_safe_directory_name() {
         assert_eq!(ChildRepository::generate_safe_directory_name("Emma Smith"), "emma_smith");
         assert_eq!(ChildRepository::generate_safe_directory_name("José María"), "jose_maria");
         assert_eq!(ChildRepository::generate_safe_directory_name("Kid #1"), "kid_1");
         assert_eq!(ChildRepository::generate_safe_directory_name("Test-Child"), "test_child");
     }
     
-    #[tokio::test]
-    async fn test_store_and_discover_child() {
-        let (repo, _temp_dir) = setup_test_repo().await;
+    #[test]
+    fn test_store_and_discover_child() {
+        let (repo, _temp_dir) = setup_test_repo();
         
         // Create a child
         let now = chrono::Utc::now();
@@ -368,26 +368,26 @@ mod tests {
         };
         
         // Store the child
-        repo.store_child(&child).await.expect("Failed to store child");
+        repo.store_child(&child).expect("Failed to store child");
         
         // Discover children
-        let children = repo.list_children().await.expect("Failed to list children");
+        let children = repo.list_children().expect("Failed to list children");
         assert_eq!(children.len(), 1);
         assert_eq!(children[0].name, "Test Child");
         assert_eq!(children[0].id, "child::123");
         
         // Get the specific child
-        let retrieved_child = repo.get_child("child::123").await.expect("Failed to get child");
+        let retrieved_child = repo.get_child("child::123").expect("Failed to get child");
         assert!(retrieved_child.is_some());
         assert_eq!(retrieved_child.unwrap().name, "Test Child");
     }
     
-    #[tokio::test]
-    async fn test_active_child_management() {
-        let (repo, _temp_dir) = setup_test_repo().await;
+    #[test]
+    fn test_active_child_management() {
+        let (repo, _temp_dir) = setup_test_repo();
         
         // Initially, no active child
-        let active_child_id = repo.get_active_child().await.expect("Failed to get active child");
+        let active_child_id = repo.get_active_child().expect("Failed to get active child");
         assert!(active_child_id.is_none());
         
         // Create and store a child
@@ -399,13 +399,13 @@ mod tests {
             created_at: now,
             updated_at: now,
         };
-        repo.store_child(&child).await.expect("Failed to store child");
+        repo.store_child(&child).expect("Failed to store child");
         
         // Set active child
-        repo.set_active_child("child::456").await.expect("Failed to set active child");
+        repo.set_active_child("child::456").expect("Failed to set active child");
         
         // Get active child
-        let active_child_id = repo.get_active_child().await.expect("Failed to get active child");
+        let active_child_id = repo.get_active_child().expect("Failed to get active child");
         assert_eq!(active_child_id, Some("child::456".to_string()));
     }
 } 

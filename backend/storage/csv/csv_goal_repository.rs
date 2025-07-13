@@ -54,18 +54,18 @@ impl CsvGoalRepository {
 #[async_trait]
 impl GoalRepository for CsvGoalRepository {
     async fn store_goal(&self, goal: &DomainGoal) -> Result<()> {
-        let mut goals = self.read_goals(&goal.child_id).await?;
+        let mut goals = self.read_goals(&goal.child_id)?;
         goals.push(goal.clone());
-        self.write_goals(&goal.child_id, &goals).await
+        self.write_goals(&goal.child_id, &goals)
     }
 
     async fn get_goal_by_id(&self, child_id: &str, goal_id: &str) -> Result<Option<DomainGoal>> {
-        let goals = self.read_goals(child_id).await?;
+        let goals = self.read_goals(child_id)?;
         Ok(goals.into_iter().find(|g| g.id == goal_id))
     }
 
     async fn get_current_goal(&self, child_id: &str) -> Result<Option<DomainGoal>> {
-        let goals = self.read_goals(child_id).await?;
+        let goals = self.read_goals(child_id)?;
         Ok(goals
             .into_iter()
             .filter(|g| g.state == GoalState::Active)
@@ -73,19 +73,19 @@ impl GoalRepository for CsvGoalRepository {
     }
 
     async fn get_all_goals(&self, child_id: &str) -> Result<Vec<DomainGoal>> {
-        self.read_goals(child_id).await
+        self.read_goals(child_id)
     }
 
     async fn update_goal(&self, goal: &DomainGoal) -> Result<()> {
-        let mut goals = self.read_goals(&goal.child_id).await?;
+        let mut goals = self.read_goals(&goal.child_id)?;
         if let Some(g) = goals.iter_mut().find(|g| g.id == goal.id) {
             *g = goal.clone();
         }
-        self.write_goals(&goal.child_id, &goals).await
+        self.write_goals(&goal.child_id, &goals)
     }
 
     async fn has_active_goal(&self, child_id: &str) -> Result<bool> {
-        let goals = self.read_goals(child_id).await?;
+        let goals = self.read_goals(child_id)?;
         Ok(goals.iter().any(|g| g.state == GoalState::Active))
     }
 }

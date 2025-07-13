@@ -872,8 +872,8 @@ mod tests {
                 amount: 10.0,
                 day_of_week: day_num,
                 is_active: true,
-                created_at: "test".to_string(),
-                updated_at: "test".to_string(),
+                created_at: chrono::Utc::now(),
+                updated_at: chrono::Utc::now(),
             };
             assert_eq!(config.day_name(), expected_name);
         }

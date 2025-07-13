@@ -16,14 +16,14 @@
 //! let git_manager = GitManager::new();
 //! 
 //! // Ensure repository exists
-//! git_manager.ensure_repo_exists("/path/to/child/directory").await?;
+//! git_manager.ensure_repo_exists("/path/to/child/directory")?;
 //! 
 //! // Commit a file change
 //! git_manager.commit_file_change(
 //!     "/path/to/child/directory",
 //!     "transactions.csv",
 //!     "Added $5.00 allowance transaction"
-//! ).await?;
+//! )?;
 //! ```
 
 use anyhow::Result;

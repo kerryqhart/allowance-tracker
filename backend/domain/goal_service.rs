@@ -466,7 +466,7 @@ use crate::backend::domain::commands::goal::GetCurrentGoalCommand;
 use crate::backend::domain::commands::child::CreateChildCommand;
     use chrono::Utc;
 
-    async fn create_test_service() -> GoalService {
+    fn create_test_service() -> GoalService {
         let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
         let db = Arc::new(CsvConnection::new(temp_dir.path()).expect("Failed to init test DB"));
         
@@ -479,14 +479,14 @@ use crate::backend::domain::commands::child::CreateChildCommand;
         GoalService::new(db, child_service, allowance_service, transaction_service, balance_service)
     }
 
-    async fn create_test_child_and_allowance(service: &GoalService) -> String {
+    fn create_test_child_and_allowance(service: &GoalService) -> String {
         // Create a test child
         let child_command = CreateChildCommand {
             name: "Test Child".to_string(),
             birthdate: "2010-01-01".to_string(),
         };
         
-        let child_result = service.child_service.create_child(child_command).await
+        let child_result = service.child_service.create_child(child_command)
             .expect("Failed to create test child");
         
         // Set the child as active
@@ -494,7 +494,7 @@ use crate::backend::domain::commands::child::CreateChildCommand;
             child_id: child_result.child.id.clone(),
         };
         
-        service.child_service.set_active_child(set_active_command).await
+        service.child_service.set_active_child(set_active_command)
             .expect("Failed to set active child");
         
         // Set up allowance
@@ -505,16 +505,16 @@ use crate::backend::domain::commands::child::CreateChildCommand;
             is_active: true,
         };
         
-        service.allowance_service.update_allowance_config(allowance_command).await
+        service.allowance_service.update_allowance_config(allowance_command)
             .expect("Failed to set up allowance");
         
         child_result.child.id
     }
 
-    #[tokio::test]
-    async fn test_create_goal() {
-        let service = create_test_service().await;
-        let child_id = create_test_child_and_allowance(&service).await;
+    #[test]
+    fn test_create_goal() {
+        let service = create_test_service();
+        let child_id = create_test_child_and_allowance(&service);
         
         let command = CreateGoalCommand {
             child_id: Some(child_id.clone()),
@@ -522,7 +522,7 @@ use crate::backend::domain::commands::child::CreateChildCommand;
             target_amount: 25.0,
         };
         
-        let result = service.create_goal(command).await.expect("Failed to create goal");
+        let result = service.create_goal(command).expect("Failed to create goal");
         
         assert_eq!(result.goal.description, "Buy new toy");
         assert_eq!(result.goal.target_amount, 25.0);
@@ -530,10 +530,10 @@ use crate::backend::domain::commands::child::CreateChildCommand;
         assert!(result.calculation.is_achievable);
     }
 
-    #[tokio::test]
-    async fn test_create_goal_validation() {
-        let service = create_test_service().await;
-        let child_id = create_test_child_and_allowance(&service).await;
+    #[test]
+    fn test_create_goal_validation() {
+        let service = create_test_service();
+        let child_id = create_test_child_and_allowance(&service);
         
         // Empty description should fail
         let command = CreateGoalCommand {
@@ -542,7 +542,7 @@ use crate::backend::domain::commands::child::CreateChildCommand;
             target_amount: 25.0,
         };
         
-        let result = service.create_goal(command).await;
+        let result = service.create_goal(command);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("cannot be empty"));
         
@@ -553,15 +553,15 @@ use crate::backend::domain::commands::child::CreateChildCommand;
             target_amount: -10.0,
         };
         
-        let result = service.create_goal(command).await;
+        let result = service.create_goal(command);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("must be positive"));
     }
 
-    #[tokio::test]
-    async fn test_cancel_goal() {
-        let service = create_test_service().await;
-        let child_id = create_test_child_and_allowance(&service).await;
+    #[test]
+    fn test_cancel_goal() {
+        let service = create_test_service();
+        let child_id = create_test_child_and_allowance(&service);
         
         // Create a goal first
         let create_command = CreateGoalCommand {
@@ -570,14 +570,14 @@ use crate::backend::domain::commands::child::CreateChildCommand;
             target_amount: 25.0,
         };
         
-        service.create_goal(create_command).await.expect("Failed to create goal");
+        service.create_goal(create_command).expect("Failed to create goal");
         
         // Cancel the goal
         let cancel_command = CancelGoalCommand {
             child_id: Some(child_id.clone()),
         };
         
-        let result = service.cancel_goal(cancel_command).await.expect("Failed to cancel goal");
+        let result = service.cancel_goal(cancel_command).expect("Failed to cancel goal");
         
         assert_eq!(result.goal.state, DomainGoalState::Cancelled);
         
@@ -586,16 +586,16 @@ use crate::backend::domain::commands::child::CreateChildCommand;
             child_id: Some(child_id),
         };
         
-        let current_result = service.get_current_goal(current_goal_command).await
+        let current_result = service.get_current_goal(current_goal_command)
             .expect("Failed to get current goal");
         
         assert!(current_result.goal.is_none());
     }
 
-    #[tokio::test]
-    async fn test_goal_calculation() {
-        let service = create_test_service().await;
-        let child_id = create_test_child_and_allowance(&service).await;
+    #[test]
+    fn test_goal_calculation() {
+        let service = create_test_service();
+        let child_id = create_test_child_and_allowance(&service);
         
         // Create a goal that requires multiple allowances
         let command = CreateGoalCommand {
@@ -604,7 +604,7 @@ use crate::backend::domain::commands::child::CreateChildCommand;
             target_amount: 30.0, // With $5 allowances and current balance, calculate allowances needed
         };
         
-        let result = service.create_goal(command).await.expect("Failed to create goal");
+        let result = service.create_goal(command).expect("Failed to create goal");
         
         // The calculation works as follows:
         // Current balance: $5.00 (from initial allowance setup)

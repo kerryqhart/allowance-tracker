@@ -312,8 +312,10 @@ mod tests {
     use crate::backend::domain::models::child::Child as DomainChild;
     use crate::backend::storage::{ChildStorage, ParentalControlStorage};
     use crate::backend::storage::csv::ChildRepository;
+    use std::sync::Arc;
+    use chrono::Utc;
 
-    async fn setup_test_repo_with_child() -> (ParentalControlRepository, ChildRepository, TempDir, DomainChild) {
+    fn setup_test_repo_with_child() -> (ParentalControlRepository, ChildRepository, TempDir, DomainChild) {
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
         let connection = CsvConnection::new(temp_dir.path()).expect("Failed to create connection");
         let parental_control_repo = ParentalControlRepository::new(connection.clone());
@@ -328,19 +330,19 @@ mod tests {
             updated_at: Utc::now(),
         };
         
-        child_repo.store_child(&child).await.expect("Failed to create test child");
+        child_repo.store_child(&child).expect("Failed to create test child");
         
         (parental_control_repo, child_repo, temp_dir, child)
     }
 
-    #[tokio::test]
-    async fn test_record_and_get_parental_control_attempts() {
-        let (repo, _child_repo, _temp_dir, child) = setup_test_repo_with_child().await;
+    #[test]
+    fn test_record_and_get_parental_control_attempts() {
+        let (repo, _child_repo, _temp_dir, child) = setup_test_repo_with_child();
         
         // Record some parental control attempts
-        let id1 = repo.record_parental_control_attempt(&child.id, "wrong_answer", false).await.unwrap();
-        let id2 = repo.record_parental_control_attempt(&child.id, "correct_answer", true).await.unwrap();
-        let id3 = repo.record_parental_control_attempt(&child.id, "another_wrong", false).await.unwrap();
+        let id1 = repo.record_parental_control_attempt(&child.id, "wrong_answer", false).unwrap();
+        let id2 = repo.record_parental_control_attempt(&child.id, "correct_answer", true).unwrap();
+        let id3 = repo.record_parental_control_attempt(&child.id, "another_wrong", false).unwrap();
         
         // IDs should be sequential
         assert_eq!(id1, 1);
@@ -348,7 +350,7 @@ mod tests {
         assert_eq!(id3, 3);
         
         // Get all attempts
-        let attempts = repo.get_parental_control_attempts(&child.id, None).await.unwrap();
+        let attempts = repo.get_parental_control_attempts(&child.id, None).unwrap();
         assert_eq!(attempts.len(), 3);
         
         // Should be ordered by ID descending (most recent first)
@@ -365,17 +367,17 @@ mod tests {
         assert_eq!(attempts[2].success, false);
     }
 
-    #[tokio::test]
-    async fn test_get_parental_control_attempts_with_limit() {
-        let (repo, _child_repo, _temp_dir, child) = setup_test_repo_with_child().await;
+    #[test]
+    fn test_get_parental_control_attempts_with_limit() {
+        let (repo, _child_repo, _temp_dir, child) = setup_test_repo_with_child();
         
         // Record several attempts
         for i in 1..=5 {
-            repo.record_parental_control_attempt(&child.id, &format!("attempt_{}", i), i % 2 == 0).await.unwrap();
+            repo.record_parental_control_attempt(&child.id, &format!("attempt_{}", i), i % 2 == 0).unwrap();
         }
         
         // Get with limit
-        let attempts = repo.get_parental_control_attempts(&child.id, Some(2)).await.unwrap();
+        let attempts = repo.get_parental_control_attempts(&child.id, Some(2)).unwrap();
         assert_eq!(attempts.len(), 2);
         
         // Should get the most recent 2
@@ -383,9 +385,9 @@ mod tests {
         assert_eq!(attempts[1].attempted_value, "attempt_4");
     }
 
-    #[tokio::test]
-    async fn test_get_all_parental_control_attempts() {
-        let (repo, child_repo, _temp_dir, child1) = setup_test_repo_with_child().await;
+    #[test]
+    fn test_get_all_parental_control_attempts() {
+        let (repo, child_repo, _temp_dir, child1) = setup_test_repo_with_child();
         
         // Create a second child
         let child2 = DomainChild {
@@ -395,15 +397,15 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };
-        child_repo.store_child(&child2).await.unwrap();
+        child_repo.store_child(&child2).unwrap();
         
         // Record attempts for both children
-        repo.record_parental_control_attempt(&child1.id, "child1_attempt1", false).await.unwrap();
-        repo.record_parental_control_attempt(&child2.id, "child2_attempt1", true).await.unwrap();
-        repo.record_parental_control_attempt(&child1.id, "child1_attempt2", true).await.unwrap();
+        repo.record_parental_control_attempt(&child1.id, "child1_attempt1", false).unwrap();
+        repo.record_parental_control_attempt(&child2.id, "child2_attempt1", true).unwrap();
+        repo.record_parental_control_attempt(&child1.id, "child1_attempt2", true).unwrap();
         
         // Get all attempts
-        let all_attempts = repo.get_all_parental_control_attempts(None).await.unwrap();
+        let all_attempts = repo.get_all_parental_control_attempts(None).unwrap();
         assert_eq!(all_attempts.len(), 3);
         
         // Should be ordered by ID descending across all children
@@ -413,22 +415,22 @@ mod tests {
         assert!(attempt_values.contains(&&"child1_attempt2".to_string()));
     }
 
-    #[tokio::test]
-    async fn test_record_attempt_for_nonexistent_child() {
-        let (repo, _child_repo, _temp_dir, _child) = setup_test_repo_with_child().await;
+    #[test]
+    fn test_record_attempt_for_nonexistent_child() {
+        let (repo, _child_repo, _temp_dir, _child) = setup_test_repo_with_child();
         
         // Try to record attempt for non-existent child
-        let result = repo.record_parental_control_attempt("child::nonexistent", "test", false).await;
+        let result = repo.record_parental_control_attempt("child::nonexistent", "test", false);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("child with ID"));
     }
 
-    #[tokio::test]
-    async fn test_get_attempts_for_nonexistent_child() {
-        let (repo, _child_repo, _temp_dir, _child) = setup_test_repo_with_child().await;
+    #[test]
+    fn test_get_attempts_for_nonexistent_child() {
+        let (repo, _child_repo, _temp_dir, _child) = setup_test_repo_with_child();
         
         // Try to get attempts for non-existent child
-        let attempts = repo.get_parental_control_attempts("child::nonexistent", None).await.unwrap();
+        let attempts = repo.get_parental_control_attempts("child::nonexistent", None).unwrap();
         assert!(attempts.is_empty());
     }
 } 
