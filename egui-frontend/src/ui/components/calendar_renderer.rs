@@ -250,12 +250,18 @@ impl CalendarDay {
 impl AllowanceTrackerApp {
     /// Create CalendarDay instances for the selected month
     pub fn create_calendar_days(&self, transactions: &[Transaction]) -> Vec<CalendarDay> {
+        log::info!("🗓️  Creating calendar days for {}/{} with {} transactions", 
+                  self.selected_month, self.selected_year, transactions.len());
+        
         let mut calendar_days = Vec::new();
         
         // Create a date for the first day of the selected month
         let first_day = match NaiveDate::from_ymd_opt(self.selected_year, self.selected_month, 1) {
             Some(date) => date,
-            None => return calendar_days,
+            None => {
+                log::error!("❌ Failed to create first day of month {}/{}", self.selected_month, self.selected_year);
+                return calendar_days;
+            }
         };
         
         // Calculate the number of days in the month
@@ -268,8 +274,13 @@ impl AllowanceTrackerApp {
                 };
                 (next_month - chrono::Duration::days(1)).day()
             }
-            None => return calendar_days,
+            None => {
+                log::error!("❌ Failed to calculate days in month {}/{}", self.selected_month, self.selected_year);
+                return calendar_days;
+            }
         };
+        
+        log::info!("📅 Month {}/{} has {} days", self.selected_month, self.selected_year, days_in_month);
         
         // Get current date for highlighting today
         let today = chrono::Local::now();
@@ -278,13 +289,42 @@ impl AllowanceTrackerApp {
         
         // Group transactions by day
         let mut transactions_by_day: std::collections::HashMap<u32, Vec<Transaction>> = std::collections::HashMap::new();
+        let mut processed_transactions = 0;
+        let mut filtered_transactions = 0;
+        
         for transaction in transactions {
-            if let Ok(parsed_date) = chrono::DateTime::parse_from_rfc3339(&transaction.date) {
-                let transaction_date = parsed_date.naive_local().date();
-                if transaction_date.year() == self.selected_year && transaction_date.month() == self.selected_month {
-                    let day = transaction_date.day();
-                    transactions_by_day.entry(day).or_insert_with(Vec::new).push(transaction.clone());
-                }
+            processed_transactions += 1;
+            log::debug!("🔍 Processing transaction {}: {} on {}", 
+                       processed_transactions, transaction.description, transaction.date);
+            
+            // Extract date from DateTime object
+            let parsed_date = transaction.date.naive_local().date();
+            
+            
+            log::debug!("📅 Parsed date: {} (year={}, month={}, day={})", 
+                       parsed_date, parsed_date.year(), parsed_date.month(), parsed_date.day());
+            
+            if parsed_date.year() == self.selected_year && parsed_date.month() == self.selected_month {
+                filtered_transactions += 1;
+                let day = parsed_date.day();
+                log::info!("✅ Transaction '{}' matches {}/{} - adding to day {}", 
+                          transaction.description, self.selected_month, self.selected_year, day);
+                transactions_by_day.entry(day).or_insert_with(Vec::new).push(transaction.clone());
+            } else {
+                log::debug!("❌ Transaction '{}' date {}/{} doesn't match selected {}/{}", 
+                           transaction.description, parsed_date.year(), parsed_date.month(), 
+                           self.selected_year, self.selected_month);
+            }
+        }
+        
+        log::info!("📊 Transaction processing complete: {}/{} transactions matched {}/{}", 
+                  filtered_transactions, processed_transactions, self.selected_month, self.selected_year);
+        
+        // Log the grouped transactions
+        for (day, day_transactions) in &transactions_by_day {
+            log::info!("📅 Day {}: {} transactions", day, day_transactions.len());
+            for transaction in day_transactions {
+                log::debug!("  - {}: ${}", transaction.description, transaction.amount);
             }
         }
         
@@ -300,6 +340,7 @@ impl AllowanceTrackerApp {
             
             // Add transactions for this day
             if let Some(day_transactions) = transactions_by_day.get(&day) {
+                log::info!("📅 Adding {} transactions to day {}", day_transactions.len(), day);
                 for transaction in day_transactions {
                     calendar_day.add_transaction(transaction.clone());
                 }
@@ -307,6 +348,9 @@ impl AllowanceTrackerApp {
             
             calendar_days.push(calendar_day);
         }
+        
+        log::info!("🗓️  Created {} calendar days for {}/{}", 
+                  calendar_days.len(), self.selected_month, self.selected_year);
         
         calendar_days
     }
@@ -418,6 +462,11 @@ impl AllowanceTrackerApp {
     
     /// Navigate to a different month
     pub fn navigate_month(&mut self, delta: i32) {
+        let old_month = self.selected_month;
+        let old_year = self.selected_year;
+        
+        log::info!("🗓️  Navigating from {}/{} with delta {}", old_month, old_year, delta);
+        
         if delta > 0 {
             if self.selected_month == 12 {
                 self.selected_month = 1;
@@ -433,7 +482,17 @@ impl AllowanceTrackerApp {
                 self.selected_month -= 1;
             }
         }
+        
+        log::info!("🗓️  Navigation complete: {}/{} → {}/{}", 
+                  old_month, old_year, self.selected_month, self.selected_year);
+        
+        if self.selected_month == 6 {
+            log::info!("🗓️  🎯 Navigated to June {} - about to load calendar data", self.selected_year);
+        }
+        
         self.load_calendar_data();
+        
+        log::info!("🔄 Calendar data reloaded for {}/{}", self.selected_month, self.selected_year);
     }
     
     /// Get color for day header based on index

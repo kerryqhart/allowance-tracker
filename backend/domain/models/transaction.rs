@@ -1,6 +1,7 @@
 //! Domain model for a transaction.
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
+use chrono::{DateTime, FixedOffset};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum TransactionType {
@@ -13,7 +14,7 @@ pub enum TransactionType {
 pub struct Transaction {
     pub id: String,
     pub child_id: String,
-    pub date: String,
+    pub date: DateTime<FixedOffset>,  // ✅ FIXED: Now uses proper DateTime object
     pub description: String,
     pub amount: f64,
     pub balance: f64,

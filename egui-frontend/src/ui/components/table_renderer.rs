@@ -108,12 +108,8 @@ impl AllowanceTrackerApp {
                 // Transaction rows
                 for transaction in transactions {
                     ui.horizontal(|ui| {
-                        // Parse and format the date string
-                        let date_display = if let Ok(parsed_date) = chrono::DateTime::parse_from_rfc3339(&transaction.date) {
-                            parsed_date.format("%b %d, %Y").to_string()
-                        } else {
-                            transaction.date.clone() // Fallback to original string if parsing fails
-                        };
+                        // Format the date
+                        let date_display = transaction.date.format("%b %d, %Y").to_string();
                         
                         ui.label(egui::RichText::new(date_display)
                             .font(egui::FontId::new(13.0, egui::FontFamily::Proportional))

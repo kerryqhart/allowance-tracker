@@ -59,12 +59,17 @@ impl<C: Connection> TransactionService<C> {
         let now_millis = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64;
         let transaction_id = DomainTransaction::generate_id(command.amount, now_millis);
 
+        // ✅ FIXED: Create DateTime object instead of string
         let transaction_date = match command.date {
-            Some(d) => d,
+            Some(date_str) => {
+                // Parse the provided date string into a DateTime object
+                chrono::DateTime::parse_from_rfc3339(&date_str)
+                    .map_err(|e| anyhow!("Invalid date format: {}", e))?
+            },
             None => {
-                let now = time::OffsetDateTime::from(SystemTime::now());
-                let eastern_offset = time::UtcOffset::from_hms(-5, 0, 0)?;
-                now.to_offset(eastern_offset).format(&Rfc3339)?
+                // Create current time in Eastern timezone
+                let eastern_offset = chrono::FixedOffset::west_opt(5 * 3600).unwrap(); // EST (UTC-5)
+                chrono::Utc::now().with_timezone(&eastern_offset)
             }
         };
 
@@ -72,14 +77,14 @@ impl<C: Connection> TransactionService<C> {
             .balance_service
             .calculate_balance_for_new_transaction(
                 &active_child.id,
-                &transaction_date,
+                &transaction_date.to_rfc3339(),  // ✅ Convert to string for balance service
                 command.amount,
             )?;
 
         let domain_transaction = DomainTransaction {
             id: transaction_id,
             child_id: active_child.id.clone(),
-            date: transaction_date.clone(),
+            date: transaction_date,  // ✅ Now uses DateTime object
             description: command.description,
             amount: command.amount,
             balance: transaction_balance,
@@ -95,10 +100,10 @@ impl<C: Connection> TransactionService<C> {
 
         if self
             .balance_service
-            .requires_balance_recalculation(&active_child.id, &transaction_date)?
+            .requires_balance_recalculation(&active_child.id, &transaction_date.to_rfc3339())?
         {
             self.balance_service
-                .recalculate_balances_from_date(&active_child.id, &transaction_date)?;
+                .recalculate_balances_from_date(&active_child.id, &transaction_date.to_rfc3339())?;
         }
 
         Ok(domain_transaction)
@@ -368,18 +373,17 @@ impl<C: Connection> TransactionService<C> {
         );
         let eastern_offset = chrono::FixedOffset::west_opt(5 * 3600).unwrap();
         let eastern_datetime = utc_datetime.with_timezone(&eastern_offset);
-        let transaction_date = eastern_datetime.to_rfc3339();
-        info!("🎯 ALLOWANCE DEBUG: Transaction date formatted as: {}", transaction_date);
+        info!("🎯 ALLOWANCE DEBUG: Transaction date: {}", eastern_datetime.to_rfc3339());
 
         let transaction_balance = self
             .balance_service
-            .calculate_balance_for_new_transaction(child_id, &transaction_date, amount)?;
+            .calculate_balance_for_new_transaction(child_id, &eastern_datetime.to_rfc3339(), amount)?;
         info!("🎯 ALLOWANCE DEBUG: Calculated balance: {}", transaction_balance);
 
         let domain_transaction = DomainTransaction {
             id: transaction_id.clone(),
             child_id: child_id.to_string(),
-            date: transaction_date.clone(),
+            date: eastern_datetime,  // ✅ FIXED: Use DateTime object directly
             description: "Weekly allowance".to_string(),
             amount,
             balance: transaction_balance,
@@ -393,11 +397,11 @@ impl<C: Connection> TransactionService<C> {
 
         if self
             .balance_service
-            .requires_balance_recalculation(child_id, &transaction_date)?
+            .requires_balance_recalculation(child_id, &eastern_datetime.to_rfc3339())?
         {
-            info!("🎯 ALLOWANCE DEBUG: Recalculating balances from date: {}", transaction_date);
+            info!("🎯 ALLOWANCE DEBUG: Recalculating balances from date: {}", eastern_datetime.to_rfc3339());
             self.balance_service
-                .recalculate_balances_from_date(child_id, &transaction_date)?;
+                .recalculate_balances_from_date(child_id, &eastern_datetime.to_rfc3339())?;
         }
 
         info!("🎯 ALLOWANCE DEBUG: create_allowance_transaction() completed for {}", transaction_id);

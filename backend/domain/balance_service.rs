@@ -117,11 +117,12 @@ impl<C: Connection> BalanceService<C> {
 
         for tx in same_day_transactions {
             // Check if this transaction is from the same day
-            if let Some(tx_date_part) = tx.date.split('T').next() {
+            let tx_date_str = tx.date.format("%Y-%m-%dT%H:%M:%S%.3f%z").to_string();
+            if let Some(tx_date_part) = tx_date_str.split('T').next() {
                 if tx_date_part == target_date_part {
                     // Check if this transaction occurred before our new transaction
                     // We'll use string comparison of the full timestamp since RFC3339 sorts lexicographically
-                    if tx.date.as_str() < transaction_date {
+                    if tx_date_str.as_str() < transaction_date {
                         same_day_earlier_transactions.push(tx);
                     }
                 }
@@ -158,7 +159,10 @@ impl<C: Connection> BalanceService<C> {
             .get_transactions_since(child_id, transaction_date)?;
 
         // If there are transactions after this date (excluding exact matches), we need recalculation
-        let needs_recalc = transactions_after.iter().any(|tx| tx.date.as_str() > transaction_date);
+        let needs_recalc = transactions_after.iter().any(|tx| {
+            let tx_date_str = tx.date.format("%Y-%m-%dT%H:%M:%S%.3f%z").to_string();
+            tx_date_str.as_str() > transaction_date
+        });
         
         info!("Balance recalculation needed for date {}: {}", transaction_date, needs_recalc);
         Ok(needs_recalc)

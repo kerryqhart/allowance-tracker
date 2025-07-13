@@ -1,5 +1,5 @@
 use anyhow::Result;
-use chrono::{Utc, NaiveDate, Datelike, Local};
+use chrono::{Utc, NaiveDate, Datelike, Local, FixedOffset};
 use log::{info, warn};
 use std::sync::Arc;
 
@@ -232,11 +232,17 @@ impl AllowanceService {
                 
                 if day_of_week == config.day_of_week {
                     // This is a future allowance day!
-                    let formatted_date = current.and_hms_opt(12, 0, 0).unwrap().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
+                    // Create DateTime at 12:00 UTC for the date
+                    let naive_datetime = current.and_hms_opt(12, 0, 0).unwrap();
+                    let utc_offset = FixedOffset::east_opt(0).unwrap(); // UTC offset
+                    let transaction_datetime = naive_datetime.and_local_timezone(utc_offset)
+                        .single()
+                        .unwrap();
+                    
                     let allowance_transaction = DomainTransaction {
                         id: format!("future-allowance::{}::{}", child_id, current.format("%Y-%m-%d")),
                         child_id: child_id.to_string(),
-                        date: formatted_date.clone(),
+                        date: transaction_datetime,
                         description: "Weekly allowance".to_string(),
                         amount: config.amount,
                         balance: 0.0, // Balance is not meaningful for future transactions
@@ -244,8 +250,8 @@ impl AllowanceService {
                     };
                     
                     future_allowances.push(allowance_transaction);
-                    info!("🔍 ALLOWANCE DEBUG: Generated future allowance for {} on {} (day_of_week: {}, expected: {}, formatted_date: {})", 
-                          child_id, current, day_of_week, config.day_of_week, formatted_date);
+                    info!("🔍 ALLOWANCE DEBUG: Generated future allowance for {} on {} (day_of_week: {}, expected: {}, datetime: {})", 
+                          child_id, current, day_of_week, config.day_of_week, transaction_datetime);
                 }
             }
             
@@ -333,8 +339,11 @@ impl AllowanceService {
         // We'll be more conservative: look for any positive income on allowance day
         let mut allowance_count = 0;
         for transaction in transactions {
+            // Format the transaction date to string for comparison
+            let transaction_date_str = transaction.date.format("%Y-%m-%d").to_string();
+            
             // Check if transaction is on this date and has positive amount (indicating income/allowance)
-            if transaction.date.starts_with(&date_prefix) && transaction.amount > 0.0 {
+            if transaction_date_str.starts_with(&date_prefix) && transaction.amount > 0.0 {
                 info!("🎯 ALLOWANCE DEBUG: Found positive transaction on target date: {} (${:.2}) - {}", 
                       transaction.id, transaction.amount, transaction.description);
                 // Check if the description suggests it's an allowance
@@ -346,7 +355,7 @@ impl AllowanceService {
                 } else {
                     info!("🎯 ALLOWANCE DEBUG: ❌ Positive transaction but not an allowance: {}", transaction.description);
                 }
-            } else if transaction.date.starts_with(&date_prefix) {
+            } else if transaction_date_str.starts_with(&date_prefix) {
                 info!("🎯 ALLOWANCE DEBUG: Found transaction on target date but not positive: {} (${:.2}) - {}", 
                       transaction.id, transaction.amount, transaction.description);
             }

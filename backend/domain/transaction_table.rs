@@ -86,16 +86,17 @@ impl TransactionTableService {
 
     /// Format a single transaction for display
     pub fn format_single_transaction(&self, transaction: &Transaction) -> FormattedTransaction {
+        let date_str = transaction.date.format("%Y-%m-%dT%H:%M:%S%.3f%z").to_string();
         FormattedTransaction {
             id: transaction.id.clone(),
-            formatted_date: self.format_date(&transaction.date),
+            formatted_date: self.format_date(&date_str),
             description: transaction.description.clone(),
             formatted_amount: self.format_amount(transaction.amount),
             amount_type: self.classify_amount(transaction.amount),
             formatted_balance: self.format_balance(transaction.balance),
             raw_amount: transaction.amount,
             raw_balance: transaction.balance,
-            raw_date: transaction.date.clone(),
+            raw_date: date_str,
         }
     }
 

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use chrono::Datelike;
+use chrono::{Datelike, DateTime, FixedOffset, NaiveDate, Utc};
 
 /// Transaction ID in format: "transaction::<income|expense>::epoch_millis"
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -8,8 +8,8 @@ pub struct Transaction {
     pub id: String,
     /// ID of the child this transaction belongs to
     pub child_id: String,
-    /// Human-readable timestamp with timezone (RFC 3339)
-    pub date: String,
+    /// Timestamp with timezone information
+    pub date: DateTime<FixedOffset>,  // ✅ FIXED: Now uses proper DateTime object
     /// Description of the transaction (max 256 characters)
     pub description: String,
     /// Transaction amount (positive for income, negative for expense)
@@ -297,9 +297,9 @@ pub struct MoneyFormState {
 pub struct Child {
     pub id: String,
     pub name: String,
-    pub birthdate: String, // ISO 8601 date format (YYYY-MM-DD)
-    pub created_at: String, // RFC 3339 timestamp
-    pub updated_at: String, // RFC 3339 timestamp
+    pub birthdate: NaiveDate, // ✅ FIXED: Now uses proper NaiveDate object
+    pub created_at: DateTime<Utc>, // ✅ FIXED: Now uses proper DateTime object
+    pub updated_at: DateTime<Utc>, // ✅ FIXED: Now uses proper DateTime object
 }
 
 /// Request for creating a new child
@@ -415,8 +415,8 @@ pub struct AllowanceConfig {
     pub amount: f64,
     pub day_of_week: u8, // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
     pub is_active: bool,
-    pub created_at: String, // RFC 3339 timestamp
-    pub updated_at: String, // RFC 3339 timestamp
+    pub created_at: DateTime<Utc>, // ✅ FIXED: Now uses proper DateTime object
+    pub updated_at: DateTime<Utc>, // ✅ FIXED: Now uses proper DateTime object
 }
 
 /// Request for getting allowance configuration
@@ -496,8 +496,8 @@ pub struct Goal {
     pub description: String,
     pub target_amount: f64,
     pub state: GoalState,
-    pub created_at: String, // RFC 3339 timestamp
-    pub updated_at: String, // RFC 3339 timestamp
+    pub created_at: DateTime<Utc>, // ✅ FIXED: Now uses proper DateTime object
+    pub updated_at: DateTime<Utc>, // ✅ FIXED: Now uses proper DateTime object
 }
 
 impl Goal {
@@ -802,7 +802,7 @@ mod tests {
         let transaction = Transaction {
             id: "transaction::income::1702516122000".to_string(),
             child_id: "test_child_id".to_string(),
-            date: "2023-12-14T01:02:02.000Z".to_string(),
+            date: Utc::now().with_timezone(&FixedOffset::east_opt(0).unwrap()), // ✅ FIXED: Use east_opt instead
             description: "Test transaction".to_string(),
             amount: 10.0,
             balance: 100.0,
@@ -838,9 +838,9 @@ mod tests {
         let child = Child {
             id: "child::1702516122000".to_string(),
             name: "Test Child".to_string(),
-            birthdate: "2015-06-15".to_string(),
-            created_at: "2023-12-14T01:02:02.000Z".to_string(),
-            updated_at: "2023-12-14T01:02:02.000Z".to_string(),
+            birthdate: NaiveDate::from_ymd_opt(2015, 6, 15).unwrap(),  // ✅ FIXED: Use proper NaiveDate
+            created_at: DateTime::parse_from_rfc3339("2023-12-14T01:02:02.000Z").unwrap().with_timezone(&Utc),  // ✅ FIXED: Use proper DateTime
+            updated_at: DateTime::parse_from_rfc3339("2023-12-14T01:02:02.000Z").unwrap().with_timezone(&Utc),  // ✅ FIXED: Use proper DateTime
         };
 
         assert_eq!(child.extract_timestamp().unwrap(), 1702516122000);

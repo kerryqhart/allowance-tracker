@@ -118,14 +118,8 @@ impl ExportService {
         csv_content.push_str("transaction_id,transaction_date,description,amount\n");
 
         for (index, transaction) in transactions.iter().enumerate() {
-            // Parse the date and format as yyyy/mm/dd
-            let formatted_date = match DateTime::parse_from_rfc3339(&transaction.date) {
-                Ok(dt) => dt.format("%Y/%m/%d").to_string(),
-                Err(_) => {
-                    // Fallback to original date if parsing fails
-                    transaction.date.clone()
-                }
-            };
+            // Format the date as yyyy/mm/dd
+            let formatted_date = transaction.date.format("%Y/%m/%d").to_string();
 
             // Format the CSV row
             let row = format!(

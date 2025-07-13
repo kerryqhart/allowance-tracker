@@ -88,15 +88,10 @@ pub fn render_transaction_table(ui: &mut egui::Ui, transactions: &[Transaction])
                 body.row(45.0, |mut row| {
                     // Date column (formatted with full month name)
                     row.col(|ui| {
-                        let date_str = if let Some(date_part) = transaction.date.split('T').next() {
-                            // Parse and format date with full month name
-                            if let Ok(parsed_date) = chrono::NaiveDate::parse_from_str(date_part, "%Y-%m-%d") {
-                                parsed_date.format("%B %d, %Y").to_string()  // Full month name
-                            } else {
-                                date_part.to_string()
-                            }
-                        } else {
-                            "Unknown".to_string()
+                        let date_str = {
+                            // Format date with full month name
+                            let parsed_date = transaction.date.naive_local().date();
+                            parsed_date.format("%B %d, %Y").to_string()  // Full month name
                         };
                         
                         // Add vertical centering and padding
@@ -308,14 +303,10 @@ pub fn render_responsive_transaction_table(ui: &mut egui::Ui, available_rect: eg
                                 body.row(row_height, |mut row| {
                                     // Date column
                                     row.col(|ui| {
-                                        let date_str = if let Some(date_part) = transaction.date.split('T').next() {
-                                            if let Ok(parsed_date) = chrono::NaiveDate::parse_from_str(date_part, "%Y-%m-%d") {
-                                                parsed_date.format("%B %d, %Y").to_string()
-                                            } else {
-                                                date_part.to_string()
-                                            }
-                                        } else {
-                                            "Unknown".to_string()
+                                        let date_str = {
+                                            // Format date with full month name
+                                            let parsed_date = transaction.date.naive_local().date();
+                                            parsed_date.format("%B %d, %Y").to_string()
                                         };
                                         
                                         ui.with_layout(egui::Layout::centered_and_justified(egui::Direction::LeftToRight), |ui| {

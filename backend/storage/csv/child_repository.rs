@@ -5,6 +5,17 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use shared::Child as SharedChild;
 use crate::backend::domain::models::child::Child as DomainChild;
+use serde::{Deserialize, Serialize};
+
+/// Intermediate struct for YAML serialization with string date fields
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct YamlChild {
+    id: String,
+    name: String,
+    birthdate: String, // String representation for YAML
+    created_at: String, // String representation for YAML
+    updated_at: String, // String representation for YAML
+}
 use super::connection::CsvConnection;
 use crate::backend::storage::GitManager;
 use serde_yaml;
@@ -143,18 +154,18 @@ impl ChildRepository {
         }
         
         let yaml_content = fs::read_to_string(&yaml_path)?;
-        let shared_child: SharedChild = serde_yaml::from_str(&yaml_content)?;
+        let yaml_child: YamlChild = serde_yaml::from_str(&yaml_content)?;
         
-        // Map shared child to domain child with proper type conversions
+        // Map YAML child to domain child with proper type conversions
         let domain_child = DomainChild {
-            id: shared_child.id,
-            name: shared_child.name,
-            birthdate: chrono::NaiveDate::parse_from_str(&shared_child.birthdate, "%Y-%m-%d")
+            id: yaml_child.id,
+            name: yaml_child.name,
+            birthdate: chrono::NaiveDate::parse_from_str(&yaml_child.birthdate, "%Y-%m-%d")
                 .map_err(|e| anyhow::anyhow!("Failed to parse birthdate: {}", e))?,
-            created_at: chrono::DateTime::parse_from_rfc3339(&shared_child.created_at)
+            created_at: chrono::DateTime::parse_from_rfc3339(&yaml_child.created_at)
                 .map_err(|e| anyhow::anyhow!("Failed to parse created_at: {}", e))?
                 .with_timezone(&chrono::Utc),
-            updated_at: chrono::DateTime::parse_from_rfc3339(&shared_child.updated_at)
+            updated_at: chrono::DateTime::parse_from_rfc3339(&yaml_child.updated_at)
                 .map_err(|e| anyhow::anyhow!("Failed to parse updated_at: {}", e))?
                 .with_timezone(&chrono::Utc),
         };
@@ -171,18 +182,18 @@ impl ChildRepository {
             info!("Created child directory: {:?}", child_dir);
         }
         
-        // Convert domain child to shared child
-        let shared_child = SharedChild {
+        // Convert domain child to YAML child
+        let yaml_child = YamlChild {
             id: child.id.clone(),
             name: child.name.clone(),
-            birthdate: child.birthdate.to_string(),
+            birthdate: child.birthdate.format("%Y-%m-%d").to_string(),
             created_at: child.created_at.to_rfc3339(),
             updated_at: child.updated_at.to_rfc3339(),
         };
         
         // Write child.yaml
         let yaml_path = self.get_child_yaml_path(directory_name);
-        let yaml_content = serde_yaml::to_string(&shared_child)?;
+        let yaml_content = serde_yaml::to_string(&yaml_child)?;
         
         // Atomic write using temp file
         let temp_path = yaml_path.with_extension("tmp");

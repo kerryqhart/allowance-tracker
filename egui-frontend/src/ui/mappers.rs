@@ -5,9 +5,9 @@ pub fn to_dto(child: crate::backend::domain::models::child::Child) -> Child {
     Child {
         id: child.id,
         name: child.name,
-        birthdate: child.birthdate.to_string(),
-        created_at: child.created_at.to_rfc3339(),
-        updated_at: child.updated_at.to_rfc3339(),
+        birthdate: child.birthdate,
+        created_at: child.created_at,
+        updated_at: child.updated_at,
     }
 }
 

@@ -211,7 +211,8 @@ impl CalendarService {
         let mut transactions_by_day: HashMap<u32, Vec<Transaction>> = HashMap::new();
         
         for transaction in transactions {
-            if let Some((t_year, t_month, t_day)) = self.parse_transaction_date(&transaction.date) {
+            let date_str = transaction.date.format("%Y-%m-%dT%H:%M:%S%.3f%z").to_string();
+            if let Some((t_year, t_month, t_day)) = self.parse_transaction_date(&date_str) {
                 if t_month == month && t_year == year {
                     transactions_by_day
                         .entry(t_day)
@@ -240,8 +241,10 @@ impl CalendarService {
         // Find the starting balance for this month from the most recent previous transaction
         let mut sorted_transactions = transactions.to_vec();
         sorted_transactions.sort_by(|a, b| {
-            let date_a = self.parse_transaction_date(&a.date).unwrap_or((0, 0, 0));
-            let date_b = self.parse_transaction_date(&b.date).unwrap_or((0, 0, 0));
+            let date_a_str = a.date.format("%Y-%m-%dT%H:%M:%S%.3f%z").to_string();
+            let date_b_str = b.date.format("%Y-%m-%dT%H:%M:%S%.3f%z").to_string();
+            let date_a = self.parse_transaction_date(&date_a_str).unwrap_or((0, 0, 0));
+            let date_b = self.parse_transaction_date(&date_b_str).unwrap_or((0, 0, 0));
             date_b.cmp(&date_a) // Newest first
         });
         
@@ -288,7 +291,8 @@ impl CalendarService {
         // Find the most recent transaction BEFORE the start of the target month
         // This gives us the balance at the end of the previous month
         for transaction in sorted_transactions {
-            if let Some((t_year, t_month, _)) = self.parse_transaction_date(&transaction.date) {
+            let date_str = transaction.date.format("%Y-%m-%dT%H:%M:%S%.3f%z").to_string();
+            if let Some((t_year, t_month, _)) = self.parse_transaction_date(&date_str) {
                 // Check if this transaction is before the target month
                 let transaction_is_before_target = if t_year < year {
                     true // Transaction is from a previous year

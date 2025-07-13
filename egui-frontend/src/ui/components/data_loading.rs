@@ -27,6 +27,7 @@
 //! This module ensures the UI always has the most current data available.
 
 use log::{info, warn};
+use chrono::{Datelike, NaiveDate, Duration};
 use crate::ui::app_state::AllowanceTrackerApp;
 use crate::ui::mappers::{to_dto, TransactionMapper};
 use crate::backend::domain::commands::transactions::TransactionListQuery;
@@ -117,30 +118,73 @@ impl AllowanceTrackerApp {
         }
     }
     
-    /// Load calendar data
+    /// Load calendar data for the selected month/year
     pub fn load_calendar_data(&mut self) {
-        info!("📅 Loading calendar data for {}/{}", self.selected_month, self.selected_year);
+        log::info!("📅 Loading calendar data for {}/{}", self.selected_month, self.selected_year);
         
-        // Load recent transactions for the current month
+        // Calculate the start and end dates for the selected month
+        let start_date = match chrono::NaiveDate::from_ymd_opt(self.selected_year, self.selected_month, 1) {
+            Some(date) => date,
+            None => {
+                log::error!("❌ Failed to create start date for {}/{}", self.selected_month, self.selected_year);
+                self.error_message = Some("Invalid date".to_string());
+                return;
+            }
+        };
+        
+        let end_date = if self.selected_month == 12 {
+            chrono::NaiveDate::from_ymd_opt(self.selected_year + 1, 1, 1).unwrap()
+        } else {
+            chrono::NaiveDate::from_ymd_opt(self.selected_year, self.selected_month + 1, 1).unwrap()
+        } - chrono::Duration::days(1);
+        
+        log::info!("🗓️  Querying transactions from {} to {}", start_date, end_date);
+        
+        // Load transactions for the selected month with date filtering
         let query = TransactionListQuery {
             after: None,
-            limit: Some(20), // Load last 20 transactions
-            start_date: None,
-            end_date: None,
+            limit: None, // Don't limit - get all transactions for the month
+            start_date: Some(format!("{}T00:00:00Z", start_date.format("%Y-%m-%d"))),
+            end_date: Some(format!("{}T23:59:59Z", end_date.format("%Y-%m-%d"))),
         };
+        
+        log::debug!("🔍 Query: {:?}", query);
         
         match self.backend.transaction_service.list_transactions_domain(query) {
             Ok(result) => {
-                info!("📊 Successfully loaded {} transactions", result.transactions.len());
+                log::info!("📊 Successfully loaded {} transactions from backend for {}/{}", 
+                          result.transactions.len(), self.selected_month, self.selected_year);
                 
                 // Convert domain transactions to DTOs
                 self.calendar_transactions = result.transactions
                     .into_iter()
                     .map(TransactionMapper::to_dto)
                     .collect();
+                
+                log::info!("🔄 Converted to {} DTO transactions", self.calendar_transactions.len());
+                
+                // Log details about the loaded transactions
+                for (i, transaction) in self.calendar_transactions.iter().enumerate() {
+                    log::debug!("📝 Transaction {}: {} on {} (amount: ${})", 
+                               i + 1, transaction.description, transaction.date, transaction.amount);
+                }
+                
+                // Specifically check for June transactions
+                let june_transactions: Vec<_> = self.calendar_transactions.iter()
+                    .filter(|t| {
+                        let transaction_date = t.date.naive_local().date();
+                        transaction_date.month() == 6 && transaction_date.year() == self.selected_year
+                    })
+                    .collect();
+                
+                log::info!("🗓️  Found {} June {} transactions", june_transactions.len(), self.selected_year);
+                for transaction in june_transactions {
+                    log::info!("  - June transaction: {} on {} (amount: ${})", 
+                              transaction.description, transaction.date, transaction.amount);
+                }
             }
             Err(e) => {
-                warn!("❌ Failed to load transactions: {}", e);
+                log::error!("❌ Failed to load transactions: {}", e);
                 self.error_message = Some(format!("Failed to load transactions: {}", e));
                 self.calendar_transactions = Vec::new();
             }

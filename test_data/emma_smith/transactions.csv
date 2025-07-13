@@ -1,4 +1,12 @@
 id,child_id,date,description,amount,balance
+tx_june_001,child_emma_001,2024-06-01,"Weekly allowance",5.00,5.00
+tx_june_002,child_emma_001,2024-06-03,"Spent on stickers",-2.00,3.00
+tx_june_003,child_emma_001,2024-06-08,"Weekly allowance",5.00,8.00
+tx_june_004,child_emma_001,2024-06-10,"Saved for toy fund",0.00,8.00
+tx_june_005,child_emma_001,2024-06-15,"Weekly allowance",5.00,13.00
+tx_june_006,child_emma_001,2024-06-17,"Bought candy",-1.50,11.50
+tx_june_007,child_emma_001,2024-06-22,"Weekly allowance",5.00,16.50
+tx_june_008,child_emma_001,2024-06-25,"Summer bonus!",10.00,26.50
 tx_001,child_emma_001,2024-12-01,"Weekly allowance",5.00,5.00
 tx_002,child_emma_001,2024-12-03,"Spent on stickers",-2.00,3.00
 tx_003,child_emma_001,2024-12-08,"Weekly allowance",5.00,8.00
