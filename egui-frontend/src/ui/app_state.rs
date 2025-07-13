@@ -3,6 +3,13 @@ use chrono::Datelike;
 use shared::*;
 use crate::backend::Backend;
 
+/// Tabs available in the main interface
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MainTab {
+    Calendar,
+    Table,
+}
+
 /// Main application struct for the egui allowance tracker
 pub struct AllowanceTrackerApp {
     pub backend: Backend,
@@ -15,6 +22,7 @@ pub struct AllowanceTrackerApp {
     pub loading: bool,
     pub error_message: Option<String>,
     pub success_message: Option<String>,
+    pub current_tab: MainTab,
     
     // Calendar state
     #[allow(dead_code)]
@@ -64,6 +72,7 @@ impl AllowanceTrackerApp {
             loading: true,
             error_message: None,
             success_message: None,
+            current_tab: MainTab::Calendar, // Default to calendar view
             
             // Calendar state
             calendar_loading: false,

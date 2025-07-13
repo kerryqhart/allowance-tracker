@@ -1,5 +1,5 @@
 use eframe::egui;
-use crate::ui::app_state::AllowanceTrackerApp;
+use crate::ui::app_state::{AllowanceTrackerApp, MainTab};
 use crate::ui::*;
 use chrono::{NaiveDate, Datelike, Weekday};
 use shared::Transaction;
@@ -88,22 +88,79 @@ impl AllowanceTrackerApp {
         }
     }
     
+    /// Render tab buttons for switching between views
+    fn render_tab_buttons(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            // Center the tabs
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                ui.add_space(20.0);
+                
+                // Calendar tab
+                let calendar_selected = self.current_tab == MainTab::Calendar;
+                let calendar_button = if calendar_selected {
+                    egui::Button::new(egui::RichText::new("📅 Calendar")
+                        .font(egui::FontId::new(20.0, egui::FontFamily::Proportional)))
+                        .fill(egui::Color32::from_rgb(70, 130, 180)) // Steel blue for selected
+                } else {
+                    egui::Button::new(egui::RichText::new("📅 Calendar")
+                        .font(egui::FontId::new(20.0, egui::FontFamily::Proportional)))
+                        .fill(egui::Color32::from_rgb(240, 240, 240)) // Light gray for unselected
+                };
+                
+                if ui.add_sized([150.0, 45.0], calendar_button).clicked() {
+                    self.current_tab = MainTab::Calendar;
+                }
+                
+                ui.add_space(10.0);
+                
+                // Table tab
+                let table_selected = self.current_tab == MainTab::Table;
+                let table_button = if table_selected {
+                    egui::Button::new(egui::RichText::new("📋 Table")
+                        .font(egui::FontId::new(20.0, egui::FontFamily::Proportional)))
+                        .fill(egui::Color32::from_rgb(70, 130, 180)) // Steel blue for selected
+                } else {
+                    egui::Button::new(egui::RichText::new("📋 Table")
+                        .font(egui::FontId::new(20.0, egui::FontFamily::Proportional)))
+                        .fill(egui::Color32::from_rgb(240, 240, 240)) // Light gray for unselected
+                };
+                
+                if ui.add_sized([150.0, 45.0], table_button).clicked() {
+                    self.current_tab = MainTab::Table;
+                }
+            });
+        });
+    }
+    
     /// Render the main content area
     fn render_main_content(&mut self, ui: &mut egui::Ui) {
         ui.vertical(|ui| {
-            // Top - Calendar with dimension verification
-            let available_rect = ui.available_rect_before_wrap();
-            self.draw_calendar_section(ui, available_rect, &self.calendar_transactions.clone());
+            // Render tab buttons
+            self.render_tab_buttons(ui);
             
             ui.add_space(10.0);
             
-            // Middle - Transactions table
-            self.render_transactions_section(ui);
-            
-            ui.add_space(10.0);
-            
-            // Bottom - Money management cards
-            self.render_money_management_section(ui);
+            // Render content based on selected tab
+            match self.current_tab {
+                MainTab::Calendar => {
+                    // Reserve space for bottom margin before drawing calendar
+                    let mut available_rect = ui.available_rect_before_wrap();
+                    available_rect.max.y -= 30.0; // Reserve 30px bottom margin
+                    self.draw_calendar_section(ui, available_rect, &self.calendar_transactions.clone());
+                    
+                    // Add bottom spacing to ensure the calendar doesn't touch the edge
+                    ui.add_space(30.0);
+                }
+                MainTab::Table => {
+                    // Reserve space for bottom margin before drawing table
+                    let mut available_rect = ui.available_rect_before_wrap();
+                    available_rect.max.y -= 30.0; // Reserve 30px bottom margin
+                    self.draw_transactions_section(ui, available_rect, &self.calendar_transactions.clone());
+                    
+                    // Add bottom spacing to ensure the table doesn't touch the edge
+                    ui.add_space(30.0);
+                }
+            }
         });
     }
     
@@ -269,6 +326,11 @@ impl AllowanceTrackerApp {
                 render_transaction_table(ui, &self.calendar_transactions);
             });
         });
+    }
+    
+    /// Draw transactions section with responsive table in card container
+    fn draw_transactions_section(&mut self, ui: &mut egui::Ui, available_rect: egui::Rect, transactions: &[Transaction]) {
+        crate::ui::components::transaction_table::render_responsive_transaction_table(ui, available_rect, transactions);
     }
     
     /// Render the money management section
@@ -606,9 +668,14 @@ impl AllowanceTrackerApp {
         
         // Draw the card container
         let card_height = (header_height + cell_height * 6.0) + 150.0; // Space for 6 weeks + padding (reduced from 200.0)
+        
+        // Ensure card doesn't exceed available rectangle bounds
+        let max_available_height = available_rect.height() - 40.0; // Leave 40px margin (20px top + 20px bottom)
+        let final_card_height = card_height.min(max_available_height);
+        
         let card_rect = egui::Rect::from_min_size(
             egui::pos2(available_rect.left() + 20.0, available_rect.top() + 20.0),
-            egui::vec2(content_width, card_height)
+            egui::vec2(content_width, final_card_height)
         );
         
         draw_card_container(ui, card_rect, 10.0);

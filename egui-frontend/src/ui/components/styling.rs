@@ -146,4 +146,16 @@ pub fn draw_day_header_gradient(ui: &mut egui::Ui, rect: egui::Rect, day_index: 
     };
     
     painter.rect_filled(rect, egui::Rounding::same(5.0), color);
+}
+
+/// Get table header color that matches calendar day header style
+pub fn get_table_header_color(header_index: usize) -> egui::Color32 {
+    // Use the same colors as calendar day headers but cycle through them
+    match header_index % 4 {
+        0 => egui::Color32::from_rgb(255, 182, 193), // Light pink (DATE)
+        1 => egui::Color32::from_rgb(186, 85, 211),  // Medium orchid (DESCRIPTION)
+        2 => egui::Color32::from_rgb(147, 112, 219), // Medium purple (AMOUNT)
+        3 => egui::Color32::from_rgb(100, 149, 237), // Cornflower blue (BALANCE)
+        _ => egui::Color32::GRAY,
+    }
 } 
