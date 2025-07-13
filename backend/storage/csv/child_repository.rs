@@ -3,7 +3,6 @@ use log::{info, warn, debug};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
-use shared::Child as SharedChild;
 use crate::backend::domain::models::child::Child as DomainChild;
 use serde::{Deserialize, Serialize};
 

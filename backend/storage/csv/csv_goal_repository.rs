@@ -2,12 +2,11 @@ use crate::backend::{
     domain::models::goal::{DomainGoal, DomainGoalState},
     storage::GoalStorage,
 };
-use anyhow::{Context, Result};
-use log::{debug, info, warn};
+use anyhow::Result;
+use log::warn;
 use serde::{Deserialize, Serialize};
-use std::fs::{File, OpenOptions};
-use std::io::{Read, Write};
-use std::path::PathBuf;
+use std::fs::{self};
+use std::io::BufWriter;
 use super::connection::CsvConnection;
 
 /// CSV record structure for goals
@@ -73,7 +72,7 @@ impl CsvGoalRepository {
             return Ok(Vec::new());
         }
 
-        let file = File::open(file_path)?;
+        let file = fs::File::open(file_path)?;
         let mut rdr = csv::Reader::from_reader(file);
         let mut goals = Vec::new();
         for result in rdr.deserialize() {
@@ -91,7 +90,14 @@ impl CsvGoalRepository {
 
     fn write_goals(&self, child_id: &str, goals: &[DomainGoal]) -> Result<()> {
         let file_path = self.connection.get_goals_file_path(child_id);
-        let mut wtr = csv::Writer::from_path(file_path)?;
+        
+        // Ensure the parent directory exists
+        if let Some(parent) = file_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        
+        let file = fs::File::create(file_path)?;
+        let mut wtr = csv::Writer::from_writer(BufWriter::new(file));
         for goal in goals {
             let record = GoalRecord::from(goal.clone());
             wtr.serialize(record)?;

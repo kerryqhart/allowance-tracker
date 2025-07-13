@@ -85,11 +85,18 @@ impl ParentalControlRepository {
     }
     
     /// Get the parental control attempts CSV file path for a specific child directory
-    #[allow(dead_code)]
     fn get_parental_control_file_path(&self, child_directory: &str) -> PathBuf {
-        self.connection
-            .get_child_directory(child_directory)
-            .join("parental_control_attempts.csv")
+        if child_directory == "global" {
+            // For global parental control attempts, store at root level
+            self.connection
+                .base_directory()
+                .join("parental_control_attempts.csv")
+        } else {
+            // For child-specific attempts, store in child directory
+            self.connection
+                .get_child_directory(child_directory)
+                .join("parental_control_attempts.csv")
+        }
     }
     
     /// Find the child directory that contains a child with the given child_id
@@ -290,10 +297,16 @@ impl ParentalControlRepository {
 
 impl crate::backend::storage::ParentalControlStorage for ParentalControlRepository {
     fn record_parental_control_attempt(&self, child_id: &str, attempted_value: &str, success: bool) -> Result<i64> {
-        // Find the child directory
-        let child_directory = match self.find_child_directory_by_id(child_id)? {
-            Some(dir) => dir,
-            None => return Err(anyhow::anyhow!("Child not found: {}", child_id)),
+        // Handle global parental control attempts specially
+        let child_directory = if child_id == "global" {
+            // For global attempts, use the root directory directly
+            "global".to_string()
+        } else {
+            // Find the child directory for specific child IDs
+            match self.find_child_directory_by_id(child_id)? {
+                Some(dir) => dir,
+                None => return Err(anyhow::anyhow!("Child not found: {}", child_id)),
+            }
         };
         
         // Get the next available ID
@@ -315,10 +328,16 @@ impl crate::backend::storage::ParentalControlStorage for ParentalControlReposito
     }
 
     fn get_parental_control_attempts(&self, child_id: &str, limit: Option<u32>) -> Result<Vec<DomainParentalControlAttempt>> {
-        // Find the child directory
-        let child_directory = match self.find_child_directory_by_id(child_id)? {
-            Some(dir) => dir,
-            None => return Ok(Vec::new()), // Return empty vector if child not found
+        // Handle global parental control attempts specially
+        let child_directory = if child_id == "global" {
+            // For global attempts, use the root directory directly
+            "global".to_string()
+        } else {
+            // Find the child directory for specific child IDs
+            match self.find_child_directory_by_id(child_id)? {
+                Some(dir) => dir,
+                None => return Ok(Vec::new()), // Return empty vector if child not found
+            }
         };
         
         // Load attempts from the directory
@@ -466,7 +485,7 @@ mod tests {
         // Try to record attempt for non-existent child
         let result = repo.record_parental_control_attempt("child::nonexistent", "test", false);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("child with ID"));
+        assert!(result.unwrap_err().to_string().contains("Child not found"));
     }
 
     #[test]

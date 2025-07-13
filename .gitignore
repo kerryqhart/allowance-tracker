@@ -11,6 +11,9 @@ node_modules/
 *.db-shm
 *.db-wal
 
+# Test data directories
+test_data_*/
+
 # IDE and editor files
 .vscode/
 .idea/

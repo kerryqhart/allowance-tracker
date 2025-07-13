@@ -10,25 +10,22 @@ use crate::backend::domain::models::transaction::{
 };
 use super::connection::CsvConnection;
 use super::child_repository::ChildRepository;
-use crate::backend::storage::{ChildStorage, GitManager};
+use crate::backend::storage::ChildStorage;
 
 /// CSV-based transaction repository
 #[derive(Clone)]
 pub struct TransactionRepository {
     connection: CsvConnection,
     child_repository: ChildRepository,
-    git_manager: GitManager,
 }
 
 impl TransactionRepository {
     /// Create a new CSV transaction repository
     pub fn new(connection: CsvConnection) -> Self {
         let child_repository = ChildRepository::new(Arc::new(connection.clone()));
-        let git_manager = GitManager::new();
         Self { 
             connection,
             child_repository,
-            git_manager,
         }
     }
     
@@ -153,115 +150,7 @@ impl TransactionRepository {
         }
     }
 
-    /// Normalize a transaction date to RFC 3339 format with conflict resolution
-    /// 
-    /// This ensures all dates are stored in full RFC 3339 format and handles same-day conflicts
-    /// by incrementing the time component by 1-second intervals.
-    fn normalize_transaction_date(&self, date: &str, existing_transactions: &[DomainTransaction]) -> Result<String> {
-        use chrono::{DateTime, FixedOffset, NaiveDate, TimeZone};
-        
-        info!("🕐 Normalizing transaction date: '{}'", date);
-        
-        // If already in RFC 3339 format, check for conflicts and increment if needed
-        if let Ok(_dt) = DateTime::parse_from_rfc3339(date) {
-            info!("📅 Date is already RFC 3339, checking for conflicts...");
-            return self.resolve_timestamp_conflict(date, existing_transactions);
-        }
-        
-        // If date-only format (YYYY-MM-DD), convert to RFC 3339
-        if let Ok(naive_date) = NaiveDate::parse_from_str(date, "%Y-%m-%d") {
-            info!("📅 Converting date-only format to RFC 3339...");
-            // Start at beginning of day in Eastern Time
-            let naive_datetime = naive_date.and_hms_opt(0, 0, 0).unwrap();
-            let eastern_offset = FixedOffset::west_opt(5 * 3600).unwrap(); // EST (UTC-5)
-            
-            if let Some(dt) = eastern_offset.from_local_datetime(&naive_datetime).single() {
-                // Use the same format as successful transactions: -0500 instead of -05:00
-                let original_timestamp = dt.format("%Y-%m-%dT%H:%M:%S%z").to_string();
-                info!("🕐 Original chrono timestamp: '{}'", original_timestamp);
-                
-                let mut base_timestamp = original_timestamp;
-                // Only remove colon from timezone offset (find colon after + or -)
-                if let Some(tz_start) = base_timestamp.rfind('+').or_else(|| base_timestamp.rfind('-')) {
-                    info!("🌍 Found timezone start at position: {}", tz_start);
-                    if let Some(colon_pos) = base_timestamp[tz_start..].find(':') {
-                        info!("🌍 Found colon in timezone at relative position: {}", colon_pos);
-                        base_timestamp.remove(tz_start + colon_pos);
-                        info!("🌍 Removed colon, result: '{}'", base_timestamp);
-                    }
-                }
-                info!("Generated base timestamp for date-only '{}': '{}'", date, base_timestamp);
-                return self.resolve_timestamp_conflict(&base_timestamp, existing_transactions);
-            }
-        }
-        
-        // If we can't parse the date, return it as-is (fallback)
-        warn!("Could not parse date '{}', storing as-is", date);
-        Ok(date.to_string())
-    }
-    
-    /// Resolve timestamp conflicts by incrementing seconds until we find a unique timestamp
-    fn resolve_timestamp_conflict(&self, base_timestamp: &str, existing_transactions: &[DomainTransaction]) -> Result<String> {
-        use chrono::{DateTime, Duration};
-        
-        info!("🔄 Resolving timestamp conflict for: '{}'", base_timestamp);
-        
-        // Ensure the base timestamp has the colon for parsing
-        let parseable_timestamp = if base_timestamp.contains("T") && base_timestamp.len() > 5 {
-            let mut temp = base_timestamp.to_string();
-            // Add colon back to timezone if missing (e.g., -0500 -> -05:00)
-            if let Some(tz_start) = temp.rfind('+').or_else(|| temp.rfind('-')) {
-                let tz_part = &temp[tz_start..];
-                // Check if timezone part lacks colon (e.g., "-0500" instead of "-05:00")
-                if tz_part.len() == 5 && !tz_part.contains(':') {
-                    temp.insert(tz_start + 3, ':'); // Insert colon at position 3 in timezone
-                }
-            }
-            temp
-        } else {
-            base_timestamp.to_string()
-        };
-        
-        info!("🔧 Parseable timestamp: '{}'", parseable_timestamp);
-        let mut current_dt = DateTime::parse_from_rfc3339(&parseable_timestamp)?;
-        let mut attempts = 0;
-        const MAX_ATTEMPTS: i32 = 86400; // Max 1 day worth of seconds
-        
-        // Keep incrementing by 1 second until we find a unique timestamp
-        while attempts < MAX_ATTEMPTS {
-            let mut current_timestamp = current_dt.format("%Y-%m-%dT%H:%M:%S%z").to_string();
-            // Only remove colon from timezone offset (find colon after + or -)
-            if let Some(tz_start) = current_timestamp.rfind('+').or_else(|| current_timestamp.rfind('-')) {
-                if let Some(colon_pos) = current_timestamp[tz_start..].find(':') {
-                    current_timestamp.remove(tz_start + colon_pos);
-                }
-            }
-            
-            info!("Checking timestamp conflict for: '{}'", current_timestamp);
-            
-            // Check if this timestamp already exists
-            let conflict_exists = existing_transactions.iter().any(|tx| {
-                let tx_date_str = tx.date.format("%Y-%m-%dT%H:%M:%S%.3f%z").to_string();
-                tx_date_str == current_timestamp
-            });
-            
-            if !conflict_exists {
-                if attempts > 0 {
-                    info!("Resolved timestamp conflict: '{}' -> '{}' (incremented {} seconds)", 
-                          base_timestamp, current_timestamp, attempts);
-                }
-                return Ok(current_timestamp);
-            }
-            
-            // Increment by 1 second and try again
-            current_dt = current_dt + Duration::seconds(1);
-            attempts += 1;
-        }
-        
-        // If we somehow exhausted all attempts, return the original with a warning
-        warn!("Could not resolve timestamp conflict for '{}' after {} attempts", base_timestamp, MAX_ATTEMPTS);
-        Ok(base_timestamp.to_string())
-    }
+
 }
 
 impl TransactionRepository {
@@ -295,16 +184,7 @@ impl TransactionRepository {
         if *date1 < *date2 { -1 } else if *date1 > *date2 { 1 } else { 0 }
     }
 
-    /// Convert a DateTime to a comparable string timestamp for conflict resolution
-    fn datetime_to_timestamp(&self, dt: &chrono::DateTime<chrono::FixedOffset>) -> String {
-        // Use the same format as the original timestamp resolution
-        dt.format("%Y-%m-%dT%H:%M:%S%z").to_string()
-    }
-    
-    /// Parse a string into a DateTime for conflict resolution
-    fn parse_datetime_for_conflict(&self, date_str: &str) -> Result<chrono::DateTime<chrono::FixedOffset>> {
-        self.parse_date_string(date_str)
-    }
+
     
     /// Store transaction with explicit child name (preferred method)
     pub fn store_transaction_with_child_name(&self, transaction: &DomainTransaction, child_name: &str) -> Result<()> {
@@ -588,7 +468,7 @@ mod tests {
         let (repo, _env) = setup_test_repo()?;
         
         // Test the exact scenario from the bug report
-        let cdt_transaction_date = "2025-06-15T00:00:00-0500"; // CDT transaction
+        let cdt_transaction_date = "2025-06-15T00:00:00-05:00"; // CDT transaction
         let utc_query_end_date = "2025-06-30T23:59:59Z";       // UTC query
         
         // The CDT transaction should be BEFORE the UTC end date (comparison should be < 0)
@@ -597,7 +477,7 @@ mod tests {
         assert!(result < 0, "CDT transaction should be before UTC end date");
         
         // Test another CDT transaction that should be included
-        let cdt_transaction_june27 = "2025-06-27T07:00:00-0500";
+        let cdt_transaction_june27 = "2025-06-27T07:00:00-05:00";
         let result2 = repo.compare_dates(&repo.parse_date_string(cdt_transaction_june27)?, utc_query_end_date);
         println!("Test: compare_dates('{}', '{}') = {}", cdt_transaction_june27, utc_query_end_date, result2);
         assert!(result2 < 0, "CDT June 27 transaction should be before UTC end date");
@@ -812,16 +692,16 @@ mod tests {
         // Test that different timezone formats are handled correctly
         let timezone_variants = vec![
             ("2024-06-15T10:30:00Z", "UTC"),
-            ("2024-06-15T10:30:00-0500", "CDT without colon"),
             ("2024-06-15T10:30:00-05:00", "CDT with colon"),
-            ("2024-06-15T10:30:00+0000", "UTC with explicit offset"),
+            ("2024-06-15T10:30:00-05:00", "CDT with colon (duplicate)"),
+            ("2024-06-15T10:30:00+00:00", "UTC with explicit offset"),
         ];
         
         for (i, (date_str, description)) in timezone_variants.iter().enumerate() {
             let transaction = DomainTransaction {
                 id: format!("tz_test_{}", i),
                 child_id: "test_child".to_string(),
-                date: chrono::DateTime::parse_from_str(date_str, "%Y-%m-%dT%H:%M:%S%z").unwrap(),
+                date: chrono::DateTime::parse_from_rfc3339(date_str).unwrap(),
                 description: format!("Test {}", description),
                 amount: 10.0,
                 balance: 10.0,

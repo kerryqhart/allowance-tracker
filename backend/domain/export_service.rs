@@ -5,7 +5,7 @@
 //! and file operations. The UI should only handle presentation concerns.
 
 use anyhow::Result;
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use log::{info, error};
 use std::fs;
 

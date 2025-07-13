@@ -2,7 +2,6 @@ use anyhow::Result;
 use std::path::{Path, PathBuf};
 use std::fs;
 use std::io;
-use chrono::Utc;
 use crate::backend::storage::traits::Connection;
 use log::{info, warn, error, debug};
 
@@ -69,14 +68,6 @@ impl CsvConnection {
         };
         
         Self::new(actual_data_dir)
-    }
-    
-    /// Create a new CSV connection for testing with a unique directory
-    pub fn new_for_testing() -> Result<Self> {
-        // Create a unique test directory using timestamp
-        let timestamp = Utc::now().timestamp_millis();
-        let test_dir = PathBuf::from(format!("test_data_{}", timestamp));
-        Self::new(test_dir)
     }
     
     /// Get the directory path for a child's data using the child name

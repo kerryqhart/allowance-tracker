@@ -20,7 +20,6 @@ use log::{error, info};
 
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
-use time::format_description::well_known::Rfc3339;
 
 #[derive(Clone)]
 pub struct TransactionService<C: Connection> {
@@ -430,8 +429,9 @@ mod tests {
     };
     // Tests now use domain models instead of shared types
 
-    fn create_test_service() -> (TransactionService<CsvConnection>, Arc<CsvConnection>) {
-        let connection = Arc::new(CsvConnection::new_for_testing().unwrap());
+    fn create_test_service() -> (TransactionService<CsvConnection>, Arc<CsvConnection>, tempfile::TempDir) {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let connection = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
         let child_service = ChildService::new(connection.clone());
         let allowance_service = AllowanceService::new(connection.clone());
         let balance_service = BalanceService::new(connection.clone());
@@ -441,7 +441,7 @@ mod tests {
             allowance_service,
             balance_service,
         );
-        (transaction_service, connection)
+        (transaction_service, connection, temp_dir)
     }
 
     fn create_test_child(
@@ -458,7 +458,7 @@ mod tests {
 
     #[test]
     fn test_create_transaction_basic() {
-        let (service, _conn) = create_test_service();
+        let (service, _conn, _temp_dir) = create_test_service();
         let test_child = create_test_child(&service.child_service, "test_child").unwrap();
         let set_active_command = SetActiveChildCommand {
             child_id: test_child.id.clone(),

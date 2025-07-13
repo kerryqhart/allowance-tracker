@@ -27,7 +27,7 @@
 //! This module ensures the UI always has the most current data available.
 
 use log::{info, warn};
-use chrono::{Datelike, NaiveDate, Duration};
+use chrono::Datelike;
 use crate::ui::app_state::AllowanceTrackerApp;
 use crate::ui::mappers::{to_dto, TransactionMapper};
 use crate::backend::domain::commands::transactions::TransactionListQuery;
