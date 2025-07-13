@@ -83,8 +83,9 @@ impl AllowanceTrackerApp {
                                         .unwrap_or(false);
                                     
                                     if is_active {
-                                        ui.label(egui::RichText::new("👑")
-                                            .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))); // Crown for active child
+                                        ui.label(egui::RichText::new("•")
+                                            .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))
+                                            .color(egui::Color32::from_rgb(0, 120, 215))); // Bullet for active child
                                     } else {
                                         ui.label("   "); // Spacing
                                     }

@@ -1,0 +1,10 @@
+id,child_id,date,description,amount,balance
+tx_alex_001,child_alex_002,2024-12-01,"Weekly allowance",3.00,3.00
+tx_alex_002,child_alex_002,2024-12-04,"Spent on pokemon cards",-1.50,1.50
+tx_alex_003,child_alex_002,2024-12-08,"Weekly allowance",3.00,4.50
+tx_alex_004,child_alex_002,2024-12-12,"Bought snacks",-0.75,3.75
+tx_alex_005,child_alex_002,2024-12-15,"Weekly allowance",3.00,6.75
+tx_alex_006,child_alex_002,2024-12-20,"Saved for video game",0.00,6.75
+tx_alex_007,child_alex_002,2024-12-22,"Weekly allowance",3.00,9.75
+tx_alex_008,child_alex_002,2024-12-25,"Christmas money",15.00,24.75
+tx_alex_009,child_alex_002,2025-01-01,"New Year allowance",3.00,27.75

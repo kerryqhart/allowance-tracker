@@ -27,9 +27,66 @@ impl AllowanceTrackerApp {
     
     /// Load current balance
     pub fn load_balance(&mut self) {
-        // For now, set a placeholder balance
-        // TODO: Implement actual balance calculation
-        self.current_balance = 42.50;
+        if let Some(child) = &self.current_child {
+            info!("💰 Loading balance for child: {} (ID: {})", child.name, child.id);
+            
+            // Get the most recent transaction to get the current balance
+            let query = TransactionListQuery {
+                after: None,
+                limit: Some(1), // Just get the most recent transaction
+                start_date: None,
+                end_date: None,
+            };
+            
+            info!("💰 DEBUG: About to call list_transactions_domain with query: {:?}", query);
+            
+            match self.backend.transaction_service.list_transactions_domain(query) {
+                Ok(result) => {
+                    info!("💰 DEBUG: list_transactions_domain returned {} transactions", result.transactions.len());
+                    
+                    if let Some(latest_transaction) = result.transactions.first() {
+                        self.current_balance = latest_transaction.balance;
+                        info!("💰 SUCCESS: Found latest transaction ID={}, balance=${:.2}", 
+                             latest_transaction.id, self.current_balance);
+                        info!("💰 DEBUG: Transaction details - date={}, description={}, amount={}", 
+                             latest_transaction.date, latest_transaction.description, latest_transaction.amount);
+                    } else {
+                        // No transactions, balance is 0
+                        self.current_balance = 0.0;
+                        info!("💰 WARNING: No transactions found for child {}, balance is $0.00", child.name);
+                        
+                        // Additional debug: Let's try to load ALL transactions to see what's happening
+                        let debug_query = TransactionListQuery {
+                            after: None,
+                            limit: Some(100), // Get more transactions for debugging
+                            start_date: None,
+                            end_date: None,
+                        };
+                        
+                        match self.backend.transaction_service.list_transactions_domain(debug_query) {
+                            Ok(debug_result) => {
+                                info!("💰 DEBUG: Extended query returned {} transactions", debug_result.transactions.len());
+                                for (i, tx) in debug_result.transactions.iter().take(5).enumerate() {
+                                    info!("💰 DEBUG: Transaction {}: id={}, date={}, amount={}, balance={}", 
+                                         i+1, tx.id, tx.date, tx.amount, tx.balance);
+                                }
+                            }
+                            Err(e) => {
+                                warn!("💰 DEBUG: Extended query also failed: {}", e);
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!("❌ Failed to load balance for child {}: {}", child.name, e);
+                    self.error_message = Some(format!("Failed to load balance: {}", e));
+                    self.current_balance = 0.0;
+                }
+            }
+        } else {
+            info!("💰 DEBUG: No current child set, balance = $0.00");
+            self.current_balance = 0.0;
+        }
     }
     
     /// Load calendar data
@@ -53,11 +110,6 @@ impl AllowanceTrackerApp {
                     .into_iter()
                     .map(TransactionMapper::to_dto)
                     .collect();
-                
-                // Update balance from the most recent transaction
-                if let Some(latest_transaction) = self.calendar_transactions.first() {
-                    self.current_balance = latest_transaction.balance;
-                }
             }
             Err(e) => {
                 warn!("❌ Failed to load transactions: {}", e);

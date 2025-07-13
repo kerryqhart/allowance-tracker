@@ -1,13 +1,19 @@
-Implement unified content card with integrated toggles
+feat: Complete child selector dropdown implementation
 
-- Replace separate calendar and transactions sections with unified card approach
-- Add toggle buttons inside card header for Calendar/Table view switching
-- Implement draw_unified_content_card() with proper layout and styling
-- Create draw_card_header_with_toggles() for integrated header controls
-- Add conditional content rendering based on current_tab selection
-- Fix calendar grid positioning and layout within unified card structure
-- Maintain responsive design and proper spacing throughout
-- Clean up unused methods and improve code organization
+- Add clickable child name in header that opens dropdown
+- Implement dynamic dropdown sizing based on actual child names
+- Add hover-based open/close behavior (stays open while hovering button or dropdown)
+- Ensure button stays in pressed state while dropdown is open
+- Apply professional styling with proper z-index, borders, and smooth interactions
 
-This matches the reference design with toggles integrated into the card header
-rather than separate floating tabs above the content. 
+Technical improvements:
+- Fix dropdown width calculation using actual font metrics with generous spacing
+- Implement proper hover detection for both button and dropdown areas
+- Add visual feedback with button pressed state persistence
+- Clean up all debug logging for production readiness
+
+UX features:
+- Crown emoji (👑) indicator for currently selected child
+- Smooth transitions between hover states
+- Appropriate minimum width with responsive sizing
+- Instant feedback on mouse movement 

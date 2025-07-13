@@ -35,6 +35,8 @@ pub struct AllowanceTrackerApp {
     pub show_add_money_modal: bool,
     pub show_spend_money_modal: bool,
     pub show_child_selector: bool,
+    pub show_child_dropdown: bool,
+    pub child_dropdown_just_opened: bool,
     #[allow(dead_code)]
     pub show_settings_menu: bool,
     #[allow(dead_code)]
@@ -87,6 +89,8 @@ impl AllowanceTrackerApp {
             show_add_money_modal: false,
             show_spend_money_modal: false,
             show_child_selector: false,
+            show_child_dropdown: false,
+            child_dropdown_just_opened: false,
             show_settings_menu: false,
             show_allowance_config_modal: false,
             

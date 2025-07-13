@@ -33,18 +33,13 @@ pub struct Backend {
 impl Backend {
     /// Create a new backend instance with all services
     pub fn new() -> Result<Self> {
-        // Use test_data directory for egui frontend demo
-        // When running from egui-frontend, we need to go up one level to find test_data
-        let current_dir = std::env::current_dir()?;
-        let test_data_path = if current_dir.file_name().unwrap() == "egui-frontend" {
-            current_dir.parent().unwrap().join("test_data")
-        } else {
-            current_dir.join("test_data")
-        };
+        // Use the real data directory in ~/Documents/Allowance Tracker
+        let home_dir = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Could not find home directory"))?;
+        let data_path = home_dir.join("Documents").join("Allowance Tracker");
         
-        // Create the CSV connection with test data directory
-        println!("🔍 Backend::new() using test_data path: {:?}", test_data_path);
-        let csv_connection = Arc::new(CsvConnection::new(test_data_path)?);
+        // Create the CSV connection with the real data directory
+        println!("🔍 Backend::new() using real data path: {:?}", data_path);
+        let csv_connection = Arc::new(CsvConnection::new(data_path)?);
         
         // Create services using the Arc<CsvConnection> pattern
         let child_service = domain::child_service::ChildService::new(csv_connection.clone());
