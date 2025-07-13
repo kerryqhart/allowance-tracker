@@ -67,80 +67,7 @@ impl AllowanceTrackerApp {
 
     
     /// Render tab buttons for switching between views
-    fn render_tab_buttons(&mut self, ui: &mut egui::Ui) {
-        // Add more space to separate from header, making tabs feel closer to calendar
-        ui.add_space(15.0);
-        
-        // Calculate the same margin structure as the calendar for perfect alignment
-        let left_margin = 20.0 + 15.0; // Same as calendar: 20px window margin + 15px card padding
-        
-        // Create browser-style tabs that connect to the calendar below
-        ui.horizontal(|ui| {
-            // Add margin to align with calendar
-            ui.add_space(left_margin);
-            
-            // Create traditional browser-style tabs
-            ui.horizontal(|ui| {
-                // Calendar tab - browser style
-                let calendar_selected = self.current_tab == MainTab::Calendar;
-                let calendar_rounding = if calendar_selected {
-                    egui::Rounding { nw: 8.0, ne: 8.0, sw: 0.0, se: 0.0 } // Rounded top, flat bottom for connection
-                } else {
-                    egui::Rounding { nw: 8.0, ne: 8.0, sw: 0.0, se: 8.0 } // Rounded top, rounded bottom-right
-                };
-                
-                let calendar_button = if calendar_selected {
-                    egui::Button::new(egui::RichText::new("📅 Calendar")
-                        .font(egui::FontId::new(18.0, egui::FontFamily::Proportional))
-                        .color(egui::Color32::from_rgb(60, 60, 60)))
-                        .fill(egui::Color32::WHITE) // Same white as calendar card
-                        .rounding(calendar_rounding)
-                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(220, 220, 220))) // Light border
-                } else {
-                    egui::Button::new(egui::RichText::new("📅 Calendar")
-                        .font(egui::FontId::new(18.0, egui::FontFamily::Proportional))
-                        .color(egui::Color32::from_rgb(100, 100, 100)))
-                        .fill(egui::Color32::from_rgb(240, 240, 240)) // Lighter gray for inactive
-                        .rounding(calendar_rounding)
-                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(200, 200, 200)))
-                };
-                
-                if ui.add_sized([140.0, 45.0], calendar_button).clicked() {
-                    self.current_tab = MainTab::Calendar;
-                }
-                
-                ui.add_space(2.0); // Small gap between tabs
-                
-                // Table tab - browser style
-                let table_selected = self.current_tab == MainTab::Table;
-                let table_rounding = if table_selected {
-                    egui::Rounding { nw: 8.0, ne: 8.0, sw: 0.0, se: 0.0 } // Rounded top, flat bottom for connection
-                } else {
-                    egui::Rounding { nw: 8.0, ne: 8.0, sw: 8.0, se: 8.0 } // Rounded top and bottom-left
-                };
-                
-                let table_button = if table_selected {
-                    egui::Button::new(egui::RichText::new("📋 Table")
-                        .font(egui::FontId::new(18.0, egui::FontFamily::Proportional))
-                        .color(egui::Color32::from_rgb(60, 60, 60)))
-                        .fill(egui::Color32::WHITE) // Same white as calendar card
-                        .rounding(table_rounding)
-                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(220, 220, 220)))
-                } else {
-                    egui::Button::new(egui::RichText::new("📋 Table")
-                        .font(egui::FontId::new(18.0, egui::FontFamily::Proportional))
-                        .color(egui::Color32::from_rgb(100, 100, 100)))
-                        .fill(egui::Color32::from_rgb(240, 240, 240)) // Lighter gray for inactive
-                        .rounding(table_rounding)
-                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(200, 200, 200)))
-                };
-                
-                if ui.add_sized([140.0, 45.0], table_button).clicked() {
-                    self.current_tab = MainTab::Table;
-                }
-            });
-        });
-    }
+
     
     /// Render the main content area
     fn render_main_content(&mut self, ui: &mut egui::Ui) {
@@ -384,35 +311,7 @@ impl AllowanceTrackerApp {
         });
     }
     
-    /// Draw a unified card with header toggles (like the old Tauri version)
-    fn draw_unified_content_card(&mut self, ui: &mut egui::Ui) {
-        let available_rect = ui.available_rect_before_wrap();
-        let card_rect = egui::Rect::from_min_size(
-            available_rect.min + egui::vec2(20.0, 0.0),
-            egui::vec2(available_rect.width() - 40.0, available_rect.height() - 30.0),
-        );
-        
-        // Draw card background
-        self.draw_card_background(ui, card_rect);
-        
-        // Draw header with title and toggle buttons
-        self.draw_card_header_with_toggles(ui, card_rect);
-        
-        // Draw content based on selected tab
-        let content_rect = egui::Rect::from_min_size(
-            card_rect.min + egui::vec2(20.0, 60.0), // Leave space for header
-            egui::vec2(card_rect.width() - 40.0, card_rect.height() - 80.0),
-        );
-        
-        match self.current_tab {
-            MainTab::Calendar => {
-                self.draw_calendar_content(ui, content_rect, &self.calendar_transactions.clone());
-            }
-            MainTab::Table => {
-                self.draw_table_content(ui, content_rect, &self.calendar_transactions.clone());
-            }
-        }
-    }
+
     
     /// Draw card background with proper styling
     fn draw_card_background(&self, ui: &mut egui::Ui, rect: egui::Rect) {
@@ -682,119 +581,7 @@ impl AllowanceTrackerApp {
         self.draw_calendar_days_responsive(ui, transactions, cell_width, cell_height);
     }
     
-    /// Render the calendar section
-    fn render_calendar_section(&mut self, ui: &mut egui::Ui) {
-        // Calculate dynamic calendar dimensions first
-        let available_width = ui.available_width();
-        let day_spacing = 6.0 * 4.0; // 6 gaps between 7 days, 4px each
-        let card_padding = 40.0; // Padding inside the card (left + right = 40px total)
-        
-        // Calculate usable width for the calendar content (leaving room for card padding)
-        let max_calendar_width = (available_width - card_padding - 20.0).max(420.0); // 20px margin for centering
-        let usable_width = max_calendar_width - day_spacing;
-        let day_width = usable_width / 7.0;
-        let day_height = day_width.max(80.0);
-        
-        // Calculate actual calendar dimensions
-        let calendar_width = day_width * 7.0 + day_spacing;
-        let header_height = 40.0;
-        let title_area_height = 80.0; // Title + month navigation + spacing
-        let calendar_grid_height = self.calculate_calendar_grid_height(day_height);
-        let calendar_height = title_area_height + header_height + calendar_grid_height + 30.0; // Extra padding
-        
-        // Calculate final card container size
-        let card_width = calendar_width + card_padding;
-        let card_height = calendar_height + card_padding;
-        
-        // Center the card in available space
-        let available_rect = ui.available_rect_before_wrap();
-        let card_x = (available_rect.width() - card_width).max(0.0) / 2.0 + available_rect.min.x;
-        let card_y = available_rect.min.y + 10.0;
-        
-        let calendar_rect = egui::Rect::from_min_size(
-            egui::pos2(card_x, card_y),
-            egui::vec2(card_width, card_height),
-        );
-        
-        // Draw the modern card container
-        crate::ui::draw_card_container(ui, calendar_rect, 15.0);
-        
-        // Create a child UI within the card container
-        let mut child_ui = ui.child_ui(calendar_rect, *ui.layout(), None);
-        
-        child_ui.vertical(|ui| {
-            ui.add_space(20.0);
-            
-            // Center the calendar title
-            ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
-                ui.label(egui::RichText::new("📅 Calendar")
-                    .font(egui::FontId::new(24.0, egui::FontFamily::Proportional))
-                    .strong());
-            });
-            
-            ui.add_space(10.0);
-                
-                // Center the month/year selector
-                ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
-                    ui.horizontal(|ui| {
-                        if ui.button(egui::RichText::new("⬅")
-                            .font(egui::FontId::new(20.0, egui::FontFamily::Proportional))).clicked() {
-                            if self.selected_month == 1 {
-                                self.selected_month = 12;
-                                self.selected_year -= 1;
-                            } else {
-                                self.selected_month -= 1;
-                            }
-                            self.load_calendar_data();
-                        }
-                        
-                        ui.add_space(20.0);
-                        
-                        // Format month name
-                        let month_name = match self.selected_month {
-                            1 => "January",
-                            2 => "February", 
-                            3 => "March",
-                            4 => "April",
-                            5 => "May",
-                            6 => "June",
-                            7 => "July",
-                            8 => "August",
-                            9 => "September",
-                            10 => "October",
-                            11 => "November",
-                            12 => "December",
-                            _ => "Unknown",
-                        };
-                        
-                        ui.label(egui::RichText::new(format!("{} {}", month_name, self.selected_year))
-                            .font(egui::FontId::new(18.0, egui::FontFamily::Proportional))
-                            .strong());
-                        
-                        ui.add_space(20.0);
-                        
-                        if ui.button(egui::RichText::new("➡")
-                            .font(egui::FontId::new(20.0, egui::FontFamily::Proportional))).clicked() {
-                            if self.selected_month == 12 {
-                                self.selected_month = 1;
-                                self.selected_year += 1;
-                            } else {
-                                self.selected_month += 1;
-                            }
-                            self.load_calendar_data();
-                        }
-                    });
-                });
-                
-                ui.add_space(10.0);
-                
-                // Calendar grid
-                self.render_calendar_grid(ui, day_width, day_height);
-            });
-        
-        // Reserve space for the calendar container
-        ui.allocate_space(egui::vec2(calendar_rect.width(), calendar_rect.height() + 20.0));
-    }
+
     
     /// Calculate the height needed for the calendar grid
     fn calculate_calendar_grid_height(&self, day_height: f32) -> f32 {
@@ -833,73 +620,7 @@ impl AllowanceTrackerApp {
         weeks_needed as f32 * day_height + 10.0 // Add some spacing
     }
     
-    /// Render the transactions section
-    fn render_transactions_section(&mut self, ui: &mut egui::Ui) {
-        ui.group(|ui| {
-            ui.vertical(|ui| {
-                ui.label(egui::RichText::new("📋 Recent Transactions")
-                    .font(egui::FontId::new(24.0, egui::FontFamily::Proportional))
-                    .strong());
-                
-                render_transaction_table(ui, &self.calendar_transactions);
-            });
-        });
-    }
-    
-    /// Draw transactions section with responsive table in card container
-    fn draw_transactions_section(&mut self, ui: &mut egui::Ui, available_rect: egui::Rect, transactions: &[Transaction]) {
-        crate::ui::components::transaction_table::render_responsive_transaction_table(ui, available_rect, transactions);
-    }
-    
-    /// Render the money management section
-    fn render_money_management_section(&mut self, ui: &mut egui::Ui) {
-        ui.group(|ui| {
-            ui.vertical(|ui| {
-                // Center the title
-                ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
-                    ui.label(egui::RichText::new("💰 Money Actions")
-                        .font(egui::FontId::new(24.0, egui::FontFamily::Proportional))
-                        .strong());
-                });
-                
-                ui.add_space(10.0);
-                
-                // Center the action buttons
-                ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
-                    ui.horizontal(|ui| {
-                        // Add money button - make it larger and more prominent
-                        if ui.add_sized([150.0, 50.0], egui::Button::new(
-                            egui::RichText::new("💵 Add Money")
-                                .font(egui::FontId::new(18.0, egui::FontFamily::Proportional))
-                        )).clicked() {
-                            self.show_add_money_modal = true;
-                        }
-                        
-                        ui.add_space(20.0);
-                        
-                        // Spend money button - make it larger and more prominent
-                        if ui.add_sized([150.0, 50.0], egui::Button::new(
-                            egui::RichText::new("🛍️ Spend Money")
-                                .font(egui::FontId::new(18.0, egui::FontFamily::Proportional))
-                        )).clicked() {
-                            self.show_spend_money_modal = true;
-                        }
-                        
-                        // Child selector button if no active child
-                        if self.current_child.is_none() {
-                            ui.add_space(20.0);
-                            if ui.add_sized([150.0, 50.0], egui::Button::new(
-                                egui::RichText::new("👤 Select Child")
-                                    .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))
-                            )).clicked() {
-                                self.show_child_selector = true;
-                            }
-                        }
-                    });
-                });
-            });
-        });
-    }
+
     
     /// Render the calendar grid for the selected month
     fn render_calendar_grid(&mut self, ui: &mut egui::Ui, day_width: f32, day_height: f32) {
@@ -976,9 +697,6 @@ impl AllowanceTrackerApp {
                         egui::vec2(total_calendar_width, ui.available_height()),
                         egui::Layout::top_down(egui::Align::LEFT),
                         |ui| {
-                            // Store the starting position for grid lines
-                            let grid_start_pos = ui.cursor().min;
-                            
                             // Day headers with gradient background - dynamic width
                             ui.horizontal(|ui| {
                                 let day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -1223,28 +941,6 @@ impl AllowanceTrackerApp {
             }
         }
         self.load_calendar_data();
-    }
-
-        fn draw_calendar_section_with_tabs(&mut self, ui: &mut egui::Ui, available_rect: egui::Rect, transactions: &[Transaction]) {
-        // Add space for tabs in the header area
-        ui.add_space(15.0);
-        
-        // Draw the tabs first, positioned to connect to calendar
-        self.draw_integrated_tabs(ui, available_rect);
-        
-        // Now draw the calendar section connected to the tabs
-        self.draw_calendar_section(ui, available_rect, transactions);
-    }
-    
-    fn draw_transactions_section_with_tabs(&mut self, ui: &mut egui::Ui, available_rect: egui::Rect, transactions: &[Transaction]) {
-        // Add space for tabs in the header area
-        ui.add_space(15.0);
-        
-        // Draw the tabs first, positioned to connect to table
-        self.draw_integrated_tabs(ui, available_rect);
-        
-        // Now draw the transactions section connected to the tabs
-        self.draw_transactions_section(ui, available_rect, transactions);
     }
     
     fn draw_card_with_flat_top(&self, ui: &mut egui::Ui, rect: egui::Rect) {
