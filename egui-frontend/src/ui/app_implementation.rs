@@ -1373,14 +1373,32 @@ impl AllowanceTrackerApp {
                                 let mut day_button = egui::Button::new(
                                     egui::RichText::new(current_day.to_string())
                                         .font(egui::FontId::new(18.0, egui::FontFamily::Proportional))
-                                        .color(if is_today { egui::Color32::WHITE } else { egui::Color32::BLACK })
+                                        .color(if is_today { egui::Color32::from_rgb(219, 112, 147) } else { egui::Color32::BLACK })
                                 );
                                 
-                                // Special styling for today
+                                // Special styling for today - pink outline with shadow
                                 if is_today {
-                                    day_button = day_button.fill(egui::Color32::from_rgb(0, 120, 215)); // Nice blue
+                                    day_button = day_button
+                                        .fill(egui::Color32::TRANSPARENT)
+                                        .stroke(egui::Stroke::new(2.0, egui::Color32::from_rgb(219, 112, 147))) // Pink outline
+                                        .rounding(egui::Rounding::same(6.0));
                                 } else {
-                                    day_button = day_button.fill(egui::Color32::WHITE);
+                                    day_button = day_button
+                                        .fill(egui::Color32::TRANSPARENT)
+                                        .rounding(egui::Rounding::same(4.0));
+                                }
+                                
+                                // Add shadow effect for today
+                                if is_today {
+                                    let button_rect = egui::Rect::from_min_size(
+                                        ui.cursor().min + egui::vec2(2.0, 2.0), // Offset for shadow
+                                        egui::vec2(button_width, 25.0)
+                                    );
+                                    ui.painter().rect_filled(
+                                        button_rect,
+                                        egui::Rounding::same(6.0),
+                                        egui::Color32::from_rgba_premultiplied(219, 112, 147, 40) // Pink shadow
+                                    );
                                 }
                                 
                                 let day_response = ui.add_sized([button_width, 25.0], day_button);
@@ -1406,10 +1424,12 @@ impl AllowanceTrackerApp {
                                     ui.add_space(2.0);
                                     
                                     // Determine chip color based on transaction amount
-                                    let chip_color = if transaction.amount > 0.0 {
-                                        egui::Color32::from_rgb(34, 139, 34)  // Green for positive
+                                    let (chip_color, text_color) = if transaction.amount > 0.0 {
+                                        // Green for positive amounts - matching the green from the image
+                                        (egui::Color32::from_rgb(46, 160, 67), egui::Color32::from_rgb(46, 160, 67))
                                     } else {
-                                        egui::Color32::from_rgb(220, 20, 60)  // Red for negative
+                                        // Gray for negative amounts - matching the gray from the image
+                                        (egui::Color32::from_rgb(128, 128, 128), egui::Color32::from_rgb(128, 128, 128))
                                     };
                                     
                                     // Create transaction chip
@@ -1442,15 +1462,18 @@ impl AllowanceTrackerApp {
                                                 egui::Align2::CENTER_CENTER,
                                                 &chip_text,
                                                 egui::FontId::new(10.0, egui::FontFamily::Proportional),
-                                                chip_color,
+                                                text_color,
                                             );
                                         } else {
-                                            // Solid chip for completed transactions - dynamic size
+                                            // Outlined chip for completed transactions - matching the style from the image
                                             let chip_button = egui::Button::new(
                                                 egui::RichText::new(&chip_text)
                                                     .font(egui::FontId::new(10.0, egui::FontFamily::Proportional))
-                                                    .color(egui::Color32::WHITE)
-                                            ).fill(chip_color);
+                                                    .color(text_color)
+                                            )
+                                            .fill(egui::Color32::TRANSPARENT)
+                                            .stroke(egui::Stroke::new(1.0, chip_color))
+                                            .rounding(egui::Rounding::same(4.0));
                                             
                                             ui.add_sized([chip_width, 18.0], chip_button);
                                         }
@@ -1820,14 +1843,29 @@ impl AllowanceTrackerApp {
                         let day_button_width = cell_width * 0.9; // 90% of cell width
                         
                         let day_button = if is_today {
-                            egui::Button::new(egui::RichText::new(current_day.to_string()).size(day_font_size).color(egui::Color32::WHITE))
-                                .fill(egui::Color32::from_rgb(0, 120, 215))
-                                .rounding(egui::Rounding::same(4.0))
+                            // Pink outline with shadow for current day - matching the reference screenshot
+                            egui::Button::new(egui::RichText::new(current_day.to_string()).size(day_font_size).color(egui::Color32::from_rgb(219, 112, 147)))
+                                .fill(egui::Color32::TRANSPARENT)
+                                .stroke(egui::Stroke::new(2.0, egui::Color32::from_rgb(219, 112, 147))) // Pink outline
+                                .rounding(egui::Rounding::same(6.0))
                         } else {
                             egui::Button::new(egui::RichText::new(current_day.to_string()).size(day_font_size))
-                                .fill(egui::Color32::WHITE)
+                                .fill(egui::Color32::TRANSPARENT)
                                 .rounding(egui::Rounding::same(4.0))
                         };
+                        
+                        // Add shadow effect for today
+                        if is_today {
+                            let button_rect = egui::Rect::from_min_size(
+                                ui.cursor().min + egui::vec2(2.0, 2.0), // Offset for shadow
+                                egui::vec2(day_button_width, day_button_height)
+                            );
+                            ui.painter().rect_filled(
+                                button_rect,
+                                egui::Rounding::same(6.0),
+                                egui::Color32::from_rgba_premultiplied(219, 112, 147, 40) // Pink shadow
+                            );
+                        }
                         
                         ui.add_sized([day_button_width, day_button_height], day_button);
                         
@@ -1837,10 +1875,12 @@ impl AllowanceTrackerApp {
                         let chip_width = cell_width * 0.85; // 85% of cell width
                         
                         for transaction in day_transactions.iter().take(2) { // Show max 2 transactions
-                            let chip_color = if transaction.amount > 0.0 {
-                                egui::Color32::from_rgb(34, 139, 34)  // Green
+                            let (chip_color, text_color) = if transaction.amount > 0.0 {
+                                // Green for positive amounts - matching the green from the image
+                                (egui::Color32::from_rgb(46, 160, 67), egui::Color32::from_rgb(46, 160, 67))
                             } else {
-                                egui::Color32::from_rgb(220, 20, 60)  // Red
+                                // Gray for negative amounts - matching the gray from the image
+                                (egui::Color32::from_rgb(128, 128, 128), egui::Color32::from_rgb(128, 128, 128))
                             };
                             
                             let chip_text = if transaction.amount > 0.0 {
@@ -1849,9 +1889,10 @@ impl AllowanceTrackerApp {
                                 format!("-${:.0}", transaction.amount.abs())
                             };
                             
-                            let chip = egui::Button::new(egui::RichText::new(chip_text).size(chip_font_size).color(egui::Color32::WHITE))
-                                .fill(chip_color)
-                                .rounding(egui::Rounding::same(2.0));
+                            let chip = egui::Button::new(egui::RichText::new(chip_text).size(chip_font_size).color(text_color))
+                                .fill(egui::Color32::TRANSPARENT)
+                                .stroke(egui::Stroke::new(1.0, chip_color))
+                                .rounding(egui::Rounding::same(4.0));
                             ui.add_sized([chip_width, chip_height], chip);
                         }
                     });
