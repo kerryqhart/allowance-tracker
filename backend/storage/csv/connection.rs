@@ -9,7 +9,7 @@ use log::{info, warn, error, debug};
 use std::sync::{Arc, Mutex};
 
 /// CsvConnection manages file paths and ensures CSV files exist for each child
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct CsvConnection {
     base_directory: Arc<Mutex<PathBuf>>,
 }
@@ -128,6 +128,12 @@ impl CsvConnection {
     pub fn get_transactions_file_path(&self, child_name: &str) -> PathBuf {
         let child_dir = self.get_child_directory(child_name);
         child_dir.join("transactions.csv")
+    }
+    
+    /// Get the file path for a child's goals using the child name
+    pub fn get_goals_file_path(&self, child_name: &str) -> PathBuf {
+        let child_dir = self.get_child_directory(child_name);
+        child_dir.join("goals.csv")
     }
     
     /// Ensure a CSV file exists with proper header for the child using the child name

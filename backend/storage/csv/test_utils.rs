@@ -9,7 +9,7 @@ use anyhow::Result;
 use super::connection::CsvConnection;
 use super::transaction_repository::TransactionRepository;
 use super::child_repository::ChildRepository;
-use super::goal_repository::GoalRepository;
+use super::csv_goal_repository::CsvGoalRepository;
 use super::allowance_repository::AllowanceRepository;
 use super::parental_control_repository::ParentalControlRepository;
 use super::global_config_repository::GlobalConfigRepository;
@@ -85,7 +85,7 @@ pub struct RepositoryTestHelper {
     pub env: TestEnvironment,
     pub transaction_repo: TransactionRepository,
     pub child_repo: ChildRepository,
-    pub goal_repo: GoalRepository,
+    pub goal_repo: CsvGoalRepository,
     pub allowance_repo: AllowanceRepository,
     pub parental_control_repo: ParentalControlRepository,
     pub global_config_repo: GlobalConfigRepository,
@@ -98,7 +98,7 @@ impl RepositoryTestHelper {
         
         let transaction_repo = TransactionRepository::new(env.connection.clone());
         let child_repo = ChildRepository::new(Arc::new(env.connection.clone()));
-        let goal_repo = GoalRepository::new(env.connection.clone());
+        let goal_repo = CsvGoalRepository::new(env.connection.clone());
         let allowance_repo = AllowanceRepository::new(env.connection.clone());
         let parental_control_repo = ParentalControlRepository::new(env.connection.clone());
         let global_config_repo = GlobalConfigRepository::new(env.connection.clone());
@@ -120,7 +120,7 @@ impl RepositoryTestHelper {
         
         let transaction_repo = TransactionRepository::new(env.connection.clone());
         let child_repo = ChildRepository::new(Arc::new(env.connection.clone()));
-        let goal_repo = GoalRepository::new(env.connection.clone());
+        let goal_repo = CsvGoalRepository::new(env.connection.clone());
         let allowance_repo = AllowanceRepository::new(env.connection.clone());
         let parental_control_repo = ParentalControlRepository::new(env.connection.clone());
         let global_config_repo = GlobalConfigRepository::new(env.connection.clone());

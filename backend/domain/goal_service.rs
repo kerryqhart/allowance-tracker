@@ -26,7 +26,7 @@ use log::info;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::backend::storage::csv::{CsvConnection, GoalRepository};
+use crate::backend::storage::csv::{CsvConnection, CsvGoalRepository};
 use crate::backend::storage::GoalStorage;
 use crate::backend::domain::{child_service::ChildService, AllowanceService, TransactionService, BalanceService};
 use crate::backend::domain::models::goal::{DomainGoal, DomainGoalState};
@@ -41,7 +41,7 @@ use shared::GoalCalculation;
 /// Service for managing goals and goal-related calculations
 #[derive(Clone)]
 pub struct GoalService {
-    goal_repository: GoalRepository,
+    goal_repository: CsvGoalRepository,
     child_service: ChildService,
     allowance_service: AllowanceService,
     transaction_service: TransactionService<CsvConnection>,
@@ -58,7 +58,7 @@ impl GoalService {
         transaction_service: TransactionService<CsvConnection>,
         balance_service: BalanceService<CsvConnection>,
     ) -> Self {
-        let goal_repository = GoalRepository::new((*csv_conn).clone());
+        let goal_repository = CsvGoalRepository::new((*csv_conn).clone());
         Self {
             goal_repository,
             child_service,
