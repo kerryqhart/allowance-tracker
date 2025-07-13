@@ -34,7 +34,206 @@ use chrono::{NaiveDate, Datelike, Weekday};
 use shared::Transaction;
 use crate::ui::app_state::AllowanceTrackerApp;
 
+/// Represents a single day in the calendar with its associated state and rendering logic
+pub struct CalendarDay {
+    /// The day number (1-31)
+    pub day_number: u32,
+    /// The full date for this day
+    pub date: NaiveDate,
+    /// Whether this day is today
+    pub is_today: bool,
+    /// Transactions that occurred on this day
+    pub transactions: Vec<Transaction>,
+    /// The balance at the end of this day (if any transactions occurred)
+    pub balance: Option<f64>,
+}
+
+impl CalendarDay {
+    /// Create a new CalendarDay instance
+    pub fn new(day_number: u32, date: NaiveDate, is_today: bool) -> Self {
+        Self {
+            day_number,
+            date,
+            is_today,
+            transactions: Vec::new(),
+            balance: None,
+        }
+    }
+
+    /// Add a transaction to this day
+    pub fn add_transaction(&mut self, transaction: Transaction) {
+        // Update balance from the transaction (this is the balance after the transaction)
+        self.balance = Some(transaction.balance);
+        self.transactions.push(transaction);
+    }
+
+    /// Render this calendar day within the given dimensions
+    pub fn render(&self, ui: &mut egui::Ui, cell_width: f32, cell_height: f32) {
+        ui.vertical(|ui| {
+            ui.set_width(cell_width);
+            ui.set_height(cell_height);
+            
+            // Day number button - responsive sizing
+            let day_font_size = (cell_width * 0.2).max(14.0).min(20.0);
+            let day_button_height = cell_height * 0.3;
+            let day_button_width = cell_width * 0.9;
+            
+            let day_button = if self.is_today {
+                // Pink outline with shadow for current day
+                egui::Button::new(egui::RichText::new(self.day_number.to_string()).size(day_font_size).color(egui::Color32::from_rgb(219, 112, 147)))
+                    .fill(egui::Color32::TRANSPARENT)
+                    .stroke(egui::Stroke::new(2.0, egui::Color32::from_rgb(219, 112, 147)))
+                    .rounding(egui::Rounding::same(6.0))
+            } else {
+                egui::Button::new(egui::RichText::new(self.day_number.to_string()).size(day_font_size))
+                    .fill(egui::Color32::TRANSPARENT)
+                    .rounding(egui::Rounding::same(4.0))
+            };
+            
+            // Add shadow effect for today
+            if self.is_today {
+                let button_rect = egui::Rect::from_min_size(
+                    ui.cursor().min + egui::vec2(2.0, 2.0),
+                    egui::vec2(day_button_width, day_button_height)
+                );
+                ui.painter().rect_filled(
+                    button_rect,
+                    egui::Rounding::same(6.0),
+                    egui::Color32::from_rgba_premultiplied(219, 112, 147, 40)
+                );
+            }
+            
+            ui.add_sized([day_button_width, day_button_height], day_button);
+            
+            // Show balance if available
+            if let Some(balance) = self.balance {
+                ui.add_space(3.0);
+                ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+                    ui.label(
+                        egui::RichText::new(format!("${:.2}", balance))
+                            .font(egui::FontId::new(12.0, egui::FontFamily::Proportional))
+                            .color(egui::Color32::GRAY)
+                    );
+                });
+            }
+            
+            // Transaction chips - responsive sizing
+            let chip_font_size = (cell_width * 0.12).max(9.0).min(12.0);
+            let chip_height = cell_height * 0.15;
+            let chip_width = cell_width * 0.85;
+            
+            for transaction in self.transactions.iter().take(2) {
+                let (chip_color, text_color) = if transaction.amount > 0.0 {
+                    (egui::Color32::from_rgb(46, 160, 67), egui::Color32::from_rgb(46, 160, 67))
+                } else {
+                    (egui::Color32::from_rgb(128, 128, 128), egui::Color32::from_rgb(128, 128, 128))
+                };
+                
+                let chip_text = if transaction.amount > 0.0 {
+                    format!("+${:.0}", transaction.amount)
+                } else {
+                    format!("-${:.0}", transaction.amount.abs())
+                };
+                
+                // Check if this is a future transaction
+                let is_future = matches!(transaction.transaction_type, shared::TransactionType::FutureAllowance);
+                
+                ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+                    if is_future {
+                        // Dotted/dashed border for future transactions
+                        let (rect, _) = ui.allocate_exact_size(egui::vec2(chip_width, chip_height), egui::Sense::hover());
+                        
+                        ui.painter().rect_stroke(
+                            rect,
+                            egui::Rounding::same(4.0),
+                            egui::Stroke::new(1.0, chip_color)
+                        );
+                        
+                        ui.painter().text(
+                            rect.center(),
+                            egui::Align2::CENTER_CENTER,
+                            &chip_text,
+                            egui::FontId::new(chip_font_size, egui::FontFamily::Proportional),
+                            text_color,
+                        );
+                    } else {
+                        // Outlined chip for completed transactions
+                        let chip = egui::Button::new(egui::RichText::new(chip_text).size(chip_font_size).color(text_color))
+                            .fill(egui::Color32::TRANSPARENT)
+                            .stroke(egui::Stroke::new(1.0, chip_color))
+                            .rounding(egui::Rounding::same(4.0));
+                        ui.add_sized([chip_width, chip_height], chip);
+                    }
+                });
+            }
+        });
+    }
+}
+
 impl AllowanceTrackerApp {
+    /// Create CalendarDay instances for the selected month
+    pub fn create_calendar_days(&self, transactions: &[Transaction]) -> Vec<CalendarDay> {
+        let mut calendar_days = Vec::new();
+        
+        // Create a date for the first day of the selected month
+        let first_day = match NaiveDate::from_ymd_opt(self.selected_year, self.selected_month, 1) {
+            Some(date) => date,
+            None => return calendar_days,
+        };
+        
+        // Calculate the number of days in the month
+        let days_in_month = match first_day.with_day(1) {
+            Some(first) => {
+                let next_month = if self.selected_month == 12 {
+                    first.with_year(self.selected_year + 1).unwrap().with_month(1).unwrap()
+                } else {
+                    first.with_month(self.selected_month + 1).unwrap()
+                };
+                (next_month - chrono::Duration::days(1)).day()
+            }
+            None => return calendar_days,
+        };
+        
+        // Get current date for highlighting today
+        let today = chrono::Local::now();
+        let is_current_month = today.year() == self.selected_year && today.month() == self.selected_month;
+        let today_day = if is_current_month { Some(today.day()) } else { None };
+        
+        // Group transactions by day
+        let mut transactions_by_day: std::collections::HashMap<u32, Vec<Transaction>> = std::collections::HashMap::new();
+        for transaction in transactions {
+            if let Ok(parsed_date) = chrono::DateTime::parse_from_rfc3339(&transaction.date) {
+                let transaction_date = parsed_date.naive_local().date();
+                if transaction_date.year() == self.selected_year && transaction_date.month() == self.selected_month {
+                    let day = transaction_date.day();
+                    transactions_by_day.entry(day).or_insert_with(Vec::new).push(transaction.clone());
+                }
+            }
+        }
+        
+        // Create CalendarDay instances for each day in the month
+        for day in 1..=days_in_month {
+            let day_date = match first_day.with_day(day) {
+                Some(date) => date,
+                None => continue,
+            };
+            
+            let is_today = today_day == Some(day);
+            let mut calendar_day = CalendarDay::new(day, day_date, is_today);
+            
+            // Add transactions for this day
+            if let Some(day_transactions) = transactions_by_day.get(&day) {
+                for transaction in day_transactions {
+                    calendar_day.add_transaction(transaction.clone());
+                }
+            }
+            
+            calendar_days.push(calendar_day);
+        }
+        
+        calendar_days
+    }
+
     /// Draw calendar section with toggle header integrated
     pub fn draw_calendar_section_with_toggle(&mut self, ui: &mut egui::Ui, available_rect: egui::Rect, transactions: &[Transaction]) {
         // Use the existing draw_calendar_section method but with toggle header
@@ -176,28 +375,17 @@ impl AllowanceTrackerApp {
         )
     }
     
-    /// Draw calendar days with responsive sizing
+    /// Draw calendar days with responsive sizing using CalendarDay components
     pub fn draw_calendar_days_responsive(&mut self, ui: &mut egui::Ui, transactions: &[Transaction], cell_width: f32, cell_height: f32) {
-        // Create a date for the first day of the selected month
+        // Create CalendarDay instances for this month
+        let calendar_days = self.create_calendar_days(transactions);
+        
+        // Calculate the first day offset for grid layout
         let first_day = match NaiveDate::from_ymd_opt(self.selected_year, self.selected_month, 1) {
             Some(date) => date,
             None => return,
         };
         
-        // Calculate the number of days in the month
-        let days_in_month = match first_day.with_day(1) {
-            Some(first) => {
-                let next_month = if self.selected_month == 12 {
-                    first.with_year(self.selected_year + 1).unwrap().with_month(1).unwrap()
-                } else {
-                    first.with_month(self.selected_month + 1).unwrap()
-                };
-                (next_month - chrono::Duration::days(1)).day()
-            }
-            None => return,
-        };
-        
-        // Calculate the offset for the first day of the month
         let first_day_offset = match first_day.weekday() {
             Weekday::Mon => 0,
             Weekday::Tue => 1,
@@ -208,24 +396,15 @@ impl AllowanceTrackerApp {
             Weekday::Sun => 6,
         };
         
-        // Get current date for highlighting today
-        let today = chrono::Local::now();
-        let is_current_month = today.year() == self.selected_year && today.month() == self.selected_month;
-        let today_day = if is_current_month { Some(today.day()) } else { None };
-        
-        // Group transactions by day
-        let mut transactions_by_day: std::collections::HashMap<u32, Vec<&Transaction>> = std::collections::HashMap::new();
-        for transaction in transactions {
-            if let Ok(parsed_date) = chrono::DateTime::parse_from_rfc3339(&transaction.date) {
-                let transaction_date = parsed_date.naive_local().date();
-                if transaction_date.year() == self.selected_year && transaction_date.month() == self.selected_month {
-                    let day = transaction_date.day();
-                    transactions_by_day.entry(day).or_insert_with(Vec::new).push(transaction);
-                }
-            }
+        // Create a map of day number to CalendarDay for easy lookup
+        let mut day_map: std::collections::HashMap<u32, &CalendarDay> = std::collections::HashMap::new();
+        for calendar_day in &calendar_days {
+            day_map.insert(calendar_day.day_number, calendar_day);
         }
         
-        // Draw calendar cells
+        let days_in_month = calendar_days.len() as u32;
+        
+        // Draw calendar cells using the same grid layout
         let mut current_day = 1;
         let mut week_count = 0;
         
@@ -237,73 +416,13 @@ impl AllowanceTrackerApp {
                     // Empty cell - size it to match other cells
                     ui.add_sized([cell_width, cell_height], egui::Label::new(""));
                 } else {
-                    // Day cell - responsive sizing
-                    let is_today = today_day == Some(current_day);
-                    let day_transactions = transactions_by_day.get(&current_day).cloned().unwrap_or_default();
-                    
-                    ui.vertical(|ui| {
-                        ui.set_width(cell_width);
-                        ui.set_height(cell_height);
-                        
-                        // Day number - responsive sizing
-                        let day_font_size = (cell_width * 0.2).max(14.0).min(20.0); // Responsive font size
-                        let day_button_height = cell_height * 0.3; // 30% of cell height
-                        let day_button_width = cell_width * 0.9; // 90% of cell width
-                        
-                        let day_button = if is_today {
-                            // Pink outline with shadow for current day - matching the reference screenshot
-                            egui::Button::new(egui::RichText::new(current_day.to_string()).size(day_font_size).color(egui::Color32::from_rgb(219, 112, 147)))
-                                .fill(egui::Color32::TRANSPARENT)
-                                .stroke(egui::Stroke::new(2.0, egui::Color32::from_rgb(219, 112, 147))) // Pink outline
-                                .rounding(egui::Rounding::same(6.0))
-                        } else {
-                            egui::Button::new(egui::RichText::new(current_day.to_string()).size(day_font_size))
-                                .fill(egui::Color32::TRANSPARENT)
-                                .rounding(egui::Rounding::same(4.0))
-                        };
-                        
-                        // Add shadow effect for today
-                        if is_today {
-                            let button_rect = egui::Rect::from_min_size(
-                                ui.cursor().min + egui::vec2(2.0, 2.0), // Offset for shadow
-                                egui::vec2(day_button_width, day_button_height)
-                            );
-                            ui.painter().rect_filled(
-                                button_rect,
-                                egui::Rounding::same(6.0),
-                                egui::Color32::from_rgba_premultiplied(219, 112, 147, 40) // Pink shadow
-                            );
-                        }
-                        
-                        ui.add_sized([day_button_width, day_button_height], day_button);
-                        
-                        // Transaction chips - responsive sizing
-                        let chip_font_size = (cell_width * 0.12).max(9.0).min(12.0); // Responsive chip font
-                        let chip_height = cell_height * 0.15; // 15% of cell height
-                        let chip_width = cell_width * 0.85; // 85% of cell width
-                        
-                        for transaction in day_transactions.iter().take(2) { // Show max 2 transactions
-                            let (chip_color, text_color) = if transaction.amount > 0.0 {
-                                // Green for positive amounts - matching the green from the image
-                                (egui::Color32::from_rgb(46, 160, 67), egui::Color32::from_rgb(46, 160, 67))
-                            } else {
-                                // Gray for negative amounts - matching the gray from the image
-                                (egui::Color32::from_rgb(128, 128, 128), egui::Color32::from_rgb(128, 128, 128))
-                            };
-                            
-                            let chip_text = if transaction.amount > 0.0 {
-                                format!("+${:.0}", transaction.amount)
-                            } else {
-                                format!("-${:.0}", transaction.amount.abs())
-                            };
-                            
-                            let chip = egui::Button::new(egui::RichText::new(chip_text).size(chip_font_size).color(text_color))
-                                .fill(egui::Color32::TRANSPARENT)
-                                .stroke(egui::Stroke::new(1.0, chip_color))
-                                .rounding(egui::Rounding::same(4.0));
-                            ui.add_sized([chip_width, chip_height], chip);
-                        }
-                    });
+                    // Day cell - use CalendarDay component
+                    if let Some(calendar_day) = day_map.get(&current_day) {
+                        calendar_day.render(ui, cell_width, cell_height);
+                    } else {
+                        // Fallback empty cell if day not found
+                        ui.add_sized([cell_width, cell_height], egui::Label::new(""));
+                    }
                     
                     current_day += 1;
                 }
