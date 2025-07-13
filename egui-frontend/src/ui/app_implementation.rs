@@ -740,17 +740,18 @@ impl AllowanceTrackerApp {
     }
     
     fn get_day_header_color(&self, day_index: usize) -> egui::Color32 {
-        // Simple gradient colors for day headers
-        match day_index {
-            0 => egui::Color32::from_rgb(255, 182, 193), // Light pink
-            1 => egui::Color32::from_rgb(221, 160, 221), // Plum
-            2 => egui::Color32::from_rgb(186, 85, 211),  // Medium orchid
-            3 => egui::Color32::from_rgb(147, 112, 219), // Medium purple
-            4 => egui::Color32::from_rgb(138, 43, 226),  // Blue violet
-            5 => egui::Color32::from_rgb(100, 149, 237), // Cornflower blue
-            6 => egui::Color32::from_rgb(135, 206, 235), // Sky blue
-            _ => egui::Color32::GRAY,
-        }
+        // Use smooth pink-to-purple gradient matching the draw_day_header_gradient function
+        let t = day_index as f32 / 6.0; // 0.0 to 1.0
+        
+        // Interpolate between pink and purple (no blue)
+        let pink = egui::Color32::from_rgb(255, 182, 193); // Light pink
+        let purple = egui::Color32::from_rgb(186, 85, 211); // Purple
+        
+        egui::Color32::from_rgb(
+            (pink.r() as f32 * (1.0 - t) + purple.r() as f32 * t) as u8,
+            (pink.g() as f32 * (1.0 - t) + purple.g() as f32 * t) as u8,
+            (pink.b() as f32 * (1.0 - t) + purple.b() as f32 * t) as u8,
+        )
     }
     
     fn draw_calendar_days_responsive(&mut self, ui: &mut egui::Ui, transactions: &[Transaction], cell_width: f32, cell_height: f32) {

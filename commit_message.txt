@@ -1,11 +1,14 @@
-Fix table layout and spacing to match calendar
+feat: Update gradients to consistent pink-to-purple theme
 
-- Updated table to use 92% width with proper centering (matching calendar)
-- Fixed layout structure that was causing rows to appear horizontally instead of vertically
-- Replaced ui.horizontal() with ui.allocate_ui_with_layout() for proper vertical flow
-- Adjusted card padding from 20.0 to 15.0 to match calendar spacing
-- Ensured table rows now appear correctly below headers instead of offset to the side
-- Maintained responsive column widths and gradient bubble headers
-- Cleaned up unused variables
+- Updated calendar day header gradient from pink-purple-blue to pink-purple
+- Updated table header gradient to match calendar using same color endpoints
+- Eliminated blue colors from both calendar and table headers
+- Created cohesive design language across Calendar and Table views
+- Improved visual consistency and aesthetic appeal
 
-The table now has consistent spacing and layout behavior matching the calendar view. 
+Functions updated:
+- draw_day_header_gradient(): Now smooth pink-to-purple interpolation
+- get_day_header_color(): Updated to match gradient function
+- get_table_header_color(): Updated to use same color endpoints
+
+Result: Beautiful, unified pink-to-purple gradient theme throughout the UI 

@@ -126,36 +126,29 @@ pub fn draw_day_header_gradient(ui: &mut egui::Ui, rect: egui::Rect, day_index: 
     // Calculate color based on day index (0-6 for Mon-Sun)
     let t = day_index as f32 / 6.0; // 0.0 to 1.0
     
-    // Interpolate between pink, purple, and blue
-    let color = if t < 0.5 {
-        // Pink to Purple
-        let local_t = t * 2.0;
-        Color32::from_rgb(
-            (colors::DAY_HEADER_START.r() as f32 * (1.0 - local_t) + colors::DAY_HEADER_MID.r() as f32 * local_t) as u8,
-            (colors::DAY_HEADER_START.g() as f32 * (1.0 - local_t) + colors::DAY_HEADER_MID.g() as f32 * local_t) as u8,
-            (colors::DAY_HEADER_START.b() as f32 * (1.0 - local_t) + colors::DAY_HEADER_MID.b() as f32 * local_t) as u8,
-        )
-    } else {
-        // Purple to Blue
-        let local_t = (t - 0.5) * 2.0;
-        Color32::from_rgb(
-            (colors::DAY_HEADER_MID.r() as f32 * (1.0 - local_t) + colors::DAY_HEADER_END.r() as f32 * local_t) as u8,
-            (colors::DAY_HEADER_MID.g() as f32 * (1.0 - local_t) + colors::DAY_HEADER_END.g() as f32 * local_t) as u8,
-            (colors::DAY_HEADER_MID.b() as f32 * (1.0 - local_t) + colors::DAY_HEADER_END.b() as f32 * local_t) as u8,
-        )
-    };
+    // Smooth pink-to-purple gradient across all 7 days (no blue transition)
+    let color = Color32::from_rgb(
+        (colors::DAY_HEADER_START.r() as f32 * (1.0 - t) + colors::DAY_HEADER_MID.r() as f32 * t) as u8,
+        (colors::DAY_HEADER_START.g() as f32 * (1.0 - t) + colors::DAY_HEADER_MID.g() as f32 * t) as u8,
+        (colors::DAY_HEADER_START.b() as f32 * (1.0 - t) + colors::DAY_HEADER_MID.b() as f32 * t) as u8,
+    );
     
     painter.rect_filled(rect, egui::Rounding::same(5.0), color);
 }
 
 /// Get table header color that matches calendar day header style
 pub fn get_table_header_color(header_index: usize) -> egui::Color32 {
-    // Use the same colors as calendar day headers but cycle through them
-    match header_index % 4 {
-        0 => egui::Color32::from_rgb(255, 182, 193), // Light pink (DATE)
-        1 => egui::Color32::from_rgb(186, 85, 211),  // Medium orchid (DESCRIPTION)
-        2 => egui::Color32::from_rgb(147, 112, 219), // Medium purple (AMOUNT)
-        3 => egui::Color32::from_rgb(100, 149, 237), // Cornflower blue (BALANCE)
-        _ => egui::Color32::GRAY,
-    }
+    // Use the same pink-to-purple gradient as the calendar day headers
+    let t = (header_index as f32) / 3.0; // 0.0 to 1.0 across 4 headers (0, 1, 2, 3)
+    
+    // Same start and end points as the calendar gradient
+    let pink = colors::DAY_HEADER_START; // Light pink (255, 182, 193)
+    let purple = colors::DAY_HEADER_MID; // Purple (186, 85, 211)
+    
+    // Interpolate between pink and purple
+    Color32::from_rgb(
+        (pink.r() as f32 * (1.0 - t) + purple.r() as f32 * t) as u8,
+        (pink.g() as f32 * (1.0 - t) + purple.g() as f32 * t) as u8,
+        (pink.b() as f32 * (1.0 - t) + purple.b() as f32 * t) as u8,
+    )
 } 
