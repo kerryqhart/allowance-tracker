@@ -19,11 +19,11 @@ impl eframe::App for AllowanceTrackerApp {
             ctx.request_repaint_after(std::time::Duration::from_secs(5));
         }
         
-        // Main UI with gradient background
+        // Main UI with image background
         egui::CentralPanel::default().show(ctx, |ui| {
-            // Draw gradient background first
+            // Draw image background with blue overlay first
             let full_rect = ui.available_rect_before_wrap();
-            crate::ui::draw_gradient_background(ui, full_rect);
+            crate::ui::draw_image_background(ui, full_rect);
             
             if self.loading {
                 self.render_loading_screen(ui);

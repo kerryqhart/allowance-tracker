@@ -55,6 +55,9 @@ impl AllowanceTrackerApp {
         // Setup custom fonts including Chalkboard
         crate::ui::setup_custom_fonts(&cc.egui_ctx);
         
+        // Install image loaders for background support
+        egui_extras::install_image_loaders(&cc.egui_ctx);
+        
         let backend = crate::backend::Backend::new()?;
         
         let now = chrono::Local::now();

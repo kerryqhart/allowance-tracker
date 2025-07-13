@@ -7,8 +7,8 @@ pub fn setup_kid_friendly_style(ctx: &egui::Context) {
         let mut style = (*ctx.style()).clone();
         
         // Bright, fun colors
-        style.visuals.window_fill = egui::Color32::from_rgb(240, 248, 255); // Light blue background
-        style.visuals.panel_fill = egui::Color32::from_rgb(250, 250, 250); // Light gray panels
+        style.visuals.window_fill = egui::Color32::TRANSPARENT; // Make window transparent so our background shows through
+        style.visuals.panel_fill = egui::Color32::TRANSPARENT; // Make panels transparent so our background shows through
         style.visuals.button_frame = true;
         
         // Use Chalkboard font family if available, otherwise fall back to Proportional
@@ -77,30 +77,27 @@ pub mod colors {
     pub const BALANCE_TEXT: Color32 = Color32::from_rgb(128, 128, 128);     // Gray
 }
 
-/// Draw a vertical gradient background
-pub fn draw_gradient_background(ui: &mut egui::Ui, rect: egui::Rect) {
+/// Draw image background with blue overlay (replacing gradient)
+pub fn draw_image_background(ui: &mut egui::Ui, rect: egui::Rect) {
     let painter = ui.painter();
     
-    // Create a simple linear gradient effect by drawing multiple horizontal stripes
-    let num_stripes = 100;
-    let stripe_height = rect.height() / num_stripes as f32;
+    // Load and paint the background image with blue tint
+    let image_source = egui::include_image!("../../../assets/background.jpg");
+    let blue_tint = egui::Color32::from_rgba_premultiplied(173, 216, 230, 180); // Light blue tint
+    let image = egui::Image::new(image_source)
+        .fit_to_exact_size(rect.size())
+        .tint(blue_tint); // Apply blue tint directly to the image
     
-    for i in 0..num_stripes {
-        let t = i as f32 / (num_stripes - 1) as f32; // 0.0 to 1.0
-        
-        // Interpolate between top and bottom colors
-        let color = Color32::from_rgb(
-            (colors::GRADIENT_TOP.r() as f32 * (1.0 - t) + colors::GRADIENT_BOTTOM.r() as f32 * t) as u8,
-            (colors::GRADIENT_TOP.g() as f32 * (1.0 - t) + colors::GRADIENT_BOTTOM.g() as f32 * t) as u8,
-            (colors::GRADIENT_TOP.b() as f32 * (1.0 - t) + colors::GRADIENT_BOTTOM.b() as f32 * t) as u8,
-        );
-        
-        let stripe_rect = egui::Rect::from_min_size(
-            egui::pos2(rect.min.x, rect.min.y + i as f32 * stripe_height),
-            egui::vec2(rect.width(), stripe_height + 1.0), // +1 to avoid gaps
-        );
-        
-        painter.rect_filled(stripe_rect, egui::Rounding::ZERO, color);
+    // Try to load the image and see if it fails
+    match image.load_for_size(ui.ctx(), rect.size()) {
+        Ok(_sized_texture) => {
+            image.paint_at(ui, rect);
+        }
+        Err(_e) => {
+            // Fallback to a solid color if image fails to load
+            let fallback_color = egui::Color32::from_rgb(173, 216, 230); // Light blue
+            painter.rect_filled(rect, egui::Rounding::ZERO, fallback_color);
+        }
     }
 }
 
