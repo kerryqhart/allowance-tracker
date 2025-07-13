@@ -1,3 +1,31 @@
+//! # Data Loading Module
+//!
+//! This module handles all data loading operations for the allowance tracker app,
+//! interfacing with the backend to fetch and update application state.
+//!
+//! ## Key Functions:
+//! - `load_initial_data()` - Load all required data on app startup
+//! - `load_balance()` - Fetch current balance for selected child
+//! - `load_calendar_data()` - Load transaction data for calendar view
+//!
+//! ## Purpose:
+//! This module centralizes all data loading logic, ensuring consistent error handling
+//! and state management. It serves as the bridge between the UI and the backend,
+//! handling:
+//! - Initial app data loading
+//! - Balance queries and updates
+//! - Transaction data for calendar display
+//! - Error handling and user feedback
+//!
+//! ## Data Flow:
+//! 1. UI triggers data loading request
+//! 2. Module calls appropriate backend service
+//! 3. Maps backend responses to UI state
+//! 4. Updates application state with loaded data
+//! 5. Handles any errors and provides user feedback
+//!
+//! This module ensures the UI always has the most current data available.
+
 use log::{info, warn};
 use crate::ui::app_state::AllowanceTrackerApp;
 use crate::ui::mappers::{to_dto, TransactionMapper};

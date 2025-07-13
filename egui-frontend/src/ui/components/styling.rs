@@ -1,7 +1,32 @@
+//! # Styling Module
+//!
+//! This module contains all styling functions and color constants for the allowance tracker app.
+//! It provides a consistent, kid-friendly visual theme throughout the application.
+//!
+//! ## Key Functions:
+//! - `setup_kid_friendly_style()` - Configure global egui styling
+//! - `draw_solid_purple_background()` - Draw solid background color
+//! - `draw_image_background()` - Draw gradient background with image
+//! - `draw_card_container()` - Draw card-style containers with shadows
+//! - `draw_day_header_gradient()` - Draw gradient headers for calendar days
+//! - `get_table_header_color()` - Get colors for table headers
+//!
+//! ## Color Palette:
+//! The colors module contains all the color constants used throughout the app:
+//! - Gradient backgrounds (pink to blue)
+//! - Calendar styling (white backgrounds, subtle shadows)
+//! - Transaction chips (green for income, red for expenses)
+//! - Interactive elements (buttons, headers)
+//!
+//! ## Purpose:
+//! This module ensures visual consistency and provides a centralized place for all
+//! styling concerns. The kid-friendly theme uses bright, welcoming colors and
+//! smooth gradients to create an engaging user experience.
+
 use eframe::egui;
 use egui::Color32;
 
-/// Setup kid-friendly UI styling
+/// Setup kid-friendly UI styling for the entire application
 pub fn setup_kid_friendly_style(ctx: &egui::Context) {
     ctx.set_style({
         let mut style = (*ctx.style()).clone();

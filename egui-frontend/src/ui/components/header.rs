@@ -1,3 +1,26 @@
+//! # Header Module
+//!
+//! This module handles rendering the application header, including child selection,
+//! balance display, and action buttons.
+//!
+//! ## Key Functions:
+//! - `render_header()` - Main header rendering with child selector and balance
+//! - `render_child_dropdown()` - Child selection dropdown menu
+//! - `render_messages()` - Success/error message display
+//!
+//! ## Purpose:
+//! The header provides essential navigation and information display:
+//! - Current child selection with dropdown
+//! - Current balance display
+//! - Quick action buttons (Add Money, Spend Money)
+//! - Message display for user feedback
+//!
+//! ## Features:
+//! - Translucent background for modern look
+//! - Responsive design
+//! - Interactive child selection
+//! - Visual feedback for user actions
+
 use eframe::egui;
 use crate::ui::app_state::AllowanceTrackerApp;
 

@@ -1,3 +1,31 @@
+//! # App State Module
+//!
+//! This module defines the central application state structure and initialization logic
+//! for the allowance tracker app.
+//!
+//! ## Key Types:
+//! - `MainTab` - Enum defining available tabs (Calendar, Table)
+//! - `AllowanceTrackerApp` - Main application state struct
+//!
+//! ## Key Functions:
+//! - `new()` - Initialize new app instance with backend connection
+//! - `clear_messages()` - Clear success/error messages
+//!
+//! ## Purpose:
+//! This module serves as the central state management for the entire application,
+//! containing:
+//! - Backend connection and data access
+//! - Current user context (selected child, balance)
+//! - UI state (loading, messages, current tab)
+//! - Calendar state (selected month/year, transactions)
+//! - Modal visibility states
+//! - Form input states
+//!
+//! ## State Management:
+//! The AllowanceTrackerApp struct holds all application state in a single location,
+//! making it easy to manage and pass between different UI components. This follows
+//! the single source of truth principle for state management.
+
 use log::info;
 use chrono::Datelike;
 use shared::*;
