@@ -48,6 +48,23 @@ pub struct CalendarDay {
     pub balance: Option<f64>,
 }
 
+/// Configuration for calendar day rendering
+pub struct RenderConfig {
+    pub is_grid_layout: bool,
+    pub max_transactions: Option<usize>,
+    pub enable_click_handler: bool,
+}
+
+impl Default for RenderConfig {
+    fn default() -> Self {
+        Self {
+            is_grid_layout: false,
+            max_transactions: Some(2),
+            enable_click_handler: false,
+        }
+    }
+}
+
 impl CalendarDay {
     /// Create a new CalendarDay instance
     pub fn new(day_number: u32, date: NaiveDate, is_today: bool) -> Self {
@@ -66,17 +83,38 @@ impl CalendarDay {
         self.balance = Some(transaction.balance);
         self.transactions.push(transaction);
     }
-
-    /// Render this calendar day within the given dimensions
-    pub fn render(&self, ui: &mut egui::Ui, cell_width: f32, cell_height: f32) {
+    
+    /// Render this calendar day with configurable styling
+    pub fn render(&self, ui: &mut egui::Ui, width: f32, height: f32) {
+        self.render_with_config(ui, width, height, &RenderConfig::default())
+    }
+    
+    /// Render this calendar day for grid layout
+    pub fn render_grid(&self, ui: &mut egui::Ui, width: f32, height: f32) {
+        self.render_with_config(ui, width, height, &RenderConfig {
+            is_grid_layout: true,
+            max_transactions: None,
+            enable_click_handler: true,
+        })
+    }
+    
+    /// Render this calendar day with specified configuration
+    pub fn render_with_config(&self, ui: &mut egui::Ui, width: f32, height: f32, config: &RenderConfig) {
         ui.vertical(|ui| {
-            ui.set_width(cell_width);
-            ui.set_height(cell_height);
+            ui.set_width(width);
+            ui.set_height(height);
             
-            // Day number button - responsive sizing
-            let day_font_size = (cell_width * 0.2).max(14.0).min(20.0);
-            let day_button_height = cell_height * 0.3;
-            let day_button_width = cell_width * 0.9;
+            // Day number button - adaptive sizing based on layout
+            let (day_font_size, button_width, button_height) = if config.is_grid_layout {
+                // Grid layout: fixed sizing
+                (18.0, width - 10.0, 25.0)
+            } else {
+                // Responsive layout: proportional sizing
+                let font_size = (width * 0.2).max(14.0).min(20.0);
+                let btn_height = height * 0.3;
+                let btn_width = width * 0.9;
+                (font_size, btn_width, btn_height)
+            };
             
             let day_button = if self.is_today {
                 // Pink outline with shadow for current day
@@ -94,7 +132,7 @@ impl CalendarDay {
             if self.is_today {
                 let button_rect = egui::Rect::from_min_size(
                     ui.cursor().min + egui::vec2(2.0, 2.0),
-                    egui::vec2(day_button_width, day_button_height)
+                    egui::vec2(button_width, button_height)
                 );
                 ui.painter().rect_filled(
                     button_rect,
@@ -103,7 +141,11 @@ impl CalendarDay {
                 );
             }
             
-            ui.add_sized([day_button_width, day_button_height], day_button);
+            let day_response = ui.add_sized([button_width, button_height], day_button);
+            
+            if config.enable_click_handler && day_response.clicked() {
+                println!("Selected day: {}", self.day_number);
+            }
             
             // Show balance if available
             if let Some(balance) = self.balance {
@@ -117,54 +159,89 @@ impl CalendarDay {
                 });
             }
             
-            // Transaction chips - responsive sizing
-            let chip_font_size = (cell_width * 0.12).max(9.0).min(12.0);
-            let chip_height = cell_height * 0.15;
-            let chip_width = cell_width * 0.85;
+            // Transaction chips - adaptive sizing and behavior
+            let transactions_to_show = if let Some(max) = config.max_transactions {
+                self.transactions.iter().take(max)
+            } else {
+                self.transactions.iter().take(self.transactions.len())
+            };
             
-            for transaction in self.transactions.iter().take(2) {
-                let (chip_color, text_color) = if transaction.amount > 0.0 {
-                    (egui::Color32::from_rgb(46, 160, 67), egui::Color32::from_rgb(46, 160, 67))
+            for transaction in transactions_to_show {
+                if !config.is_grid_layout {
+                    // No spacing for responsive layout to fit in smaller cells
                 } else {
-                    (egui::Color32::from_rgb(128, 128, 128), egui::Color32::from_rgb(128, 128, 128))
-                };
+                    ui.add_space(2.0);
+                }
                 
-                let chip_text = if transaction.amount > 0.0 {
-                    format!("+${:.0}", transaction.amount)
-                } else {
-                    format!("-${:.0}", transaction.amount.abs())
-                };
+                self.render_transaction_chip(ui, transaction, width, height, config.is_grid_layout);
+            }
+        });
+    }
+    
+    /// Render a single transaction chip
+    fn render_transaction_chip(&self, ui: &mut egui::Ui, transaction: &Transaction, width: f32, height: f32, is_grid_layout: bool) {
+        // Determine chip color based on transaction amount
+        let (chip_color, text_color) = if transaction.amount > 0.0 {
+            (egui::Color32::from_rgb(46, 160, 67), egui::Color32::from_rgb(46, 160, 67))
+        } else {
+            (egui::Color32::from_rgb(128, 128, 128), egui::Color32::from_rgb(128, 128, 128))
+        };
+        
+        // Create transaction chip text
+        let chip_text = if transaction.amount > 0.0 {
+            if is_grid_layout {
+                format!("+${:.2}", transaction.amount)
+            } else {
+                format!("+${:.0}", transaction.amount)
+            }
+        } else {
+            if is_grid_layout {
+                format!("-${:.2}", transaction.amount.abs())
+            } else {
+                format!("-${:.0}", transaction.amount.abs())
+            }
+        };
+        
+        // Calculate chip dimensions based on layout
+        let (chip_width, chip_height, chip_font_size) = if is_grid_layout {
+            ((width - 10.0).min(120.0), 18.0, 10.0)
+        } else {
+            (width * 0.85, height * 0.15, (width * 0.12).max(9.0).min(12.0))
+        };
+        
+        // Check if this is a future transaction
+        let is_future = matches!(transaction.transaction_type, shared::TransactionType::FutureAllowance);
+        
+        ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+            if is_future {
+                // Dotted/dashed border for future transactions
+                let (rect, _) = ui.allocate_exact_size(egui::vec2(chip_width, chip_height), egui::Sense::hover());
                 
-                // Check if this is a future transaction
-                let is_future = matches!(transaction.transaction_type, shared::TransactionType::FutureAllowance);
+                ui.painter().rect_stroke(
+                    rect,
+                    egui::Rounding::same(4.0),
+                    egui::Stroke::new(1.0, chip_color)
+                );
                 
-                ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
-                    if is_future {
-                        // Dotted/dashed border for future transactions
-                        let (rect, _) = ui.allocate_exact_size(egui::vec2(chip_width, chip_height), egui::Sense::hover());
-                        
-                        ui.painter().rect_stroke(
-                            rect,
-                            egui::Rounding::same(4.0),
-                            egui::Stroke::new(1.0, chip_color)
-                        );
-                        
-                        ui.painter().text(
-                            rect.center(),
-                            egui::Align2::CENTER_CENTER,
-                            &chip_text,
-                            egui::FontId::new(chip_font_size, egui::FontFamily::Proportional),
-                            text_color,
-                        );
-                    } else {
-                        // Outlined chip for completed transactions
-                        let chip = egui::Button::new(egui::RichText::new(chip_text).size(chip_font_size).color(text_color))
-                            .fill(egui::Color32::TRANSPARENT)
-                            .stroke(egui::Stroke::new(1.0, chip_color))
-                            .rounding(egui::Rounding::same(4.0));
-                        ui.add_sized([chip_width, chip_height], chip);
-                    }
-                });
+                ui.painter().text(
+                    rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    &chip_text,
+                    egui::FontId::new(chip_font_size, egui::FontFamily::Proportional),
+                    text_color,
+                );
+            } else {
+                // Outlined chip for completed transactions
+                let chip_button = egui::Button::new(
+                    egui::RichText::new(&chip_text)
+                        .font(egui::FontId::new(chip_font_size, egui::FontFamily::Proportional))
+                        .color(text_color)
+                )
+                .fill(egui::Color32::TRANSPARENT)
+                .stroke(egui::Stroke::new(1.0, chip_color))
+                .rounding(egui::Rounding::same(4.0));
+                
+                ui.add_sized([chip_width, chip_height], chip_button);
             }
         });
     }
@@ -552,9 +629,12 @@ impl AllowanceTrackerApp {
         weeks_needed as f32 * day_height + 10.0 // Add some spacing
     }
     
-    /// Render the calendar grid for the selected month
+    /// Render the calendar grid for the selected month using CalendarDay components
     pub fn render_calendar_grid(&mut self, ui: &mut egui::Ui, day_width: f32, day_height: f32) {
-        // Create a date for the first day of the selected month
+        // Create CalendarDay instances from calendar_transactions
+        let calendar_days = self.create_calendar_days(&self.calendar_transactions);
+        
+        // Calculate the first day offset for grid layout
         let first_day = match NaiveDate::from_ymd_opt(self.selected_year, self.selected_month, 1) {
             Some(date) => date,
             None => {
@@ -563,21 +643,6 @@ impl AllowanceTrackerApp {
             }
         };
         
-        // Calculate the number of days in the month
-        let days_in_month = match first_day.with_day(1) {
-            Some(first) => {
-                // Get the first day of the next month and subtract 1 day
-                let next_month = if self.selected_month == 12 {
-                    first.with_year(self.selected_year + 1).unwrap().with_month(1).unwrap()
-                } else {
-                    first.with_month(self.selected_month + 1).unwrap()
-                };
-                (next_month - chrono::Duration::days(1)).day()
-            }
-            None => return,
-        };
-        
-        // Calculate the offset for the first day of the month
         let first_day_offset = match first_day.weekday() {
             Weekday::Mon => 0,
             Weekday::Tue => 1,
@@ -588,30 +653,13 @@ impl AllowanceTrackerApp {
             Weekday::Sun => 6,
         };
         
-        // Get current date for highlighting today
-        let today = chrono::Local::now();
-        let is_current_month = today.year() == self.selected_year && today.month() == self.selected_month;
-        let today_day = if is_current_month { Some(today.day()) } else { None };
-        
-        // Group transactions by day of the month
-        let mut transactions_by_day: std::collections::HashMap<u32, Vec<&Transaction>> = std::collections::HashMap::new();
-        let mut balance_by_day: std::collections::HashMap<u32, f64> = std::collections::HashMap::new();
-        
-        for transaction in &self.calendar_transactions {
-            // Parse the transaction date (RFC 3339 format)
-            if let Ok(parsed_date) = chrono::DateTime::parse_from_rfc3339(&transaction.date) {
-                let transaction_date = parsed_date.naive_local().date();
-                
-                // Check if this transaction is in the current month/year
-                if transaction_date.year() == self.selected_year && transaction_date.month() == self.selected_month {
-                    let day = transaction_date.day();
-                    transactions_by_day.entry(day).or_insert_with(Vec::new).push(transaction);
-                    
-                    // Use the balance from the transaction (this is the balance after the transaction)
-                    balance_by_day.insert(day, transaction.balance);
-                }
-            }
+        // Create a map of day number to CalendarDay for easy lookup
+        let mut day_map: std::collections::HashMap<u32, &CalendarDay> = std::collections::HashMap::new();
+        for calendar_day in &calendar_days {
+            day_map.insert(calendar_day.day_number, calendar_day);
         }
+        
+        let days_in_month = calendar_days.len() as u32;
         
         // Use the pre-calculated dimensions - remove spacing for grid
         let total_calendar_width = day_width * 7.0;
@@ -650,7 +698,7 @@ impl AllowanceTrackerApp {
                             
                             // No spacing - grid lines will provide visual separation
             
-            // Calendar grid with dynamic sizing
+            // Calendar grid with dynamic sizing using CalendarDay components
             let mut current_day = 1;
             let mut week_count = 0;
             
@@ -666,130 +714,13 @@ impl AllowanceTrackerApp {
                             // Empty cell - dynamic size
                             ui.add_sized([day_width, day_height], egui::Label::new(""));
                         } else {
-                            // Check if this is today
-                            let is_today = today_day == Some(current_day);
-                            
-                            // Get transactions and balance for this day
-                            let day_transactions = transactions_by_day.get(&current_day).cloned().unwrap_or_default();
-                            let day_balance = balance_by_day.get(&current_day).copied();
-                            
-                            // Create a vertical layout for the day cell - dynamic size
-                            ui.vertical(|ui| {
-                                ui.set_width(day_width);
-                                ui.set_height(day_height);
-                                
-                                // Day number button - dynamic size
-                                let button_width = day_width - 10.0;
-                                let mut day_button = egui::Button::new(
-                                    egui::RichText::new(current_day.to_string())
-                                        .font(egui::FontId::new(18.0, egui::FontFamily::Proportional))
-                                        .color(if is_today { egui::Color32::from_rgb(219, 112, 147) } else { egui::Color32::BLACK })
-                                );
-                                
-                                // Special styling for today - pink outline with shadow
-                                if is_today {
-                                    day_button = day_button
-                                        .fill(egui::Color32::TRANSPARENT)
-                                        .stroke(egui::Stroke::new(2.0, egui::Color32::from_rgb(219, 112, 147))) // Pink outline
-                                        .rounding(egui::Rounding::same(6.0));
-                                } else {
-                                    day_button = day_button
-                                        .fill(egui::Color32::TRANSPARENT)
-                                        .rounding(egui::Rounding::same(4.0));
-                                }
-                                
-                                // Add shadow effect for today
-                                if is_today {
-                                    let button_rect = egui::Rect::from_min_size(
-                                        ui.cursor().min + egui::vec2(2.0, 2.0), // Offset for shadow
-                                        egui::vec2(button_width, 25.0)
-                                    );
-                                    ui.painter().rect_filled(
-                                        button_rect,
-                                        egui::Rounding::same(6.0),
-                                        egui::Color32::from_rgba_premultiplied(219, 112, 147, 40) // Pink shadow
-                                    );
-                                }
-                                
-                                let day_response = ui.add_sized([button_width, 25.0], day_button);
-                                
-                                if day_response.clicked() {
-                                    println!("Selected day: {}", current_day);
-                                }
-                                
-                                // Show balance if available - larger font
-                                if let Some(balance) = day_balance {
-                                    ui.add_space(3.0);
-                                    ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
-                                        ui.label(
-                                            egui::RichText::new(format!("${:.2}", balance))
-                                                .font(egui::FontId::new(12.0, egui::FontFamily::Proportional))
-                                                .color(egui::Color32::GRAY)
-                                        );
-                                    });
-                                }
-                                
-                                // Show transaction chips - dynamic size
-                                for transaction in day_transactions {
-                                    ui.add_space(2.0);
-                                    
-                                    // Determine chip color based on transaction amount
-                                    let (chip_color, text_color) = if transaction.amount > 0.0 {
-                                        // Green for positive amounts - matching the green from the image
-                                        (egui::Color32::from_rgb(46, 160, 67), egui::Color32::from_rgb(46, 160, 67))
-                                    } else {
-                                        // Gray for negative amounts - matching the gray from the image
-                                        (egui::Color32::from_rgb(128, 128, 128), egui::Color32::from_rgb(128, 128, 128))
-                                    };
-                                    
-                                    // Create transaction chip
-                                    let chip_text = if transaction.amount > 0.0 {
-                                        format!("+${:.2}", transaction.amount)
-                                    } else {
-                                        format!("-${:.2}", transaction.amount.abs())
-                                    };
-                                    
-                                    // Different styling for future transactions
-                                    let is_future = matches!(transaction.transaction_type, shared::TransactionType::FutureAllowance);
-                                    
-                                    let chip_width = (day_width - 10.0).min(120.0);
-                                    
-                                    ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
-                                        if is_future {
-                                            // Dotted/dashed border for future transactions - dynamic size
-                                            let (rect, _) = ui.allocate_exact_size(egui::vec2(chip_width, 18.0), egui::Sense::hover());
-                                            
-                                            // Draw dotted border
-                                            ui.painter().rect_stroke(
-                                                rect,
-                                                egui::Rounding::same(4.0),
-                                                egui::Stroke::new(1.0, chip_color)
-                                            );
-                                            
-                                            // Draw text
-                                            ui.painter().text(
-                                                rect.center(),
-                                                egui::Align2::CENTER_CENTER,
-                                                &chip_text,
-                                                egui::FontId::new(10.0, egui::FontFamily::Proportional),
-                                                text_color,
-                                            );
-                                        } else {
-                                            // Outlined chip for completed transactions - matching the style from the image
-                                            let chip_button = egui::Button::new(
-                                                egui::RichText::new(&chip_text)
-                                                    .font(egui::FontId::new(10.0, egui::FontFamily::Proportional))
-                                                    .color(text_color)
-                                            )
-                                            .fill(egui::Color32::TRANSPARENT)
-                                            .stroke(egui::Stroke::new(1.0, chip_color))
-                                            .rounding(egui::Rounding::same(4.0));
-                                            
-                                            ui.add_sized([chip_width, 18.0], chip_button);
-                                        }
-                                    });
-                                }
-                            });
+                            // Day cell - use CalendarDay component
+                            if let Some(calendar_day) = day_map.get(&current_day) {
+                                calendar_day.render_grid(ui, day_width, day_height);
+                            } else {
+                                // Fallback empty cell if day not found
+                                ui.add_sized([day_width, day_height], egui::Label::new(""));
+                            }
                             
                             current_day += 1;
                         }
