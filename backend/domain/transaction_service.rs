@@ -407,11 +407,16 @@ impl<C: Connection> TransactionService<C> {
         Ok(domain_transaction)
     }
 
-    fn get_active_child(&self) -> Result<DomainChild> {
+    pub fn get_active_child(&self) -> Result<DomainChild> {
         self.child_service
             .get_active_child()?
             .active_child.child
             .ok_or_else(|| anyhow!("No active child found."))
+    }
+
+    /// Create a balance service for projected balance calculations
+    pub fn create_balance_service(&self) -> &BalanceService<C> {
+        &self.balance_service
     }
 }
 

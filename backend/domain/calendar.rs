@@ -80,14 +80,26 @@ impl CalendarService {
         
         info!("🗓️ CALENDAR: Total transactions for calendar: {} transactions", dto_transactions.len());
         for (i, tx) in dto_transactions.iter().enumerate().take(5) {
-            info!("🗓️ CALENDAR: DTO Transaction {}: id={}, date={}, amount={}, description={}", 
-                 i + 1, tx.id, tx.date, tx.amount, tx.description);
+            info!("🗓️ CALENDAR: DTO Transaction {}: id={}, date={}, amount={}, description={} balance={}", 
+                 i + 1, tx.id, tx.date, tx.amount, tx.description, tx.balance);
         }
 
-        // Step 3: Generate calendar month using existing method
-        let calendar_month = self.generate_calendar_month(month, year, dto_transactions);
+        // Step 3: Generate calendar month using enhanced method that handles NaN balances
+        // Get the active child for balance service
+        let active_child = transaction_service.get_active_child()?;
         
-        info!("🗓️ CALENDAR: Generated calendar with {} days", calendar_month.days.len());
+        // Create balance service for projected balance calculations
+        let balance_service = transaction_service.create_balance_service();
+        
+        let calendar_month = self.generate_calendar_month_with_projected_balances(
+            month, 
+            year, 
+            dto_transactions, 
+            &balance_service, 
+            &active_child.id
+        );
+        
+        info!("🗓️ CALENDAR: Generated calendar with {} days using projected balances", calendar_month.days.len());
         let total_transaction_count: usize = calendar_month.days.iter()
             .map(|day| day.transactions.len())
             .sum();
@@ -96,71 +108,7 @@ impl CalendarService {
         Ok(calendar_month)
     }
 
-    /// Generate a calendar month view with transaction data and future allowances
-    pub fn generate_calendar_month(
-        &self,
-        month: u32,
-        year: u32,
-        transactions: Vec<Transaction>,
-    ) -> CalendarMonth {
-        let days_in_month = self.days_in_month(month, year);
-        let first_day = self.first_day_of_month(month, year);
-        
-        log::debug!("🗓️ CALENDAR DEBUG: Generating calendar for {}/{}", month, year);
-        log::debug!("🗓️ CALENDAR DEBUG: Days in month: {}, First day of week: {}", days_in_month, first_day);
-        
-        // Transactions already include future allowances from the transaction service
-        let all_transactions = transactions;
-        
-        // Group all transactions by day for the current month
-        let transactions_by_day = self.group_transactions_by_day(month, year, &all_transactions);
-        
-        // Calculate daily balances using stored balances from ALL transactions (including future allowances)
-        // Future allowances now have proper projected balances calculated in the transaction service
-        let daily_balances = self.calculate_daily_balances(month, year, &all_transactions, days_in_month);
-        
-        let mut calendar_days = Vec::new();
-        
-        // Add empty cells for days before the first day of month
-        log::debug!("🗓️ CALENDAR DEBUG: Adding {} padding days before month", first_day);
-        for i in 0..first_day {
-            log::debug!("🗓️ CALENDAR DEBUG: Adding padding day {} with PaddingBefore", i);
-            calendar_days.push(CalendarDay {
-                day: 0,
-                balance: 0.0,
-                transactions: Vec::new(),
-                day_type: CalendarDayType::PaddingBefore,
-                #[allow(deprecated)]
-                is_empty: true,
-            });
-        }
-        
-        // Add days of the month
-        log::debug!("🗓️ CALENDAR DEBUG: Adding {} actual month days", days_in_month);
-        for day in 1..=days_in_month {
-            let day_transactions = transactions_by_day.get(&day).cloned().unwrap_or_default();
-            let day_balance = daily_balances.get(&day).copied().unwrap_or(0.0);
-            
-            log::debug!("🗓️ CALENDAR DEBUG: Adding month day {} with {} transactions", day, day_transactions.len());
-            calendar_days.push(CalendarDay {
-                day,
-                balance: day_balance,
-                transactions: day_transactions,
-                day_type: CalendarDayType::MonthDay,
-                #[allow(deprecated)]
-                is_empty: false,
-            });
-        }
-        
-        log::debug!("🗓️ CALENDAR DEBUG: Total calendar days created: {}", calendar_days.len());
-        
-        CalendarMonth {
-            month,
-            year,
-            days: calendar_days,
-            first_day_of_week: first_day,
-        }
-    }
+
 
     /// Get the number of days in a given month and year
     pub fn days_in_month(&self, month: u32, year: u32) -> u32 {
@@ -225,61 +173,7 @@ impl CalendarService {
         transactions_by_day
     }
 
-    /// Calculate daily balances using stored transaction balances (much simpler and more reliable)
-    fn calculate_daily_balances(
-        &self,
-        month: u32,
-        year: u32,
-        transactions: &[Transaction],
-        days_in_month: u32,
-    ) -> HashMap<u32, f64> {
-        let mut daily_balances: HashMap<u32, f64> = HashMap::new();
-        
-        // Group transactions by day
-        let transactions_by_day = self.group_transactions_by_day(month, year, transactions);
-        
-        // Find the starting balance for this month from the most recent previous transaction
-        let mut sorted_transactions = transactions.to_vec();
-        sorted_transactions.sort_by(|a, b| {
-            let date_a_str = a.date.format("%Y-%m-%dT%H:%M:%S%.3f%z").to_string();
-            let date_b_str = b.date.format("%Y-%m-%dT%H:%M:%S%.3f%z").to_string();
-            let date_a = self.parse_transaction_date(&date_a_str).unwrap_or((0, 0, 0));
-            let date_b = self.parse_transaction_date(&date_b_str).unwrap_or((0, 0, 0));
-            date_b.cmp(&date_a) // Newest first
-        });
-        
-        let starting_balance = self.calculate_starting_balance_for_month(month, year, &sorted_transactions);
-        let mut previous_balance = starting_balance;
-        
-        log::debug!("🗓️ BALANCE DEBUG: Starting balance for {}/{}: ${:.2}", month, year, starting_balance);
-        
-        // For each day, find the latest transaction (chronologically) and use its balance
-        for day in 1..=days_in_month {
-            if let Some(day_transactions) = transactions_by_day.get(&day) {
-                // Sort transactions by full timestamp (not just date) to get proper chronological order
-                let mut sorted_day_transactions = day_transactions.clone();
-                sorted_day_transactions.sort_by(|a, b| a.date.cmp(&b.date));
-                
-                // Use the balance from the chronologically last transaction of the day
-                if let Some(latest) = sorted_day_transactions.last() {
-                    daily_balances.insert(day, latest.balance);
-                    previous_balance = latest.balance;
-                    log::debug!("🗓️ BALANCE DEBUG: Day {}: Using stored balance ${:.2} from transaction {}", 
-                              day, latest.balance, latest.id);
-                } else {
-                    // No transactions on this day, carry forward previous balance
-                    daily_balances.insert(day, previous_balance);
-                }
-            } else {
-                // No transactions on this day, carry forward previous balance
-                daily_balances.insert(day, previous_balance);
-                log::debug!("🗓️ BALANCE DEBUG: Day {}: No transactions, using previous balance ${:.2}", 
-                          day, previous_balance);
-            }
-        }
-        
-        daily_balances
-    }
+
 
     /// Enhanced calculate_daily_balances that can delegate NaN balance calculations to BalanceService
     /// This method detects transactions with NaN balance and calculates projected balances using BalanceService
@@ -664,14 +558,34 @@ mod tests {
 
     #[test]
     fn test_generate_calendar_month() {
+        use std::sync::Arc;
+        use tempfile::tempdir;
+        use crate::backend::storage::csv::CsvConnection;
+        use crate::backend::domain::balance_service::BalanceService;
+        use crate::backend::domain::child_service::ChildService;
+        use crate::backend::domain::commands::child::CreateChildCommand;
+
         let service = CalendarService::new();
+        
+        // Create test infrastructure
+        let temp_dir = tempdir().unwrap();
+        let connection = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
+        let balance_service = BalanceService::new(connection.clone());
+        let child_service = ChildService::new(connection.clone());
+        
+        // Create a test child
+        let child_result = child_service.create_child(CreateChildCommand {
+            name: "Test Child".to_string(),
+            birthdate: "2015-01-01".to_string(),
+        }).unwrap();
+        let child_id = child_result.child.id;
         
         let transactions = vec![
             create_test_transaction("2025-06-01T09:00:00-04:00", 10.0, 10.0, "Test 1"),
             create_test_transaction("2025-06-15T12:00:00-04:00", -5.0, 5.0, "Test 2"),
         ];
         
-        let calendar = service.generate_calendar_month(6, 2025, transactions);
+        let calendar = service.generate_calendar_month_with_projected_balances(6, 2025, transactions, &balance_service, &child_id);
         
         assert_eq!(calendar.month, 6);
         assert_eq!(calendar.year, 2025);
@@ -777,7 +691,27 @@ mod tests {
 
     #[test]
     fn test_cross_month_balance_forwarding_comprehensive() {
+        use std::sync::Arc;
+        use tempfile::tempdir;
+        use crate::backend::storage::csv::CsvConnection;
+        use crate::backend::domain::balance_service::BalanceService;
+        use crate::backend::domain::child_service::ChildService;
+        use crate::backend::domain::commands::child::CreateChildCommand;
+
         let service = CalendarService::new();
+        
+        // Create test infrastructure
+        let temp_dir = tempdir().unwrap();
+        let connection = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
+        let balance_service = BalanceService::new(connection.clone());
+        let child_service = ChildService::new(connection.clone());
+        
+        // Create a test child
+        let child_result = child_service.create_child(CreateChildCommand {
+            name: "Test Child".to_string(),
+            birthdate: "2015-01-01".to_string(),
+        }).unwrap();
+        let child_id = child_result.child.id;
         
         // Create comprehensive test data that matches the user's scenario:
         // - June 15: Income +$1 (balance = $1)
@@ -785,7 +719,7 @@ mod tests {
         // - Allowance: Every Friday +$1
         // - Expected: June 30th = $2, July 31st = $6, August 31st = $11
         
-        let mut transactions = vec![
+        let transactions = vec![
             // Historical real transactions
             create_test_transaction("2025-06-15T12:00:00Z", 1.0, 1.0, "Income"),
             create_test_transaction("2025-06-19T12:00:00Z", -1.0, 0.0, "Spend"),
@@ -809,7 +743,7 @@ mod tests {
         ];
         
         // Test July calendar generation (should start with June 30th ending balance)
-        let july_calendar = service.generate_calendar_month(7, 2025, transactions.clone());
+        let july_calendar = service.generate_calendar_month_with_projected_balances(7, 2025, transactions.clone(), &balance_service, &child_id);
         
         // July 1st should start with $2.0 (June ending balance)
         assert_eq!(july_calendar.days[2].balance, 2.0, "July 1st should start with June 30th ending balance of $2.00");
@@ -818,7 +752,7 @@ mod tests {
         assert_eq!(july_calendar.days[32].balance, 6.0, "July 31st should end with $6.00 after 4 Friday allowances");
         
         // Test August calendar generation (should start with July 31st ending balance)  
-        let august_calendar = service.generate_calendar_month(8, 2025, transactions.clone());
+        let august_calendar = service.generate_calendar_month_with_projected_balances(8, 2025, transactions.clone(), &balance_service, &child_id);
         
         // August 1st should start with $7.0 (July ending balance + August 1st allowance)
         assert_eq!(august_calendar.days[5].balance, 7.0, "August 1st should show $7.00 (July end $6.00 + August 1st allowance $1.00)");

@@ -1,34 +1,25 @@
-Fix calendar balance calculations with proper architecture separation (TDD Phases 1-5)
+Fix NaN balance display for future allowances and clean up obsolete code
 
-PROBLEM: Calendar balances were zeroing out after July 18th due to AllowanceService 
-setting balance: 0.0 for future allowances instead of calculating projected balances.
-Previous fix created architectural violations requiring extensive type system changes.
+- **FIXED**: NaN balance issue in calendar display for future allowances
+  - Changed calendar service to use `generate_calendar_month_with_projected_balances()` 
+  - This method properly handles NaN balances from future allowances by calculating projected balances
+  - Future allowances now show correct projected balance instead of "NaN"
 
-SOLUTION: Complete TDD-driven refactor implementing correct architecture:
-- AllowanceService: Scheduling logic only (dates + amounts, balance = NaN)
-- BalanceService: All balance calculations including new projected balance logic
-- CalendarService: Orchestrator delegating balance math to BalanceService
+- **CLEANED UP**: Removed obsolete calendar methods that didn't handle NaN balances
+  - Removed `generate_calendar_month()` - old method without NaN handling
+  - Removed `calculate_daily_balances()` - problematic method that couldn't handle NaN
+  - Updated all tests to use the enhanced method with proper test infrastructure
+  - Fixed minor warning about unnecessary `mut` keyword
 
-PHASES COMPLETED:
-• Phase 1: AllowanceService responsibility separation (balance = NaN)
-• Phase 2: BalanceService enhanced with calculate_projected_balance_for_transaction()
-• Phase 3: CalendarService delegation architecture with new methods
-• Phase 4: Integration tests and dependency wiring
-• Phase 5: Fixed balance calculation logic for sequential NaN accumulation
+- **ENHANCED**: Transaction service API
+  - Made `get_active_child()` public for calendar service access
+  - Added `create_balance_service()` method for projected balance calculations
 
-KEY FIXES:
-- AllowanceService now sets balance: f64::NaN (not 0.0) for future allowances
-- BalanceService calculates projected balances using existing transaction logic
-- CalendarService properly delegates all balance calculations to BalanceService
-- Fixed core bug: sequential NaN transaction accumulation now works correctly
-- Comprehensive test coverage with 169 tests passing (20 new tests added)
+Root cause: Future allowances were correctly created with NaN balance (delegating to BalanceService), 
+but the calendar service was using a basic method that passed NaN values directly to the frontend.
 
-ARCHITECTURE BENEFITS:
-✅ Proper separation of concerns maintained
-✅ No tight coupling between services
-✅ Clean boundaries and single responsibilities
-✅ Comprehensive test coverage
-✅ Zero regressions - all existing functionality preserved
+All 19 calendar tests pass. The enhanced method handles both scenarios:
+- Normal transactions with pre-calculated balances (unchanged)
+- Future allowances with NaN balances (now calculates projected balances)
 
-Result: Calendar now shows proper projected balances beyond July 18th with
-clean architecture and comprehensive test coverage. 
+Benefits: Single robust method, no duplicate code, future-proof NaN handling 
