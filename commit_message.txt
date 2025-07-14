@@ -1,10 +1,19 @@
-Fix calendar grid alignment with navigation buttons
+Refactor calendar days with enum and fix filler day styling
 
-- Changed calendar layout from center to left alignment
-- Removed internal spacing that was pushing calendar too far right  
-- Removed card padding calculation that was making calendar 30px narrower
-- Calendar grid now perfectly aligns with navigation buttons
-- Equal 20px margins on both left and right sides
+- Replace boolean `is_current_month` with `CalendarDayType` enum for better type safety
+- Add `CalendarDayType::CurrentMonth` and `CalendarDayType::FillerDay` variants
+- Fix filler day background color to darker gray (RGB 120,120,120) with proper opacity
+- Increase all calendar day card opacity by 10% (50→55, 100→110, 30→33→55)
+- Refactor `create_calendar_days()` to return complete grid including filler days
+- Simplify `draw_calendar_days_responsive()` to use complete grid from `create_calendar_days()`
+- Fix bug where July showed invalid day numbers (32, 33, 34, 35)
+- Ensure proper day numbering: current month days (1-31) and correct filler day numbers
+- Improve code maintainability with single source of truth for calendar grid creation
+- Update all CalendarDay instantiation to use new enum instead of boolean
 
-The calendar now has a clean, professional appearance with consistent
-left alignment and balanced margins throughout the interface. 
+Benefits:
+- Better visual distinction between current month and filler days
+- Type-safe day type checking prevents logical errors
+- Cleaner, more maintainable codebase
+- Consistent styling across all calendar day cards
+- Proper calendar grid with correct day numbering 
