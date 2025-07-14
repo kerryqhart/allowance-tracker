@@ -314,11 +314,22 @@ impl CalendarDay {
         // Check if this is a future transaction
         let is_future = matches!(transaction.transaction_type, shared::TransactionType::FutureAllowance);
         
+        // Opaque white background for all transaction chips
+        let chip_background = egui::Color32::from_rgba_unmultiplied(255, 255, 255, 255); // Pure opaque white
+        
         ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
             if is_future {
-                // Dotted/dashed border for future transactions
+                // Future transactions with white background and dotted border
                 let (rect, _) = ui.allocate_exact_size(egui::vec2(chip_width, chip_height), egui::Sense::hover());
                 
+                // Draw opaque white background
+                ui.painter().rect_filled(
+                    rect,
+                    egui::Rounding::same(4.0),
+                    chip_background
+                );
+                
+                // Draw dotted/dashed border
                 ui.painter().rect_stroke(
                     rect,
                     egui::Rounding::same(4.0),
@@ -333,13 +344,13 @@ impl CalendarDay {
                     text_color,
                 );
             } else {
-                // Outlined chip for completed transactions
+                // Completed transactions with white background and solid border
                 let chip_button = egui::Button::new(
                     egui::RichText::new(&chip_text)
                         .font(egui::FontId::new(chip_font_size, egui::FontFamily::Proportional))
                         .color(text_color)
                 )
-                .fill(egui::Color32::TRANSPARENT)
+                .fill(chip_background) // Opaque white background
                 .stroke(egui::Stroke::new(1.0, chip_color))
                 .rounding(egui::Rounding::same(4.0));
                 
