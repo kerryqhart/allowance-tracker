@@ -487,7 +487,110 @@ impl CalendarDay {
                 egui::FontId::new(chip_font_size, egui::FontFamily::Proportional),
                 text_color,
             );
+            
+            // Show floating tooltip when hovering
+            if is_hovered && !chip.transaction.description.is_empty() {
+                self.show_transaction_tooltip(ui, &chip.transaction.description, rect);
+            }
         });
+    }
+    
+    /// Show a floating tooltip with transaction description
+    fn show_transaction_tooltip(&self, ui: &mut egui::Ui, description: &str, chip_rect: egui::Rect) {
+        // Get cursor position for tooltip positioning
+        let cursor_pos = ui.ctx().pointer_interact_pos().unwrap_or(chip_rect.center());
+        
+        // Calculate tooltip dimensions (estimate based on text length)
+        let tooltip_font_size = 12.0;
+        let tooltip_padding = egui::vec2(8.0, 6.0);
+        let max_tooltip_width = 200.0;
+        
+        // Estimate tooltip size (rough approximation)
+        let char_width = tooltip_font_size * 0.6; // Approximate character width
+        let text_width = (description.len() as f32 * char_width).min(max_tooltip_width);
+        let text_height = tooltip_font_size * 1.2; // Line height
+        let tooltip_size = egui::vec2(text_width + tooltip_padding.x * 2.0, text_height + tooltip_padding.y * 2.0);
+        
+        // Smart positioning: offset from cursor, but avoid screen boundaries
+        let default_offset = egui::vec2(10.0, -25.0); // Right and up from cursor
+        let screen_rect = ui.ctx().screen_rect();
+        
+        // Calculate initial position
+        let mut tooltip_pos = cursor_pos + default_offset;
+        
+        // Adjust if tooltip would go off-screen
+        // Check right boundary
+        if tooltip_pos.x + tooltip_size.x > screen_rect.right() {
+            tooltip_pos.x = cursor_pos.x - tooltip_size.x - 10.0; // Show to the left instead
+        }
+        
+        // Check left boundary
+        if tooltip_pos.x < screen_rect.left() {
+            tooltip_pos.x = screen_rect.left() + 5.0; // Keep some margin
+        }
+        
+        // Check top boundary
+        if tooltip_pos.y < screen_rect.top() {
+            tooltip_pos.y = cursor_pos.y + 25.0; // Show below cursor instead
+        }
+        
+        // Check bottom boundary
+        if tooltip_pos.y + tooltip_size.y > screen_rect.bottom() {
+            tooltip_pos.y = cursor_pos.y - tooltip_size.y - 10.0; // Show above cursor
+        }
+        
+        // Create tooltip using egui::Area for precise positioning
+        egui::Area::new("transaction_tooltip".into())
+            .fixed_pos(tooltip_pos)
+            .order(egui::Order::Foreground) // Show above everything else
+            .show(ui.ctx(), |ui| {
+                // Tooltip styling
+                let tooltip_bg_color = egui::Color32::from_rgba_unmultiplied(40, 40, 40, 240); // Dark semi-transparent
+                let tooltip_text_color = egui::Color32::WHITE;
+                let tooltip_border_color = egui::Color32::from_rgba_unmultiplied(100, 100, 100, 200);
+                
+                // Draw tooltip background with rounded corners
+                let tooltip_rect = egui::Rect::from_min_size(ui.cursor().min, tooltip_size);
+                
+                // Draw shadow first (slightly offset)
+                let shadow_rect = tooltip_rect.translate(egui::vec2(1.0, 1.0));
+                ui.painter().rect_filled(
+                    shadow_rect,
+                    egui::Rounding::same(6.0),
+                    egui::Color32::from_rgba_unmultiplied(0, 0, 0, 60)
+                );
+                
+                // Draw main tooltip background
+                ui.painter().rect_filled(
+                    tooltip_rect,
+                    egui::Rounding::same(6.0),
+                    tooltip_bg_color
+                );
+                
+                // Draw border
+                ui.painter().rect_stroke(
+                    tooltip_rect,
+                    egui::Rounding::same(6.0),
+                    egui::Stroke::new(1.0, tooltip_border_color)
+                );
+                
+                // Add padding and render text
+                ui.allocate_ui_with_layout(
+                    tooltip_size,
+                    egui::Layout::top_down(egui::Align::LEFT),
+                    |ui| {
+                        ui.add_space(tooltip_padding.y);
+                        ui.horizontal(|ui| {
+                            ui.add_space(tooltip_padding.x);
+                            ui.label(
+                                egui::RichText::new(description)
+                                    .font(egui::FontId::new(tooltip_font_size, egui::FontFamily::Proportional))
+                                    .color(tooltip_text_color)
+                            );
+                        });
+                    }
+                );
+            });
     }
     
     /// Draw a dotted border around a rectangle for future allowance chips

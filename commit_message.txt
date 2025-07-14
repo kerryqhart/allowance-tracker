@@ -1,28 +1,17 @@
-Unify calendar chip rendering with consistent height and hover effects
+feat: Add floating tooltips to calendar chips and update future allowance descriptions
 
-- **UNIFIED CHIP RENDERING**: All transaction chips now use the same rendering system
-  - Consolidated expense, income, and future allowance chips into single render path
-  - Eliminated separate egui::Button vs manual drawing approaches
-  - All chips now use unified ui.allocate_exact_size() with hover detection
+• Added smart floating tooltips that show transaction descriptions on hover
+  - Professional styling with dark background, white text, and rounded corners
+  - Intelligent boundary detection to prevent tooltips from going off-screen
+  - High z-index layering to appear above all other UI elements
+  - Only displays when transaction descriptions exist (not empty)
 
-- **CONSISTENT HEIGHT**: Standardized all chips to use thinner height (18.0px)
-  - Previously: Regular chips were thicker (height * 0.15), future allowances were thin (18.0px)
-  - Now: All chips use the same compact 18.0px height for better space efficiency
-  - Allows more transactions to fit on the same calendar day
+• Updated future allowance descriptions from "Weekly allowance" to "Upcoming allowance"
+  - Changed in AllowanceService::generate_future_allowance_transactions()
+  - Preserved "Weekly allowance" for historical allowances in TransactionService
+  - Updated corresponding test cases
+  - All 160 unit tests pass
 
-- **UNIFIED HOVER EFFECTS**: All chip types now have the same mouse-over behavior
-  - Added hover detection to future allowance chips (previously had none)
-  - Light gray background (245, 245, 245) appears on hover for all chip types
-  - Consistent interactive feedback across all transaction types
-
-- **CONSOLIDATED STYLING ARCHITECTURE**: Only colors vary by chip type
-  - CalendarChipType now only controls primary_color() and uses_dotted_border()
-  - All other styling (height, hover effects, text rendering) handled in one place
-  - Eliminates code duplication and ensures visual consistency
-
-- **IMPROVED MAINTAINABILITY**: Single source of truth for chip appearance
-  - Future styling changes only need to be made in one location
-  - Clear separation of concerns: chip type = colors, renderer = everything else
-  - Easier to add new transaction types or modify existing ones
-
-UI/UX benefits: More compact calendar layout, consistent interactions, better visual cohesion 
+The tooltip implementation provides immediate context about transactions without
+cluttering the calendar interface, while the updated descriptions better
+distinguish between historical and future allowances. 

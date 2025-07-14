@@ -264,7 +264,7 @@ impl AllowanceService {
                         id: format!("future-allowance::{}::{}", child_id, current.format("%Y-%m-%d")),
                         child_id: child_id.to_string(),
                         date: transaction_datetime,
-                        description: "Weekly allowance".to_string(),
+                        description: "Upcoming allowance".to_string(),
                         amount: config.amount,
                         balance: f64::NAN, // Balance calculation delegated to BalanceService
                         transaction_type: DomainTransactionType::FutureAllowance,
@@ -948,7 +948,7 @@ mod tests {
                 "Future allowance balance should be NaN, not {:.2}. AllowanceService should not calculate balances - that's BalanceService's responsibility",
                 allowance.balance);
             assert_eq!(allowance.amount, 10.0, "Future allowance amount should match config");
-            assert_eq!(allowance.description, "Weekly allowance", "Future allowance description should be correct");
+            assert_eq!(allowance.description, "Upcoming allowance", "Future allowance description should be correct");
             assert_eq!(allowance.transaction_type, DomainTransactionType::FutureAllowance, "Future allowance type should be FutureAllowance");
         }
     }
