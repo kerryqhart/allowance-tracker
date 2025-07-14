@@ -265,11 +265,9 @@ impl CalendarDay {
     
     /// Render this calendar day with specified configuration
     pub fn render_with_config(&self, ui: &mut egui::Ui, width: f32, height: f32, config: &RenderConfig) {
-        // Get the available rect for this day cell
-        let cell_rect = egui::Rect::from_min_size(
-            ui.cursor().min,
-            egui::vec2(width, height)
-        );
+        // Allocate space for this day cell and get hover/click detection - same approach as chips
+        let (cell_rect, response) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover().union(egui::Sense::click()));
+        let is_hovered = response.hovered();
         
         // Draw shadow first (behind everything else) for today's date
         if self.is_today {
@@ -284,8 +282,28 @@ impl CalendarDay {
             );
         }
         
-        // Draw background for the day cell using centralized color scheme
-        let bg_color = self.day_type.background_color(self.is_today);
+        // Draw background for the day cell using centralized color scheme with hover effect
+        let base_bg_color = self.day_type.background_color(self.is_today);
+        let bg_color = if is_hovered {
+            // Make more opaque when hovered - same approach as chips
+            if self.is_today {
+                // For today, make the yellow background more solid
+                egui::Color32::from_rgba_unmultiplied(255, 248, 220, 180) // More opaque yellow
+            } else {
+                match self.day_type {
+                    CalendarDayType::CurrentMonth => {
+                        // Make current month days more opaque white
+                        egui::Color32::from_rgba_unmultiplied(255, 255, 255, 120) // More opaque white
+                    }
+                    CalendarDayType::FillerDay => {
+                        // Make filler days more opaque gray
+                        egui::Color32::from_rgba_unmultiplied(120, 120, 120, 100) // More opaque gray
+                    }
+                }
+            }
+        } else {
+            base_bg_color
+        };
         
         ui.painter().rect_filled(
             cell_rect,
@@ -323,109 +341,108 @@ impl CalendarDay {
             );
         }
         
-        ui.vertical(|ui| {
-            ui.set_width(width);
-            ui.set_height(height);
-            
-            // Add small padding inside the cell
-            ui.add_space(4.0);
-            
-            // Top row: Day number (left) and Balance (right)
-            ui.horizontal(|ui| {
-                ui.set_width(width - 8.0); // Account for padding
+        // Draw the content within the allocated cell rectangle
+        ui.allocate_ui_at_rect(cell_rect, |ui| {
+            ui.vertical(|ui| {
+                ui.set_width(width);
+                ui.set_height(height);
                 
-                // Day number in upper left (standard size)
-                let day_font_size = if config.is_grid_layout {
-                    16.0
-                } else {
-                    (width * 0.15).max(14.0).min(18.0)
-                };
+                // Add small padding inside the cell
+                ui.add_space(4.0);
                 
-                // Day number text color using centralized color scheme
-                let day_text_color = self.day_type.day_text_color();
-                
-                // Create the rich text with emphasis for today
-                let rich_text = egui::RichText::new(self.day_number.to_string())
-                    .font(egui::FontId::new(day_font_size, egui::FontFamily::Proportional))
-                    .color(day_text_color)
-                    .strong();
-                
-                                if self.is_today {
-                    // Use manual underline for today's date (more subtle than native)
-                    let rich_text_bold = egui::RichText::new(self.day_number.to_string())
+                // Top row: Day number (left) and Balance (right)
+                ui.horizontal(|ui| {
+                    ui.set_width(width - 8.0); // Account for padding
+                    
+                    // Day number in upper left (standard size)
+                    let day_font_size = if config.is_grid_layout {
+                        16.0
+                    } else {
+                        (width * 0.15).max(14.0).min(18.0)
+                    };
+                    
+                    // Day number text color using centralized color scheme
+                    let day_text_color = self.day_type.day_text_color();
+                    
+                    // Create the rich text with emphasis for today
+                    let rich_text = egui::RichText::new(self.day_number.to_string())
                         .font(egui::FontId::new(day_font_size, egui::FontFamily::Proportional))
                         .color(day_text_color)
                         .strong();
                     
-                    // Render the text first
-                    let response = ui.label(rich_text_bold);
-                    
-                    // Draw manual underline beneath the text (shorter and thinner)
-                    let text_rect = response.rect;
-                    let underline_y = text_rect.bottom() + 1.0; // 1px below text
-                    let left_padding = 3.0; // More padding on left side
-                    let right_padding = 2.0; // Less padding on right side
-                    let underline_color = egui::Color32::from_rgb(80, 80, 80); // Dark gray
-                    ui.painter().line_segment(
-                        [
-                            egui::pos2(text_rect.left() + left_padding, underline_y),
-                            egui::pos2(text_rect.right() - right_padding, underline_y)
-                        ],
-                        egui::Stroke::new(0.7, underline_color)
-                    );
-                } else {
-                    // Normal day number rendering
-                    ui.label(rich_text);
-                }
-                
-                // Balance in upper right (subtle gray)
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if let Some(balance) = self.balance {
-                        let balance_font_size = if config.is_grid_layout {
-                            11.0
-                        } else {
-                            (width * 0.12).max(10.0).min(14.0)
-                        };
+                    if self.is_today {
+                        // Use manual underline for today's date (more subtle than native)
+                        let rich_text_bold = egui::RichText::new(self.day_number.to_string())
+                            .font(egui::FontId::new(day_font_size, egui::FontFamily::Proportional))
+                            .color(day_text_color)
+                            .strong();
                         
-                        // Balance text color using centralized color scheme
-                        let balance_color = self.day_type.balance_text_color();
+                        // Render the text first
+                        let label_response = ui.label(rich_text_bold);
                         
-                        ui.label(
-                            egui::RichText::new(format!("${:.2}", balance))
-                                .font(egui::FontId::new(balance_font_size, egui::FontFamily::Proportional))
-                                .color(balance_color)
+                        // Draw manual underline beneath the text (shorter and thinner)
+                        let text_rect = label_response.rect;
+                        let underline_y = text_rect.bottom() + 1.0; // 1px below text
+                        let left_padding = 3.0; // More padding on left side
+                        let right_padding = 2.0; // Less padding on right side
+                        let underline_color = egui::Color32::from_rgb(80, 80, 80); // Dark gray
+                        ui.painter().line_segment(
+                            [
+                                egui::pos2(text_rect.left() + left_padding, underline_y),
+                                egui::pos2(text_rect.right() - right_padding, underline_y)
+                            ],
+                            egui::Stroke::new(0.7, underline_color)
                         );
+                    } else {
+                        // Normal day number rendering
+                        ui.label(rich_text);
                     }
+                    
+                    // Balance in upper right (subtle gray)
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if let Some(balance) = self.balance {
+                            let balance_font_size = if config.is_grid_layout {
+                                11.0
+                            } else {
+                                (width * 0.12).max(10.0).min(14.0)
+                            };
+                            
+                            // Balance text color using centralized color scheme
+                            let balance_color = self.day_type.balance_text_color();
+                            
+                            ui.label(
+                                egui::RichText::new(format!("${:.2}", balance))
+                                    .font(egui::FontId::new(balance_font_size, egui::FontFamily::Proportional))
+                                    .color(balance_color)
+                            );
+                        }
+                    });
                 });
-            });
-            
-            // Add some spacing between header and transaction chips
-            ui.add_space(4.0);
-            
-            // Transaction chips below - vertically stacked
-            // Convert transactions to calendar chips
-            let chips = CalendarChip::from_transactions(self.transactions.clone(), config.is_grid_layout);
-            
-            let chips_to_show = if let Some(max) = config.max_transactions {
-                chips.iter().take(max)
-            } else {
-                chips.iter().take(chips.len())
-            };
-            
-            for chip in chips_to_show {
-                self.render_calendar_chip(ui, chip, width - 8.0, height, config.is_grid_layout);
-                ui.add_space(1.0); // Smaller spacing between chips due to padding
-            }
-            
-            // Add click handler for the entire day if enabled
-            if config.enable_click_handler {
-                let day_rect = ui.available_rect_before_wrap();
-                let day_response = ui.allocate_rect(day_rect, egui::Sense::click());
-                if day_response.clicked() {
-                    println!("Selected day: {}", self.day_number);
+                
+                // Add some spacing between header and transaction chips
+                ui.add_space(4.0);
+                
+                // Transaction chips below - vertically stacked
+                // Convert transactions to calendar chips
+                let chips = CalendarChip::from_transactions(self.transactions.clone(), config.is_grid_layout);
+                
+                let chips_to_show = if let Some(max) = config.max_transactions {
+                    chips.iter().take(max)
+                } else {
+                    chips.iter().take(chips.len())
+                };
+                
+                for chip in chips_to_show {
+                    self.render_calendar_chip(ui, chip, width - 8.0, height, config.is_grid_layout);
+                    ui.add_space(1.0); // Smaller spacing between chips due to padding
                 }
-            }
+            });
         });
+        
+        // Click handler is handled by the main response allocated above
+        if config.enable_click_handler && response.clicked() {
+            println!("Selected day: {}", self.day_number);
+        }
     }
     
     /// Render a single calendar chip with unified styling and hover effects
