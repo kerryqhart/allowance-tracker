@@ -29,7 +29,44 @@
 use eframe::egui;
 use chrono::{NaiveDate, Datelike, Weekday};
 use shared::Transaction;
-use crate::ui::app_state::AllowanceTrackerApp;
+use crate::ui::app_state::{AllowanceTrackerApp, OverlayType};
+
+/// Represents the different types of day menu glyphs that can be displayed above a selected day
+#[derive(Debug, Clone, PartialEq)]
+pub enum DayMenuGlyph {
+    AddMoney,
+    SpendMoney,
+    CreateGoal,
+}
+
+impl DayMenuGlyph {
+    /// Get the text to display for this glyph
+    pub fn text(&self) -> &'static str {
+        match self {
+            DayMenuGlyph::AddMoney => "+$",
+            DayMenuGlyph::SpendMoney => "-$",
+            DayMenuGlyph::CreateGoal => "G",
+        }
+    }
+    
+    /// Get the overlay type this glyph should activate
+    pub fn overlay_type(&self) -> OverlayType {
+        match self {
+            DayMenuGlyph::AddMoney => OverlayType::AddMoney,
+            DayMenuGlyph::SpendMoney => OverlayType::SpendMoney,
+            DayMenuGlyph::CreateGoal => OverlayType::CreateGoal,
+        }
+    }
+    
+    /// Get all available glyphs in order
+    pub fn all() -> Vec<DayMenuGlyph> {
+        vec![
+            DayMenuGlyph::AddMoney,
+            DayMenuGlyph::SpendMoney,
+            DayMenuGlyph::CreateGoal,
+        ]
+    }
+}
 
 /// Consistent spacing for all calendar elements - controls gaps between day cards, headers, etc.
 /// This value determines the visual tightness/looseness of the calendar layout.
@@ -217,6 +254,7 @@ pub struct RenderConfig {
     pub is_grid_layout: bool,
     pub max_transactions: Option<usize>,
     pub enable_click_handler: bool,
+    pub is_selected: bool,
 }
 
 impl Default for RenderConfig {
@@ -225,6 +263,7 @@ impl Default for RenderConfig {
             is_grid_layout: false,
             max_transactions: Some(2),
             enable_click_handler: false,
+            is_selected: false,
         }
     }
 }
@@ -250,21 +289,22 @@ impl CalendarDay {
     }
     
     /// Render this calendar day with configurable styling
-    pub fn render(&self, ui: &mut egui::Ui, width: f32, height: f32) {
+    pub fn render(&self, ui: &mut egui::Ui, width: f32, height: f32) -> egui::Response {
         self.render_with_config(ui, width, height, &RenderConfig::default())
     }
     
     /// Render this calendar day for grid layout
-    pub fn render_grid(&self, ui: &mut egui::Ui, width: f32, height: f32) {
+    pub fn render_grid(&self, ui: &mut egui::Ui, width: f32, height: f32) -> egui::Response {
         self.render_with_config(ui, width, height, &RenderConfig {
             is_grid_layout: true,
             max_transactions: None,
             enable_click_handler: true,
+            is_selected: false, // Default to not selected - this method doesn't know about selection
         })
     }
     
     /// Render this calendar day with specified configuration
-    pub fn render_with_config(&self, ui: &mut egui::Ui, width: f32, height: f32, config: &RenderConfig) {
+    pub fn render_with_config(&self, ui: &mut egui::Ui, width: f32, height: f32, config: &RenderConfig) -> egui::Response {
         // Allocate space for this day cell and get hover/click detection - same approach as chips
         let (cell_rect, response) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover().union(egui::Sense::click()));
         let is_hovered = response.hovered();
@@ -284,7 +324,10 @@ impl CalendarDay {
         
         // Draw background for the day cell using centralized color scheme with hover effect
         let base_bg_color = self.day_type.background_color(self.is_today);
-        let bg_color = if is_hovered {
+        let bg_color = if config.is_selected {
+            // Selected day gets a purple-pink tint matching the Create Goal button
+            egui::Color32::from_rgba_unmultiplied(230, 190, 235, 140) // Purple-pink for selection
+        } else if is_hovered {
             // Make more opaque when hovered - same approach as chips
             if self.is_today {
                 // For today, make the yellow background more solid
@@ -312,7 +355,14 @@ impl CalendarDay {
         );
         
         // Draw border around the day cell using centralized color scheme
-        if self.is_today {
+        if config.is_selected {
+            // Selected day gets a purple-pink border matching the Create Goal button
+            ui.painter().rect_stroke(
+                cell_rect,
+                egui::Rounding::same(2.0),
+                egui::Stroke::new(2.0, egui::Color32::from_rgb(199, 112, 221)) // Purple-pink border for selection
+            );
+        } else if self.is_today {
             // Double outline for today: white inner + dark outer for high visibility
             // Draw white inner outline first
             ui.painter().rect_stroke(
@@ -444,10 +494,8 @@ impl CalendarDay {
             });
         });
         
-        // Click handler is handled by the main response allocated above
-        if config.enable_click_handler && response.clicked() {
-            println!("Selected day: {}", self.day_number);
-        }
+        // Return the response for click handling by the caller
+        response
     }
     
     /// Render a single calendar chip with unified styling and hover effects
@@ -929,27 +977,53 @@ impl AllowanceTrackerApp {
         
         // Render the calendar grid (dynamic weeks based on month needs) in proper row layout  
         // Process days in chunks of 7 (one week per row)
+        let mut selected_day_rect: Option<egui::Rect> = None;
+        let mut selected_day_date: Option<NaiveDate> = None;
+        
         for week_days in all_days.chunks(7) {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = CALENDAR_CARD_SPACING; // Horizontal spacing between day cards
                 for calendar_day in week_days.iter() {
-                    ui.allocate_ui_with_layout(
+                    let ui_response = ui.allocate_ui_with_layout(
                         egui::vec2(cell_width, cell_height),
                         egui::Layout::top_down(egui::Align::LEFT),
                         |ui| {
-                            calendar_day.render_with_config(ui, cell_width, cell_height, &RenderConfig {
+                            // Check if this day is selected
+                            let is_selected = self.selected_day == Some(calendar_day.date);
+                            
+                            let response = calendar_day.render_with_config(ui, cell_width, cell_height, &RenderConfig {
                                 is_grid_layout: true,
                                 max_transactions: Some(2), // Limit transactions in grid view
                                 enable_click_handler: true,
+                                is_selected,
                             });
+                            
+                            // Handle click detection for current month days only
+                            if response.clicked() && matches!(calendar_day.day_type, CalendarDayType::CurrentMonth) {
+                                self.handle_day_click(calendar_day.date);
+                            }
+                            
+                            // Return whether this day is selected for later rect capture
+                            is_selected && matches!(calendar_day.day_type, CalendarDayType::CurrentMonth)
                         },
                     );
+                    
+                    // Store the selected day's rect for icon rendering
+                    if ui_response.inner {
+                        selected_day_rect = Some(ui_response.response.rect);
+                        selected_day_date = Some(calendar_day.date);
+                    }
                     
                     // No manual spacing between day cells - using egui spacing control instead
                 }
             });
             
             // No vertical spacing between week rows
+        }
+        
+        // Render action icons above the selected day if one is selected
+        if let (Some(day_rect), Some(day_date)) = (selected_day_rect, selected_day_date) {
+            self.render_day_action_icons(ui, day_rect, day_date);
         }
     }
     
@@ -988,6 +1062,75 @@ impl AllowanceTrackerApp {
         let weeks_needed = (total_cells + 6) / 7; // Round up
         
         weeks_needed as f32 * day_height + 10.0 // Add some spacing
+    }
+    
+    /// Handle clicking on a calendar day - toggle selection and clear overlay
+    pub fn handle_day_click(&mut self, clicked_date: NaiveDate) {
+        if let Some(selected_date) = self.selected_day {
+            if selected_date == clicked_date {
+                // Clicking the same day - deselect it
+                self.selected_day = None;
+                self.active_overlay = None;
+                log::info!("📅 Deselected day: {}", clicked_date);
+            } else {
+                // Clicking a different day - select it and clear overlay
+                self.selected_day = Some(clicked_date);
+                self.active_overlay = None;
+                log::info!("📅 Selected day: {}", clicked_date);
+            }
+        } else {
+            // No day selected - select this day
+            self.selected_day = Some(clicked_date);
+            self.active_overlay = None;
+            log::info!("📅 Selected day: {}", clicked_date);
+        }
+    }
+
+    /// Render action icons above the selected day
+    pub fn render_day_action_icons(&mut self, ui: &mut egui::Ui, day_cell_rect: egui::Rect, selected_date: NaiveDate) {
+        // Shared styling for all glyphs - wider to accommodate two characters
+        let glyph_size = egui::vec2(48.0, 22.0);
+        let glyph_spacing = 6.0;
+        let glyphs = DayMenuGlyph::all();
+        
+        // Shared colors - using the same pink as selected day
+        let outline_color = egui::Color32::from_rgb(199, 112, 221); // Same as selected day
+        let background_color = egui::Color32::WHITE;
+        let text_color = outline_color; // Same pink as outline
+        
+        // Calculate the actual width of the glyphs by measuring them
+        let total_glyph_width = glyph_size.x * glyphs.len() as f32;
+        let total_spacing = glyph_spacing * (glyphs.len() - 1) as f32;
+        let total_width = total_glyph_width + total_spacing;
+        
+        // Position each glyph individually for precise control
+        let center_x = day_cell_rect.center().x;
+        let start_x = center_x - (total_width / 2.0);
+        let glyphs_y = day_cell_rect.top() - glyph_size.y - 25.0; // More space above
+        
+        // Render each glyph as a separate Area for precise positioning
+        for (i, glyph) in glyphs.iter().enumerate() {
+            let glyph_x = start_x + (i as f32 * (glyph_size.x + glyph_spacing));
+            let glyph_pos = egui::pos2(glyph_x, glyphs_y);
+            
+            egui::Area::new(egui::Id::new(format!("day_menu_glyph_{}", i)))
+                .fixed_pos(glyph_pos)
+                .order(egui::Order::Foreground)
+                .show(ui.ctx(), |ui| {
+                    let glyph_text = glyph.text();
+                    
+                    // Create a button with consistent styling
+                    let button = egui::Button::new(egui::RichText::new(glyph_text).color(text_color))
+                        .fill(background_color)
+                        .stroke(egui::Stroke::new(2.0, outline_color))
+                        .rounding(egui::Rounding::same(4.0));
+                    
+                    if ui.add_sized(glyph_size, button).clicked() {
+                        self.active_overlay = Some(glyph.overlay_type());
+                        log::info!("🎯 Day menu glyph '{}' clicked for date: {}", glyph_text, selected_date);
+                    }
+                });
+        }
     }
     
 

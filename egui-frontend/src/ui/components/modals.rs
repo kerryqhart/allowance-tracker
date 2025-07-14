@@ -136,10 +136,131 @@ impl AllowanceTrackerApp {
             });
     }
 
+    /// Render day action overlay based on active overlay type
+    pub fn render_day_action_overlay(&mut self, ctx: &egui::Context) {
+        let overlay_type = match self.active_overlay {
+            Some(overlay) => overlay,
+            None => return,
+        };
+        
+        // Define colors for each overlay type to match transaction chip themes
+        let (overlay_color, title_text, content_text) = match overlay_type {
+            crate::ui::app_state::OverlayType::AddMoney => (
+                egui::Color32::from_rgb(34, 139, 34), // Green to match income chips
+                "Add Money",
+                "Enter the amount you want to add to your allowance"
+            ),
+            crate::ui::app_state::OverlayType::SpendMoney => (
+                egui::Color32::from_rgb(128, 128, 128), // Gray to match expense chips
+                "Spend Money", 
+                "Enter the amount you want to spend from your allowance"
+            ),
+            crate::ui::app_state::OverlayType::CreateGoal => (
+                egui::Color32::from_rgb(199, 112, 221), // Pink for goals
+                "Create Goal",
+                "Set a savings goal for something special"
+            ),
+        };
+        
+        // Create a more focused modal dialog positioned above the glyphs
+        egui::Window::new(title_text)
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 100.0)) // Position in upper portion of screen
+            .fixed_size(egui::vec2(450.0, 280.0))
+            .frame(egui::Frame::window(&ctx.style())
+                .fill(egui::Color32::WHITE) // Solid white background
+                .stroke(egui::Stroke::new(3.0, overlay_color))
+                .rounding(egui::Rounding::same(16.0))
+                .shadow(egui::Shadow {
+                    offset: egui::vec2(6.0, 6.0),
+                    blur: 20.0,
+                    spread: 0.0,
+                    color: egui::Color32::from_rgba_unmultiplied(0, 0, 0, 100),
+                }))
+            .show(ctx, |ui| {
+                // Add a subtle backdrop click detector
+                let backdrop_response = ui.ctx().input(|i| i.pointer.any_click());
+                if backdrop_response {
+                    // Check if click was outside the window bounds
+                    let window_rect = ui.available_rect_before_wrap();
+                    let pointer_pos = ui.ctx().input(|i| i.pointer.interact_pos());
+                    if let Some(pos) = pointer_pos {
+                        if !window_rect.contains(pos) {
+                            self.active_overlay = None;
+                            self.selected_day = None;
+                        }
+                    }
+                }
+                
+                ui.vertical_centered(|ui| {
+                    ui.add_space(25.0);
+                    
+                    // Title with icon
+                    let title_icon = match overlay_type {
+                        crate::ui::app_state::OverlayType::AddMoney => "💰",
+                        crate::ui::app_state::OverlayType::SpendMoney => "💸",
+                        crate::ui::app_state::OverlayType::CreateGoal => "🎯",
+                    };
+                    
+                                         ui.label(egui::RichText::new(format!("{} {}", title_icon, title_text))
+                         .font(egui::FontId::new(28.0, egui::FontFamily::Proportional))
+                         .strong()
+                         .color(overlay_color)); // Use overlay color directly on white background
+                    
+                    ui.add_space(15.0);
+                    
+                    // Content
+                    ui.label(egui::RichText::new(content_text)
+                        .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))
+                        .color(egui::Color32::from_rgb(80, 80, 80)));
+                    
+                    ui.add_space(40.0);
+                    
+                    // Buttons
+                    ui.horizontal(|ui| {
+                        ui.add_space(80.0);
+                        
+                        // OK button
+                        let ok_button = egui::Button::new(egui::RichText::new("OK")
+                            .font(egui::FontId::new(18.0, egui::FontFamily::Proportional))
+                            .color(egui::Color32::WHITE))
+                            .fill(overlay_color)
+                            .rounding(egui::Rounding::same(10.0))
+                            .min_size(egui::vec2(90.0, 40.0));
+                        
+                        if ui.add(ok_button).clicked() {
+                            self.active_overlay = None;
+                            self.selected_day = None;
+                        }
+                        
+                        ui.add_space(30.0);
+                        
+                        // Cancel button
+                        let cancel_button = egui::Button::new(egui::RichText::new("Cancel")
+                            .font(egui::FontId::new(18.0, egui::FontFamily::Proportional))
+                            .color(egui::Color32::from_rgb(100, 100, 100)))
+                            .fill(egui::Color32::from_rgb(245, 245, 245))
+                            .stroke(egui::Stroke::new(1.5, egui::Color32::from_rgb(200, 200, 200)))
+                            .rounding(egui::Rounding::same(10.0))
+                            .min_size(egui::vec2(90.0, 40.0));
+                        
+                        if ui.add(cancel_button).clicked() {
+                            self.active_overlay = None;
+                            self.selected_day = None;
+                        }
+                    });
+                    
+                    ui.add_space(25.0);
+                });
+            });
+    }
+
     /// Render all modals
     pub fn render_modals(&mut self, ctx: &egui::Context) {
         self.render_add_money_modal(ctx);
         self.render_spend_money_modal(ctx);
         self.render_child_selector_modal(ctx);
+        self.render_day_action_overlay(ctx);
     }
 } 

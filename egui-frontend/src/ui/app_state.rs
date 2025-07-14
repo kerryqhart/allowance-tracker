@@ -38,6 +38,14 @@ pub enum MainTab {
     Table,
 }
 
+/// Types of overlays that can be shown for calendar day interaction
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OverlayType {
+    AddMoney,
+    SpendMoney,
+    CreateGoal,
+}
+
 /// Main application struct for the egui allowance tracker
 pub struct AllowanceTrackerApp {
     pub backend: Backend,
@@ -59,6 +67,10 @@ pub struct AllowanceTrackerApp {
     pub calendar_month: Option<shared::CalendarMonth>,
     pub selected_month: u32,
     pub selected_year: i32,
+    
+    // Calendar interaction state
+    pub selected_day: Option<chrono::NaiveDate>,
+    pub active_overlay: Option<OverlayType>,
     
     // Modal states
     pub show_add_money_modal: bool,
@@ -114,6 +126,10 @@ impl AllowanceTrackerApp {
             calendar_month: None,
             selected_month: current_month,
             selected_year: current_year,
+            
+            // Calendar interaction state
+            selected_day: None,
+            active_overlay: None,
             
             // Modal states
             show_add_money_modal: false,

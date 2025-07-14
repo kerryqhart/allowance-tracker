@@ -1,10 +1,14 @@
-Improve calendar padding days implementation
+feat: Add interactive calendar day selection with action icons and modal overlays
 
-- Add missing trailing padding days (PaddingAfter) to complete calendar grid
-- Fix padding logic to only complete final week instead of forcing 6 weeks
-- Increase opacity of filler days for better visibility (55→120 background, 80→140 border)
-- Remove balance display from padding days (cleaner UI)
-- Remove day numbers from padding days (pure visual structure)
+- Add calendar day click detection with selection toggle behavior
+- Implement visual feedback for selected days with purple-pink highlighting
+- Display three action icons above selected day (+$, -$, G) with consistent styling
+- Create colored modal overlays for each action type:
+  - Add Money: Green theme matching income transactions
+  - Spend Money: Gray theme matching expense transactions  
+  - Create Goal: Pink theme matching goal transactions
+- Add click-outside-to-dismiss functionality for modals
+- Use egui::Area for proper icon positioning and egui::Window for modals
+- Maintain consistent UI styling with white backgrounds and themed borders
 
-Calendar now properly displays complete grid with clean, unobtrusive padding
-that provides visual continuity without cluttering the current month view. 
+All calendar interaction phases completed successfully with proper error handling and build verification. 
