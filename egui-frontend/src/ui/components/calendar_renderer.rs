@@ -42,6 +42,8 @@ pub struct CalendarDay {
     pub date: NaiveDate,
     /// Whether this day is today
     pub is_today: bool,
+    /// Whether this day is in the current month (false for filler days)
+    pub is_current_month: bool,
     /// Transactions that occurred on this day
     pub transactions: Vec<Transaction>,
     /// The balance at the end of this day (if any transactions occurred)
@@ -67,11 +69,12 @@ impl Default for RenderConfig {
 
 impl CalendarDay {
     /// Create a new CalendarDay instance
-    pub fn new(day_number: u32, date: NaiveDate, is_today: bool) -> Self {
+    pub fn new(day_number: u32, date: NaiveDate, is_today: bool, is_current_month: bool) -> Self {
         Self {
             day_number,
             date,
             is_today,
+            is_current_month,
             transactions: Vec::new(),
             balance: None,
         }
@@ -100,13 +103,50 @@ impl CalendarDay {
     
     /// Render this calendar day with specified configuration
     pub fn render_with_config(&self, ui: &mut egui::Ui, width: f32, height: f32, config: &RenderConfig) {
+        // Get the available rect for this day cell
+        let cell_rect = egui::Rect::from_min_size(
+            ui.cursor().min,
+            egui::vec2(width, height)
+        );
+        
+        // Draw subtle background for the day cell
+        let bg_color = if self.is_today {
+            egui::Color32::from_rgba_unmultiplied(255, 248, 220, 100) // Light yellow tint for today
+        } else if !self.is_current_month {
+            egui::Color32::from_rgba_unmultiplied(200, 200, 200, 30) // Light gray for filler days
+        } else {
+            egui::Color32::from_rgba_unmultiplied(255, 255, 255, 50) // Very subtle white tint
+        };
+        
+        ui.painter().rect_filled(
+            cell_rect,
+            egui::Rounding::same(2.0),
+            bg_color
+        );
+        
+        // Draw subtle border around the day cell
+        let border_color = if !self.is_current_month {
+            egui::Color32::from_rgba_unmultiplied(150, 150, 150, 80) // Lighter border for filler days
+        } else {
+            egui::Color32::from_rgba_unmultiplied(200, 200, 200, 100) // Normal border
+        };
+        
+        ui.painter().rect_stroke(
+            cell_rect,
+            egui::Rounding::same(2.0),
+            egui::Stroke::new(0.5, border_color)
+        );
+        
         ui.vertical(|ui| {
             ui.set_width(width);
             ui.set_height(height);
             
+            // Add small padding inside the cell
+            ui.add_space(4.0);
+            
             // Top row: Day number (left) and Balance (right)
             ui.horizontal(|ui| {
-                ui.set_width(width);
+                ui.set_width(width - 8.0); // Account for padding
                 
                 // Day number in upper left (bold black)
                 let day_font_size = if config.is_grid_layout {
@@ -117,6 +157,8 @@ impl CalendarDay {
                 
                 let day_text_color = if self.is_today {
                     egui::Color32::from_rgb(219, 112, 147) // Pink for today
+                } else if !self.is_current_month {
+                    egui::Color32::from_rgb(150, 150, 150) // Gray for filler days
                 } else {
                     egui::Color32::BLACK // Bold black for other days
                 };
@@ -137,17 +179,23 @@ impl CalendarDay {
                             (width * 0.12).max(10.0).min(14.0)
                         };
                         
+                        let balance_color = if !self.is_current_month {
+                            egui::Color32::from_rgb(120, 120, 120) // More subdued gray for filler day balance
+                        } else {
+                            egui::Color32::GRAY // Normal gray
+                        };
+                        
                         ui.label(
                             egui::RichText::new(format!("${:.2}", balance))
                                 .font(egui::FontId::new(balance_font_size, egui::FontFamily::Proportional))
-                                .color(egui::Color32::GRAY)
+                                .color(balance_color)
                         );
                     }
                 });
             });
             
             // Add some spacing between header and transaction chips
-            ui.add_space(6.0);
+            ui.add_space(4.0);
             
             // Transaction chips below - vertically stacked
             let transactions_to_show = if let Some(max) = config.max_transactions {
@@ -157,8 +205,8 @@ impl CalendarDay {
             };
             
             for transaction in transactions_to_show {
-                self.render_transaction_chip(ui, transaction, width, height, config.is_grid_layout);
-                ui.add_space(2.0); // Small spacing between chips
+                self.render_transaction_chip(ui, transaction, width - 8.0, height, config.is_grid_layout);
+                ui.add_space(1.0); // Smaller spacing between chips due to padding
             }
             
             // Add click handler for the entire day if enabled
@@ -330,7 +378,7 @@ impl AllowanceTrackerApp {
             };
             
             let is_today = today_day == Some(day);
-            let mut calendar_day = CalendarDay::new(day, day_date, is_today);
+            let mut calendar_day = CalendarDay::new(day, day_date, is_today, true); // Pass true for is_current_month
             
             // Add transactions for this day
             if let Some(day_transactions) = transactions_by_day.get(&day) {
@@ -361,7 +409,6 @@ impl AllowanceTrackerApp {
         
         // Calendar takes up 92% of available width, centered
         let calendar_width = available_calendar_width * 0.92;
-        let calendar_left_margin = (available_calendar_width - calendar_width) / 2.0;
         
         // Calculate cell dimensions proportionally
         let cell_spacing = 4.0;
@@ -384,45 +431,51 @@ impl AllowanceTrackerApp {
             egui::vec2(content_width, final_card_height)
         );
         
-        // Draw card background
-        self.draw_card_background(ui, card_rect);
-        
-        // Draw calendar content inside the card
+        // Draw calendar content (no background card)
         ui.allocate_ui_at_rect(card_rect, |ui| {
             ui.vertical(|ui| {
                 ui.add_space(15.0); // Reduced space since no header
                 
-                // Responsive calendar grid - same as original
-                ui.horizontal(|ui| {
-                    ui.add_space(card_padding + calendar_left_margin);
-                    
-                    egui::Grid::new("calendar_grid")
-                        .num_columns(7)
-                        .spacing([cell_spacing, cell_spacing])
-                        .min_col_width(cell_width)
-                        .max_col_width(cell_width)
-                        .striped(false)
-                        .show(ui, |ui| {
-                            // Day headers - sized proportionally
-                            let day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-                            for (i, day_name) in day_names.iter().enumerate() {
-                                ui.allocate_ui_with_layout(
-                                    egui::vec2(cell_width, header_height),
-                                    egui::Layout::centered_and_justified(egui::Direction::TopDown),
-                                    |ui| {
-                                        ui.label(egui::RichText::new(*day_name)
-                                            .font(egui::FontId::new(12.0, egui::FontFamily::Proportional))
-                                            .strong()
-                                            .color(self.get_day_header_color(i)));
-                                    },
-                                );
+                // Center the calendar content
+                ui.allocate_ui_with_layout(
+                    egui::vec2(ui.available_width(), ui.available_height()),
+                    egui::Layout::top_down(egui::Align::Center),
+                    |ui| {
+                        // Constrain calendar to calculated width
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(calendar_width, ui.available_height()),
+                            egui::Layout::top_down(egui::Align::LEFT),
+                            |ui| {
+                                // Day headers - manual layout with proper spacing
+                                ui.horizontal(|ui| {
+                                    let day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+                                    for (i, day_name) in day_names.iter().enumerate() {
+                                        ui.allocate_ui_with_layout(
+                                            egui::vec2(cell_width, header_height),
+                                            egui::Layout::centered_and_justified(egui::Direction::TopDown),
+                                            |ui| {
+                                                ui.label(egui::RichText::new(*day_name)
+                                                    .font(egui::FontId::new(12.0, egui::FontFamily::Proportional))
+                                                    .strong()
+                                                    .color(self.get_day_header_color(i)));
+                                            },
+                                        );
+                                        
+                                        // Add spacing between headers (except after last)
+                                        if i < day_names.len() - 1 {
+                                            ui.add_space(cell_spacing);
+                                        }
+                                    }
+                                });
+                                
+                                ui.add_space(5.0); // Small gap between headers and calendar
+                                
+                                // Calendar days - use corrected manual method
+                                self.draw_calendar_days_responsive(ui, transactions, cell_width, cell_height);
                             }
-                            ui.end_row();
-                            
-                            // Calendar days - use original method
-                            self.draw_calendar_days_responsive(ui, transactions, cell_width, cell_height);
-                        });
-                });
+                        );
+                    }
+                );
             });
         });
     }
@@ -480,18 +533,20 @@ impl AllowanceTrackerApp {
     
     /// Draw calendar days with responsive sizing using CalendarDay components
     pub fn draw_calendar_days_responsive(&mut self, ui: &mut egui::Ui, transactions: &[Transaction], cell_width: f32, cell_height: f32) {
+        // Get spacing from the context - use the same spacing as headers
+        let cell_spacing = 4.0;
         // Create CalendarDay instances for this month
-        let calendar_days = self.create_calendar_days(transactions);
+        let current_month_days = self.create_calendar_days(transactions);
         
-        // Calculate the first day offset for grid layout
-        let first_day = match NaiveDate::from_ymd_opt(self.selected_year, self.selected_month, 1) {
+        // Calculate dates for a complete 6-week calendar grid (42 days)
+        let first_day_of_month = match NaiveDate::from_ymd_opt(self.selected_year, self.selected_month, 1) {
             Some(date) => date,
             None => return,
         };
         
-        let first_day_offset = match first_day.weekday() {
+        let first_day_offset = match first_day_of_month.weekday() {
             Weekday::Mon => 0,
-            Weekday::Tue => 1,
+            Weekday::Tue => 1, 
             Weekday::Wed => 2,
             Weekday::Thu => 3,
             Weekday::Fri => 4,
@@ -499,39 +554,103 @@ impl AllowanceTrackerApp {
             Weekday::Sun => 6,
         };
         
-        // Create a map of day number to CalendarDay for easy lookup
-        let mut day_map: std::collections::HashMap<u32, &CalendarDay> = std::collections::HashMap::new();
-        for calendar_day in &calendar_days {
-            day_map.insert(calendar_day.day_number, calendar_day);
+        // Create a map of current month days for easy lookup
+        let mut current_day_map: std::collections::HashMap<u32, &CalendarDay> = std::collections::HashMap::new();
+        for calendar_day in &current_month_days {
+            current_day_map.insert(calendar_day.day_number, calendar_day);
         }
         
-        let days_in_month = calendar_days.len() as u32;
+        let days_in_current_month = current_month_days.len() as i32;
+        let today = chrono::Local::now().date_naive();
         
-        // Draw calendar cells using the same grid layout
-        let mut current_day = 1;
-        let mut week_count = 0;
+        // Calculate previous month info
+        let (prev_month, prev_year) = if self.selected_month == 1 {
+            (12, self.selected_year - 1)
+        } else {
+            (self.selected_month - 1, self.selected_year)
+        };
         
-        while current_day <= days_in_month {
-            for day_of_week in 0..7 {
-                let cell_pos = week_count * 7 + day_of_week;
-                
-                if cell_pos < first_day_offset || current_day > days_in_month {
-                    // Empty cell - size it to match other cells
-                    ui.add_sized([cell_width, cell_height], egui::Label::new(""));
-                } else {
-                    // Day cell - use CalendarDay component
-                    if let Some(calendar_day) = day_map.get(&current_day) {
-                        calendar_day.render(ui, cell_width, cell_height);
-                    } else {
-                        // Fallback empty cell if day not found
-                        ui.add_sized([cell_width, cell_height], egui::Label::new(""));
+        let days_in_prev_month = match NaiveDate::from_ymd_opt(prev_year, prev_month + 1, 1) {
+            Some(next_month_first) => (next_month_first - chrono::Duration::days(1)).day(),
+            None => 31, // Fallback
+        };
+        
+        // Calculate the minimum number of weeks needed for this month
+        let total_cells_needed = first_day_offset + days_in_current_month as usize;
+        let weeks_needed = (total_cells_needed + 6) / 7; // Round up to complete weeks
+        let total_days_to_show = weeks_needed * 7;
+        
+        // Generate only the days we actually need to display
+        let mut all_days: Vec<CalendarDay> = Vec::new();
+        
+        for grid_pos in 0..total_days_to_show {
+            let calendar_day = if grid_pos < first_day_offset {
+                // Previous month filler days
+                let prev_day = days_in_prev_month - (first_day_offset - grid_pos - 1) as u32;
+                let prev_date = NaiveDate::from_ymd_opt(prev_year, prev_month, prev_day).unwrap_or(today);
+                let is_today_check = prev_date == today;
+                CalendarDay::new(prev_day, prev_date, is_today_check, false)
+            } else if grid_pos < first_day_offset + days_in_current_month as usize {
+                // Current month days
+                let current_day = (grid_pos - first_day_offset + 1) as u32;
+                if let Some(existing_day) = current_day_map.get(&current_day) {
+                    // Clone the existing day from our current month data
+                    CalendarDay {
+                        day_number: existing_day.day_number,
+                        date: existing_day.date,
+                        is_today: existing_day.is_today,
+                        is_current_month: true,
+                        transactions: existing_day.transactions.clone(),
+                        balance: existing_day.balance,
                     }
-                    
-                    current_day += 1;
+                } else {
+                    // Fallback for missing days
+                    let day_date = NaiveDate::from_ymd_opt(self.selected_year, self.selected_month, current_day).unwrap_or(today);
+                    let is_today_check = day_date == today;
+                    CalendarDay::new(current_day, day_date, is_today_check, true)
                 }
-            }
-            ui.end_row();
-            week_count += 1;
+            } else {
+                // Next month filler days
+                let next_day = (grid_pos - first_day_offset - days_in_current_month as usize + 1) as u32;
+                let (next_month, next_year) = if self.selected_month == 12 {
+                    (1, self.selected_year + 1)
+                } else {
+                    (self.selected_month + 1, self.selected_year)
+                };
+                let next_date = NaiveDate::from_ymd_opt(next_year, next_month, next_day).unwrap_or(today);
+                let is_today_check = next_date == today;
+                CalendarDay::new(next_day, next_date, is_today_check, false)
+            };
+            
+            all_days.push(calendar_day);
+        }
+        
+        // Render the calendar grid (dynamic weeks based on month needs) in proper row layout  
+        // Process days in chunks of 7 (one week per row)
+        for week_days in all_days.chunks(7) {
+            ui.horizontal(|ui| {
+                for (day_index, calendar_day) in week_days.iter().enumerate() {
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(cell_width, cell_height),
+                        egui::Layout::top_down(egui::Align::LEFT),
+                        |ui| {
+                            calendar_day.render_with_config(ui, cell_width, cell_height, &RenderConfig {
+                                is_grid_layout: true,
+                                max_transactions: Some(2), // Limit transactions in grid view
+                                enable_click_handler: true,
+                            });
+                        },
+                    );
+                    
+                    // Add spacing between day cells (except after last day in row)
+                    if day_index < week_days.len() - 1 {
+                        ui.add_space(cell_spacing);
+                    }
+                }
+            });
+            
+            // Add vertical spacing between week rows
+            ui.add_space(cell_spacing);
         }
     }
     
@@ -811,6 +930,11 @@ impl AllowanceTrackerApp {
     }
     
     /// Draw calendar section with proper responsive layout
+    /// 
+    /// **DEPRECATED**: This function uses egui::Grid approach which limits flexibility for variable row heights.
+    /// Use draw_calendar_section_with_toggle() instead which uses the manual approach for better control.
+    /// Keeping this in our back-pocket for now but not actively using it.
+    #[deprecated(note = "Use draw_calendar_section_with_toggle() instead - egui::Grid limits flexibility")]
     pub fn draw_calendar_section(&mut self, ui: &mut egui::Ui, available_rect: egui::Rect, transactions: &[Transaction]) {
         // Responsive approach: size everything as percentages of available space
         

@@ -1,34 +1,13 @@
-🎉 Complete async-to-synchronous conversion - All 148 tests passing
+Fix calendar layout: proper grid display and dynamic week calculation
 
-✅ **MILESTONE: 100% Test Success (148/148 passing)**
+- Fix calendar days layout to display in proper 7-column rows instead of single row
+- Implement dynamic week calculation - only show weeks needed for current month
+- Remove unnecessary extra rows (e.g., August days when viewing July)
+- Add proper spacing between day cells and week rows for visual consistency
+- Deprecate egui::Grid approach in favor of manual layout for future flexibility
+- Fix type conversion issues (i32 ↔ usize) in calendar calculations
+- Use chunks(7) iterator for clean row-by-row day rendering
+- Remove dead code and unused variables
 
-## Major Fixes Completed
-
-### Parental Control Storage (7 tests fixed)
-- Implemented global storage pattern for parental control attempts
-- Modified repository to handle "global" child_id as special case
-- Stores global attempts at root level (parental_control_attempts.csv)
-- Follows existing GlobalConfigRepository pattern
-
-### Transaction Timezone Handling (2 tests fixed)  
-- Fixed timezone parsing to use proper RFC3339 format
-- Updated test data: "-0500" → "-05:00" for compliance
-- Ensured consistent timezone comparison logic
-
-### Error Message Consistency (1 test fixed)
-- Aligned test assertions with actual error message format
-- Updated "child with ID" → "Child not found" expectation
-
-## Architecture Achievements
-
-🔄 **Complete Synchronous Conversion**: All async/await patterns removed
-🗃️ **Global Storage**: Proper handling of app-level vs child-specific data  
-⏰ **Timezone Support**: Robust RFC3339 datetime parsing throughout
-🧪 **Test Coverage**: 148/148 tests passing with no compilation errors
-
-## Files Modified
-- backend/storage/csv/parental_control_repository.rs
-- backend/storage/csv/transaction_repository.rs
-
-This completes the async-to-synchronous migration for the desktop egui application.
-All storage operations are now synchronous and fully tested. 
+Calendar now properly displays with responsive grid layout and no extra rows.
+Future enhancements like variable row heights are now possible with manual approach. 
