@@ -408,11 +408,9 @@ impl AllowanceTrackerApp {
         
         // Calculate responsive dimensions - same as original
         let content_width = available_rect.width() - 40.0;
-        let card_padding = 15.0;
-        let available_calendar_width = content_width - (card_padding * 2.0);
         
-        // Calendar takes up 92% of available width, centered
-        let calendar_width = available_calendar_width * 0.92;
+        // Calendar takes up full available width to align with navigation buttons
+        let calendar_width = content_width;
         
         // Calculate cell dimensions proportionally  
         let total_spacing = CALENDAR_CARD_SPACING * 6.0;
@@ -437,12 +435,10 @@ impl AllowanceTrackerApp {
         // Draw calendar content (no background card)
         ui.allocate_ui_at_rect(card_rect, |ui| {
             ui.vertical(|ui| {
-                ui.add_space(15.0); // Reduced space since no header
-                
-                // Center the calendar content
+                // Align the calendar content to the left to match navigation buttons
                 ui.allocate_ui_with_layout(
                     egui::vec2(ui.available_width(), ui.available_height()),
-                    egui::Layout::top_down(egui::Align::Center),
+                    egui::Layout::top_down(egui::Align::LEFT),
                     |ui| {
                         // Constrain calendar to calculated width
                         ui.allocate_ui_with_layout(

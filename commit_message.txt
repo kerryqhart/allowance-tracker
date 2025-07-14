@@ -1,13 +1,10 @@
-Fix calendar layout: proper grid display and dynamic week calculation
+Fix calendar grid alignment with navigation buttons
 
-- Fix calendar days layout to display in proper 7-column rows instead of single row
-- Implement dynamic week calculation - only show weeks needed for current month
-- Remove unnecessary extra rows (e.g., August days when viewing July)
-- Add proper spacing between day cells and week rows for visual consistency
-- Deprecate egui::Grid approach in favor of manual layout for future flexibility
-- Fix type conversion issues (i32 ↔ usize) in calendar calculations
-- Use chunks(7) iterator for clean row-by-row day rendering
-- Remove dead code and unused variables
+- Changed calendar layout from center to left alignment
+- Removed internal spacing that was pushing calendar too far right  
+- Removed card padding calculation that was making calendar 30px narrower
+- Calendar grid now perfectly aligns with navigation buttons
+- Equal 20px margins on both left and right sides
 
-Calendar now properly displays with responsive grid layout and no extra rows.
-Future enhancements like variable row heights are now possible with manual approach. 
+The calendar now has a clean, professional appearance with consistent
+left alignment and balanced margins throughout the interface. 
