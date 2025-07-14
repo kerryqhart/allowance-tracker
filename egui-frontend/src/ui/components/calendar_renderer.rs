@@ -428,59 +428,65 @@ impl CalendarDay {
         });
     }
     
-    /// Render a single calendar chip
-    fn render_calendar_chip(&self, ui: &mut egui::Ui, chip: &CalendarChip, width: f32, height: f32, is_grid_layout: bool) {
+    /// Render a single calendar chip with unified styling and hover effects
+    fn render_calendar_chip(&self, ui: &mut egui::Ui, chip: &CalendarChip, width: f32, _height: f32, is_grid_layout: bool) {
         
         // Get chip styling from the chip type
         let chip_color = chip.chip_type.primary_color();
         let text_color = chip.chip_type.text_color();
         let uses_dotted_border = chip.chip_type.uses_dotted_border();
         
-        // Calculate chip dimensions based on layout
+        // Calculate chip dimensions based on layout - use the thinner height for all chips
         let (chip_width, chip_height, chip_font_size) = if is_grid_layout {
             ((width - 10.0).min(120.0), 18.0, 10.0)
         } else {
-            (width * 0.85, height * 0.15, (width * 0.12).max(9.0).min(12.0))
+            (width * 0.85, 18.0, (width * 0.12).max(9.0).min(12.0)) // Force consistent height
         };
         
         // Opaque white background for all transaction chips
-        let chip_background = egui::Color32::from_rgba_unmultiplied(255, 255, 255, 255); // Pure opaque white
+        let chip_background = egui::Color32::from_rgba_unmultiplied(255, 255, 255, 255);
         
         ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+            // Unified chip rendering with hover effects for all types
+            let (rect, response) = ui.allocate_exact_size(egui::vec2(chip_width, chip_height), egui::Sense::hover());
+            
+            // Determine if we should show hover effect
+            let is_hovered = response.hovered();
+            
+            // Background color - slightly darker when hovered
+            let background_color = if is_hovered {
+                egui::Color32::from_rgba_unmultiplied(245, 245, 245, 255) // Light gray on hover
+            } else {
+                chip_background
+            };
+            
+            // Draw background
+            ui.painter().rect_filled(
+                rect,
+                egui::Rounding::same(4.0),
+                background_color
+            );
+            
+            // Draw border - solid or dotted based on chip type
             if uses_dotted_border {
-                // Future allowances with white background and dotted border
-                let (rect, _) = ui.allocate_exact_size(egui::vec2(chip_width, chip_height), egui::Sense::hover());
-                
-                // Draw opaque white background
-                ui.painter().rect_filled(
+                self.draw_dotted_border(ui, rect, chip_color);
+            } else {
+                // Draw solid border
+                ui.painter().rect_stroke(
                     rect,
                     egui::Rounding::same(4.0),
-                    chip_background
+                    egui::Stroke::new(1.0, chip_color)
                 );
-                
-                // Draw dotted border for future allowances
-                self.draw_dotted_border(ui, rect, chip_color);
-                
-                ui.painter().text(
-                    rect.center(),
-                    egui::Align2::CENTER_CENTER,
-                    &chip.display_amount,
-                    egui::FontId::new(chip_font_size, egui::FontFamily::Proportional),
-                    text_color,
-                );
-            } else {
-                // Completed transactions with white background and solid border
-                let chip_button = egui::Button::new(
-                    egui::RichText::new(&chip.display_amount)
-                        .font(egui::FontId::new(chip_font_size, egui::FontFamily::Proportional))
-                        .color(text_color)
-                )
-                .fill(chip_background) // Opaque white background
-                .stroke(egui::Stroke::new(1.0, chip_color))
-                .rounding(egui::Rounding::same(4.0));
-                
-                ui.add_sized([chip_width, chip_height], chip_button);
             }
+            
+            // Draw text
+            ui.painter().text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                &chip.display_amount,
+                egui::FontId::new(chip_font_size, egui::FontFamily::Proportional),
+                text_color,
+            );
         });
     }
     

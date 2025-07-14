@@ -1,25 +1,28 @@
-Fix NaN balance display for future allowances and clean up obsolete code
+Unify calendar chip rendering with consistent height and hover effects
 
-- **FIXED**: NaN balance issue in calendar display for future allowances
-  - Changed calendar service to use `generate_calendar_month_with_projected_balances()` 
-  - This method properly handles NaN balances from future allowances by calculating projected balances
-  - Future allowances now show correct projected balance instead of "NaN"
+- **UNIFIED CHIP RENDERING**: All transaction chips now use the same rendering system
+  - Consolidated expense, income, and future allowance chips into single render path
+  - Eliminated separate egui::Button vs manual drawing approaches
+  - All chips now use unified ui.allocate_exact_size() with hover detection
 
-- **CLEANED UP**: Removed obsolete calendar methods that didn't handle NaN balances
-  - Removed `generate_calendar_month()` - old method without NaN handling
-  - Removed `calculate_daily_balances()` - problematic method that couldn't handle NaN
-  - Updated all tests to use the enhanced method with proper test infrastructure
-  - Fixed minor warning about unnecessary `mut` keyword
+- **CONSISTENT HEIGHT**: Standardized all chips to use thinner height (18.0px)
+  - Previously: Regular chips were thicker (height * 0.15), future allowances were thin (18.0px)
+  - Now: All chips use the same compact 18.0px height for better space efficiency
+  - Allows more transactions to fit on the same calendar day
 
-- **ENHANCED**: Transaction service API
-  - Made `get_active_child()` public for calendar service access
-  - Added `create_balance_service()` method for projected balance calculations
+- **UNIFIED HOVER EFFECTS**: All chip types now have the same mouse-over behavior
+  - Added hover detection to future allowance chips (previously had none)
+  - Light gray background (245, 245, 245) appears on hover for all chip types
+  - Consistent interactive feedback across all transaction types
 
-Root cause: Future allowances were correctly created with NaN balance (delegating to BalanceService), 
-but the calendar service was using a basic method that passed NaN values directly to the frontend.
+- **CONSOLIDATED STYLING ARCHITECTURE**: Only colors vary by chip type
+  - CalendarChipType now only controls primary_color() and uses_dotted_border()
+  - All other styling (height, hover effects, text rendering) handled in one place
+  - Eliminates code duplication and ensures visual consistency
 
-All 19 calendar tests pass. The enhanced method handles both scenarios:
-- Normal transactions with pre-calculated balances (unchanged)
-- Future allowances with NaN balances (now calculates projected balances)
+- **IMPROVED MAINTAINABILITY**: Single source of truth for chip appearance
+  - Future styling changes only need to be made in one location
+  - Clear separation of concerns: chip type = colors, renderer = everything else
+  - Easier to add new transaction types or modify existing ones
 
-Benefits: Single robust method, no duplicate code, future-proof NaN handling 
+UI/UX benefits: More compact calendar layout, consistent interactions, better visual cohesion 
