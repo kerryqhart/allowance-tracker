@@ -118,8 +118,10 @@ impl AllowanceRepository {
                 None => continue,
             };
             
-            // Check if this directory has a child.yaml with the matching child_id
-            let child_yaml_path = path.join("child.yaml");
+            // Use the connection's get_child_directory method to handle redirect files
+            let actual_child_dir = self.connection.get_child_directory(dir_name);
+            let child_yaml_path = actual_child_dir.join("child.yaml");
+            
             if child_yaml_path.exists() {
                 if let Ok(yaml_content) = std::fs::read_to_string(&child_yaml_path) {
                     if let Ok(child) = serde_yaml::from_str::<shared::Child>(&yaml_content) {

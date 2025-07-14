@@ -1,32 +1,7 @@
-Fix cross-month balance forwarding and remove legacy calendar code
+Clean up debug logs and fix unused variable warnings
 
-## Problem Fixed
-- July was starting at $0.00 instead of carrying forward June's ending balance of $19.62
-- Frontend was discarding backend balance data and recalculating incorrectly
-- Days without transactions were not showing carried-forward balances
-
-## Root Cause
-Frontend was calling calendar service but only extracting transactions, throwing away
-the calculated balance data. The frontend's create_calendar_days() method couldn't
-access previous months' transactions needed for proper starting balance calculation.
-
-## Solution
-1. **Use Backend Calendar Service Properly**: Switch from transaction service to calendar service's get_calendar_month_with_transactions() which includes proper cross-month balance forwarding
-2. **Store Complete Calendar Data**: Added calendar_month field to app state to preserve backend's balance calculations
-3. **Convert Backend to Frontend Types**: Added convert_backend_calendar_day() to bridge between shared::CalendarDay and frontend CalendarDay
-4. **Remove Legacy Code**: Deleted 175+ line create_calendar_days() method that duplicated backend logic
-
-## Key Changes
-- `data_loading.rs`: Switch to calendar service, store CalendarMonth object
-- `app_state.rs`: Add calendar_month field to preserve backend data
-- `calendar_renderer.rs`: Use backend data instead of recreating calendar, remove create_calendar_days()
-
-## Result
-✅ Running balance properly carries forward across months (June $19.62 → July $19.62)
-✅ All days show balances (transaction days + carry-forward days)  
-✅ Cleaner architecture with single source of truth in domain layer
-✅ No more duplicate calendar logic between frontend and backend
-
-## Architecture Improvement
-Before: Frontend → Transaction Service → Recreate calendar with broken balance logic
-After:  Frontend → Calendar Service → Use proper domain balance calculations 
+- Remove all debug println! statements from calendar, transaction service, 
+  allowance service, allowance repository, calendar renderer, and data loading
+- Fix unused variable warnings by prefixing with underscore
+- Build now passes cleanly without warnings
+- App runs without noisy debug output cluttering console 

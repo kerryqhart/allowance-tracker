@@ -112,6 +112,89 @@ impl CalendarDayType {
     }
 }
 
+/// Represents the type of calendar transaction chip for visual distinction
+#[derive(Debug, Clone, PartialEq)]
+pub enum CalendarChipType {
+    /// Negative amount transaction (completed)
+    Expense,
+    /// Positive amount transaction (completed)
+    Income,
+    /// Future allowance transaction (estimated)
+    FutureAllowance,
+}
+
+impl CalendarChipType {
+    /// Get the primary color for this chip type
+    pub fn primary_color(&self) -> egui::Color32 {
+        match self {
+            CalendarChipType::Expense => egui::Color32::from_rgb(128, 128, 128), // Gray for expenses
+            CalendarChipType::Income => egui::Color32::from_rgb(46, 160, 67), // Green for income
+            CalendarChipType::FutureAllowance => egui::Color32::from_rgb(46, 160, 67), // Green for future allowances
+        }
+    }
+    
+    /// Get the text color for this chip type
+    pub fn text_color(&self) -> egui::Color32 {
+        self.primary_color() // Use same color as border for text
+    }
+    
+    /// Whether this chip type should use a dotted border
+    pub fn uses_dotted_border(&self) -> bool {
+        matches!(self, CalendarChipType::FutureAllowance)
+    }
+}
+
+/// Represents a transaction chip displayed on the calendar
+#[derive(Debug, Clone)]
+pub struct CalendarChip {
+    /// The type of chip (expense, income, or future allowance)
+    pub chip_type: CalendarChipType,
+    /// The original transaction data
+    pub transaction: Transaction,
+    /// Pre-formatted display amount (e.g., "+$5.00", "-$2.50")
+    pub display_amount: String,
+}
+
+impl CalendarChip {
+    /// Create a new CalendarChip from a transaction
+    pub fn from_transaction(transaction: Transaction, is_grid_layout: bool) -> Self {
+        // Determine chip type based on transaction
+        let chip_type = match transaction.transaction_type {
+            shared::TransactionType::Income => CalendarChipType::Income,
+            shared::TransactionType::Expense => CalendarChipType::Expense,
+            shared::TransactionType::FutureAllowance => CalendarChipType::FutureAllowance,
+        };
+        
+        // Format display amount based on type and layout
+        let display_amount = if transaction.amount > 0.0 {
+            if is_grid_layout {
+                format!("+${:.2}", transaction.amount)
+            } else {
+                format!("+${:.0}", transaction.amount)
+            }
+        } else {
+            if is_grid_layout {
+                format!("-${:.2}", transaction.amount.abs())
+            } else {
+                format!("-${:.0}", transaction.amount.abs())
+            }
+        };
+        
+        Self {
+            chip_type,
+            transaction,
+            display_amount,
+        }
+    }
+    
+    /// Convert a vector of transactions to calendar chips
+    pub fn from_transactions(transactions: Vec<Transaction>, is_grid_layout: bool) -> Vec<Self> {
+        transactions.into_iter()
+            .map(|transaction| Self::from_transaction(transaction, is_grid_layout))
+            .collect()
+    }
+}
+
 /// Represents a single day in the calendar with its associated state and rendering logic
 pub struct CalendarDay {
     /// The day number (1-31)
@@ -258,14 +341,17 @@ impl CalendarDay {
             ui.add_space(4.0);
             
             // Transaction chips below - vertically stacked
-            let transactions_to_show = if let Some(max) = config.max_transactions {
-                self.transactions.iter().take(max)
+            // Convert transactions to calendar chips
+            let chips = CalendarChip::from_transactions(self.transactions.clone(), config.is_grid_layout);
+            
+            let chips_to_show = if let Some(max) = config.max_transactions {
+                chips.iter().take(max)
             } else {
-                self.transactions.iter().take(self.transactions.len())
+                chips.iter().take(chips.len())
             };
             
-            for transaction in transactions_to_show {
-                self.render_transaction_chip(ui, transaction, width - 8.0, height, config.is_grid_layout);
+            for chip in chips_to_show {
+                self.render_calendar_chip(ui, chip, width - 8.0, height, config.is_grid_layout);
                 ui.add_space(1.0); // Smaller spacing between chips due to padding
             }
             
@@ -280,29 +366,13 @@ impl CalendarDay {
         });
     }
     
-    /// Render a single transaction chip
-    fn render_transaction_chip(&self, ui: &mut egui::Ui, transaction: &Transaction, width: f32, height: f32, is_grid_layout: bool) {
-        // Determine chip color based on transaction amount
-        let (chip_color, text_color) = if transaction.amount > 0.0 {
-            (egui::Color32::from_rgb(46, 160, 67), egui::Color32::from_rgb(46, 160, 67))
-        } else {
-            (egui::Color32::from_rgb(128, 128, 128), egui::Color32::from_rgb(128, 128, 128))
-        };
+    /// Render a single calendar chip
+    fn render_calendar_chip(&self, ui: &mut egui::Ui, chip: &CalendarChip, width: f32, height: f32, is_grid_layout: bool) {
         
-        // Create transaction chip text
-        let chip_text = if transaction.amount > 0.0 {
-            if is_grid_layout {
-                format!("+${:.2}", transaction.amount)
-            } else {
-                format!("+${:.0}", transaction.amount)
-            }
-        } else {
-            if is_grid_layout {
-                format!("-${:.2}", transaction.amount.abs())
-            } else {
-                format!("-${:.0}", transaction.amount.abs())
-            }
-        };
+        // Get chip styling from the chip type
+        let chip_color = chip.chip_type.primary_color();
+        let text_color = chip.chip_type.text_color();
+        let uses_dotted_border = chip.chip_type.uses_dotted_border();
         
         // Calculate chip dimensions based on layout
         let (chip_width, chip_height, chip_font_size) = if is_grid_layout {
@@ -311,15 +381,12 @@ impl CalendarDay {
             (width * 0.85, height * 0.15, (width * 0.12).max(9.0).min(12.0))
         };
         
-        // Check if this is a future transaction
-        let is_future = matches!(transaction.transaction_type, shared::TransactionType::FutureAllowance);
-        
         // Opaque white background for all transaction chips
         let chip_background = egui::Color32::from_rgba_unmultiplied(255, 255, 255, 255); // Pure opaque white
         
         ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
-            if is_future {
-                // Future transactions with white background and dotted border
+            if uses_dotted_border {
+                // Future allowances with white background and dotted border
                 let (rect, _) = ui.allocate_exact_size(egui::vec2(chip_width, chip_height), egui::Sense::hover());
                 
                 // Draw opaque white background
@@ -329,24 +396,20 @@ impl CalendarDay {
                     chip_background
                 );
                 
-                // Draw dotted/dashed border
-                ui.painter().rect_stroke(
-                    rect,
-                    egui::Rounding::same(4.0),
-                    egui::Stroke::new(1.0, chip_color)
-                );
+                // Draw dotted border for future allowances
+                self.draw_dotted_border(ui, rect, chip_color);
                 
                 ui.painter().text(
                     rect.center(),
                     egui::Align2::CENTER_CENTER,
-                    &chip_text,
+                    &chip.display_amount,
                     egui::FontId::new(chip_font_size, egui::FontFamily::Proportional),
                     text_color,
                 );
             } else {
                 // Completed transactions with white background and solid border
                 let chip_button = egui::Button::new(
-                    egui::RichText::new(&chip_text)
+                    egui::RichText::new(&chip.display_amount)
                         .font(egui::FontId::new(chip_font_size, egui::FontFamily::Proportional))
                         .color(text_color)
                 )
@@ -357,6 +420,114 @@ impl CalendarDay {
                 ui.add_sized([chip_width, chip_height], chip_button);
             }
         });
+    }
+    
+    /// Draw a dotted border around a rectangle for future allowance chips
+    fn draw_dotted_border(&self, ui: &mut egui::Ui, rect: egui::Rect, color: egui::Color32) {
+        let painter = ui.painter();
+        let rounding = 4.0;
+        let dash_length = 3.0;
+        let gap_length = 2.0;
+        let stroke_width = 1.0;
+        
+        // Top border
+        let mut x = rect.left() + rounding;
+        let y = rect.top();
+        while x < rect.right() - rounding {
+            let end_x = (x + dash_length).min(rect.right() - rounding);
+            painter.line_segment(
+                [egui::pos2(x, y), egui::pos2(end_x, y)],
+                egui::Stroke::new(stroke_width, color)
+            );
+            x = end_x + gap_length;
+        }
+        
+        // Right border
+        let mut y = rect.top() + rounding;
+        let x = rect.right();
+        while y < rect.bottom() - rounding {
+            let end_y = (y + dash_length).min(rect.bottom() - rounding);
+            painter.line_segment(
+                [egui::pos2(x, y), egui::pos2(x, end_y)],
+                egui::Stroke::new(stroke_width, color)
+            );
+            y = end_y + gap_length;
+        }
+        
+        // Bottom border
+        let mut x = rect.right() - rounding;
+        let y = rect.bottom();
+        while x > rect.left() + rounding {
+            let end_x = (x - dash_length).max(rect.left() + rounding);
+            painter.line_segment(
+                [egui::pos2(x, y), egui::pos2(end_x, y)],
+                egui::Stroke::new(stroke_width, color)
+            );
+            x = end_x - gap_length;
+        }
+        
+        // Left border
+        let mut y = rect.bottom() - rounding;
+        let x = rect.left();
+        while y > rect.top() + rounding {
+            let end_y = (y - dash_length).max(rect.top() + rounding);
+            painter.line_segment(
+                [egui::pos2(x, y), egui::pos2(x, end_y)],
+                egui::Stroke::new(stroke_width, color)
+            );
+            y = end_y - gap_length;
+        }
+        
+        // Draw rounded corners as small arcs (simplified as short lines)
+        let corner_dash = 2.0;
+        
+        // Top-left corner
+        painter.line_segment(
+            [egui::pos2(rect.left() + rounding - corner_dash, rect.top()), 
+             egui::pos2(rect.left() + rounding, rect.top())],
+            egui::Stroke::new(stroke_width, color)
+        );
+        painter.line_segment(
+            [egui::pos2(rect.left(), rect.top() + rounding - corner_dash), 
+             egui::pos2(rect.left(), rect.top() + rounding)],
+            egui::Stroke::new(stroke_width, color)
+        );
+        
+        // Top-right corner
+        painter.line_segment(
+            [egui::pos2(rect.right() - rounding, rect.top()), 
+             egui::pos2(rect.right() - rounding + corner_dash, rect.top())],
+            egui::Stroke::new(stroke_width, color)
+        );
+        painter.line_segment(
+            [egui::pos2(rect.right(), rect.top() + rounding - corner_dash), 
+             egui::pos2(rect.right(), rect.top() + rounding)],
+            egui::Stroke::new(stroke_width, color)
+        );
+        
+        // Bottom-right corner
+        painter.line_segment(
+            [egui::pos2(rect.right() - rounding + corner_dash, rect.bottom()), 
+             egui::pos2(rect.right() - rounding, rect.bottom())],
+            egui::Stroke::new(stroke_width, color)
+        );
+        painter.line_segment(
+            [egui::pos2(rect.right(), rect.bottom() - rounding), 
+             egui::pos2(rect.right(), rect.bottom() - rounding + corner_dash)],
+            egui::Stroke::new(stroke_width, color)
+        );
+        
+        // Bottom-left corner
+        painter.line_segment(
+            [egui::pos2(rect.left() + rounding, rect.bottom()), 
+             egui::pos2(rect.left() + rounding - corner_dash, rect.bottom())],
+            egui::Stroke::new(stroke_width, color)
+        );
+        painter.line_segment(
+            [egui::pos2(rect.left(), rect.bottom() - rounding + corner_dash), 
+             egui::pos2(rect.left(), rect.bottom() - rounding)],
+            egui::Stroke::new(stroke_width, color)
+        );
     }
 }
 
@@ -547,7 +718,7 @@ impl AllowanceTrackerApp {
     }
     
     /// Draw calendar days with responsive sizing using CalendarDay components
-    pub fn draw_calendar_days_responsive(&mut self, ui: &mut egui::Ui, transactions: &[Transaction], cell_width: f32, cell_height: f32) {
+    pub fn draw_calendar_days_responsive(&mut self, ui: &mut egui::Ui, _transactions: &[Transaction], cell_width: f32, cell_height: f32) {
         ui.spacing_mut().item_spacing.y = CALENDAR_CARD_SPACING; // Vertical spacing between week rows
         // Use calendar month data from backend (which includes balance data)
         let all_days: Vec<CalendarDay> = if let Some(ref calendar_month) = self.calendar_month {

@@ -206,31 +206,52 @@ impl AllowanceService {
         start_date: NaiveDate,
         end_date: NaiveDate,
     ) -> Result<Vec<DomainTransaction>> {
-        info!("Generating future allowance transactions for child: {} from {} to {}", 
-              child_id, start_date, end_date);
+        info!("🔮 ALLOWANCE DEBUG: Generating future allowances for child {} from {} to {}", 
+             child_id, start_date, end_date);
 
         // Get allowance config for the child
         let allowance_config = self.allowance_repository.get_allowance_config(child_id)?;
         
+        info!("🔮 ALLOWANCE DEBUG: Retrieved allowance config: {:?}", allowance_config);
+        
         let config = match allowance_config {
-            Some(config) if config.is_active => config,
-            _ => {
-                info!("No active allowance config found for child: {}", child_id);
+            Some(config) if config.is_active => {
+                info!("🔮 ALLOWANCE DEBUG: Found active config - amount: ${:.2}, day_of_week: {} ({})", 
+                     config.amount, config.day_of_week, config.day_name());
+                config
+            },
+            Some(_config) => {
+                info!("🔮 ALLOWANCE DEBUG: Found inactive allowance config for child: {}", child_id);
+                return Ok(Vec::new());
+            },
+            None => {
+                info!("🔮 ALLOWANCE DEBUG: No allowance config found for child: {}", child_id);
                 return Ok(Vec::new());
             }
         };
 
         let mut future_allowances = Vec::new();
         let current_date = Local::now().date_naive();
+        
+        info!("🔮 ALLOWANCE DEBUG: Current date: {}", current_date);
 
         // Iterate through each date in the range
         let mut current = start_date;
+        let mut checked_days = 0;
         while current <= end_date {
+            checked_days += 1;
+            let day_of_week = current.weekday().num_days_from_sunday() as u8;
+            let is_future = current > current_date;
+            let matches_allowance_day = day_of_week == config.day_of_week;
+            
+            info!("🔮 ALLOWANCE DEBUG: Checking date {} - day_of_week: {} ({}), is_future: {}, matches_allowance_day: {}", 
+                 current, day_of_week, current.weekday(), is_future, matches_allowance_day);
+            
             // Check if this date is in the future and matches the allowance day of week
             if current > current_date {
-                let day_of_week = current.weekday().num_days_from_sunday() as u8;
-                
                 if day_of_week == config.day_of_week {
+                    info!("🔮 ALLOWANCE DEBUG: ✅ CREATING future allowance for {} on {}", child_id, current);
+                    
                     // This is a future allowance day!
                     // Create DateTime at 12:00 UTC for the date
                     let naive_datetime = current.and_hms_opt(12, 0, 0).unwrap();
@@ -250,9 +271,14 @@ impl AllowanceService {
                     };
                     
                     future_allowances.push(allowance_transaction);
-                    info!("🔍 ALLOWANCE DEBUG: Generated future allowance for {} on {} (day_of_week: {}, expected: {}, datetime: {})", 
+                    info!("🔮 ALLOWANCE DEBUG: Generated future allowance for {} on {} (day_of_week: {}, expected: {}, datetime: {})", 
                           child_id, current, day_of_week, config.day_of_week, transaction_datetime);
+                } else {
+                    info!("🔮 ALLOWANCE DEBUG: ❌ Future date {} doesn't match allowance day (got {}, need {})", 
+                         current, day_of_week, config.day_of_week);
                 }
+            } else {
+                info!("🔮 ALLOWANCE DEBUG: ❌ Date {} is not in the future (current: {})", current, current_date);
             }
             
             // Move to next day
@@ -263,8 +289,17 @@ impl AllowanceService {
             }
         }
 
-        info!("Generated {} future allowance transactions for child: {}", 
-              future_allowances.len(), child_id);
+        info!("🔮 ALLOWANCE DEBUG: Checked {} days total, generated {} future allowance transactions for child: {}", 
+              checked_days, future_allowances.len(), child_id);
+
+        if future_allowances.is_empty() {
+            info!("🔮 ALLOWANCE DEBUG: ❌ NO FUTURE ALLOWANCES GENERATED! Check the configuration and date range.");
+        } else {
+            info!("🔮 ALLOWANCE DEBUG: ✅ Generated future allowances:");
+            for allowance in &future_allowances {
+                info!("  - {} on {}: ${:.2}", allowance.id, allowance.date.format("%Y-%m-%d"), allowance.amount);
+            }
+        }
 
         Ok(future_allowances)
     }
