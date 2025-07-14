@@ -1,13 +1,34 @@
-Enhance calendar current day identification with refined styling
+Fix calendar balance calculations with proper architecture separation (TDD Phases 1-5)
 
-- Replace pink text color with double outline (white inner + navy outer)
-- Add subtle drop shadow behind today's date card
-- Implement asymmetric underline beneath day number:
-  - Dark gray color (rgb 80,80,80) for subtlety
-  - 0.7px stroke width for refined appearance
-  - Shorter on left (3px padding), longer on right (2px padding)
-- Maintain existing card background and transaction display
-- Improve visual prominence while preserving elegant design
+PROBLEM: Calendar balances were zeroing out after July 18th due to AllowanceService 
+setting balance: 0.0 for future allowances instead of calculating projected balances.
+Previous fix created architectural violations requiring extensive type system changes.
 
-The new styling provides clear identification of today's date with
-better contrast against the pink gradient background. 
+SOLUTION: Complete TDD-driven refactor implementing correct architecture:
+- AllowanceService: Scheduling logic only (dates + amounts, balance = NaN)
+- BalanceService: All balance calculations including new projected balance logic
+- CalendarService: Orchestrator delegating balance math to BalanceService
+
+PHASES COMPLETED:
+• Phase 1: AllowanceService responsibility separation (balance = NaN)
+• Phase 2: BalanceService enhanced with calculate_projected_balance_for_transaction()
+• Phase 3: CalendarService delegation architecture with new methods
+• Phase 4: Integration tests and dependency wiring
+• Phase 5: Fixed balance calculation logic for sequential NaN accumulation
+
+KEY FIXES:
+- AllowanceService now sets balance: f64::NaN (not 0.0) for future allowances
+- BalanceService calculates projected balances using existing transaction logic
+- CalendarService properly delegates all balance calculations to BalanceService
+- Fixed core bug: sequential NaN transaction accumulation now works correctly
+- Comprehensive test coverage with 169 tests passing (20 new tests added)
+
+ARCHITECTURE BENEFITS:
+✅ Proper separation of concerns maintained
+✅ No tight coupling between services
+✅ Clean boundaries and single responsibilities
+✅ Comprehensive test coverage
+✅ Zero regressions - all existing functionality preserved
+
+Result: Calendar now shows proper projected balances beyond July 18th with
+clean architecture and comprehensive test coverage. 

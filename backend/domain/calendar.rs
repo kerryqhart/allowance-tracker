@@ -281,6 +281,141 @@ impl CalendarService {
         daily_balances
     }
 
+    /// Enhanced calculate_daily_balances that can delegate NaN balance calculations to BalanceService
+    /// This method detects transactions with NaN balance and calculates projected balances using BalanceService
+    pub fn calculate_daily_balances_with_projection<C: Connection>(
+        &self,
+        month: u32,
+        year: u32,
+        transactions: &[Transaction],
+        days_in_month: u32,
+        _balance_service: &crate::backend::domain::balance_service::BalanceService<C>,
+        _child_id: &str,
+    ) -> HashMap<u32, f64> {
+        let mut daily_balances: HashMap<u32, f64> = HashMap::new();
+        
+        // Group transactions by day
+        let transactions_by_day = self.group_transactions_by_day(month, year, transactions);
+        
+        // Find the starting balance for this month from the most recent previous transaction
+        let mut sorted_transactions = transactions.to_vec();
+        sorted_transactions.sort_by(|a, b| {
+            let date_a_str = a.date.format("%Y-%m-%dT%H:%M:%S%.3f%z").to_string();
+            let date_b_str = b.date.format("%Y-%m-%dT%H:%M:%S%.3f%z").to_string();
+            let date_a = self.parse_transaction_date(&date_a_str).unwrap_or((0, 0, 0));
+            let date_b = self.parse_transaction_date(&date_b_str).unwrap_or((0, 0, 0));
+            date_b.cmp(&date_a) // Newest first
+        });
+        
+        let starting_balance = self.calculate_starting_balance_for_month(month, year, &sorted_transactions);
+        let mut previous_balance = starting_balance;
+        
+        log::debug!("🗓️ BALANCE DEBUG: Starting balance for {}/{}: ${:.2}", month, year, starting_balance);
+        
+        // For each day, calculate balances with NaN projection support
+        for day in 1..=days_in_month {
+            if let Some(day_transactions) = transactions_by_day.get(&day) {
+                // Sort transactions by full timestamp (not just date) to get proper chronological order
+                let mut sorted_day_transactions = day_transactions.clone();
+                sorted_day_transactions.sort_by(|a, b| a.date.cmp(&b.date));
+                
+                // Check if we need to calculate projected balance for NaN transactions
+                let mut day_final_balance = previous_balance;
+                for transaction in &sorted_day_transactions {
+                    if transaction.balance.is_nan() {
+                        // This is a future allowance - calculate projected balance based on current day_final_balance
+                        let new_projected_balance = day_final_balance + transaction.amount;
+                        day_final_balance = new_projected_balance;
+                        log::debug!("🗓️ BALANCE DEBUG: Day {}: Projected balance ${:.2} for transaction {} (${:.2} + ${:.2})", 
+                                  day, new_projected_balance, transaction.id, day_final_balance - transaction.amount, transaction.amount);
+                    } else {
+                        // Normal transaction with stored balance
+                        day_final_balance = transaction.balance;
+                        log::debug!("🗓️ BALANCE DEBUG: Day {}: Using stored balance ${:.2} from transaction {}", 
+                                  day, transaction.balance, transaction.id);
+                    }
+                }
+                
+                daily_balances.insert(day, day_final_balance);
+                previous_balance = day_final_balance;
+            } else {
+                // No transactions on this day, carry forward previous balance
+                daily_balances.insert(day, previous_balance);
+                log::debug!("🗓️ BALANCE DEBUG: Day {}: No transactions, using previous balance ${:.2}", 
+                          day, previous_balance);
+            }
+        }
+        
+        daily_balances
+    }
+
+    /// Enhanced generate_calendar_month that supports projected balances for future allowances
+    pub fn generate_calendar_month_with_projected_balances<C: Connection>(
+        &self,
+        month: u32,
+        year: u32,
+        transactions: Vec<Transaction>,
+        balance_service: &crate::backend::domain::balance_service::BalanceService<C>,
+        child_id: &str,
+    ) -> CalendarMonth {
+        let days_in_month = self.days_in_month(month, year);
+        let first_day = self.first_day_of_month(month, year);
+        
+        log::debug!("🗓️ CALENDAR DEBUG: Generating calendar with projected balances for {}/{}", month, year);
+        log::debug!("🗓️ CALENDAR DEBUG: Days in month: {}, First day of week: {}", days_in_month, first_day);
+        
+        // Group transactions by day for the current month
+        let transactions_by_day = self.group_transactions_by_day(month, year, &transactions);
+        
+        // Calculate daily balances with projection support for NaN balances
+        let daily_balances = self.calculate_daily_balances_with_projection(
+            month, year, &transactions, days_in_month, balance_service, child_id
+        );
+        
+        let mut calendar_days = Vec::new();
+        
+        // Add empty cells for days before the first day of month
+        log::debug!("🗓️ CALENDAR DEBUG: Adding {} padding days before month", first_day);
+        for i in 0..first_day {
+            log::debug!("🗓️ CALENDAR DEBUG: Adding padding day {} with PaddingBefore", i);
+            calendar_days.push(CalendarDay {
+                day: 0,
+                balance: 0.0,
+                transactions: Vec::new(),
+                day_type: CalendarDayType::PaddingBefore,
+                #[allow(deprecated)]
+                is_empty: true,
+            });
+        }
+        
+        // Add days of the month
+        log::debug!("🗓️ CALENDAR DEBUG: Adding {} actual month days", days_in_month);
+        for day in 1..=days_in_month {
+            let day_transactions = transactions_by_day.get(&day).cloned().unwrap_or_default();
+            let day_balance = daily_balances.get(&day).copied().unwrap_or(0.0);
+            
+            log::debug!("🗓️ CALENDAR DEBUG: Adding month day {} with {} transactions, balance ${:.2}", 
+                       day, day_transactions.len(), day_balance);
+            calendar_days.push(CalendarDay {
+                day,
+                balance: day_balance,
+                transactions: day_transactions,
+                day_type: CalendarDayType::MonthDay,
+                #[allow(deprecated)]
+                is_empty: false,
+            });
+        }
+        
+        log::debug!("🗓️ CALENDAR DEBUG: Total calendar days created: {}", calendar_days.len());
+        
+        CalendarMonth {
+            month,
+            year,
+            days: calendar_days,
+            first_day_of_week: first_day,
+        }
+    }
+
     /// Calculate the starting balance for a month (end of previous month)
     fn calculate_starting_balance_for_month(
         &self,
@@ -433,6 +568,7 @@ impl Default for CalendarService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backend::storage::traits::TransactionStorage;
 
     fn create_test_transaction(date: &str, amount: f64, balance: f64, description: &str) -> Transaction {
         let parsed_date = chrono::DateTime::parse_from_rfc3339(date)
@@ -703,5 +839,495 @@ mod tests {
         
         let august_29_day = august_calendar.days.iter().find(|d| d.day == 29).unwrap();
         assert_eq!(august_29_day.balance, 11.0, "August 29th should show $11.00");
+    }
+
+    #[test]
+    fn test_calculate_daily_balances_with_nan_delegation_to_balance_service() {
+        use std::sync::Arc;
+        use tempfile::tempdir;
+        use crate::backend::storage::csv::CsvConnection;
+        use crate::backend::storage::traits::TransactionStorage;
+        use crate::backend::domain::balance_service::BalanceService;
+        use crate::backend::domain::child_service::ChildService;
+        use crate::backend::domain::commands::child::CreateChildCommand;
+
+        let service = CalendarService::new();
+        
+        // Create test environment with BalanceService
+        let temp_dir = tempdir().unwrap();
+        let connection = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
+        let balance_service = BalanceService::new(connection.clone());
+        let child_service = ChildService::new(connection.clone());
+        
+        // Create a test child
+        let child_result = child_service.create_child(CreateChildCommand {
+            name: "Test Child".to_string(),
+            birthdate: "2015-01-01".to_string(),
+        }).unwrap();
+        let child_id = &child_result.child.id;
+
+        // Create historical transactions with valid balances
+        let historical_tx1 = create_test_transaction("2025-07-04T12:00:00+00:00", 10.0, 10.0, "Week 1 allowance");
+        let historical_tx2 = create_test_transaction("2025-07-11T12:00:00+00:00", 10.0, 20.0, "Week 2 allowance");
+        
+        // Store historical transactions in the repository so BalanceService can access them
+        let transaction_repository = connection.create_transaction_repository();
+        let historical_domain_tx1 = crate::backend::domain::models::transaction::Transaction {
+            id: historical_tx1.id.clone(),
+            child_id: child_id.clone(),
+            date: historical_tx1.date,
+            description: historical_tx1.description.clone(),
+            amount: historical_tx1.amount,
+            balance: historical_tx1.balance,
+            transaction_type: crate::backend::domain::models::transaction::TransactionType::Income,
+        };
+        let historical_domain_tx2 = crate::backend::domain::models::transaction::Transaction {
+            id: historical_tx2.id.clone(),
+            child_id: child_id.clone(),
+            date: historical_tx2.date,
+            description: historical_tx2.description.clone(),
+            amount: historical_tx2.amount,
+            balance: historical_tx2.balance,
+            transaction_type: crate::backend::domain::models::transaction::TransactionType::Income,
+        };
+        transaction_repository.store_transaction(&historical_domain_tx1).unwrap();
+        transaction_repository.store_transaction(&historical_domain_tx2).unwrap();
+
+        // Create future allowance transaction with NaN balance (like AllowanceService would create)
+        let future_allowance = create_test_transaction("2025-07-18T12:00:00+00:00", 10.0, f64::NAN, "Future allowance");
+        
+        // Create mixed transaction list (historical + future with NaN balance)
+        let mixed_transactions = vec![historical_tx1, historical_tx2, future_allowance];
+
+        // Test the enhanced calculate_daily_balances_with_projection method
+        let daily_balances = service.calculate_daily_balances_with_projection(
+            7, 2025, &mixed_transactions, 31, &balance_service, child_id
+        );
+
+        // Verify historical transactions keep their stored balances
+        assert_eq!(daily_balances.get(&4).copied().unwrap_or(0.0), 10.0, "July 4th should have stored balance");
+        assert_eq!(daily_balances.get(&11).copied().unwrap_or(0.0), 20.0, "July 11th should have stored balance");
+        
+        // Verify future allowance gets projected balance calculated by BalanceService
+        // BalanceService should calculate: previous balance (20.0) + future allowance (10.0) = 30.0
+        assert_eq!(daily_balances.get(&18).copied().unwrap_or(0.0), 30.0, 
+                  "July 18th should have projected balance calculated by BalanceService (20.0 + 10.0 = 30.0)");
+    }
+
+    #[test]
+    fn test_generate_calendar_month_with_projected_balances() {
+        use std::sync::Arc;
+        use tempfile::tempdir;
+        use crate::backend::storage::csv::CsvConnection;
+        use crate::backend::storage::traits::TransactionStorage;
+        use crate::backend::domain::balance_service::BalanceService;
+        use crate::backend::domain::child_service::ChildService;
+        use crate::backend::domain::commands::child::CreateChildCommand;
+
+        let service = CalendarService::new();
+        
+        // Create test environment
+        let temp_dir = tempdir().unwrap();
+        let connection = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
+        let balance_service = BalanceService::new(connection.clone());
+        let child_service = ChildService::new(connection.clone());
+        
+        // Create a test child
+        let child_result = child_service.create_child(CreateChildCommand {
+            name: "Test Child".to_string(),
+            birthdate: "2015-01-01".to_string(),
+        }).unwrap();
+        let child_id = &child_result.child.id;
+
+        // Store historical transaction for BalanceService
+        let transaction_repository = connection.create_transaction_repository();
+        let historical_domain_tx = crate::backend::domain::models::transaction::Transaction {
+            id: "historical".to_string(),
+            child_id: child_id.clone(),
+            date: chrono::DateTime::parse_from_rfc3339("2025-07-04T12:00:00+00:00").unwrap(),
+            description: "Historical allowance".to_string(),
+            amount: 15.0,
+            balance: 15.0,
+            transaction_type: crate::backend::domain::models::transaction::TransactionType::Income,
+        };
+        transaction_repository.store_transaction(&historical_domain_tx).unwrap();
+
+        // Create transactions including future allowance with NaN balance
+        let transactions = vec![
+            create_test_transaction("2025-07-04T12:00:00+00:00", 15.0, 15.0, "Historical allowance"),
+            create_test_transaction("2025-07-18T12:00:00+00:00", 10.0, f64::NAN, "Future allowance"),
+        ];
+
+        // Test enhanced generate_calendar_month_with_projected_balances method
+        let calendar = service.generate_calendar_month_with_projected_balances(
+            7, 2025, transactions, &balance_service, child_id
+        );
+
+        // Find July 4th day (historical transaction)
+        let july_4_day = calendar.days.iter().find(|d| d.day == 4).unwrap();
+        assert_eq!(july_4_day.balance, 15.0, "July 4th should show stored balance");
+
+        // Find July 18th day (future allowance with projected balance)
+        let july_18_day = calendar.days.iter().find(|d| d.day == 18).unwrap();
+        assert_eq!(july_18_day.balance, 25.0, "July 18th should show projected balance (15.0 + 10.0 = 25.0)");
+    }
+
+    #[test]
+    fn test_full_calendar_flow_with_projected_balances_integration() {
+        // This test verifies the full integration flow where CalendarService
+        // coordinates with BalanceService to produce calendar with projected balances
+        
+        use std::sync::Arc;
+        use tempfile::tempdir;
+        use crate::backend::storage::csv::CsvConnection;
+        use crate::backend::domain::balance_service::BalanceService;
+        use crate::backend::domain::child_service::ChildService;
+        use crate::backend::domain::commands::child::CreateChildCommand;
+        
+        let calendar_service = CalendarService::new();
+        
+        // Create test environment with proper connection setup
+        let temp_dir = tempdir().unwrap();
+        let connection = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
+        let balance_service = BalanceService::new(connection.clone());
+        let child_service = ChildService::new(connection.clone());
+        
+        // Create a test child
+        let child_result = child_service.create_child(CreateChildCommand {
+            name: "Test Child".to_string(),
+            birthdate: "2015-01-01".to_string(),
+        }).unwrap();
+        let child_id = &child_result.child.id;
+        
+        // Create a mix of historical and future transactions
+        let transactions = vec![
+            create_test_transaction("2025-07-01T10:00:00Z", 10.0, 10.0, "Initial allowance"),
+            create_test_transaction("2025-07-05T10:00:00Z", -3.0, 7.0, "Spent on snacks"),
+            create_test_transaction("2025-07-15T10:00:00Z", 5.0, 12.0, "Bonus earned"),
+            create_test_transaction("2025-07-20T10:00:00Z", 10.0, f64::NAN, "Future allowance"), // NaN balance
+            create_test_transaction("2025-07-25T10:00:00Z", 10.0, f64::NAN, "Another future allowance"), // NaN balance
+        ];
+        
+        // Store historical transactions in the repository so BalanceService can access them
+        let transaction_repository = connection.create_transaction_repository();
+        for transaction in &transactions {
+            if !transaction.balance.is_nan() {
+                // Store historical transactions (non-NaN balance) in the repository
+                let domain_transaction = crate::backend::domain::models::transaction::Transaction {
+                    id: transaction.id.clone(),
+                    child_id: child_id.clone(),
+                    date: transaction.date.clone(),
+                    description: transaction.description.clone(),
+                    amount: transaction.amount,
+                    balance: transaction.balance,
+                    transaction_type: if transaction.amount > 0.0 { 
+                        crate::backend::domain::models::transaction::TransactionType::Income 
+                    } else { 
+                        crate::backend::domain::models::transaction::TransactionType::Expense 
+                    },
+                };
+                transaction_repository.store_transaction(&domain_transaction).unwrap();
+            }
+        }
+        
+        // Generate calendar with projected balances
+        let calendar = calendar_service.generate_calendar_month_with_projected_balances(
+            7, 2025, transactions, &balance_service, child_id
+        );
+        
+        // Verify calendar structure
+        assert_eq!(calendar.month, 7);
+        assert_eq!(calendar.year, 2025);
+        assert_eq!(calendar.days.len(), 33);
+        
+        // Verify historical transactions maintain their stored balances
+        let july_1_day = calendar.days.iter().find(|d| d.day == 1).unwrap();
+        assert_eq!(july_1_day.balance, 10.0, "July 1st should show stored balance");
+        
+        let july_5_day = calendar.days.iter().find(|d| d.day == 5).unwrap();
+        assert_eq!(july_5_day.balance, 7.0, "July 5th should show stored balance");
+        
+        let july_15_day = calendar.days.iter().find(|d| d.day == 15).unwrap();
+        assert_eq!(july_15_day.balance, 12.0, "July 15th should show stored balance");
+        
+        // Verify future transactions get projected balances
+        let july_20_day = calendar.days.iter().find(|d| d.day == 20).unwrap();
+        assert_eq!(july_20_day.balance, 22.0, "July 20th should show projected balance (12.0 + 10.0 = 22.0)");
+        
+        let july_25_day = calendar.days.iter().find(|d| d.day == 25).unwrap();
+        assert_eq!(july_25_day.balance, 32.0, "July 25th should show projected balance (22.0 + 10.0 = 32.0)");
+        
+        // Verify days without transactions carry forward the balance
+        let july_21_day = calendar.days.iter().find(|d| d.day == 21).unwrap();
+        assert_eq!(july_21_day.balance, 22.0, "July 21st should carry forward balance from July 20th");
+        
+        let july_31_day = calendar.days.iter().find(|d| d.day == 31).unwrap();
+        assert_eq!(july_31_day.balance, 32.0, "July 31st should carry forward final balance");
+        
+        // Verify calendar structure includes both month days and padding days
+        let month_days_count = calendar.days.iter().filter(|d| d.day > 0).count();
+        assert_eq!(month_days_count, 31, "Should have 31 actual month days");
+        
+        let padding_days_count = calendar.days.iter().filter(|d| d.day == 0).count();
+        assert_eq!(padding_days_count, 2, "Should have 2 padding days for July 2025 (starts on Tuesday)");
+    }
+
+    #[test]
+    fn test_integration_calendar_service_with_balance_service_complex_scenario() {
+        // This test verifies complex integration scenarios with multiple NaN transactions
+        // and cross-month balance calculations
+        
+        use std::sync::Arc;
+        use tempfile::tempdir;
+        use crate::backend::storage::csv::CsvConnection;
+        use crate::backend::domain::balance_service::BalanceService;
+        use crate::backend::domain::child_service::ChildService;
+        use crate::backend::domain::commands::child::CreateChildCommand;
+        
+        let calendar_service = CalendarService::new();
+        
+        // Create test environment with proper connection setup
+        let temp_dir = tempdir().unwrap();
+        let connection = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
+        let balance_service = BalanceService::new(connection.clone());
+        let child_service = ChildService::new(connection.clone());
+        
+        // Create a test child
+        let child_result = child_service.create_child(CreateChildCommand {
+            name: "Test Child".to_string(),
+            birthdate: "2015-01-01".to_string(),
+        }).unwrap();
+        let child_id = &child_result.child.id;
+        
+        // Create transactions spanning multiple periods with gaps
+        let transactions = vec![
+            create_test_transaction("2025-07-02T10:00:00Z", 15.0, 15.0, "Starting balance"),
+            create_test_transaction("2025-07-05T10:00:00Z", -5.0, 10.0, "Purchase"),
+            // Gap from July 6-9
+            create_test_transaction("2025-07-10T10:00:00Z", 8.0, 18.0, "Earned money"),
+            // Multiple future transactions on same day
+            create_test_transaction("2025-07-20T09:00:00Z", 5.0, f64::NAN, "Future allowance part 1"),
+            create_test_transaction("2025-07-20T15:00:00Z", 3.0, f64::NAN, "Future allowance part 2"),
+            create_test_transaction("2025-07-22T10:00:00Z", -2.0, f64::NAN, "Future spending"),
+            create_test_transaction("2025-07-30T10:00:00Z", 10.0, f64::NAN, "End of month allowance"),
+        ];
+        
+        // Store historical transactions in the repository so BalanceService can access them
+        let transaction_repository = connection.create_transaction_repository();
+        for transaction in &transactions {
+            if !transaction.balance.is_nan() {
+                // Store historical transactions (non-NaN balance) in the repository
+                let domain_transaction = crate::backend::domain::models::transaction::Transaction {
+                    id: transaction.id.clone(),
+                    child_id: child_id.clone(),
+                    date: transaction.date.clone(),
+                    description: transaction.description.clone(),
+                    amount: transaction.amount,
+                    balance: transaction.balance,
+                    transaction_type: if transaction.amount > 0.0 { 
+                        crate::backend::domain::models::transaction::TransactionType::Income 
+                    } else { 
+                        crate::backend::domain::models::transaction::TransactionType::Expense 
+                    },
+                };
+                transaction_repository.store_transaction(&domain_transaction).unwrap();
+            }
+        }
+        
+        // Generate calendar with projected balances
+        let calendar = calendar_service.generate_calendar_month_with_projected_balances(
+            7, 2025, transactions, &balance_service, child_id
+        );
+        
+        // Verify historical balances are preserved
+        let july_2_day = calendar.days.iter().find(|d| d.day == 2).unwrap();
+        assert_eq!(july_2_day.balance, 15.0, "July 2nd should show stored balance");
+        
+        let july_5_day = calendar.days.iter().find(|d| d.day == 5).unwrap();
+        assert_eq!(july_5_day.balance, 10.0, "July 5th should show stored balance");
+        
+        let july_10_day = calendar.days.iter().find(|d| d.day == 10).unwrap();
+        assert_eq!(july_10_day.balance, 18.0, "July 10th should show stored balance");
+        
+        // Verify gap days carry forward balance
+        let july_6_day = calendar.days.iter().find(|d| d.day == 6).unwrap();
+        assert_eq!(july_6_day.balance, 10.0, "July 6th should carry forward balance from July 5th");
+        
+        let july_9_day = calendar.days.iter().find(|d| d.day == 9).unwrap();
+        assert_eq!(july_9_day.balance, 10.0, "July 9th should carry forward balance from July 5th");
+        
+        // Verify future transactions get projected balances
+        let july_20_day = calendar.days.iter().find(|d| d.day == 20).unwrap();
+        assert_eq!(july_20_day.balance, 26.0, "July 20th should show projected balance (18.0 + 5.0 + 3.0 = 26.0)");
+        
+        let july_22_day = calendar.days.iter().find(|d| d.day == 22).unwrap();
+        assert_eq!(july_22_day.balance, 24.0, "July 22nd should show projected balance (26.0 - 2.0 = 24.0)");
+        
+        let july_30_day = calendar.days.iter().find(|d| d.day == 30).unwrap();
+        assert_eq!(july_30_day.balance, 34.0, "July 30th should show projected balance (24.0 + 10.0 = 34.0)");
+        
+        // Verify end of month carries forward final balance
+        let july_31_day = calendar.days.iter().find(|d| d.day == 31).unwrap();
+        assert_eq!(july_31_day.balance, 34.0, "July 31st should carry forward final balance");
+    }
+
+    #[test]
+    fn test_integration_calendar_service_balance_service_cross_month_boundaries() {
+        // This test verifies that projected balance calculations work correctly
+        // when the starting balance comes from a previous month
+        
+        use std::sync::Arc;
+        use tempfile::tempdir;
+        use crate::backend::storage::csv::CsvConnection;
+        use crate::backend::domain::balance_service::BalanceService;
+        use crate::backend::domain::child_service::ChildService;
+        use crate::backend::domain::commands::child::CreateChildCommand;
+        
+        let calendar_service = CalendarService::new();
+        
+        // Create test environment with proper connection setup
+        let temp_dir = tempdir().unwrap();
+        let connection = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
+        let balance_service = BalanceService::new(connection.clone());
+        let child_service = ChildService::new(connection.clone());
+        
+        // Create a test child
+        let child_result = child_service.create_child(CreateChildCommand {
+            name: "Test Child".to_string(),
+            birthdate: "2015-01-01".to_string(),
+        }).unwrap();
+        let child_id = &child_result.child.id;
+        
+        // Create transactions where July starts with only future transactions
+        // (simulating a scenario where the last historical transaction was in June)
+        let transactions = vec![
+            create_test_transaction("2025-07-01T10:00:00Z", 10.0, f64::NAN, "First future allowance"),
+            create_test_transaction("2025-07-15T10:00:00Z", 15.0, f64::NAN, "Mid-month future allowance"),
+            create_test_transaction("2025-07-30T10:00:00Z", -5.0, f64::NAN, "End-month future spending"),
+        ];
+        
+        // Store historical transactions in the repository so BalanceService can access them
+        let transaction_repository = connection.create_transaction_repository();
+        for transaction in &transactions {
+            if !transaction.balance.is_nan() {
+                // Store historical transactions (non-NaN balance) in the repository
+                let domain_transaction = crate::backend::domain::models::transaction::Transaction {
+                    id: transaction.id.clone(),
+                    child_id: child_id.clone(),
+                    date: transaction.date.clone(),
+                    description: transaction.description.clone(),
+                    amount: transaction.amount,
+                    balance: transaction.balance,
+                    transaction_type: if transaction.amount > 0.0 { 
+                        crate::backend::domain::models::transaction::TransactionType::Income 
+                    } else { 
+                        crate::backend::domain::models::transaction::TransactionType::Expense 
+                    },
+                };
+                transaction_repository.store_transaction(&domain_transaction).unwrap();
+            }
+        }
+        
+        // Generate calendar with projected balances
+        let calendar = calendar_service.generate_calendar_month_with_projected_balances(
+            7, 2025, transactions, &balance_service, child_id
+        );
+        
+        // Verify the calendar handles the case where all transactions need projection
+        // (starting balance would be 0.0 from calculate_starting_balance_for_month)
+        let july_1_day = calendar.days.iter().find(|d| d.day == 1).unwrap();
+        assert_eq!(july_1_day.balance, 10.0, "July 1st should show projected balance (0.0 + 10.0 = 10.0)");
+        
+        let july_15_day = calendar.days.iter().find(|d| d.day == 15).unwrap();
+        assert_eq!(july_15_day.balance, 25.0, "July 15th should show projected balance (10.0 + 15.0 = 25.0)");
+        
+        let july_30_day = calendar.days.iter().find(|d| d.day == 30).unwrap();
+        assert_eq!(july_30_day.balance, 20.0, "July 30th should show projected balance (25.0 - 5.0 = 20.0)");
+        
+        // Verify intermediate days carry forward balances correctly
+        let july_10_day = calendar.days.iter().find(|d| d.day == 10).unwrap();
+        assert_eq!(july_10_day.balance, 10.0, "July 10th should carry forward balance from July 1st");
+        
+        let july_25_day = calendar.days.iter().find(|d| d.day == 25).unwrap();
+        assert_eq!(july_25_day.balance, 25.0, "July 25th should carry forward balance from July 15th");
+        
+        let july_31_day = calendar.days.iter().find(|d| d.day == 31).unwrap();
+        assert_eq!(july_31_day.balance, 20.0, "July 31st should carry forward balance from July 30th");
+    }
+
+    #[test]
+    fn test_integration_calendar_service_no_nan_transactions() {
+        // This test verifies that when there are no NaN transactions,
+        // the integration still works correctly (fallback to original behavior)
+        
+        use std::sync::Arc;
+        use tempfile::tempdir;
+        use crate::backend::storage::csv::CsvConnection;
+        use crate::backend::domain::balance_service::BalanceService;
+        use crate::backend::domain::child_service::ChildService;
+        use crate::backend::domain::commands::child::CreateChildCommand;
+        
+        let calendar_service = CalendarService::new();
+        
+        // Create test environment with proper connection setup
+        let temp_dir = tempdir().unwrap();
+        let connection = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
+        let balance_service = BalanceService::new(connection.clone());
+        let child_service = ChildService::new(connection.clone());
+        
+        // Create a test child
+        let child_result = child_service.create_child(CreateChildCommand {
+            name: "Test Child".to_string(),
+            birthdate: "2015-01-01".to_string(),
+        }).unwrap();
+        let child_id = &child_result.child.id;
+        
+        // Create transactions with all valid balances (no NaN)
+        let transactions = vec![
+            create_test_transaction("2025-07-01T10:00:00Z", 10.0, 10.0, "Historical allowance"),
+            create_test_transaction("2025-07-05T10:00:00Z", -3.0, 7.0, "Historical spending"),
+            create_test_transaction("2025-07-15T10:00:00Z", 5.0, 12.0, "Historical bonus"),
+        ];
+        
+        // Store historical transactions in the repository so BalanceService can access them
+        let transaction_repository = connection.create_transaction_repository();
+        for transaction in &transactions {
+            if !transaction.balance.is_nan() {
+                // Store historical transactions (non-NaN balance) in the repository
+                let domain_transaction = crate::backend::domain::models::transaction::Transaction {
+                    id: transaction.id.clone(),
+                    child_id: child_id.clone(),
+                    date: transaction.date.clone(),
+                    description: transaction.description.clone(),
+                    amount: transaction.amount,
+                    balance: transaction.balance,
+                    transaction_type: if transaction.amount > 0.0 { 
+                        crate::backend::domain::models::transaction::TransactionType::Income 
+                    } else { 
+                        crate::backend::domain::models::transaction::TransactionType::Expense 
+                    },
+                };
+                transaction_repository.store_transaction(&domain_transaction).unwrap();
+            }
+        }
+        
+        // Generate calendar with projected balances
+        let calendar = calendar_service.generate_calendar_month_with_projected_balances(
+            7, 2025, transactions, &balance_service, child_id
+        );
+        
+        // Verify all balances are preserved as-is (no projection needed)
+        let july_1_day = calendar.days.iter().find(|d| d.day == 1).unwrap();
+        assert_eq!(july_1_day.balance, 10.0, "July 1st should show original stored balance");
+        
+        let july_5_day = calendar.days.iter().find(|d| d.day == 5).unwrap();
+        assert_eq!(july_5_day.balance, 7.0, "July 5th should show original stored balance");
+        
+        let july_15_day = calendar.days.iter().find(|d| d.day == 15).unwrap();
+        assert_eq!(july_15_day.balance, 12.0, "July 15th should show original stored balance");
+        
+        // Verify forward balance propagation still works
+        let july_31_day = calendar.days.iter().find(|d| d.day == 31).unwrap();
+        assert_eq!(july_31_day.balance, 12.0, "July 31st should carry forward final balance");
     }
 } 

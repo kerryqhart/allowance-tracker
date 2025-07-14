@@ -152,6 +152,17 @@ impl<C: Connection> BalanceService<C> {
         Ok(final_balance)
     }
 
+    /// Calculate the projected balance for a future transaction
+    /// This is specifically for calculating what the balance would be for future allowances
+    /// without actually inserting the transaction. Used by CalendarService for display purposes.
+    pub fn calculate_projected_balance_for_transaction(&self, child_id: &str, transaction_date: &str, transaction_amount: f64) -> Result<f64> {
+        // Reuse the existing calculate_balance_for_new_transaction logic
+        // This method is identical in implementation but semantically different:
+        // - calculate_balance_for_new_transaction: for actual insertion
+        // - calculate_projected_balance_for_transaction: for projection/display only
+        self.calculate_balance_for_new_transaction(child_id, transaction_date, transaction_amount)
+    }
+
     /// Check if inserting a transaction at a specific date would require balance recalculation
     /// Returns true if there are any transactions after the specified date
     pub fn requires_balance_recalculation(&self, child_id: &str, transaction_date: &str) -> Result<bool> {
@@ -430,5 +441,137 @@ mod tests {
 
         let errors = service.validate_all_balances(child_id).unwrap();
         assert_eq!(errors.len(), 2); // Two incorrect balances
+    }
+
+    #[test]
+    fn test_calculate_projected_balance_for_transaction_no_history() {
+        let service = create_test_service();
+        
+        // Create a child first
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
+        let child_service = crate::backend::domain::child_service::ChildService::new(db);
+        let child_result = child_service.create_child(CreateChildCommand {
+            name: "Test Child".to_string(),
+            birthdate: "2015-01-01".to_string(),
+        }).unwrap();
+        let child_id = &child_result.child.id;
+
+        // No previous transactions - first allowance should be the amount itself
+        let projected_balance = service
+            .calculate_projected_balance_for_transaction(child_id, "2025-07-25T12:00:00+00:00", 10.0)
+            .expect("Failed to calculate projected balance");
+        
+        assert_eq!(projected_balance, 10.0, "First transaction should result in balance equal to the amount");
+    }
+
+    #[test]
+    fn test_calculate_projected_balance_for_transaction_with_history() {
+        let service = create_test_service();
+        
+        // Create a child first
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
+        let child_service = crate::backend::domain::child_service::ChildService::new(db);
+        let child_result = child_service.create_child(CreateChildCommand {
+            name: "Test Child".to_string(),
+            birthdate: "2015-01-01".to_string(),
+        }).unwrap();
+        let child_id = &child_result.child.id;
+
+        // Create some historical transactions
+        create_test_transaction(&service, child_id, "2025-07-01T12:00:00+00:00", "Previous allowance", 10.0, 10.0);
+        create_test_transaction(&service, child_id, "2025-07-15T12:00:00+00:00", "Spending", -3.0, 7.0);
+
+        // Project balance for a future allowance
+        let projected_balance = service
+            .calculate_projected_balance_for_transaction(child_id, "2025-07-25T12:00:00+00:00", 10.0)
+            .expect("Failed to calculate projected balance");
+        
+        assert_eq!(projected_balance, 17.0, "Projected balance should be previous balance (7.0) + new amount (10.0)");
+    }
+
+    #[test]
+    fn test_calculate_projected_balance_for_transaction_mid_month() {
+        let service = create_test_service();
+        
+        // Create a child first
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
+        let child_service = crate::backend::domain::child_service::ChildService::new(db);
+        let child_result = child_service.create_child(CreateChildCommand {
+            name: "Test Child".to_string(),
+            birthdate: "2015-01-01".to_string(),
+        }).unwrap();
+        let child_id = &child_result.child.id;
+
+        // Create transactions across multiple weeks
+        create_test_transaction(&service, child_id, "2025-07-04T12:00:00+00:00", "Week 1 allowance", 10.0, 10.0);
+        create_test_transaction(&service, child_id, "2025-07-11T12:00:00+00:00", "Week 2 allowance", 10.0, 20.0);
+        create_test_transaction(&service, child_id, "2025-07-16T14:30:00+00:00", "Spending", -5.0, 15.0);
+
+        // Project balance for next allowance
+        let projected_balance = service
+            .calculate_projected_balance_for_transaction(child_id, "2025-07-18T12:00:00+00:00", 10.0)
+            .expect("Failed to calculate projected balance");
+        
+        assert_eq!(projected_balance, 25.0, "Mid-month projection should account for all previous transactions");
+    }
+
+    #[test]
+    fn test_calculate_projected_balance_for_transaction_same_day_earlier() {
+        let service = create_test_service();
+        
+        // Create a child first
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
+        let child_service = crate::backend::domain::child_service::ChildService::new(db);
+        let child_result = child_service.create_child(CreateChildCommand {
+            name: "Test Child".to_string(),
+            birthdate: "2015-01-01".to_string(),
+        }).unwrap();
+        let child_id = &child_result.child.id;
+
+        // Create early morning spending transaction
+        create_test_transaction(&service, child_id, "2025-07-18T08:00:00+00:00", "Early spending", -2.0, -2.0);
+        
+        // Create morning allowance transaction (after spending)
+        create_test_transaction(&service, child_id, "2025-07-18T10:00:00+00:00", "Morning allowance", 10.0, 8.0);
+
+        // Project balance for afternoon transaction on same day
+        let projected_balance = service
+            .calculate_projected_balance_for_transaction(child_id, "2025-07-18T15:00:00+00:00", 5.0)
+            .expect("Failed to calculate projected balance");
+        
+        assert_eq!(projected_balance, 13.0, "Same-day projection should account for earlier same-day transactions (8.0 + 5.0)");
+    }
+
+    #[test]
+    fn test_calculate_projected_balance_for_transaction_complex_scenario() {
+        let service = create_test_service();
+        
+        // Create a child first
+        let temp_dir = tempfile::tempdir().unwrap();
+        let db = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
+        let child_service = crate::backend::domain::child_service::ChildService::new(db);
+        let child_result = child_service.create_child(CreateChildCommand {
+            name: "Test Child".to_string(),
+            birthdate: "2015-01-01".to_string(),
+        }).unwrap();
+        let child_id = &child_result.child.id;
+
+        // Create a complex history that mimics real allowance scenario
+        create_test_transaction(&service, child_id, "2025-06-27T12:00:00+00:00", "June Week 4", 10.0, 10.0);
+        create_test_transaction(&service, child_id, "2025-07-04T12:00:00+00:00", "July Week 1", 10.0, 20.0);
+        create_test_transaction(&service, child_id, "2025-07-07T16:00:00+00:00", "Toy purchase", -8.0, 12.0);
+        create_test_transaction(&service, child_id, "2025-07-11T12:00:00+00:00", "July Week 2", 10.0, 22.0);
+        create_test_transaction(&service, child_id, "2025-07-18T12:00:00+00:00", "July Week 3", 10.0, 32.0);
+
+        // Project balance for the next allowance (July Week 4)
+        let projected_balance = service
+            .calculate_projected_balance_for_transaction(child_id, "2025-07-25T12:00:00+00:00", 10.0)
+            .expect("Failed to calculate projected balance");
+        
+        assert_eq!(projected_balance, 42.0, "Complex scenario: should project correct balance for future allowance");
     }
 } 

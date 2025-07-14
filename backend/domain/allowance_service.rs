@@ -266,7 +266,7 @@ impl AllowanceService {
                         date: transaction_datetime,
                         description: "Weekly allowance".to_string(),
                         amount: config.amount,
-                        balance: 0.0, // Balance is not meaningful for future transactions
+                        balance: f64::NAN, // Balance calculation delegated to BalanceService
                         transaction_type: DomainTransactionType::FutureAllowance,
                     };
                     
@@ -912,5 +912,44 @@ mod tests {
             .expect("Failed to check allowance for date");
 
         assert!(!has_allowance, "Should not detect allowance from non-allowance transaction");
+    }
+
+    #[test]
+    fn test_generate_future_allowance_transactions_balance_is_nan() {
+        let service = setup_test();
+        let child = create_test_child(&service);
+
+        // Create active allowance config for Friday (day_of_week: 5)
+        let command = UpdateAllowanceConfigCommand {
+            child_id: Some(child.id.clone()),
+            amount: 10.0,
+            day_of_week: 5, // Friday
+            is_active: true,
+        };
+
+        service
+            .update_allowance_config(command)
+            .expect("Failed to create allowance config");
+
+        // Generate future allowances for a date range that includes future Fridays
+        let start_date = Local::now().date_naive().succ_opt().unwrap(); // Tomorrow
+        let end_date = start_date + chrono::Duration::days(14); // Two weeks from tomorrow
+
+        let future_allowances = service
+            .generate_future_allowance_transactions(&child.id, start_date, end_date)
+            .expect("Failed to generate future allowances");
+
+        // Should have at least one future allowance (likely 2 Fridays in a 2-week period)
+        assert!(!future_allowances.is_empty(), "Should generate at least one future allowance");
+
+        // All future allowances should have NaN balance (balance calculation delegated to BalanceService)
+        for allowance in &future_allowances {
+            assert!(allowance.balance.is_nan(), 
+                "Future allowance balance should be NaN, not {:.2}. AllowanceService should not calculate balances - that's BalanceService's responsibility",
+                allowance.balance);
+            assert_eq!(allowance.amount, 10.0, "Future allowance amount should match config");
+            assert_eq!(allowance.description, "Weekly allowance", "Future allowance description should be correct");
+            assert_eq!(allowance.transaction_type, DomainTransactionType::FutureAllowance, "Future allowance type should be FutureAllowance");
+        }
     }
 } 
