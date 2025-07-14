@@ -56,6 +56,7 @@ pub struct AllowanceTrackerApp {
     #[allow(dead_code)]
     pub calendar_loading: bool,
     pub calendar_transactions: Vec<Transaction>,
+    pub calendar_month: Option<shared::CalendarMonth>,
     pub selected_month: u32,
     pub selected_year: i32,
     
@@ -110,6 +111,7 @@ impl AllowanceTrackerApp {
             // Calendar state
             calendar_loading: false,
             calendar_transactions: Vec::new(),
+            calendar_month: None,
             selected_month: current_month,
             selected_year: current_year,
             

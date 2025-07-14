@@ -29,7 +29,7 @@
 use log::{info, warn};
 use chrono::Datelike;
 use crate::ui::app_state::AllowanceTrackerApp;
-use crate::ui::mappers::{to_dto, TransactionMapper};
+use crate::ui::mappers::to_dto;
 use crate::backend::domain::commands::transactions::TransactionListQuery;
 
 impl AllowanceTrackerApp {
@@ -140,26 +140,27 @@ impl AllowanceTrackerApp {
         
         log::info!("🗓️  Querying transactions from {} to {}", start_date, end_date);
         
-        // Load transactions for the selected month with date filtering
-        let query = TransactionListQuery {
-            after: None,
-            limit: None, // Don't limit - get all transactions for the month
-            start_date: Some(format!("{}T00:00:00Z", start_date.format("%Y-%m-%d"))),
-            end_date: Some(format!("{}T23:59:59Z", end_date.format("%Y-%m-%d"))),
-        };
-        
-        log::debug!("🔍 Query: {:?}", query);
-        
-        match self.backend.transaction_service.list_transactions_domain(query) {
-            Ok(result) => {
-                log::info!("📊 Successfully loaded {} transactions from backend for {}/{}", 
-                          result.transactions.len(), self.selected_month, self.selected_year);
+        // Use calendar service instead of transaction service directly
+        // This ensures proper cross-month balance forwarding
+        match self.backend.calendar_service.get_calendar_month_with_transactions(
+            self.selected_month,
+            self.selected_year as u32,
+            &self.backend.transaction_service,
+        ) {
+            Ok(calendar_month) => {
+                log::info!("📊 Successfully loaded calendar month with {} days for {}/{}", 
+                          calendar_month.days.len(), self.selected_month, self.selected_year);
                 
-                // Convert domain transactions to DTOs
-                self.calendar_transactions = result.transactions
-                    .into_iter()
-                    .map(TransactionMapper::to_dto)
-                    .collect();
+                // Extract transactions from all calendar days (for backward compatibility)
+                let mut all_transactions = Vec::new();
+                for day in &calendar_month.days {
+                    all_transactions.extend(day.transactions.clone());
+                }
+                
+                self.calendar_transactions = all_transactions;
+                
+                // Store the complete calendar month structure (with balance data)
+                self.calendar_month = Some(calendar_month);
                 
                 log::info!("🔄 Converted to {} DTO transactions", self.calendar_transactions.len());
                 
@@ -187,6 +188,7 @@ impl AllowanceTrackerApp {
                 log::error!("❌ Failed to load transactions: {}", e);
                 self.error_message = Some(format!("Failed to load transactions: {}", e));
                 self.calendar_transactions = Vec::new();
+                self.calendar_month = None;
             }
         }
     }

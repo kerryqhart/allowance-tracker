@@ -127,7 +127,7 @@ pub struct CalendarDay {
     pub day_type: CalendarDayType,
     /// Transactions that occurred on this day
     pub transactions: Vec<Transaction>,
-    /// The balance at the end of this day (if any transactions occurred)
+    /// The balance at the end of this day (for current month days only)
     pub balance: Option<f64>,
 }
 
@@ -353,179 +353,43 @@ impl CalendarDay {
 }
 
 impl AllowanceTrackerApp {
-    /// Create CalendarDay instances for the selected month
-    pub fn create_calendar_days(&self, transactions: &[Transaction]) -> Vec<CalendarDay> {
-        log::info!("🗓️  Creating calendar days for {}/{} with {} transactions", 
-                  self.selected_month, self.selected_year, transactions.len());
-        
-        let mut calendar_days = Vec::new();
-        
-        // Create a date for the first day of the selected month
-        let first_day = match NaiveDate::from_ymd_opt(self.selected_year, self.selected_month, 1) {
-            Some(date) => date,
-            None => {
-                log::error!("❌ Failed to create first day of month {}/{}", self.selected_month, self.selected_year);
-                return calendar_days;
-            }
+    /// Convert backend CalendarDay to frontend CalendarDay structure
+    fn convert_backend_calendar_day(&self, backend_day: &shared::CalendarDay) -> CalendarDay {
+        // Convert day type from backend to frontend enum
+        let day_type = match backend_day.day_type {
+            shared::CalendarDayType::MonthDay => CalendarDayType::CurrentMonth,
+            shared::CalendarDayType::PaddingBefore | shared::CalendarDayType::PaddingAfter => CalendarDayType::FillerDay,
         };
         
-        // Calculate the number of days in the month
-        let days_in_month = match first_day.with_day(1) {
-            Some(first) => {
-                let next_month = if self.selected_month == 12 {
-                    first.with_year(self.selected_year + 1).unwrap().with_month(1).unwrap()
-                } else {
-                    first.with_month(self.selected_month + 1).unwrap()
-                };
-                (next_month - chrono::Duration::days(1)).day()
-            }
-            None => {
-                log::error!("❌ Failed to calculate days in month {}/{}", self.selected_month, self.selected_year);
-                return calendar_days;
-            }
+        // Create date for this day
+        let date = if backend_day.day == 0 {
+            // For filler days, use an arbitrary date (not used for display)
+            NaiveDate::from_ymd_opt(self.selected_year, self.selected_month, 1).unwrap()
+        } else {
+            NaiveDate::from_ymd_opt(self.selected_year, self.selected_month, backend_day.day).unwrap()
         };
         
-        log::info!("📅 Month {}/{} has {} days", self.selected_month, self.selected_year, days_in_month);
-        
-        // Get current date for highlighting today
+        // Check if this is today
         let today = chrono::Local::now();
-        let is_current_month = today.year() == self.selected_year && today.month() == self.selected_month;
-        let today_day = if is_current_month { Some(today.day()) } else { None };
+        let is_today = today.year() == self.selected_year 
+            && today.month() == self.selected_month 
+            && today.day() == backend_day.day;
         
-        // Group transactions by day
-        let mut transactions_by_day: std::collections::HashMap<u32, Vec<Transaction>> = std::collections::HashMap::new();
-        let mut processed_transactions = 0;
-        let mut filtered_transactions = 0;
-        
-        for transaction in transactions {
-            processed_transactions += 1;
-            log::debug!("🔍 Processing transaction {}: {} on {}", 
-                       processed_transactions, transaction.description, transaction.date);
-            
-            // Extract date from DateTime object
-            let parsed_date = transaction.date.naive_local().date();
-            
-            
-            log::debug!("📅 Parsed date: {} (year={}, month={}, day={})", 
-                       parsed_date, parsed_date.year(), parsed_date.month(), parsed_date.day());
-            
-            if parsed_date.year() == self.selected_year && parsed_date.month() == self.selected_month {
-                filtered_transactions += 1;
-                let day = parsed_date.day();
-                log::info!("✅ Transaction '{}' matches {}/{} - adding to day {}", 
-                          transaction.description, self.selected_month, self.selected_year, day);
-                transactions_by_day.entry(day).or_insert_with(Vec::new).push(transaction.clone());
-            } else {
-                log::debug!("❌ Transaction '{}' date {}/{} doesn't match selected {}/{}", 
-                           transaction.description, parsed_date.year(), parsed_date.month(), 
-                           self.selected_year, self.selected_month);
-            }
+        CalendarDay {
+            day_number: backend_day.day,
+            date,
+            is_today,
+            day_type,
+            transactions: backend_day.transactions.clone(),
+            balance: Some(backend_day.balance),
         }
-        
-        log::info!("📊 Transaction processing complete: {}/{} transactions matched {}/{}", 
-                  filtered_transactions, processed_transactions, self.selected_month, self.selected_year);
-        
-        // Log the grouped transactions
-        for (day, day_transactions) in &transactions_by_day {
-            log::info!("📅 Day {}: {} transactions", day, day_transactions.len());
-            for transaction in day_transactions {
-                log::debug!("  - {}: ${}", transaction.description, transaction.amount);
-            }
-        }
-        
-        // Create CalendarDay instances for each day in the month
-        for day in 1..=days_in_month {
-            let day_date = match first_day.with_day(day) {
-                Some(date) => date,
-                None => continue,
-            };
-            
-            let is_today = today_day == Some(day);
-            let mut calendar_day = CalendarDay::new(day, day_date, is_today, CalendarDayType::CurrentMonth);
-            
-            // Add transactions for this day
-            if let Some(day_transactions) = transactions_by_day.get(&day) {
-                log::info!("📅 Adding {} transactions to day {}", day_transactions.len(), day);
-                for transaction in day_transactions {
-                    calendar_day.add_transaction(transaction.clone());
-                }
-            }
-            
-            calendar_days.push(calendar_day);
-        }
-        
-        // Now create a complete calendar grid with filler days
-        let mut complete_calendar_days = Vec::new();
-        
-        // Calculate first day offset for grid layout
-        let first_day_offset = match first_day.weekday() {
-            Weekday::Mon => 0,
-            Weekday::Tue => 1,
-            Weekday::Wed => 2,
-            Weekday::Thu => 3,
-            Weekday::Fri => 4,
-            Weekday::Sat => 5,
-            Weekday::Sun => 6,
-        };
-        
-        // Create filler days for beginning of month if needed
-        if first_day_offset > 0 {
-            let prev_month_date = if self.selected_month == 1 {
-                NaiveDate::from_ymd_opt(self.selected_year - 1, 12, 1)
-            } else {
-                NaiveDate::from_ymd_opt(self.selected_year, self.selected_month - 1, 1)
-            };
-            
-            if let Some(prev_month_first) = prev_month_date {
-                // Get the last day of previous month
-                let prev_month_last_day = first_day - chrono::Duration::days(1);
-                
-                // Create filler days for the end of the previous month
-                for i in 0..first_day_offset {
-                    let filler_day_num = (prev_month_last_day.day() - (first_day_offset - 1 - i)) as u32;
-                    let filler_date = prev_month_last_day - chrono::Duration::days((first_day_offset - 1 - i) as i64);
-                    
-                    let filler_day = CalendarDay::new(filler_day_num, filler_date, false, CalendarDayType::FillerDay);
-                    complete_calendar_days.push(filler_day);
-                }
-            }
-        }
-        
-        // Add all the current month days
-        complete_calendar_days.extend(calendar_days);
-        
-        // Calculate how many days we need to fill the last row
-        let total_days_so_far = complete_calendar_days.len();
-        let weeks_needed = ((total_days_so_far + 6) / 7) as u32;
-        let total_cells_needed = weeks_needed * 7;
-        let filler_days_needed = total_cells_needed - total_days_so_far as u32;
-        
-        // Create filler days for the end of the calendar if needed
-        if filler_days_needed > 0 {
-            let next_month_date = if self.selected_month == 12 {
-                NaiveDate::from_ymd_opt(self.selected_year + 1, 1, 1)
-            } else {
-                NaiveDate::from_ymd_opt(self.selected_year, self.selected_month + 1, 1)
-            };
-            
-            if let Some(next_month_first) = next_month_date {
-                for i in 0..filler_days_needed {
-                    let filler_day_num = i + 1;
-                    let filler_date = next_month_first + chrono::Duration::days(i as i64);
-                    
-                    let filler_day = CalendarDay::new(filler_day_num, filler_date, false, CalendarDayType::FillerDay);
-                    complete_calendar_days.push(filler_day);
-                }
-            }
-        }
-        
-        log::info!("🗓️  Created {} total calendar days ({} current month + {} filler days) for {}/{}", 
-                  complete_calendar_days.len(), days_in_month, 
-                  complete_calendar_days.len() - days_in_month as usize,
-                  self.selected_month, self.selected_year);
-        
-        complete_calendar_days
     }
+    
+
+    
+    /// Calculate running balances for all days in the month, carrying forward balances
+    /// from previous days when there are no transactions
+
 
     /// Draw calendar section with toggle header integrated
     pub fn draw_calendar_section_with_toggle(&mut self, ui: &mut egui::Ui, available_rect: egui::Rect, transactions: &[Transaction]) {
@@ -677,10 +541,19 @@ impl AllowanceTrackerApp {
     /// Draw calendar days with responsive sizing using CalendarDay components
     pub fn draw_calendar_days_responsive(&mut self, ui: &mut egui::Ui, transactions: &[Transaction], cell_width: f32, cell_height: f32) {
         ui.spacing_mut().item_spacing.y = CALENDAR_CARD_SPACING; // Vertical spacing between week rows
-        // Create complete calendar grid with filler days
-        let all_days = self.create_calendar_days(transactions);
+        // Use calendar month data from backend (which includes balance data)
+        let all_days: Vec<CalendarDay> = if let Some(ref calendar_month) = self.calendar_month {
+            // Convert backend calendar days to frontend calendar days
+            calendar_month.days.iter()
+                .map(|day| self.convert_backend_calendar_day(day))
+                .collect()
+        } else {
+            // No calendar data available - return empty calendar
+            log::warn!("⚠️ No calendar month data available for {}/{}", self.selected_month, self.selected_year);
+            Vec::new()
+        };
         
-        // The create_calendar_days() method now returns a complete grid with filler days included
+        // Backend calendar data includes complete grid with filler days
         
         // Render the calendar grid (dynamic weeks based on month needs) in proper row layout  
         // Process days in chunks of 7 (one week per row)
@@ -830,8 +703,17 @@ impl AllowanceTrackerApp {
     
     /// Render the calendar grid for the selected month using CalendarDay components
     pub fn render_calendar_grid(&mut self, ui: &mut egui::Ui, day_width: f32, day_height: f32) {
-        // Create CalendarDay instances from calendar_transactions
-        let calendar_days = self.create_calendar_days(&self.calendar_transactions);
+        // Use calendar month data from backend (which includes balance data)
+        let calendar_days: Vec<CalendarDay> = if let Some(ref calendar_month) = self.calendar_month {
+            // Convert backend calendar days to frontend calendar days
+            calendar_month.days.iter()
+                .map(|day| self.convert_backend_calendar_day(day))
+                .collect()
+        } else {
+            // No calendar data available - return empty calendar
+            log::warn!("⚠️ No calendar month data available for {}/{}", self.selected_month, self.selected_year);
+            Vec::new()
+        };
         
         // Calculate the first day offset for grid layout
         let first_day = match NaiveDate::from_ymd_opt(self.selected_year, self.selected_month, 1) {
@@ -842,7 +724,7 @@ impl AllowanceTrackerApp {
             }
         };
         
-        // Since create_calendar_days now returns a complete grid, we just need to render all days
+        // Backend provides complete grid, we just need to render all days
         let total_days = calendar_days.len();
         
         // Use the pre-calculated dimensions - remove spacing for grid
@@ -883,7 +765,7 @@ impl AllowanceTrackerApp {
                             // No spacing - grid lines will provide visual separation
             
             // Calendar grid with dynamic sizing using CalendarDay components
-            // Since create_calendar_days returns a complete grid, we just iterate through all days
+            // Backend provides complete grid, we just iterate through all days
             let total_weeks = (total_days + 6) / 7;
             
             for week in 0..total_weeks {
