@@ -47,6 +47,74 @@ pub enum CalendarDayType {
     FillerDay,
 }
 
+impl CalendarDayType {
+    /// Get the background color for this day type
+    pub fn background_color(&self, is_today: bool) -> egui::Color32 {
+        if is_today {
+            // Light yellow tint for today (10% more opacity)
+            egui::Color32::from_rgba_unmultiplied(255, 248, 220, 110)
+        } else {
+            match self {
+                CalendarDayType::CurrentMonth => {
+                    // Semi-transparent white background (10% more opacity)
+                    egui::Color32::from_rgba_unmultiplied(255, 255, 255, 55)
+                }
+                CalendarDayType::FillerDay => {
+                    // Darker gray for filler days (matching calendar day opacity)
+                    egui::Color32::from_rgba_unmultiplied(120, 120, 120, 55)
+                }
+            }
+        }
+    }
+
+    /// Get the border color for this day type
+    pub fn border_color(&self) -> egui::Color32 {
+        match self {
+            CalendarDayType::CurrentMonth => {
+                // Normal border
+                egui::Color32::from_rgba_unmultiplied(200, 200, 200, 100)
+            }
+            CalendarDayType::FillerDay => {
+                // Lighter border for filler days
+                egui::Color32::from_rgba_unmultiplied(150, 150, 150, 80)
+            }
+        }
+    }
+
+    /// Get the day number text color for this day type
+    pub fn day_text_color(&self, is_today: bool) -> egui::Color32 {
+        if is_today {
+            // Pink for today
+            egui::Color32::from_rgb(219, 112, 147)
+        } else {
+            match self {
+                CalendarDayType::CurrentMonth => {
+                    // Bold black for current month days
+                    egui::Color32::BLACK
+                }
+                CalendarDayType::FillerDay => {
+                    // Gray for filler days
+                    egui::Color32::from_rgb(150, 150, 150)
+                }
+            }
+        }
+    }
+
+    /// Get the balance text color for this day type
+    pub fn balance_text_color(&self) -> egui::Color32 {
+        match self {
+            CalendarDayType::CurrentMonth => {
+                // Normal gray
+                egui::Color32::GRAY
+            }
+            CalendarDayType::FillerDay => {
+                // More subdued gray for filler day balance
+                egui::Color32::from_rgb(120, 120, 120)
+            }
+        }
+    }
+}
+
 /// Represents a single day in the calendar with its associated state and rendering logic
 pub struct CalendarDay {
     /// The day number (1-31)
@@ -122,14 +190,8 @@ impl CalendarDay {
             egui::vec2(width, height)
         );
         
-        // Draw subtle background for the day cell
-        let bg_color = if self.is_today {
-            egui::Color32::from_rgba_unmultiplied(255, 248, 220, 110) // Light yellow tint for today (10% more opacity)
-        } else if self.day_type == CalendarDayType::FillerDay {
-            egui::Color32::from_rgba_unmultiplied(120, 120, 120, 55) // Darker gray for filler days (matching calendar day opacity)
-        } else {
-            egui::Color32::from_rgba_unmultiplied(255, 255, 255, 55) // Semi-transparent white background (10% more opacity)
-        };
+        // Draw subtle background for the day cell using centralized color scheme
+        let bg_color = self.day_type.background_color(self.is_today);
         
         ui.painter().rect_filled(
             cell_rect,
@@ -137,12 +199,8 @@ impl CalendarDay {
             bg_color
         );
         
-        // Draw subtle border around the day cell
-        let border_color = if self.day_type == CalendarDayType::FillerDay {
-            egui::Color32::from_rgba_unmultiplied(150, 150, 150, 80) // Lighter border for filler days
-        } else {
-            egui::Color32::from_rgba_unmultiplied(200, 200, 200, 100) // Normal border
-        };
+        // Draw subtle border around the day cell using centralized color scheme
+        let border_color = self.day_type.border_color();
         
         ui.painter().rect_stroke(
             cell_rect,
@@ -168,13 +226,8 @@ impl CalendarDay {
                     (width * 0.15).max(14.0).min(18.0)
                 };
                 
-                let day_text_color = if self.is_today {
-                    egui::Color32::from_rgb(219, 112, 147) // Pink for today
-                } else if self.day_type == CalendarDayType::FillerDay {
-                    egui::Color32::from_rgb(150, 150, 150) // Gray for filler days
-                } else {
-                    egui::Color32::BLACK // Bold black for other days
-                };
+                // Day number text color using centralized color scheme
+                let day_text_color = self.day_type.day_text_color(self.is_today);
                 
                 ui.label(
                     egui::RichText::new(self.day_number.to_string())
@@ -192,11 +245,8 @@ impl CalendarDay {
                             (width * 0.12).max(10.0).min(14.0)
                         };
                         
-                        let balance_color = if self.day_type == CalendarDayType::FillerDay {
-                            egui::Color32::from_rgb(120, 120, 120) // More subdued gray for filler day balance
-                        } else {
-                            egui::Color32::GRAY // Normal gray
-                        };
+                        // Balance text color using centralized color scheme
+                        let balance_color = self.day_type.balance_text_color();
                         
                         ui.label(
                             egui::RichText::new(format!("${:.2}", balance))

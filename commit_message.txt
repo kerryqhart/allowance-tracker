@@ -1,19 +1,33 @@
-Refactor calendar days with enum and fix filler day styling
+Centralize calendar day color schemes in CalendarDayType enum
 
-- Replace boolean `is_current_month` with `CalendarDayType` enum for better type safety
-- Add `CalendarDayType::CurrentMonth` and `CalendarDayType::FillerDay` variants
-- Fix filler day background color to darker gray (RGB 120,120,120) with proper opacity
-- Increase all calendar day card opacity by 10% (50→55, 100→110, 30→33→55)
-- Refactor `create_calendar_days()` to return complete grid including filler days
-- Simplify `draw_calendar_days_responsive()` to use complete grid from `create_calendar_days()`
-- Fix bug where July showed invalid day numbers (32, 33, 34, 35)
-- Ensure proper day numbering: current month days (1-31) and correct filler day numbers
-- Improve code maintainability with single source of truth for calendar grid creation
-- Update all CalendarDay instantiation to use new enum instead of boolean
+- Add color methods to CalendarDayType enum for type-safe color management
+- Implement background_color(), border_color(), day_text_color(), balance_text_color()
+- Each method returns appropriate colors based on day type (CurrentMonth vs FillerDay)
+- Handle today highlighting logic within the color methods
+- Refactor render_with_config() to use centralized color methods
+- Replace scattered color conditionals with clean method calls
+- Maintain existing visual appearance while improving code architecture
+
+Before:
+```rust
+let bg_color = if self.is_today {
+    egui::Color32::from_rgba_unmultiplied(255, 248, 220, 110)
+} else if self.day_type == CalendarDayType::FillerDay {
+    egui::Color32::from_rgba_unmultiplied(120, 120, 120, 55)
+} else {
+    egui::Color32::from_rgba_unmultiplied(255, 255, 255, 55)
+};
+```
+
+After:
+```rust
+let bg_color = self.day_type.background_color(self.is_today);
+```
 
 Benefits:
-- Better visual distinction between current month and filler days
-- Type-safe day type checking prevents logical errors
-- Cleaner, more maintainable codebase
-- Consistent styling across all calendar day cards
-- Proper calendar grid with correct day numbering 
+- Single source of truth for all calendar day color schemes
+- Type-safe color management tied to day types
+- Cleaner, more maintainable rendering code
+- Easy to modify colors in future (one place to change)
+- Self-documenting color methods with clear intent
+- Improved architectural separation of concerns 
