@@ -104,62 +104,52 @@ impl CalendarDay {
             ui.set_width(width);
             ui.set_height(height);
             
-            // Day number button - adaptive sizing based on layout
-            let (day_font_size, button_width, button_height) = if config.is_grid_layout {
-                // Grid layout: fixed sizing
-                (18.0, width - 10.0, 25.0)
-            } else {
-                // Responsive layout: proportional sizing
-                let font_size = (width * 0.2).max(14.0).min(20.0);
-                let btn_height = height * 0.3;
-                let btn_width = width * 0.9;
-                (font_size, btn_width, btn_height)
-            };
-            
-            let day_button = if self.is_today {
-                // Pink outline with shadow for current day
-                egui::Button::new(egui::RichText::new(self.day_number.to_string()).size(day_font_size).color(egui::Color32::from_rgb(219, 112, 147)))
-                    .fill(egui::Color32::TRANSPARENT)
-                    .stroke(egui::Stroke::new(2.0, egui::Color32::from_rgb(219, 112, 147)))
-                    .rounding(egui::Rounding::same(6.0))
-            } else {
-                egui::Button::new(egui::RichText::new(self.day_number.to_string()).size(day_font_size))
-                    .fill(egui::Color32::TRANSPARENT)
-                    .rounding(egui::Rounding::same(4.0))
-            };
-            
-            // Add shadow effect for today
-            if self.is_today {
-                let button_rect = egui::Rect::from_min_size(
-                    ui.cursor().min + egui::vec2(2.0, 2.0),
-                    egui::vec2(button_width, button_height)
+            // Top row: Day number (left) and Balance (right)
+            ui.horizontal(|ui| {
+                ui.set_width(width);
+                
+                // Day number in upper left (bold black)
+                let day_font_size = if config.is_grid_layout {
+                    16.0
+                } else {
+                    (width * 0.15).max(14.0).min(18.0)
+                };
+                
+                let day_text_color = if self.is_today {
+                    egui::Color32::from_rgb(219, 112, 147) // Pink for today
+                } else {
+                    egui::Color32::BLACK // Bold black for other days
+                };
+                
+                ui.label(
+                    egui::RichText::new(self.day_number.to_string())
+                        .font(egui::FontId::new(day_font_size, egui::FontFamily::Proportional))
+                        .color(day_text_color)
+                        .strong()
                 );
-                ui.painter().rect_filled(
-                    button_rect,
-                    egui::Rounding::same(6.0),
-                    egui::Color32::from_rgba_premultiplied(219, 112, 147, 40)
-                );
-            }
-            
-            let day_response = ui.add_sized([button_width, button_height], day_button);
-            
-            if config.enable_click_handler && day_response.clicked() {
-                println!("Selected day: {}", self.day_number);
-            }
-            
-            // Show balance if available
-            if let Some(balance) = self.balance {
-                ui.add_space(3.0);
-                ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
-                    ui.label(
-                        egui::RichText::new(format!("${:.2}", balance))
-                            .font(egui::FontId::new(12.0, egui::FontFamily::Proportional))
-                            .color(egui::Color32::GRAY)
-                    );
+                
+                // Balance in upper right (subtle gray)
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if let Some(balance) = self.balance {
+                        let balance_font_size = if config.is_grid_layout {
+                            11.0
+                        } else {
+                            (width * 0.12).max(10.0).min(14.0)
+                        };
+                        
+                        ui.label(
+                            egui::RichText::new(format!("${:.2}", balance))
+                                .font(egui::FontId::new(balance_font_size, egui::FontFamily::Proportional))
+                                .color(egui::Color32::GRAY)
+                        );
+                    }
                 });
-            }
+            });
             
-            // Transaction chips - adaptive sizing and behavior
+            // Add some spacing between header and transaction chips
+            ui.add_space(6.0);
+            
+            // Transaction chips below - vertically stacked
             let transactions_to_show = if let Some(max) = config.max_transactions {
                 self.transactions.iter().take(max)
             } else {
@@ -167,13 +157,17 @@ impl CalendarDay {
             };
             
             for transaction in transactions_to_show {
-                if !config.is_grid_layout {
-                    // No spacing for responsive layout to fit in smaller cells
-                } else {
-                    ui.add_space(2.0);
-                }
-                
                 self.render_transaction_chip(ui, transaction, width, height, config.is_grid_layout);
+                ui.add_space(2.0); // Small spacing between chips
+            }
+            
+            // Add click handler for the entire day if enabled
+            if config.enable_click_handler {
+                let day_rect = ui.available_rect_before_wrap();
+                let day_response = ui.allocate_rect(day_rect, egui::Sense::click());
+                if day_response.clicked() {
+                    println!("Selected day: {}", self.day_number);
+                }
             }
         });
     }
