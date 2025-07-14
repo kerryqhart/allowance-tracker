@@ -393,37 +393,10 @@ impl AllowanceTrackerApp {
         // Draw card background
         self.draw_card_background(ui, card_rect);
         
-        // Draw toggle header
-        self.draw_toggle_header(ui, card_rect, "Recent Transactions");
-        
         // Draw calendar content inside the card
         ui.allocate_ui_at_rect(card_rect, |ui| {
             ui.vertical(|ui| {
-                ui.add_space(60.0); // Space for toggle header
-                
-                // Month navigation
-                ui.horizontal(|ui| {
-                    ui.add_space(12.0);
-                    if ui.button("<").clicked() {
-                        self.navigate_month(-1);
-                    }
-                    
-                    ui.add_space(20.0);
-                    let month_name = match self.selected_month {
-                        1 => "January", 2 => "February", 3 => "March", 4 => "April",
-                        5 => "May", 6 => "June", 7 => "July", 8 => "August",
-                        9 => "September", 10 => "October", 11 => "November", 12 => "December",
-                        _ => "Unknown"
-                    };
-                    ui.label(egui::RichText::new(format!("{} {}", month_name, self.selected_year)).size(18.0));
-                    
-                    ui.add_space(20.0);
-                    if ui.button(">").clicked() {
-                        self.navigate_month(1);
-                    }
-                });
-                
-                ui.add_space(15.0);
+                ui.add_space(15.0); // Reduced space since no header
                 
                 // Responsive calendar grid - same as original
                 ui.horizontal(|ui| {

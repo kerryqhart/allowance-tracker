@@ -78,7 +78,7 @@ pub struct AllowanceTrackerApp {
 }
 
 impl AllowanceTrackerApp {
-    /// Create a new allowance tracker app
+    /// Create a new AllowanceTrackerApp with default values
     pub fn new(cc: &eframe::CreationContext<'_>) -> Result<Self, anyhow::Error> {
         info!("🚀 Initializing AllowanceTrackerApp with refactored UI");
         
@@ -129,9 +129,57 @@ impl AllowanceTrackerApp {
             spend_money_description: String::new(),
         })
     }
-    
-    /// Clear success and error messages
-    #[allow(dead_code)]
+
+    /// Navigate to the previous month
+    pub fn navigate_to_previous_month(&mut self) {
+        if self.selected_month == 1 {
+            self.selected_month = 12;
+            self.selected_year -= 1;
+        } else {
+            self.selected_month -= 1;
+        }
+        
+        // Reload calendar data for the new month
+        self.calendar_loading = true;
+        self.load_calendar_data();
+        log::info!("📅 Navigated to previous month: {}/{}", self.selected_month, self.selected_year);
+    }
+
+    /// Navigate to the next month
+    pub fn navigate_to_next_month(&mut self) {
+        if self.selected_month == 12 {
+            self.selected_month = 1;
+            self.selected_year += 1;
+        } else {
+            self.selected_month += 1;
+        }
+        
+        // Reload calendar data for the new month
+        self.calendar_loading = true;
+        self.load_calendar_data();
+        log::info!("📅 Navigated to next month: {}/{}", self.selected_month, self.selected_year);
+    }
+
+    /// Get the current month name as a string
+    pub fn get_current_month_name(&self) -> String {
+        match self.selected_month {
+            1 => "January",
+            2 => "February", 
+            3 => "March",
+            4 => "April",
+            5 => "May",
+            6 => "June",
+            7 => "July",
+            8 => "August",
+            9 => "September",
+            10 => "October",
+            11 => "November",
+            12 => "December",
+            _ => "Unknown"
+        }.to_string()
+    }
+
+    /// Clear any error or success messages
     pub fn clear_messages(&mut self) {
         self.error_message = None;
         self.success_message = None;

@@ -60,14 +60,58 @@ impl eframe::App for AllowanceTrackerApp {
                 return;
             }
             
-            // Header
-            self.render_header(ui);
+            // STEP 2: Three-layer layout with subheader for toggle buttons
+            // Calculate layout areas
+            let header_height = 80.0;
+            let subheader_height = 50.0;
             
-            // Error and success messages
-            self.render_messages(ui);
+            let header_rect = egui::Rect::from_min_size(
+                full_rect.min,
+                egui::vec2(full_rect.width(), header_height)
+            );
             
-            // Main content area
-            self.render_main_content(ui);
+            let subheader_y = full_rect.min.y + header_height;
+            let subheader_rect = egui::Rect::from_min_size(
+                egui::pos2(full_rect.min.x, subheader_y),
+                egui::vec2(full_rect.width(), subheader_height)
+            );
+            
+            let content_y = full_rect.min.y + header_height + subheader_height;
+            let content_height = full_rect.height() - header_height - subheader_height;
+            let content_rect = egui::Rect::from_min_size(
+                egui::pos2(full_rect.min.x, content_y),
+                egui::vec2(full_rect.width(), content_height)
+            );
+            
+            // Layer 1: Header (existing function, positioned in header area)
+            ui.allocate_ui_at_rect(header_rect, |ui| {
+                self.render_header(ui);
+            });
+            
+            // Layer 2: Subheader (Calendar/Table toggle buttons)
+            ui.allocate_ui_at_rect(subheader_rect, |ui| {
+                ui.horizontal(|ui| {
+                    ui.add_space(20.0); // Left padding
+                    
+                    // Tab-specific controls on the left
+                    self.draw_tab_specific_controls(ui);
+                    
+                    // Tab toggle buttons on the right
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.add_space(20.0); // Right padding
+                        self.draw_tab_toggle_buttons(ui);
+                    });
+                });
+            });
+            
+            // Layer 3: Content (main content area)
+            ui.allocate_ui_at_rect(content_rect, |ui| {
+                // Error and success messages
+                self.render_messages(ui);
+                
+                // Main content area
+                self.render_main_content(ui);
+            });
         });
         
         // Render modals
@@ -82,6 +126,57 @@ impl AllowanceTrackerApp {
             ui.add_space(100.0);
             ui.spinner();
             ui.label("Loading...");
+        });
+    }
+
+    /// Draw tab-specific controls for the subheader
+    fn draw_tab_specific_controls(&mut self, ui: &mut egui::Ui) {
+        use crate::ui::app_state::MainTab;
+        
+        match self.current_tab {
+            MainTab::Calendar => {
+                self.draw_calendar_navigation_controls(ui);
+            }
+            MainTab::Table => {
+                // Future: Table-specific controls (filters, sorting, etc.)
+                // For now, leave empty
+            }
+        }
+    }
+
+    /// Draw calendar month navigation controls
+    fn draw_calendar_navigation_controls(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            // Previous month button
+            let prev_button = egui::Button::new("<")
+                .fill(egui::Color32::from_rgba_unmultiplied(255, 255, 255, 100))
+                .rounding(egui::Rounding::same(6.0))
+                .min_size(egui::vec2(35.0, 35.0));
+            
+            if ui.add(prev_button).clicked() {
+                self.navigate_to_previous_month();
+            }
+            
+            ui.add_space(15.0);
+            
+            // Current month and year display
+            let month_year_text = format!("{} {}", self.get_current_month_name(), self.selected_year);
+            ui.label(egui::RichText::new(month_year_text)
+                .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))
+                .color(egui::Color32::WHITE)
+                .strong());
+            
+            ui.add_space(15.0);
+            
+            // Next month button
+            let next_button = egui::Button::new(">")
+                .fill(egui::Color32::from_rgba_unmultiplied(255, 255, 255, 100))
+                .rounding(egui::Rounding::same(6.0))
+                .min_size(egui::vec2(35.0, 35.0));
+            
+            if ui.add(next_button).clicked() {
+                self.navigate_to_next_month();
+            }
         });
     }
 } 

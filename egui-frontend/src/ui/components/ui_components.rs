@@ -49,50 +49,10 @@ impl AllowanceTrackerApp {
         );
     }
     
-    /// Draw toggle header within card (like old Tauri version)
-    pub fn draw_toggle_header(&mut self, ui: &mut egui::Ui, card_rect: egui::Rect, title: &str) {
-        let header_rect = egui::Rect::from_min_size(
-            card_rect.min + egui::vec2(20.0, 15.0),
-            egui::vec2(card_rect.width() - 40.0, 40.0),
-        );
-        
-        // Set up UI for header
-        let mut header_ui = ui.child_ui(header_rect, egui::Layout::left_to_right(egui::Align::Center), None);
-        
-        // Title on the left
-        header_ui.label(egui::RichText::new(title)
-            .font(egui::FontId::new(20.0, egui::FontFamily::Proportional))
-            .strong()
-            .color(egui::Color32::from_rgb(70, 70, 70)));
-        
-        // Push toggle buttons to the right
-        header_ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            // Table button (added first so it appears on the right due to right_to_left layout)
-            let table_button = egui::Button::new(
-                egui::RichText::new("📋 Table")
-                    .font(egui::FontId::new(14.0, egui::FontFamily::Proportional))
-                    .color(if self.current_tab == MainTab::Table { 
-                        egui::Color32::WHITE 
-                    } else { 
-                        egui::Color32::from_rgb(70, 70, 70) 
-                    })
-            )
-            .min_size(egui::vec2(80.0, 30.0))
-            .rounding(egui::Rounding::same(6.0))
-            .fill(if self.current_tab == MainTab::Table {
-                egui::Color32::from_rgb(79, 109, 245) // Blue for active
-            } else {
-                egui::Color32::from_rgb(248, 248, 248) // Light gray for inactive
-            });
-            
-            if ui.add(table_button).clicked() {
-                self.current_tab = MainTab::Table;
-            }
-            
-            // Small space between buttons
-            ui.add_space(8.0);
-            
-            // Calendar button (added second so it appears on the left due to right_to_left layout)
+    /// Draw just the Calendar/Table toggle buttons (for subheader)
+    pub fn draw_tab_toggle_buttons(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            // Calendar button
             let calendar_button = egui::Button::new(
                 egui::RichText::new("📅 Calendar")
                     .font(egui::FontId::new(14.0, egui::FontFamily::Proportional))
@@ -113,7 +73,48 @@ impl AllowanceTrackerApp {
             if ui.add(calendar_button).clicked() {
                 self.current_tab = MainTab::Calendar;
             }
+            
+            ui.add_space(8.0);
+            
+            // Table button
+            let table_button = egui::Button::new(
+                egui::RichText::new("📋 Table")
+                    .font(egui::FontId::new(14.0, egui::FontFamily::Proportional))
+                    .color(if self.current_tab == MainTab::Table { 
+                        egui::Color32::WHITE 
+                    } else { 
+                        egui::Color32::from_rgb(70, 70, 70) 
+                    })
+            )
+            .min_size(egui::vec2(80.0, 30.0))
+            .rounding(egui::Rounding::same(6.0))
+            .fill(if self.current_tab == MainTab::Table {
+                egui::Color32::from_rgb(79, 109, 245) // Blue for active
+            } else {
+                egui::Color32::from_rgb(248, 248, 248) // Light gray for inactive
+            });
+            
+            if ui.add(table_button).clicked() {
+                self.current_tab = MainTab::Table;
+            }
         });
+    }
+
+    /// Draw toggle header within card (like old Tauri version) - just title now, toggles moved to subheader
+    pub fn draw_toggle_header(&mut self, ui: &mut egui::Ui, card_rect: egui::Rect, title: &str) {
+        let header_rect = egui::Rect::from_min_size(
+            card_rect.min + egui::vec2(20.0, 15.0),
+            egui::vec2(card_rect.width() - 40.0, 40.0),
+        );
+        
+        // Set up UI for header
+        let mut header_ui = ui.child_ui(header_rect, egui::Layout::left_to_right(egui::Align::Center), None);
+        
+        // Just the title now - toggle buttons moved to subheader
+        header_ui.label(egui::RichText::new(title)
+            .font(egui::FontId::new(20.0, egui::FontFamily::Proportional))
+            .strong()
+            .color(egui::Color32::from_rgb(70, 70, 70)));
     }
     
     /// Draw card header with title and toggle buttons
