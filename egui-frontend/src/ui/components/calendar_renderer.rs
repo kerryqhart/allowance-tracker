@@ -34,6 +34,10 @@ use chrono::{NaiveDate, Datelike, Weekday};
 use shared::Transaction;
 use crate::ui::app_state::AllowanceTrackerApp;
 
+/// Consistent spacing for all calendar elements - controls gaps between day cards, headers, etc.
+/// This value determines the visual tightness/looseness of the calendar layout.
+const CALENDAR_CARD_SPACING: f32 = 5.0; // Spacing in pixels between calendar elements
+
 /// Represents a single day in the calendar with its associated state and rendering logic
 pub struct CalendarDay {
     /// The day number (1-31)
@@ -115,7 +119,7 @@ impl CalendarDay {
         } else if !self.is_current_month {
             egui::Color32::from_rgba_unmultiplied(200, 200, 200, 30) // Light gray for filler days
         } else {
-            egui::Color32::from_rgba_unmultiplied(255, 255, 255, 50) // Very subtle white tint
+            egui::Color32::from_rgba_unmultiplied(255, 255, 255, 50) // Semi-transparent white background
         };
         
         ui.painter().rect_filled(
@@ -410,9 +414,8 @@ impl AllowanceTrackerApp {
         // Calendar takes up 92% of available width, centered
         let calendar_width = available_calendar_width * 0.92;
         
-        // Calculate cell dimensions proportionally
-        let cell_spacing = 4.0;
-        let total_spacing = cell_spacing * 6.0;
+        // Calculate cell dimensions proportionally  
+        let total_spacing = CALENDAR_CARD_SPACING * 6.0;
         let cell_width = (calendar_width - total_spacing) / 7.0;
         let cell_height = cell_width * 0.8;
         
@@ -446,25 +449,43 @@ impl AllowanceTrackerApp {
                             egui::vec2(calendar_width, ui.available_height()),
                             egui::Layout::top_down(egui::Align::LEFT),
                             |ui| {
-                                // Day headers - manual layout with proper spacing
+                                // Day headers - consistent layout with automatic spacing matching day cards
                                 ui.horizontal(|ui| {
+                                    ui.spacing_mut().item_spacing.x = CALENDAR_CARD_SPACING; // Match day cards spacing
                                     let day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-                                    for (i, day_name) in day_names.iter().enumerate() {
+                                    for day_name in day_names.iter() {
                                         ui.allocate_ui_with_layout(
                                             egui::vec2(cell_width, header_height),
                                             egui::Layout::centered_and_justified(egui::Direction::TopDown),
                                             |ui| {
+                                                // Get the rect for this header
+                                                let header_rect = ui.available_rect_before_wrap();
+                                                
+                                                // Draw card-like background
+                                                let bg_color = egui::Color32::from_rgba_unmultiplied(255, 255, 255, 180);
+                                                ui.painter().rect_filled(
+                                                    header_rect,
+                                                    egui::Rounding::same(2.0),
+                                                    bg_color
+                                                );
+                                                
+                                                // Draw border
+                                                let border_color = egui::Color32::from_rgba_unmultiplied(150, 150, 150, 200);
+                                                ui.painter().rect_stroke(
+                                                    header_rect,
+                                                    egui::Rounding::same(2.0),
+                                                    egui::Stroke::new(1.0, border_color)
+                                                );
+                                                
+                                                // Draw text
                                                 ui.label(egui::RichText::new(*day_name)
                                                     .font(egui::FontId::new(12.0, egui::FontFamily::Proportional))
                                                     .strong()
-                                                    .color(self.get_day_header_color(i)));
+                                                    .color(egui::Color32::DARK_GRAY));
                                             },
                                         );
                                         
-                                        // Add spacing between headers (except after last)
-                                        if i < day_names.len() - 1 {
-                                            ui.add_space(cell_spacing);
-                                        }
+                                        // No manual spacing - using automatic spacing system like day cards
                                     }
                                 });
                                 
@@ -533,8 +554,7 @@ impl AllowanceTrackerApp {
     
     /// Draw calendar days with responsive sizing using CalendarDay components
     pub fn draw_calendar_days_responsive(&mut self, ui: &mut egui::Ui, transactions: &[Transaction], cell_width: f32, cell_height: f32) {
-        // Get spacing from the context - use the same spacing as headers
-        let cell_spacing = 4.0;
+        ui.spacing_mut().item_spacing.y = CALENDAR_CARD_SPACING; // Vertical spacing between week rows
         // Create CalendarDay instances for this month
         let current_month_days = self.create_calendar_days(transactions);
         
@@ -629,7 +649,8 @@ impl AllowanceTrackerApp {
         // Process days in chunks of 7 (one week per row)
         for week_days in all_days.chunks(7) {
             ui.horizontal(|ui| {
-                for (day_index, calendar_day) in week_days.iter().enumerate() {
+                ui.spacing_mut().item_spacing.x = CALENDAR_CARD_SPACING; // Horizontal spacing between day cards
+                for calendar_day in week_days.iter() {
                     ui.allocate_ui_with_layout(
                         egui::vec2(cell_width, cell_height),
                         egui::Layout::top_down(egui::Align::LEFT),
@@ -642,15 +663,11 @@ impl AllowanceTrackerApp {
                         },
                     );
                     
-                    // Add spacing between day cells (except after last day in row)
-                    if day_index < week_days.len() - 1 {
-                        ui.add_space(cell_spacing);
-                    }
+                    // No manual spacing between day cells - using egui spacing control instead
                 }
             });
             
-            // Add vertical spacing between week rows
-            ui.add_space(cell_spacing);
+            // No vertical spacing between week rows
         }
     }
     
@@ -948,7 +965,7 @@ impl AllowanceTrackerApp {
         let calendar_left_margin = (available_calendar_width - calendar_width) / 2.0;
         
         // Calculate cell dimensions proportionally
-        let cell_spacing = 4.0; // Reduced from 6.0
+        let cell_spacing = 1.0; // Reset to reasonable value
         let total_spacing = cell_spacing * 6.0; // 6 gaps between 7 columns
         let cell_width = (calendar_width - total_spacing) / 7.0;
         let cell_height = cell_width * 0.8; // Height is 80% of width for good proportions
