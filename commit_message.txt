@@ -1,17 +1,10 @@
-feat: Add floating tooltips to calendar chips and update future allowance descriptions
+Improve calendar padding days implementation
 
-• Added smart floating tooltips that show transaction descriptions on hover
-  - Professional styling with dark background, white text, and rounded corners
-  - Intelligent boundary detection to prevent tooltips from going off-screen
-  - High z-index layering to appear above all other UI elements
-  - Only displays when transaction descriptions exist (not empty)
+- Add missing trailing padding days (PaddingAfter) to complete calendar grid
+- Fix padding logic to only complete final week instead of forcing 6 weeks
+- Increase opacity of filler days for better visibility (55→120 background, 80→140 border)
+- Remove balance display from padding days (cleaner UI)
+- Remove day numbers from padding days (pure visual structure)
 
-• Updated future allowance descriptions from "Weekly allowance" to "Upcoming allowance"
-  - Changed in AllowanceService::generate_future_allowance_transactions()
-  - Preserved "Weekly allowance" for historical allowances in TransactionService
-  - Updated corresponding test cases
-  - All 160 unit tests pass
-
-The tooltip implementation provides immediate context about transactions without
-cluttering the calendar interface, while the updated descriptions better
-distinguish between historical and future allowances. 
+Calendar now properly displays complete grid with clean, unobtrusive padding
+that provides visual continuity without cluttering the current month view. 

@@ -300,6 +300,28 @@ impl CalendarService {
             });
         }
         
+        // Add padding days after the month to complete the final week
+        // Only add enough padding to reach the next multiple of 7 days
+        let current_days = calendar_days.len();
+        let days_in_final_week = current_days % 7;
+        
+        if days_in_final_week > 0 {
+            let padding_days_needed = 7 - days_in_final_week;
+            log::debug!("🗓️ CALENDAR DEBUG: Adding {} padding days after month to complete final week", padding_days_needed);
+            
+            for i in 0..padding_days_needed {
+                log::debug!("🗓️ CALENDAR DEBUG: Adding padding day {} with PaddingAfter", i);
+                calendar_days.push(CalendarDay {
+                    day: 0,
+                    balance: 0.0,
+                    transactions: Vec::new(),
+                    day_type: CalendarDayType::PaddingAfter,
+                    #[allow(deprecated)]
+                    is_empty: true,
+                });
+            }
+        }
+        
         log::debug!("🗓️ CALENDAR DEBUG: Total calendar days created: {}", calendar_days.len());
         
         CalendarMonth {
