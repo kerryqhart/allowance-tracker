@@ -65,34 +65,35 @@ impl CalendarDayType {
     }
 
     /// Get the border color for this day type
-    pub fn border_color(&self) -> egui::Color32 {
-        match self {
-            CalendarDayType::CurrentMonth => {
-                // Normal border
-                egui::Color32::from_rgba_unmultiplied(200, 200, 200, 100)
-            }
-            CalendarDayType::FillerDay => {
-                // Lighter border for filler days
-                egui::Color32::from_rgba_unmultiplied(150, 150, 150, 80)
+    pub fn border_color(&self, is_today: bool) -> egui::Color32 {
+        if is_today {
+            // Dark navy blue for high contrast against pink background
+            egui::Color32::from_rgb(25, 25, 112) // Navy blue
+        } else {
+            match self {
+                CalendarDayType::CurrentMonth => {
+                    // Normal border
+                    egui::Color32::from_rgba_unmultiplied(200, 200, 200, 100)
+                }
+                CalendarDayType::FillerDay => {
+                    // Lighter border for filler days
+                    egui::Color32::from_rgba_unmultiplied(150, 150, 150, 80)
+                }
             }
         }
     }
 
     /// Get the day number text color for this day type
-    pub fn day_text_color(&self, is_today: bool) -> egui::Color32 {
-        if is_today {
-            // Pink for today
-            egui::Color32::from_rgb(219, 112, 147)
-        } else {
-            match self {
-                CalendarDayType::CurrentMonth => {
-                    // Bold black for current month days
-                    egui::Color32::BLACK
-                }
-                CalendarDayType::FillerDay => {
-                    // Gray for filler days
-                    egui::Color32::from_rgb(150, 150, 150)
-                }
+    pub fn day_text_color(&self) -> egui::Color32 {
+        // Use normal colors for all days
+        match self {
+            CalendarDayType::CurrentMonth => {
+                // Bold black for current month days (including today)
+                egui::Color32::BLACK
+            }
+            CalendarDayType::FillerDay => {
+                // Gray for filler days
+                egui::Color32::from_rgb(150, 150, 150)
             }
         }
     }
@@ -270,7 +271,20 @@ impl CalendarDay {
             egui::vec2(width, height)
         );
         
-        // Draw subtle background for the day cell using centralized color scheme
+        // Draw shadow first (behind everything else) for today's date
+        if self.is_today {
+            let shadow_rect = egui::Rect::from_min_size(
+                cell_rect.min + egui::vec2(2.0, 2.0),
+                cell_rect.size()
+            );
+            ui.painter().rect_filled(
+                shadow_rect,
+                egui::Rounding::same(2.0),
+                egui::Color32::from_rgba_unmultiplied(0, 0, 0, 30) // Subtle shadow
+            );
+        }
+        
+        // Draw background for the day cell using centralized color scheme
         let bg_color = self.day_type.background_color(self.is_today);
         
         ui.painter().rect_filled(
@@ -279,14 +293,35 @@ impl CalendarDay {
             bg_color
         );
         
-        // Draw subtle border around the day cell using centralized color scheme
-        let border_color = self.day_type.border_color();
-        
-        ui.painter().rect_stroke(
-            cell_rect,
-            egui::Rounding::same(2.0),
-            egui::Stroke::new(0.5, border_color)
-        );
+        // Draw border around the day cell using centralized color scheme
+        if self.is_today {
+            // Double outline for today: white inner + dark outer for high visibility
+            // Draw white inner outline first
+            ui.painter().rect_stroke(
+                cell_rect,
+                egui::Rounding::same(2.0),
+                egui::Stroke::new(2.0, egui::Color32::WHITE)
+            );
+            
+            // Draw dark outer outline
+            let outer_rect = egui::Rect::from_min_size(
+                cell_rect.min - egui::vec2(1.0, 1.0),
+                cell_rect.size() + egui::vec2(2.0, 2.0)
+            );
+            ui.painter().rect_stroke(
+                outer_rect,
+                egui::Rounding::same(2.0),
+                egui::Stroke::new(2.0, self.day_type.border_color(self.is_today))
+            );
+        } else {
+            // Normal single outline for other days
+            let border_color = self.day_type.border_color(self.is_today);
+            ui.painter().rect_stroke(
+                cell_rect,
+                egui::Rounding::same(2.0),
+                egui::Stroke::new(0.5, border_color)
+            );
+        }
         
         ui.vertical(|ui| {
             ui.set_width(width);
@@ -299,7 +334,7 @@ impl CalendarDay {
             ui.horizontal(|ui| {
                 ui.set_width(width - 8.0); // Account for padding
                 
-                // Day number in upper left (bold black)
+                // Day number in upper left (standard size)
                 let day_font_size = if config.is_grid_layout {
                     16.0
                 } else {
@@ -307,14 +342,41 @@ impl CalendarDay {
                 };
                 
                 // Day number text color using centralized color scheme
-                let day_text_color = self.day_type.day_text_color(self.is_today);
+                let day_text_color = self.day_type.day_text_color();
                 
-                ui.label(
-                    egui::RichText::new(self.day_number.to_string())
+                // Create the rich text with emphasis for today
+                let rich_text = egui::RichText::new(self.day_number.to_string())
+                    .font(egui::FontId::new(day_font_size, egui::FontFamily::Proportional))
+                    .color(day_text_color)
+                    .strong();
+                
+                                if self.is_today {
+                    // Use manual underline for today's date (more subtle than native)
+                    let rich_text_bold = egui::RichText::new(self.day_number.to_string())
                         .font(egui::FontId::new(day_font_size, egui::FontFamily::Proportional))
                         .color(day_text_color)
-                        .strong()
-                );
+                        .strong();
+                    
+                    // Render the text first
+                    let response = ui.label(rich_text_bold);
+                    
+                    // Draw manual underline beneath the text (shorter and thinner)
+                    let text_rect = response.rect;
+                    let underline_y = text_rect.bottom() + 1.0; // 1px below text
+                    let left_padding = 3.0; // More padding on left side
+                    let right_padding = 2.0; // Less padding on right side
+                    let underline_color = egui::Color32::from_rgb(80, 80, 80); // Dark gray
+                    ui.painter().line_segment(
+                        [
+                            egui::pos2(text_rect.left() + left_padding, underline_y),
+                            egui::pos2(text_rect.right() - right_padding, underline_y)
+                        ],
+                        egui::Stroke::new(0.7, underline_color)
+                    );
+                } else {
+                    // Normal day number rendering
+                    ui.label(rich_text);
+                }
                 
                 // Balance in upper right (subtle gray)
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

@@ -1,7 +1,13 @@
-Clean up debug logs and fix unused variable warnings
+Enhance calendar current day identification with refined styling
 
-- Remove all debug println! statements from calendar, transaction service, 
-  allowance service, allowance repository, calendar renderer, and data loading
-- Fix unused variable warnings by prefixing with underscore
-- Build now passes cleanly without warnings
-- App runs without noisy debug output cluttering console 
+- Replace pink text color with double outline (white inner + navy outer)
+- Add subtle drop shadow behind today's date card
+- Implement asymmetric underline beneath day number:
+  - Dark gray color (rgb 80,80,80) for subtlety
+  - 0.7px stroke width for refined appearance
+  - Shorter on left (3px padding), longer on right (2px padding)
+- Maintain existing card background and transaction display
+- Improve visual prominence while preserving elegant design
+
+The new styling provides clear identification of today's date with
+better contrast against the pink gradient background. 
