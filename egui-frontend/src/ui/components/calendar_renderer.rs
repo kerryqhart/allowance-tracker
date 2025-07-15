@@ -36,7 +36,6 @@ use crate::ui::app_state::{AllowanceTrackerApp, OverlayType};
 pub enum DayMenuGlyph {
     AddMoney,
     SpendMoney,
-    CreateGoal,
 }
 
 impl DayMenuGlyph {
@@ -45,7 +44,6 @@ impl DayMenuGlyph {
         match self {
             DayMenuGlyph::AddMoney => "+$",
             DayMenuGlyph::SpendMoney => "-$",
-            DayMenuGlyph::CreateGoal => "G",
         }
     }
     
@@ -54,7 +52,6 @@ impl DayMenuGlyph {
         match self {
             DayMenuGlyph::AddMoney => OverlayType::AddMoney,
             DayMenuGlyph::SpendMoney => OverlayType::SpendMoney,
-            DayMenuGlyph::CreateGoal => OverlayType::CreateGoal,
         }
     }
     
@@ -63,8 +60,26 @@ impl DayMenuGlyph {
         vec![
             DayMenuGlyph::AddMoney,
             DayMenuGlyph::SpendMoney,
-            DayMenuGlyph::CreateGoal,
         ]
+    }
+    
+    /// Get glyphs that should be shown for a specific date based on business rules
+    pub fn for_date(date: NaiveDate) -> Vec<DayMenuGlyph> {
+        let today = chrono::Local::now().date_naive();
+        
+        // Don't show glyphs for future dates (can't future-date transactions)
+        if date > today {
+            return Vec::new();
+        }
+        
+        // Don't show glyphs for dates older than 45 days (prevent arbitrary backdating)
+        let cutoff_date = today - chrono::Duration::days(45);
+        if date < cutoff_date {
+            return Vec::new();
+        }
+        
+        // For current day and valid past days, show income and expense glyphs
+        Self::all()
     }
 }
 
@@ -774,7 +789,7 @@ impl CalendarDay {
 
 impl AllowanceTrackerApp {
     /// Convert backend CalendarDay to frontend CalendarDay structure
-    fn convert_backend_calendar_day(&self, backend_day: &shared::CalendarDay) -> CalendarDay {
+    fn convert_backend_calendar_day(&self, backend_day: &shared::CalendarDay, day_index: usize) -> CalendarDay {
         // Convert day type from backend to frontend enum
         let day_type = match backend_day.day_type {
             shared::CalendarDayType::MonthDay => CalendarDayType::CurrentMonth,
@@ -783,8 +798,61 @@ impl AllowanceTrackerApp {
         
         // Create date for this day
         let date = if backend_day.day == 0 {
-            // For filler days, use an arbitrary date (not used for display)
-            NaiveDate::from_ymd_opt(self.selected_year, self.selected_month, 1).unwrap()
+            // For filler days, calculate the actual previous/next month days they represent
+            match backend_day.day_type {
+                shared::CalendarDayType::PaddingBefore => {
+                    // Calculate previous month date
+                    let (prev_year, prev_month) = if self.selected_month == 1 {
+                        (self.selected_year - 1, 12)
+                    } else {
+                        (self.selected_year, self.selected_month - 1)
+                    };
+                    
+                    // Get the last day of previous month
+                    let prev_month_first = NaiveDate::from_ymd_opt(prev_year, prev_month, 1).unwrap();
+                    let next_month_first = if prev_month == 12 {
+                        NaiveDate::from_ymd_opt(prev_year + 1, 1, 1).unwrap()
+                    } else {
+                        NaiveDate::from_ymd_opt(prev_year, prev_month + 1, 1).unwrap()
+                    };
+                    let days_in_prev_month = (next_month_first - prev_month_first).num_days() as u32;
+                    
+                    // Calculate which day of previous month this represents
+                    // First day of current month
+                    let current_month_first = NaiveDate::from_ymd_opt(self.selected_year, self.selected_month, 1).unwrap();
+                    let weekday_of_first = current_month_first.weekday().num_days_from_sunday() as usize;
+                    
+                    // This filler day represents (days_in_prev_month - weekday_of_first + day_index + 1)
+                    let prev_day = days_in_prev_month - weekday_of_first as u32 + day_index as u32 + 1;
+                    NaiveDate::from_ymd_opt(prev_year, prev_month, prev_day).unwrap()
+                }
+                shared::CalendarDayType::PaddingAfter => {
+                    // Calculate next month date
+                    let (next_year, next_month) = if self.selected_month == 12 {
+                        (self.selected_year + 1, 1)
+                    } else {
+                        (self.selected_year, self.selected_month + 1)
+                    };
+                    
+                    // Find how many days we are past the end of current month
+                    let current_month_first = NaiveDate::from_ymd_opt(self.selected_year, self.selected_month, 1).unwrap();
+                    let next_month_first = if self.selected_month == 12 {
+                        NaiveDate::from_ymd_opt(self.selected_year + 1, 1, 1).unwrap()
+                    } else {
+                        NaiveDate::from_ymd_opt(self.selected_year, self.selected_month + 1, 1).unwrap()
+                    };
+                    let days_in_current_month = (next_month_first - current_month_first).num_days() as u32;
+                    let weekday_of_first = current_month_first.weekday().num_days_from_sunday() as usize;
+                    
+                    // Calculate which day of next month this represents
+                    let next_day = day_index as u32 - (weekday_of_first + days_in_current_month as usize) as u32 + 1;
+                    NaiveDate::from_ymd_opt(next_year, next_month, next_day).unwrap()
+                }
+                shared::CalendarDayType::MonthDay => {
+                    // This shouldn't happen for day == 0, but fallback
+                    NaiveDate::from_ymd_opt(self.selected_year, self.selected_month, 1).unwrap()
+                }
+            }
         } else {
             NaiveDate::from_ymd_opt(self.selected_year, self.selected_month, backend_day.day).unwrap()
         };
@@ -965,7 +1033,8 @@ impl AllowanceTrackerApp {
         let all_days: Vec<CalendarDay> = if let Some(ref calendar_month) = self.calendar_month {
             // Convert backend calendar days to frontend calendar days
             calendar_month.days.iter()
-                .map(|day| self.convert_backend_calendar_day(day))
+                .enumerate()
+                .map(|(index, day)| self.convert_backend_calendar_day(day, index))
                 .collect()
         } else {
             // No calendar data available - return empty calendar
@@ -1088,10 +1157,17 @@ impl AllowanceTrackerApp {
 
     /// Render action icons above the selected day
     pub fn render_day_action_icons(&mut self, ui: &mut egui::Ui, day_cell_rect: egui::Rect, selected_date: NaiveDate) {
+        // Get glyphs that should be shown for this specific date
+        let glyphs = DayMenuGlyph::for_date(selected_date);
+        
+        // If no glyphs should be shown for this date, return early
+        if glyphs.is_empty() {
+            return;
+        }
+        
         // Shared styling for all glyphs - wider to accommodate two characters
         let glyph_size = egui::vec2(48.0, 22.0);
         let glyph_spacing = 6.0;
-        let glyphs = DayMenuGlyph::all();
         
         // Shared colors - using the same pink as selected day
         let outline_color = egui::Color32::from_rgb(199, 112, 221); // Same as selected day
