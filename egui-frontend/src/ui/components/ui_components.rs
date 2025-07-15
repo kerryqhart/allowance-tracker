@@ -52,31 +52,7 @@ impl AllowanceTrackerApp {
     /// Draw just the Calendar/Table toggle buttons (for subheader)
     pub fn draw_tab_toggle_buttons(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            // Calendar button
-            let calendar_button = egui::Button::new(
-                egui::RichText::new("📅 Calendar")
-                    .font(egui::FontId::new(14.0, egui::FontFamily::Proportional))
-                    .color(if self.current_tab == MainTab::Calendar { 
-                        egui::Color32::WHITE 
-                    } else { 
-                        egui::Color32::from_rgb(70, 70, 70) 
-                    })
-            )
-            .min_size(egui::vec2(80.0, 30.0))
-            .rounding(egui::Rounding::same(6.0))
-            .fill(if self.current_tab == MainTab::Calendar {
-                egui::Color32::from_rgb(79, 109, 245) // Blue for active
-            } else {
-                egui::Color32::from_rgb(248, 248, 248) // Light gray for inactive
-            });
-            
-            if ui.add(calendar_button).clicked() {
-                self.current_tab = MainTab::Calendar;
-            }
-            
-            ui.add_space(8.0);
-            
-            // Table button
+            // Table button (rendered first so it appears on the right in right-to-left layout)
             let table_button = egui::Button::new(
                 egui::RichText::new("📋 Table")
                     .font(egui::FontId::new(14.0, egui::FontFamily::Proportional))
@@ -96,6 +72,30 @@ impl AllowanceTrackerApp {
             
             if ui.add(table_button).clicked() {
                 self.current_tab = MainTab::Table;
+            }
+            
+            ui.add_space(8.0);
+            
+            // Calendar button (rendered second so it appears on the left in right-to-left layout)
+            let calendar_button = egui::Button::new(
+                egui::RichText::new("📅 Calendar")
+                    .font(egui::FontId::new(14.0, egui::FontFamily::Proportional))
+                    .color(if self.current_tab == MainTab::Calendar { 
+                        egui::Color32::WHITE 
+                    } else { 
+                        egui::Color32::from_rgb(70, 70, 70) 
+                    })
+            )
+            .min_size(egui::vec2(80.0, 30.0))
+            .rounding(egui::Rounding::same(6.0))
+            .fill(if self.current_tab == MainTab::Calendar {
+                egui::Color32::from_rgb(79, 109, 245) // Blue for active
+            } else {
+                egui::Color32::from_rgb(248, 248, 248) // Light gray for inactive
+            });
+            
+            if ui.add(calendar_button).clicked() {
+                self.current_tab = MainTab::Calendar;
             }
         });
     }
