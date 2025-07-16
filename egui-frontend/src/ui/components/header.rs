@@ -27,6 +27,7 @@ use crate::ui::app_state::AllowanceTrackerApp;
 impl AllowanceTrackerApp {
     /// Render the header
     pub fn render_header(&mut self, ui: &mut egui::Ui) {
+        log::info!("🏠 RENDER_HEADER called");
         // Use Frame with translucent fill for proper transparency
         let header_height = 60.0;
         
@@ -104,10 +105,13 @@ impl AllowanceTrackerApp {
                                 }
                                 
                                 if child_button_response.clicked() {
+                                    log::info!("🖱️ CHILD BUTTON CLICKED!");
                                     if !self.show_child_dropdown {
+                                        log::info!("🔽 Opening dropdown");
                                         self.show_child_dropdown = true;
                                         self.child_dropdown_just_opened = true;
                                     } else {
+                                        log::info!("🔼 Closing dropdown");
                                         self.show_child_dropdown = false;
                                     }
                                 }
@@ -184,10 +188,13 @@ impl AllowanceTrackerApp {
                                 }
                                 
                                 if select_button_response.clicked() {
+                                    log::info!("🖱️ SELECT CHILD BUTTON CLICKED!");
                                     if !self.show_child_dropdown {
+                                        log::info!("🔽 Opening dropdown");
                                         self.show_child_dropdown = true;
                                         self.child_dropdown_just_opened = true;
                                     } else {
+                                        log::info!("🔼 Closing dropdown");
                                         self.show_child_dropdown = false;
                                     }
                                 }
@@ -206,6 +213,7 @@ impl AllowanceTrackerApp {
     
     /// Render child selector dropdown
     pub fn render_child_dropdown(&mut self, ui: &mut egui::Ui, button_rect: egui::Rect) {
+        log::info!("📋 RENDER_CHILD_DROPDOWN called - this is the real dropdown!");
         // Calculate dropdown position (below the button)
         let dropdown_pos = egui::pos2(button_rect.left(), button_rect.bottom());
         
@@ -275,40 +283,54 @@ impl AllowanceTrackerApp {
                                             child.name.clone()
                                         };
                                         
-                                        let button = egui::Button::new(
-                                            egui::RichText::new(button_text)
-                                                .font(egui::FontId::new(14.0, egui::FontFamily::Proportional))
-                                                .color(if is_current { 
+                                        // DEBUG: Log dropdown rendering  
+                                        log::info!("🚀 RENDERING HEADER DROPDOWN ITEM: {}", child.name);
+                                        
+                                        // Create button and check hover after
+                                        let button_response = ui.add_sized(
+                                            [dropdown_width, 22.0],
+                                            egui::Button::new(
+                                                egui::RichText::new(&button_text)
+                                                    .font(egui::FontId::new(14.0, egui::FontFamily::Proportional))
+                                                    .color(if is_current { 
+                                                        egui::Color32::from_rgb(79, 109, 245) 
+                                                    } else { 
+                                                        egui::Color32::from_rgb(60, 60, 60) 
+                                                    })
+                                            )
+                                            .fill(egui::Color32::TRANSPARENT)
+                                            .stroke(egui::Stroke::NONE)
+                                            .rounding(egui::Rounding::same(4.0))
+                                        );
+                                        
+                                        // Check hover and paint background BEHIND the text
+                                        if button_response.hovered() {
+                                            log::info!("🔍 HEADER DROPDOWN HOVER DETECTED: {}", child.name);
+                                            log::info!("🎨 HEADER DROPDOWN PAINTING: using painter behind text");
+                                            
+                                            // Paint hover background BEHIND by using a lower z-order
+                                            ui.painter().rect_filled(
+                                                button_response.rect,
+                                                egui::Rounding::same(4.0),
+                                                egui::Color32::from_rgba_unmultiplied(230, 230, 230, 255)
+                                            );
+                                            
+                                            // Repaint the text on top
+                                            ui.painter().text(
+                                                button_response.rect.center(),
+                                                egui::Align2::CENTER_CENTER,
+                                                button_text,
+                                                egui::FontId::new(14.0, egui::FontFamily::Proportional),
+                                                if is_current { 
                                                     egui::Color32::from_rgb(79, 109, 245) 
                                                 } else { 
                                                     egui::Color32::from_rgb(60, 60, 60) 
-                                                })
-                                        )
-                                        .fill(egui::Color32::TRANSPARENT)
-                                        .stroke(egui::Stroke::NONE)
-                                        .rounding(egui::Rounding::same(4.0));
-                                        
-                                        // Create hover area with calculated width instead of full available width
-                                        let inner_response = ui.allocate_ui_with_layout(
-                                            egui::vec2(dropdown_width, 22.0), // Fixed height for consistent row spacing
-                                            egui::Layout::left_to_right(egui::Align::Center),
-                                            |ui| {
-                                                ui.add(button)
-                                            }
-                                        );
-                                        let row_response = inner_response.response;
-                                        let button_response = inner_response.inner;
-                                        
-                                        // Add subtle hover effect for the row
-                                        if row_response.hovered() {
-                                            ui.painter().rect_filled(
-                                                row_response.rect,
-                                                egui::Rounding::same(2.0),
-                                                egui::Color32::from_rgba_unmultiplied(79, 109, 245, 20)
+                                                }
                                             );
                                         }
                                         
-                                        if (row_response.clicked() || button_response.clicked()) && !is_current {
+                                        // Click detection - just use button_response directly
+                                        if button_response.clicked() && !is_current {
                                             // Set this child as active
                                             let command = crate::backend::domain::commands::child::SetActiveChildCommand {
                                                 child_id: child.id.clone(),
