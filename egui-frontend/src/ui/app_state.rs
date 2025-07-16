@@ -30,6 +30,7 @@ use log::info;
 use chrono::Datelike;
 use shared::*;
 use crate::backend::Backend;
+use crate::ui::components::dropdown_menu::DropdownMenu;
 
 /// Tabs available in the main interface
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -76,12 +77,12 @@ pub struct AllowanceTrackerApp {
     pub show_add_money_modal: bool,
     pub show_spend_money_modal: bool,
     pub show_child_selector: bool,
-    pub show_child_dropdown: bool,
-    pub child_dropdown_just_opened: bool,
-    #[allow(dead_code)]
-    pub show_settings_menu: bool,
     #[allow(dead_code)]
     pub show_allowance_config_modal: bool,
+    
+    // Dropdown states using generalized component
+    pub child_dropdown: DropdownMenu,
+    pub settings_dropdown: DropdownMenu,
     
     // Form states
     pub add_money_amount: String,
@@ -135,10 +136,11 @@ impl AllowanceTrackerApp {
             show_add_money_modal: false,
             show_spend_money_modal: false,
             show_child_selector: false,
-            show_child_dropdown: false,
-            child_dropdown_just_opened: false,
-            show_settings_menu: false,
             show_allowance_config_modal: false,
+            
+            // Dropdown states using generalized component
+            child_dropdown: DropdownMenu::new("child_dropdown".to_string()),
+            settings_dropdown: DropdownMenu::new("settings_dropdown".to_string()),
             
             // Form states
             add_money_amount: String::new(),

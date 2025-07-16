@@ -1,14 +1,55 @@
-feat: Add interactive calendar day selection with action icons and modal overlays
+Fix settings dropdown hover bug with screen-aware positioning
 
-- Add calendar day click detection with selection toggle behavior
-- Implement visual feedback for selected days with purple-pink highlighting
-- Display three action icons above selected day (+$, -$, G) with consistent styling
-- Create colored modal overlays for each action type:
-  - Add Money: Green theme matching income transactions
-  - Spend Money: Gray theme matching expense transactions  
-  - Create Goal: Pink theme matching goal transactions
-- Add click-outside-to-dismiss functionality for modals
-- Use egui::Area for proper icon positioning and egui::Window for modals
-- Maintain consistent UI styling with white backgrounds and themed borders
+This commit resolves a critical UI bug where the settings dropdown would
+close unexpectedly when hovering over menu items, while the child selector
+dropdown worked perfectly.
 
-All calendar interaction phases completed successfully with proper error handling and build verification. 
+## Root Cause
+The settings menu positioned at the far-right edge (x=994) triggered egui's
+automatic screen boundary adjustment, causing a mismatch between:
+- Visual content (Frame): correctly shifted left to stay on-screen
+- Interaction area (Area): remained at original off-screen coordinates
+
+## Changes Made
+
+### 1. Unique Area IDs (Best Practice)
+- Modified DropdownMenu to accept unique identifiers
+- Prevents Area ID collisions between different dropdown instances
+- child_dropdown: "child_dropdown", settings_dropdown: "settings_dropdown"
+
+### 2. Screen-Aware Positioning Fix
+- Pre-calculate safe dropdown positions to avoid boundary adjustments
+- Right-align dropdown when it would overflow screen width
+- Eliminates visual/interaction area mismatches
+
+### 3. Improved Button Rendering
+- Replaced egui::Button with manual text rendering
+- Eliminates any potential text selection interference
+- Consistent with menu item rendering approach
+
+### 4. Enhanced Debug Logging
+- Added detailed hover detection logging
+- Helps diagnose positioning and interaction issues
+- Logs screen bounds, dropdown bounds, and mouse coordinates
+
+## Technical Details
+```rust
+// Old: Fixed positioning that could go off-screen
+.fixed_pos(dropdown_pos)
+
+// New: Screen-aware positioning with right-alignment fallback
+if button_rect.left() + estimated_dropdown_width > screen_rect.max.x {
+    button_rect.right() - estimated_dropdown_width  // Right-align
+} else {
+    button_rect.left()  // Standard left-align
+}
+```
+
+## Results
+- Settings dropdown stays open when hovering over all menu items
+- Both child selector and settings dropdowns work identically
+- No more horizontal "dead zone" causing unexpected dropdown closure
+- Improved code maintainability with unique IDs and debug logging
+
+Fixes interaction bug where settings menu would close when mouse reached
+specific horizontal coordinates, regardless of menu item being hovered. 

@@ -18,15 +18,16 @@
 //! The components are organized to promote reusability and maintainability.
 //! Each module has a clear responsibility and minimal dependencies on others.
 
+pub mod calendar_renderer;
 pub mod data_loading;
-pub mod styling;
-pub mod transaction_table;
-pub mod modals;
+pub mod dropdown_menu;
 pub mod header;
-pub mod ui_components;
+pub mod modals;
+pub mod styling;
 pub mod tab_manager;
 pub mod table_renderer;
-pub mod calendar_renderer;
+pub mod transaction_table;
+pub mod ui_components;
 
 pub use styling::*;
 pub use transaction_table::*; 

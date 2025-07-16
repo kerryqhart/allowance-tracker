@@ -21,6 +21,7 @@ use crate::ui::app_state::{AllowanceTrackerApp, MainTab};
 impl AllowanceTrackerApp {
     /// Render the main content area
     pub fn render_main_content(&mut self, ui: &mut egui::Ui) {
+        log::info!("📄 RENDER_MAIN_CONTENT called");
         ui.vertical(|ui| {
             // Render content based on selected tab with toggle header
             match self.current_tab {

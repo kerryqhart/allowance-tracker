@@ -443,8 +443,8 @@ impl CalendarDay {
                                 .color(day_text_color)
                                 .strong();
                             
-                            // Render the text first
-                            let label_response = ui.label(rich_text_bold);
+                            // Render the text first - disable selection to prevent dropdown interference
+                            let label_response = ui.add(egui::Label::new(rich_text_bold).selectable(false));
                             
                             // Draw manual underline beneath the text (shorter and thinner)
                             let text_rect = label_response.rect;
@@ -460,8 +460,8 @@ impl CalendarDay {
                                 egui::Stroke::new(0.7, underline_color)
                             );
                         } else {
-                            // Normal day number rendering
-                            ui.label(rich_text);
+                            // Normal day number rendering - disable selection to prevent dropdown interference
+                            ui.add(egui::Label::new(rich_text).selectable(false));
                         }
                     }
                     
@@ -479,11 +479,11 @@ impl CalendarDay {
                                 // Balance text color using centralized color scheme
                                 let balance_color = self.day_type.balance_text_color();
                                 
-                                ui.label(
+                                ui.add(egui::Label::new(
                                     egui::RichText::new(format!("${:.2}", balance))
                                         .font(egui::FontId::new(balance_font_size, egui::FontFamily::Proportional))
                                         .color(balance_color)
-                                );
+                                ).selectable(false)); // Disable selection to prevent dropdown interference
                             }
                         }
                     });
@@ -667,11 +667,11 @@ impl CalendarDay {
                         ui.add_space(tooltip_padding.y);
                         ui.horizontal(|ui| {
                             ui.add_space(tooltip_padding.x);
-                            ui.label(
+                            ui.add(egui::Label::new(
                                 egui::RichText::new(description)
                                     .font(egui::FontId::new(tooltip_font_size, egui::FontFamily::Proportional))
                                     .color(tooltip_text_color)
-                            );
+                            ).selectable(false)); // Disable selection to prevent dropdown interference
                         });
                     }
                 );
@@ -951,11 +951,12 @@ impl AllowanceTrackerApp {
                                                     egui::Stroke::new(1.0, border_color)
                                                 );
                                                 
-                                                // Draw text
-                                                ui.label(egui::RichText::new(*day_name)
+                                                // Draw text - disable selection to prevent dropdown interference
+                                                ui.add(egui::Label::new(egui::RichText::new(*day_name)
                                                     .font(egui::FontId::new(12.0, egui::FontFamily::Proportional))
                                                     .strong()
-                                                    .color(egui::Color32::DARK_GRAY));
+                                                    .color(egui::Color32::DARK_GRAY))
+                                                    .selectable(false));
                                             },
                                         );
                                         

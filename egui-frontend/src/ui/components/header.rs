@@ -23,6 +23,7 @@
 
 use eframe::egui;
 use crate::ui::app_state::AllowanceTrackerApp;
+use crate::ui::components::dropdown_menu::{DropdownMenuItem, DropdownButtonConfig, DropdownMenuConfig};
 
 impl AllowanceTrackerApp {
     /// Render the header
@@ -42,166 +43,61 @@ impl AllowanceTrackerApp {
                 egui::Layout::top_down(egui::Align::LEFT),
                 |ui| {
                     ui.horizontal(|ui| {
-                        // Clean title without emoji
-                        ui.label(egui::RichText::new("Allowance Tracker")
+                        // Clean title without emoji - disable text selection
+                        ui.add(egui::Label::new(egui::RichText::new("Allowance Tracker")
                             .font(egui::FontId::new(28.0, egui::FontFamily::Proportional))
                             .strong()
-                            .color(egui::Color32::from_rgb(60, 60, 60))); // Dark gray for readability
+                            .color(egui::Color32::from_rgb(60, 60, 60))) // Dark gray for readability
+                            .selectable(false)); // Disable text selection
                         
                         // Flexible space to push right content to the right
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            // Settings menu button (far right)
+                            self.render_settings_menu(ui);
+                            
+                            // Add spacing between settings and child selector
+                            ui.add_space(15.0);
                             if let Some(child) = &self.current_child {
-                                // Balance with clean styling (no color coding)
-                                ui.label(egui::RichText::new(format!("${:.2}", self.current_balance))
+                                // Balance with clean styling (no color coding) - disable text selection
+                                ui.add(egui::Label::new(egui::RichText::new(format!("${:.2}", self.current_balance))
                                     .font(egui::FontId::new(24.0, egui::FontFamily::Proportional))
                                     .strong()
-                                    .color(egui::Color32::from_rgb(60, 60, 60))); // Same dark gray as title
+                                    .color(egui::Color32::from_rgb(60, 60, 60))) // Same dark gray as title
+                                    .selectable(false)); // Disable text selection
                                 
                                 // Add spacing between balance and name
                                 ui.add_space(15.0);
                                 
-                                // Child name as clickable text with hover effects
-                                let child_name_text = &child.name;
+                                // Render child selector using generalized dropdown
+                                let button_config = DropdownButtonConfig {
+                                    text: child.name.clone(),
+                                    font_size: 18.0,
+                                    text_color: egui::Color32::from_rgb(80, 80, 80),
+                                    hover_bg_color: egui::Color32::from_rgba_unmultiplied(255, 255, 255, 20),
+                                    hover_border_color: egui::Color32::from_rgb(232, 150, 199),
+                                };
                                 
-                                // Create the clickable button (no text selection)
-                                let child_button_response = ui.add(egui::Button::new(
-                                    egui::RichText::new(child_name_text)
-                                        .font(egui::FontId::new(18.0, egui::FontFamily::Proportional))
-                                        .strong()
-                                        .color(egui::Color32::from_rgb(80, 80, 80))
-                                )
-                                .fill(egui::Color32::TRANSPARENT)  // Transparent background
-                                .stroke(egui::Stroke::NONE)        // No border
-                                .rounding(egui::Rounding::ZERO));   // No rounding
-                                
-                                // Add hover, click, and dropdown-open effects
-                                if child_button_response.hovered() || child_button_response.is_pointer_button_down_on() || self.show_child_dropdown {
-                                    // Keep hand cursor for both hover and click
-                                    ui.ctx().output_mut(|o| o.cursor_icon = egui::CursorIcon::PointingHand);
-                                    
-                                    // Draw the overlay with different alpha for hover vs click/dropdown
-                                    let expanded_rect = child_button_response.rect.expand(4.0);
-                                    
-                                    // Use higher alpha when clicked or dropdown is open, lower when just hovered
-                                    let alpha = if child_button_response.is_pointer_button_down_on() || self.show_child_dropdown {
-                                        60 // Clicked state or dropdown open - more opaque
-                                    } else {
-                                        20 // Hovered state - subtle
-                                    };
-                                    
-                                    // Draw semi-transparent white background
-                                    ui.painter().rect_filled(
-                                        expanded_rect,
-                                        egui::Rounding::same(6.0),
-                                        egui::Color32::from_rgba_unmultiplied(255, 255, 255, alpha)
-                                    );
-                                    
-                                    // Draw Wednesday color border
-                                    ui.painter().rect_stroke(
-                                        expanded_rect,
-                                        egui::Rounding::same(6.0),
-                                        egui::Stroke::new(1.5, egui::Color32::from_rgb(232, 150, 199))
-                                    );
-                                }
-                                
-                                if child_button_response.clicked() {
-                                    log::info!("🖱️ CHILD BUTTON CLICKED!");
-                                    if !self.show_child_dropdown {
-                                        log::info!("🔽 Opening dropdown");
-                                        self.show_child_dropdown = true;
-                                        self.child_dropdown_just_opened = true;
-                                    } else {
-                                        log::info!("🔼 Closing dropdown");
-                                        self.show_child_dropdown = false;
-                                    }
-                                }
+                                let (child_button_response, should_show_dropdown) = self.child_dropdown.render_button(ui, &button_config);
                                 
                                 // Show dropdown if opened
-                                if self.show_child_dropdown {
-                                    self.render_child_dropdown(ui, child_button_response.rect);
+                                if should_show_dropdown {
+                                    self.render_child_dropdown_with_generalized_component(ui, child_button_response.rect);
                                 }
                             } else {
-                                // No child selected - show select child text
-                                let select_text = "Select Child";
+                                // No child selected - render select child button using generalized dropdown
+                                let button_config = DropdownButtonConfig {
+                                    text: "Select Child".to_string(),
+                                    font_size: 16.0,
+                                    text_color: egui::Color32::GRAY,
+                                    hover_bg_color: egui::Color32::from_rgba_unmultiplied(255, 255, 255, 20),
+                                    hover_border_color: egui::Color32::from_rgb(232, 150, 199),
+                                };
                                 
-                                // Create the clickable button (no text selection)
-                                let select_button_response = ui.add(egui::Button::new(
-                                    egui::RichText::new(select_text)
-                                        .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))
-                                        .color(egui::Color32::GRAY)
-                                )
-                                .fill(egui::Color32::TRANSPARENT)  // Transparent background
-                                .stroke(egui::Stroke::NONE)        // No border
-                                .rounding(egui::Rounding::ZERO));   // No rounding
-                                
-                                // Always show pressed state when dropdown is open
-                                if self.show_child_dropdown {
-                                    // Keep hand cursor when dropdown is open
-                                    ui.ctx().output_mut(|o| o.cursor_icon = egui::CursorIcon::PointingHand);
-                                    
-                                    // Draw pressed state overlay
-                                    let expanded_rect = select_button_response.rect.expand(4.0);
-                                    
-                                    // Draw semi-transparent white background with pressed alpha
-                                    ui.painter().rect_filled(
-                                        expanded_rect,
-                                        egui::Rounding::same(6.0),
-                                        egui::Color32::from_rgba_unmultiplied(255, 255, 255, 60)
-                                    );
-                                    
-                                    // Draw Wednesday color border
-                                    ui.painter().rect_stroke(
-                                        expanded_rect,
-                                        egui::Rounding::same(6.0),
-                                        egui::Stroke::new(1.0, egui::Color32::from_rgb(126, 120, 229))
-                                    );
-                                } else {
-                                    // Add hover effect only when not pressed
-                                    if select_button_response.hovered() || select_button_response.is_pointer_button_down_on() {
-                                        // Keep hand cursor for both hover and click
-                                        ui.ctx().output_mut(|o| o.cursor_icon = egui::CursorIcon::PointingHand);
-                                        
-                                        // Draw the overlay with different alpha for hover vs click
-                                        let expanded_rect = select_button_response.rect.expand(4.0);
-                                        
-                                        // Use higher alpha when clicked, lower when just hovered
-                                        let alpha = if select_button_response.is_pointer_button_down_on() {
-                                            60 // Clicked state - more opaque
-                                        } else {
-                                            20 // Hovered state - subtle
-                                        };
-                                        
-                                        // Draw semi-transparent white background
-                                        ui.painter().rect_filled(
-                                            expanded_rect,
-                                            egui::Rounding::same(6.0),
-                                            egui::Color32::from_rgba_unmultiplied(255, 255, 255, alpha)
-                                        );
-                                        
-                                        // Draw Wednesday color border
-                                        ui.painter().rect_stroke(
-                                            expanded_rect,
-                                            egui::Rounding::same(6.0),
-                                            egui::Stroke::new(1.5, egui::Color32::from_rgb(232, 150, 199))
-                                        );
-                                    }
-                                }
-                                
-                                if select_button_response.clicked() {
-                                    log::info!("🖱️ SELECT CHILD BUTTON CLICKED!");
-                                    if !self.show_child_dropdown {
-                                        log::info!("🔽 Opening dropdown");
-                                        self.show_child_dropdown = true;
-                                        self.child_dropdown_just_opened = true;
-                                    } else {
-                                        log::info!("🔼 Closing dropdown");
-                                        self.show_child_dropdown = false;
-                                    }
-                                }
+                                let (select_button_response, should_show_dropdown) = self.child_dropdown.render_button(ui, &button_config);
                                 
                                 // Show dropdown if opened
-                                if self.show_child_dropdown {
-                                    self.render_child_dropdown(ui, select_button_response.rect);
+                                if should_show_dropdown {
+                                    self.render_child_dropdown_with_generalized_component(ui, select_button_response.rect);
                                 }
                             }
                         });
@@ -211,174 +107,191 @@ impl AllowanceTrackerApp {
         });
     }
     
-    /// Render child selector dropdown
-    pub fn render_child_dropdown(&mut self, ui: &mut egui::Ui, button_rect: egui::Rect) {
-        log::info!("📋 RENDER_CHILD_DROPDOWN called - this is the real dropdown!");
-        // Calculate dropdown position (below the button)
-        let dropdown_pos = egui::pos2(button_rect.left(), button_rect.bottom());
+    /// Render child selector dropdown using generalized component
+    pub fn render_child_dropdown_with_generalized_component(&mut self, ui: &mut egui::Ui, button_rect: egui::Rect) {
+        // Load children from backend and build menu items
+        let children_list = match self.backend.child_service.list_children() {
+            Ok(children_result) => children_result.children,
+            Err(_) => vec![],
+        };
         
-        // Create a stable area with a consistent ID
-        let area_id = egui::Id::new("child_dropdown_area");
-        
-        let area_response = egui::Area::new(area_id)
-            .order(egui::Order::Foreground)
-            .fixed_pos(dropdown_pos)
-            .show(ui.ctx(), |ui| {
-                let frame = egui::Frame::popup(&ui.style())
-                    .fill(egui::Color32::WHITE)  // Pure white background
-                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(200, 200, 200)))
-                    .rounding(egui::Rounding::same(6.0))
-                    .inner_margin(egui::Margin::same(8.0));
+        let menu_items: Vec<DropdownMenuItem> = if children_list.is_empty() {
+            vec![DropdownMenuItem {
+                label: "No children available".to_string(),
+                icon: None,
+                is_current: false,
+                is_enabled: false,
+            }]
+        } else {
+            children_list.iter().map(|child| {
+                let is_current = self.current_child.as_ref()
+                    .map(|c| c.id == child.id)
+                    .unwrap_or(false);
                 
-                frame.show(ui, |ui| {
-                    ui.vertical(|ui| {
-                        // Load children from backend
-                        match self.backend.child_service.list_children() {
-                            Ok(children_result) => {
-                                if children_result.children.is_empty() {
-                                    // Set minimum width for empty state
-                                    ui.set_min_width(120.0);
-                                    ui.label("No children available");
-                                } else {
-                                    // Calculate the width needed based on actual child names
-                                    let mut max_width: f32 = 0.0;
-                                    let min_width_raw = ui.fonts(|f| f.layout_no_wrap("Bill Smith".to_string(), 
-                                        egui::FontId::new(14.0, egui::FontFamily::Proportional), 
-                                        egui::Color32::BLACK)).size().x;
-                                    let min_width = min_width_raw * 1.3; // Apply same generous multiplier
-                                    
-                                    for child in &children_result.children {
-                                        let is_current = self.current_child.as_ref()
-                                            .map(|c| c.id == child.id)
-                                            .unwrap_or(false);
-                                        
-                                        let display_text = if is_current {
-                                            format!("👑 {}", child.name)
-                                        } else {
-                                            child.name.clone()
-                                        };
-                                        
-                                        let text_width = ui.fonts(|f| f.layout_no_wrap(display_text.clone(), 
-                                            egui::FontId::new(14.0, egui::FontFamily::Proportional), 
-                                            egui::Color32::BLACK)).size().x;
-                                        
-                                        // Add extra breathing room - multiply by 1.3 for more generous sizing
-                                        let generous_width = text_width * 1.3;
-                                        
-                                        max_width = max_width.max(generous_width);
-                                    }
-                                    
-                                    // Use the larger of calculated width or minimum width, plus buffer
-                                    let dropdown_width = (max_width.max(min_width) + 40.0).max(120.0);
-                                    ui.set_min_width(dropdown_width);
-                                    
-                                    for child in children_result.children {
-                                        let is_current = self.current_child.as_ref()
-                                            .map(|c| c.id == child.id)
-                                            .unwrap_or(false);
-                                        
-                                        let button_text = if is_current {
-                                            format!("👑 {}", child.name)
-                                        } else {
-                                            child.name.clone()
-                                        };
-                                        
-                                        // DEBUG: Log dropdown rendering  
-                                        log::info!("🚀 RENDERING HEADER DROPDOWN ITEM: {}", child.name);
-                                        
-                                        // Create button and check hover after
-                                        let button_response = ui.add_sized(
-                                            [dropdown_width, 22.0],
-                                            egui::Button::new(
-                                                egui::RichText::new(&button_text)
-                                                    .font(egui::FontId::new(14.0, egui::FontFamily::Proportional))
-                                                    .color(if is_current { 
-                                                        egui::Color32::from_rgb(79, 109, 245) 
-                                                    } else { 
-                                                        egui::Color32::from_rgb(60, 60, 60) 
-                                                    })
-                                            )
-                                            .fill(egui::Color32::TRANSPARENT)
-                                            .stroke(egui::Stroke::NONE)
-                                            .rounding(egui::Rounding::same(4.0))
-                                        );
-                                        
-                                        // Check hover and paint background BEHIND the text
-                                        if button_response.hovered() {
-                                            log::info!("🔍 HEADER DROPDOWN HOVER DETECTED: {}", child.name);
-                                            log::info!("🎨 HEADER DROPDOWN PAINTING: using painter behind text");
-                                            
-                                            // Paint hover background BEHIND by using a lower z-order
-                                            ui.painter().rect_filled(
-                                                button_response.rect,
-                                                egui::Rounding::same(4.0),
-                                                egui::Color32::from_rgba_unmultiplied(230, 230, 230, 255)
-                                            );
-                                            
-                                            // Repaint the text on top
-                                            ui.painter().text(
-                                                button_response.rect.center(),
-                                                egui::Align2::CENTER_CENTER,
-                                                button_text,
-                                                egui::FontId::new(14.0, egui::FontFamily::Proportional),
-                                                if is_current { 
-                                                    egui::Color32::from_rgb(79, 109, 245) 
-                                                } else { 
-                                                    egui::Color32::from_rgb(60, 60, 60) 
-                                                }
-                                            );
-                                        }
-                                        
-                                        // Click detection - just use button_response directly
-                                        if button_response.clicked() && !is_current {
-                                            // Set this child as active
-                                            let command = crate::backend::domain::commands::child::SetActiveChildCommand {
-                                                child_id: child.id.clone(),
-                                            };
-                                            match self.backend.child_service.set_active_child(command) {
-                                                Ok(_) => {
-                                                    self.current_child = Some(crate::ui::mappers::to_dto(child));
-                                                    self.load_balance();
-                                                    self.load_calendar_data();
-                                                    self.show_child_dropdown = false;
-                                                }
-                                                Err(e) => {
-                                                    self.error_message = Some(format!("Failed to select child: {}", e));
-                                                    self.show_child_dropdown = false;
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                ui.label(format!("Error loading children: {}", e));
-                            }
+                DropdownMenuItem {
+                    label: child.name.clone(),
+                    icon: if is_current { Some("👑".to_string()) } else { None },
+                    is_current,
+                    is_enabled: true,
+                }
+            }).collect()
+        };
+        
+        let menu_config = DropdownMenuConfig {
+            min_width: 120.0,
+            item_height: 22.0,
+            item_font_size: 14.0,
+        };
+        
+        // Track which item was clicked to handle selection outside the closure
+        let mut selected_index: Option<usize> = None;
+        
+        let _clicked_item = self.child_dropdown.render_menu(ui, button_rect, &menu_items, &menu_config, |index| {
+            selected_index = Some(index);
+        });
+        
+        // Handle item selection outside the closure to avoid borrowing conflicts
+        if let Some(index) = selected_index {
+            if index < children_list.len() {
+                let selected_child = &children_list[index];
+                let is_current = self.current_child.as_ref()
+                    .map(|c| c.id == selected_child.id)
+                    .unwrap_or(false);
+                
+                if !is_current {
+                    // Set this child as active
+                    let command = crate::backend::domain::commands::child::SetActiveChildCommand {
+                        child_id: selected_child.id.clone(),
+                    };
+                    match self.backend.child_service.set_active_child(command) {
+                        Ok(_) => {
+                            self.current_child = Some(crate::ui::mappers::to_dto(selected_child.clone()));
+                            self.load_balance();
+                            self.load_calendar_data();
                         }
-                    });
-                });
-            });
-        
-        // Close dropdown if mouse is not hovering over either the button or the dropdown
-        // (but not on the first frame when it was just opened)
-        if !self.child_dropdown_just_opened {
-            let mouse_pos = ui.input(|i| i.pointer.latest_pos());
-            if let Some(pos) = mouse_pos {
-                let hovering_button = button_rect.contains(pos);
-                let hovering_dropdown = area_response.response.contains_pointer();
-                
-                if !hovering_button && !hovering_dropdown {
-                    self.show_child_dropdown = false;
+                        Err(e) => {
+                            self.error_message = Some(format!("Failed to select child: {}", e));
+                        }
+                    }
                 }
             }
         }
+    }
+    
+    /// Render settings menu dropdown with gear icon
+    pub fn render_settings_menu(&mut self, ui: &mut egui::Ui) {
+        // Settings button with gear icon
+        let button_config = DropdownButtonConfig {
+            text: "⚙️".to_string(), // Gear icon
+            font_size: 20.0,
+            text_color: egui::Color32::from_rgb(80, 80, 80),
+            hover_bg_color: egui::Color32::from_rgba_unmultiplied(255, 255, 255, 20),
+            hover_border_color: egui::Color32::from_rgb(126, 120, 229),
+        };
         
-        // Reset the "just opened" flag after one frame
-        if self.child_dropdown_just_opened {
-            self.child_dropdown_just_opened = false;
+        let (settings_button_response, should_show_dropdown) = self.settings_dropdown.render_button(ui, &button_config);
+        
+        // Show dropdown if opened
+        if should_show_dropdown {
+            self.render_settings_dropdown_menu(ui, settings_button_response.rect);
         }
     }
     
+    /// Render settings dropdown menu items
+    pub fn render_settings_dropdown_menu(&mut self, ui: &mut egui::Ui, button_rect: egui::Rect) {
+        // Define settings menu items based on the screenshot
+        let menu_items = vec![
+            DropdownMenuItem {
+                label: "Profile".to_string(),
+                icon: Some("👤".to_string()),
+                is_current: false,
+                is_enabled: true,
+            },
+            DropdownMenuItem {
+                label: "Create child".to_string(),
+                icon: Some("👶".to_string()),
+                is_current: false,
+                is_enabled: true,
+            },
+            DropdownMenuItem {
+                label: "Configure allowance".to_string(),
+                icon: Some("⚙️".to_string()),
+                is_current: false,
+                is_enabled: true,
+            },
+            DropdownMenuItem {
+                label: "Delete transactions".to_string(),
+                icon: Some("🗑️".to_string()),
+                is_current: false,
+                is_enabled: true,
+            },
+            DropdownMenuItem {
+                label: "Export data".to_string(),
+                icon: Some("📤".to_string()),
+                is_current: false,
+                is_enabled: true,
+            },
+            DropdownMenuItem {
+                label: "Data directory".to_string(),
+                icon: Some("📁".to_string()),
+                is_current: false,
+                is_enabled: true,
+            },
+        ];
+        
+        let menu_config = DropdownMenuConfig {
+            min_width: 180.0, // Wider for settings menu
+            item_height: 24.0, // Slightly taller items
+            item_font_size: 14.0,
+        };
+        
+        // Track which item was clicked
+        let mut selected_index: Option<usize> = None;
+        
+        let _clicked_item = self.settings_dropdown.render_menu(ui, button_rect, &menu_items, &menu_config, |index| {
+            selected_index = Some(index);
+        });
+        
+        // Handle settings menu item selection
+        if let Some(index) = selected_index {
+            match index {
+                0 => {
+                    // Profile - placeholder action
+                    log::info!("📋 Profile menu item clicked");
+                    self.success_message = Some("Profile clicked (not implemented yet)".to_string());
+                }
+                1 => {
+                    // Create child - placeholder action
+                    log::info!("👶 Create child menu item clicked");
+                    self.success_message = Some("Create child clicked (not implemented yet)".to_string());
+                }
+                2 => {
+                    // Configure allowance - placeholder action
+                    log::info!("⚙️ Configure allowance menu item clicked");
+                    self.success_message = Some("Configure allowance clicked (not implemented yet)".to_string());
+                }
+                3 => {
+                    // Delete transactions - placeholder action
+                    log::info!("🗑️ Delete transactions menu item clicked");
+                    self.success_message = Some("Delete transactions clicked (not implemented yet)".to_string());
+                }
+                4 => {
+                    // Export data - placeholder action
+                    log::info!("📤 Export data menu item clicked");
+                    self.success_message = Some("Export data clicked (not implemented yet)".to_string());
+                }
+                5 => {
+                    // Data directory - placeholder action
+                    log::info!("📁 Data directory menu item clicked");
+                    self.success_message = Some("Data directory clicked (not implemented yet)".to_string());
+                }
+                _ => {
+                    log::warn!("🚨 Unknown settings menu item clicked: {}", index);
+                }
+            }
+        }
+    }
+
     /// Render error and success messages
     pub fn render_messages(&self, ui: &mut egui::Ui) {
         if let Some(error) = &self.error_message {

@@ -31,12 +31,13 @@ use crate::ui::*;
 
 impl eframe::App for AllowanceTrackerApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        log::info!("🔄 APP UPDATE called - main render loop");
         // Set up kid-friendly styling
         setup_kid_friendly_style(ctx);
         
         // Handle ESC key to close dropdown
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-            self.show_child_dropdown = false;
+            self.child_dropdown.is_open = false;
         }
         
         // Load initial data on first run
@@ -159,12 +160,13 @@ impl AllowanceTrackerApp {
             
             ui.add_space(15.0);
             
-            // Current month and year display
+            // Current month and year display - disable selection to prevent dropdown interference
             let month_year_text = format!("{} {}", self.get_current_month_name(), self.selected_year);
-            ui.label(egui::RichText::new(month_year_text)
+            ui.add(egui::Label::new(egui::RichText::new(month_year_text)
                 .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))
                 .color(egui::Color32::WHITE)
-                .strong());
+                .strong())
+                .selectable(false)); // Disable text selection
             
             ui.add_space(15.0);
             
