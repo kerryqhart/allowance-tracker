@@ -74,7 +74,7 @@ impl AllowanceTrackerApp {
                                     font_size: 18.0,
                                     text_color: egui::Color32::from_rgb(80, 80, 80),
                                     hover_bg_color: egui::Color32::from_rgba_unmultiplied(255, 255, 255, 20),
-                                    hover_border_color: egui::Color32::from_rgb(232, 150, 199),
+                                    hover_border_color: egui::Color32::from_rgb(126, 120, 229),
                                 };
                                 
                                 let (child_button_response, should_show_dropdown) = self.child_dropdown.render_button(ui, &button_config);

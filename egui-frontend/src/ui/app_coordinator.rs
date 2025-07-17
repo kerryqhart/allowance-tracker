@@ -147,10 +147,13 @@ impl AllowanceTrackerApp {
 
     /// Draw calendar month navigation controls
     fn draw_calendar_navigation_controls(&mut self, ui: &mut egui::Ui) {
+        use crate::ui::components::theme::colors;
+        
         ui.horizontal(|ui| {
-            // Previous month button
+            // Previous month button with consistent hover styling
             let prev_button = egui::Button::new("<")
                 .fill(egui::Color32::from_rgba_unmultiplied(255, 255, 255, 100))
+                .stroke(egui::Stroke::new(1.5, colors::HOVER_BORDER)) // Purple outline
                 .rounding(egui::Rounding::same(6.0))
                 .min_size(egui::vec2(35.0, 35.0));
             
@@ -170,9 +173,10 @@ impl AllowanceTrackerApp {
             
             ui.add_space(15.0);
             
-            // Next month button
+            // Next month button with consistent hover styling
             let next_button = egui::Button::new(">")
                 .fill(egui::Color32::from_rgba_unmultiplied(255, 255, 255, 100))
+                .stroke(egui::Stroke::new(1.5, colors::HOVER_BORDER)) // Purple outline
                 .rounding(egui::Rounding::same(6.0))
                 .min_size(egui::vec2(35.0, 35.0));
             

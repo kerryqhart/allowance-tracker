@@ -119,8 +119,8 @@ impl CalendarDayType {
     /// Get the border color for this day type
     pub fn border_color(&self, is_today: bool) -> egui::Color32 {
         if is_today {
-            // Dark navy blue for high contrast against pink background
-            egui::Color32::from_rgb(25, 25, 112) // Navy blue
+            // Pink outline for better visibility against gradient background
+            egui::Color32::from_rgb(232, 150, 199)
         } else {
             match self {
                 CalendarDayType::CurrentMonth => {

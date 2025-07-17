@@ -17,6 +17,7 @@
 
 use eframe::egui;
 use crate::ui::app_state::{AllowanceTrackerApp, MainTab};
+use crate::ui::components::theme::colors;
 
 impl AllowanceTrackerApp {
     /// Draw card background with proper styling
@@ -51,24 +52,27 @@ impl AllowanceTrackerApp {
     
     /// Draw just the Calendar/Table toggle buttons (for subheader)
     pub fn draw_tab_toggle_buttons(&mut self, ui: &mut egui::Ui) {
+        use crate::ui::components::theme::colors;
+        
         ui.horizontal(|ui| {
             // Table button (rendered first so it appears on the right in right-to-left layout)
             let table_button = egui::Button::new(
                 egui::RichText::new("📋 Table")
                     .font(egui::FontId::new(14.0, egui::FontFamily::Proportional))
                     .color(if self.current_tab == MainTab::Table { 
-                        egui::Color32::WHITE 
+                        colors::TEXT_WHITE 
                     } else { 
-                        egui::Color32::from_rgb(70, 70, 70) 
+                        colors::TEXT_SECONDARY 
                     })
             )
             .min_size(egui::vec2(80.0, 30.0))
             .rounding(egui::Rounding::same(6.0))
             .fill(if self.current_tab == MainTab::Table {
-                egui::Color32::from_rgb(79, 109, 245) // Blue for active
+                colors::ACTIVE_BACKGROUND // Theme active color
             } else {
-                egui::Color32::from_rgb(248, 248, 248) // Light gray for inactive
-            });
+                colors::INACTIVE_BACKGROUND // Theme inactive color
+            })
+            .stroke(egui::Stroke::new(1.5, colors::HOVER_BORDER)); // Purple outline
             
             if ui.add(table_button).clicked() {
                 self.current_tab = MainTab::Table;
@@ -81,18 +85,19 @@ impl AllowanceTrackerApp {
                 egui::RichText::new("📅 Calendar")
                     .font(egui::FontId::new(14.0, egui::FontFamily::Proportional))
                     .color(if self.current_tab == MainTab::Calendar { 
-                        egui::Color32::WHITE 
+                        colors::TEXT_WHITE 
                     } else { 
-                        egui::Color32::from_rgb(70, 70, 70) 
+                        colors::TEXT_SECONDARY 
                     })
             )
             .min_size(egui::vec2(80.0, 30.0))
             .rounding(egui::Rounding::same(6.0))
             .fill(if self.current_tab == MainTab::Calendar {
-                egui::Color32::from_rgb(79, 109, 245) // Blue for active
+                colors::ACTIVE_BACKGROUND // Theme active color
             } else {
-                egui::Color32::from_rgb(248, 248, 248) // Light gray for inactive
-            });
+                colors::INACTIVE_BACKGROUND // Theme inactive color
+            })
+            .stroke(egui::Stroke::new(1.5, colors::HOVER_BORDER)); // Purple outline
             
             if ui.add(calendar_button).clicked() {
                 self.current_tab = MainTab::Calendar;
@@ -140,18 +145,19 @@ impl AllowanceTrackerApp {
                 egui::RichText::new("📊 Chart")
                     .font(egui::FontId::new(14.0, egui::FontFamily::Proportional))
                     .color(if self.current_tab == MainTab::Calendar { 
-                        egui::Color32::WHITE 
+                        colors::TEXT_WHITE 
                     } else { 
-                        egui::Color32::from_rgb(70, 70, 70) 
+                        colors::TEXT_SECONDARY 
                     })
             )
             .min_size(egui::vec2(80.0, 30.0))
             .rounding(egui::Rounding::same(6.0))
             .fill(if self.current_tab == MainTab::Calendar {
-                egui::Color32::from_rgb(79, 109, 245) // Blue for active
+                colors::ACTIVE_BACKGROUND // Theme active color
             } else {
-                egui::Color32::from_rgb(248, 248, 248) // Light gray for inactive
-            });
+                colors::INACTIVE_BACKGROUND // Theme inactive color
+            })
+            .stroke(egui::Stroke::new(1.5, colors::HOVER_BORDER)); // Purple outline
             
             if ui.add(chart_button).clicked() {
                 self.current_tab = MainTab::Calendar;
@@ -165,18 +171,19 @@ impl AllowanceTrackerApp {
                 egui::RichText::new("📋 Table")
                     .font(egui::FontId::new(14.0, egui::FontFamily::Proportional))
                     .color(if self.current_tab == MainTab::Table { 
-                        egui::Color32::WHITE 
+                        colors::TEXT_WHITE 
                     } else { 
-                        egui::Color32::from_rgb(70, 70, 70) 
+                        colors::TEXT_SECONDARY 
                     })
             )
             .min_size(egui::vec2(80.0, 30.0))
             .rounding(egui::Rounding::same(6.0))
             .fill(if self.current_tab == MainTab::Table {
-                egui::Color32::from_rgb(79, 109, 245) // Blue for active
+                colors::ACTIVE_BACKGROUND // Theme active color
             } else {
-                egui::Color32::from_rgb(248, 248, 248) // Light gray for inactive
-            });
+                colors::INACTIVE_BACKGROUND // Theme inactive color
+            })
+            .stroke(egui::Stroke::new(1.5, colors::HOVER_BORDER)); // Purple outline
             
             if ui.add(table_button).clicked() {
                 self.current_tab = MainTab::Table;
@@ -241,17 +248,17 @@ impl AllowanceTrackerApp {
                 let calendar_button = if calendar_selected {
                     egui::Button::new(egui::RichText::new("📅 Calendar")
                         .font(egui::FontId::new(18.0, egui::FontFamily::Proportional))
-                        .color(egui::Color32::from_rgb(60, 60, 60)))
-                        .fill(egui::Color32::WHITE) // Same white as calendar card
+                        .color(colors::TEXT_PRIMARY))
+                        .fill(colors::CARD_BACKGROUND) // Same white as calendar card
                         .rounding(calendar_rounding)
-                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(220, 220, 220))) // Light border
+                        .stroke(egui::Stroke::new(1.5, colors::HOVER_BORDER)) // Purple border
                 } else {
                     egui::Button::new(egui::RichText::new("📅 Calendar")
                         .font(egui::FontId::new(18.0, egui::FontFamily::Proportional))
                         .color(egui::Color32::from_rgb(100, 100, 100)))
-                        .fill(egui::Color32::from_rgb(240, 240, 240)) // Lighter gray for inactive
+                        .fill(colors::INACTIVE_BACKGROUND) // Theme inactive color
                         .rounding(calendar_rounding)
-                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(200, 200, 200)))
+                        .stroke(egui::Stroke::new(1.5, colors::HOVER_BORDER)) // Purple border
                 };
                 
                 if ui.add_sized(calendar_size, calendar_button).clicked() {
@@ -277,17 +284,17 @@ impl AllowanceTrackerApp {
                 let table_button = if table_selected {
                     egui::Button::new(egui::RichText::new("📋 Table")
                         .font(egui::FontId::new(18.0, egui::FontFamily::Proportional))
-                        .color(egui::Color32::from_rgb(60, 60, 60)))
-                        .fill(egui::Color32::WHITE) // Same white as calendar card
+                        .color(colors::TEXT_PRIMARY))
+                        .fill(colors::CARD_BACKGROUND) // Same white as calendar card
                         .rounding(table_rounding)
-                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(220, 220, 220)))
+                        .stroke(egui::Stroke::new(1.5, colors::HOVER_BORDER)) // Purple border
                 } else {
                     egui::Button::new(egui::RichText::new("📋 Table")
                         .font(egui::FontId::new(18.0, egui::FontFamily::Proportional))
                         .color(egui::Color32::from_rgb(100, 100, 100)))
-                        .fill(egui::Color32::from_rgb(240, 240, 240)) // Lighter gray for inactive
+                        .fill(colors::INACTIVE_BACKGROUND) // Theme inactive color
                         .rounding(table_rounding)
-                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(200, 200, 200)))
+                        .stroke(egui::Stroke::new(1.5, colors::HOVER_BORDER)) // Purple border
                 };
                 
                 if ui.add_sized(table_size, table_button).clicked() {
