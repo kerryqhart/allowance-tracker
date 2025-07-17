@@ -27,7 +27,7 @@
 //! the single source of truth principle for state management.
 
 use log::info;
-use chrono::Datelike;
+use chrono::{Datelike, TimeZone};
 use std::collections::HashSet;
 use shared::*;
 use crate::backend::Backend;
@@ -61,6 +61,93 @@ pub enum ParentalControlStage {
 pub enum ProtectedAction {
     DeleteTransactions,
     // Future extensions: ConfigureAllowance, ExportData, etc.
+}
+
+/// Transaction type for money modal configuration
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransactionType {
+    Income,
+    Expense,
+}
+
+/// Generic configuration for money transaction modals (income/expense)
+pub struct MoneyTransactionModalConfig {
+    // Visual elements
+    pub title: &'static str,
+    pub icon: &'static str,
+    pub button_text: &'static str,
+    pub hint_text: &'static str,
+    pub color: egui::Color32,
+    
+    // Field configurations
+    pub description_placeholder: &'static str,
+    pub amount_placeholder: &'static str,
+    pub max_description_length: usize,
+    
+    // Transaction type for backend integration
+    pub transaction_type: TransactionType,
+}
+
+/// Generic form state for money transaction modals
+#[derive(Debug, Clone)]
+pub struct MoneyTransactionFormState {
+    pub description: String,
+    pub amount: String,
+    pub description_error: Option<String>,
+    pub amount_error: Option<String>,
+    pub is_valid: bool,
+}
+
+impl MoneyTransactionFormState {
+    pub fn new() -> Self {
+        Self {
+            description: String::new(),
+            amount: String::new(),
+            description_error: None,
+            amount_error: None,
+            is_valid: true,
+        }
+    }
+    
+    pub fn clear(&mut self) {
+        self.description.clear();
+        self.amount.clear();
+        self.description_error = None;
+        self.amount_error = None;
+        self.is_valid = true;
+    }
+}
+
+impl MoneyTransactionModalConfig {
+    /// Configuration for income (Add Money) modal
+    pub fn income_config() -> Self {
+        Self {
+            title: "Add Extra Money",
+            icon: "💰",
+            button_text: "Add Extra Money",
+            hint_text: "Enter the amount of money you received and what it was for",
+            color: egui::Color32::from_rgb(34, 139, 34), // Green
+            description_placeholder: "What is this money for?",
+            amount_placeholder: "0.00",
+            max_description_length: 70,
+            transaction_type: TransactionType::Income,
+        }
+    }
+    
+    /// Configuration for expense (Spend Money) modal  
+    pub fn expense_config() -> Self {
+        Self {
+            title: "Spend Money",
+            icon: "💸", 
+            button_text: "Spend Money",
+            hint_text: "Enter the amount you want to spend from your allowance",
+            color: egui::Color32::from_rgb(128, 128, 128), // Gray (as requested)
+            description_placeholder: "What did you buy?",
+            amount_placeholder: "0.00",
+            max_description_length: 70,
+            transaction_type: TransactionType::Expense,
+        }
+    }
 }
 
 /// Main application struct for the egui allowance tracker
@@ -123,6 +210,10 @@ pub struct AllowanceTrackerApp {
     pub add_money_description_error: Option<String>,
     pub add_money_amount_error: Option<String>,
     pub add_money_is_valid: bool,
+    
+    // Generic money transaction form states
+    pub income_form_state: MoneyTransactionFormState,
+    pub expense_form_state: MoneyTransactionFormState,
 }
 
 impl AllowanceTrackerApp {
@@ -199,6 +290,10 @@ impl AllowanceTrackerApp {
             add_money_description_error: None,
             add_money_amount_error: None,
             add_money_is_valid: true,
+            
+            // Generic money transaction form states
+            income_form_state: MoneyTransactionFormState::new(),
+            expense_form_state: MoneyTransactionFormState::new(),
         })
     }
 
@@ -507,6 +602,127 @@ impl AllowanceTrackerApp {
                 if !input.ends_with('.') && !input.ends_with('0') {
                     self.add_money_amount = format!("{:.2}", amount);
                 }
+            }
+        }
+    }
+    
+    // ====================
+    // GENERIC MONEY TRANSACTION FORM VALIDATION METHODS
+    // ====================
+    
+    /// Validate a generic money transaction form and update its validation state
+    pub fn validate_money_transaction_form(&self, form_state: &mut MoneyTransactionFormState, config: &MoneyTransactionModalConfig) {
+        form_state.description_error = None;
+        form_state.amount_error = None;
+        
+        // Validate description
+        let description = form_state.description.trim();
+        if description.is_empty() {
+            form_state.description_error = Some("Description is required".to_string());
+        } else if description.len() > config.max_description_length {
+            form_state.description_error = Some(format!("Description too long ({}/{} characters)", description.len(), config.max_description_length));
+        }
+        
+        // Validate amount
+        let amount_input = form_state.amount.trim();
+        if amount_input.is_empty() {
+            // Don't show "Amount is required" error immediately - let the grayed button be sufficient
+            form_state.amount_error = None;
+        } else {
+            // Clean and parse amount
+            match self.clean_and_parse_amount(amount_input) {
+                Ok(amount) => {
+                    if amount <= 0.0 {
+                        form_state.amount_error = Some("Amount must be positive".to_string());
+                    } else if amount > 1_000_000.0 {
+                        form_state.amount_error = Some("Amount too large (max $1,000,000)".to_string());
+                    } else if amount < 0.01 {
+                        form_state.amount_error = Some("Amount too small (min $0.01)".to_string());
+                    } else if self.has_too_many_decimal_places_generic(amount, &form_state.amount) {
+                        form_state.amount_error = Some("Maximum 2 decimal places allowed".to_string());
+                    }
+                }
+                Err(error) => {
+                    form_state.amount_error = Some(error);
+                }
+            }
+        }
+        
+        // Update overall validation state
+        form_state.is_valid = form_state.description_error.is_none() && form_state.amount_error.is_none();
+    }
+    
+    /// Check if amount has too many decimal places for generic form (takes amount input string)
+    fn has_too_many_decimal_places_generic(&self, _amount: f64, amount_input: &str) -> bool {
+        // Check the original input string instead of the parsed float
+        let input = amount_input.trim();
+        if let Some(decimal_pos) = input.find('.') {
+            let decimal_part = &input[decimal_pos + 1..];
+            // Reject if more than 2 decimal places
+            if decimal_part.len() > 2 {
+                return true;
+            }
+        }
+        false
+    }
+    
+    // ====================
+    // BACKEND INTEGRATION METHODS
+    // ====================
+    
+    /// Submit income transaction to backend
+    pub fn submit_income_transaction(&mut self) -> bool {
+        use crate::backend::domain::money_management::MoneyManagementService;
+        
+        log::info!("💰 Submitting income transaction - Description: '{}', Amount: '{}'", 
+                  self.income_form_state.description, self.income_form_state.amount);
+        
+        // Parse amount from form
+        let amount = match self.clean_and_parse_amount(&self.income_form_state.amount) {
+            Ok(amount) => amount,
+            Err(error) => {
+                log::error!("❌ Failed to parse amount: {}", error);
+                self.error_message = Some(format!("Invalid amount: {}", error));
+                return false;
+            }
+        };
+        
+        // Create AddMoneyRequest with selected date from calendar as proper DateTime object
+        let date_time = self.selected_day.map(|date| {
+            // Convert NaiveDate to DateTime at noon Eastern Time
+            let naive_datetime = date.and_hms_opt(12, 0, 0).unwrap();
+            let eastern_offset = chrono::FixedOffset::west_opt(5 * 3600).unwrap(); // EST (UTC-5)
+            eastern_offset.from_local_datetime(&naive_datetime).single().unwrap()
+        });
+        let request = shared::AddMoneyRequest {
+            description: self.income_form_state.description.trim().to_string(),
+            amount,
+            date: date_time,
+        };
+        
+        // Create MoneyManagementService instance
+        let money_service = MoneyManagementService::new();
+        
+        // Call backend with references to other services
+        match money_service.add_money_complete(
+            request,
+            &self.backend.child_service,
+            &self.backend.transaction_service,
+        ) {
+            Ok(response) => {
+                log::info!("✅ Income transaction successful: {}", response.success_message);
+                self.success_message = Some(response.success_message);
+                self.current_balance = response.new_balance;
+                
+                // Refresh calendar data to show the new transaction
+                self.load_calendar_data();
+                
+                true
+            }
+            Err(error) => {
+                log::error!("❌ Income transaction failed: {}", error);
+                self.error_message = Some(format!("Failed to add money: {}", error));
+                false
             }
         }
     }

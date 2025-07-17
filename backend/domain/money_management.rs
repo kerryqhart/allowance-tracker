@@ -90,7 +90,7 @@ impl MoneyManagementService {
         let validation = self.validate_add_money_form_with_date(
             &request.description, 
             &request.amount.to_string(),
-            request.date.as_deref(),
+            request.date.as_ref(),
             Some(&active_child.created_at.to_rfc3339())
         );
 
@@ -126,17 +126,14 @@ impl MoneyManagementService {
         // Step 5: Generate success message with backdated handling
         let success_message = if let Some(date) = &request.date {
             // Check if this was a backdated transaction
-            match self.is_backdated_transaction(date) {
-                Ok(true) => {
-                    info!("📅 MONEY MANAGEMENT: This was a backdated transaction");
-                    format!("🎉 {} added successfully (backdated to {})!", 
-                                  self.format_positive_amount(transaction.amount),
-                                  date)
-                },
-                _ => {
-                    info!("📅 MONEY MANAGEMENT: This was a current-date transaction");
-                    self.generate_success_message(transaction.amount)
-                }
+            if self.is_backdated_transaction(date) {
+                info!("📅 MONEY MANAGEMENT: This was a backdated transaction");
+                format!("🎉 {} added successfully (backdated to {})!", 
+                              self.format_positive_amount(transaction.amount),
+                              date.format("%Y-%m-%d"))
+            } else {
+                info!("📅 MONEY MANAGEMENT: This was a current-date transaction");
+                self.generate_success_message(transaction.amount)
             }
         } else {
             info!("📅 MONEY MANAGEMENT: No date provided, using current date");
@@ -186,7 +183,7 @@ impl MoneyManagementService {
         let validation = self.validate_spend_money_form_with_date(
             &request.description, 
             &request.amount.to_string(),
-            request.date.as_deref(),
+            request.date.as_ref(),
             Some(&active_child.created_at.to_rfc3339())
         );
 
@@ -220,17 +217,14 @@ impl MoneyManagementService {
         // Step 5: Generate success message with backdated handling
         let success_message = if let Some(date) = &request.date {
             // Check if this was a backdated transaction
-            match self.is_backdated_transaction(date) {
-                Ok(true) => {
-                    info!("📅 MONEY MANAGEMENT: This was a backdated transaction");
-                    format!("💸 {} spent successfully (backdated to {})!", 
-                                  self.format_amount(request.amount.abs()),
-                                  date)
-                },
-                _ => {
-                    info!("📅 MONEY MANAGEMENT: This was a current-date transaction");
-                    self.generate_spend_success_message(request.amount)
-                }
+            if self.is_backdated_transaction(date) {
+                info!("📅 MONEY MANAGEMENT: This was a backdated transaction");
+                format!("💸 {} spent successfully (backdated to {})!", 
+                              self.format_amount(request.amount.abs()),
+                              date.format("%Y-%m-%d"))
+            } else {
+                info!("📅 MONEY MANAGEMENT: This was a current-date transaction");
+                self.generate_spend_success_message(request.amount)
             }
         } else {
             info!("📅 MONEY MANAGEMENT: No date provided, using current date");
@@ -368,7 +362,7 @@ impl MoneyManagementService {
     }
 
     /// Create a transaction request from validated form data
-    pub fn create_add_money_request(&self, description: String, amount: f64, date: Option<String>) -> AddMoneyRequest {
+    pub fn create_add_money_request(&self, description: String, amount: f64, date: Option<chrono::DateTime<chrono::FixedOffset>>) -> AddMoneyRequest {
         AddMoneyRequest {
             description: description.trim().to_string(),
             amount,
@@ -571,7 +565,7 @@ impl MoneyManagementService {
     }
 
     /// Create a spend money request from validated form data
-    pub fn create_spend_money_request(&self, description: String, amount: f64, date: Option<String>) -> SpendMoneyRequest {
+    pub fn create_spend_money_request(&self, description: String, amount: f64, date: Option<chrono::DateTime<chrono::FixedOffset>>) -> SpendMoneyRequest {
         SpendMoneyRequest {
             description: description.trim().to_string(),
             amount,  // Keep positive, backend will convert to negative
@@ -675,72 +669,36 @@ impl MoneyManagementService {
     }
 
     /// Enhanced validation for add money form that includes date validation
-    pub fn validate_add_money_form_with_date(&self, description: &str, amount_input: &str, date: Option<&str>, child_created_at: Option<&str>) -> MoneyFormValidation {
-        let mut validation = self.validate_add_money_form(description, amount_input);
+    pub fn validate_add_money_form_with_date(&self, description: &str, amount_input: &str, date: Option<&chrono::DateTime<chrono::FixedOffset>>, child_created_at: Option<&str>) -> MoneyFormValidation {
+        let validation = self.validate_add_money_form(description, amount_input);
 
-        // Add date validation if date is provided
-        if let Some(date_str) = date {
-            if let Err(date_error) = self.validate_transaction_date(date_str, child_created_at) {
-                validation.errors.push(MoneyValidationError::InvalidAmountFormat(date_error)); // Reusing existing error type
-                validation.is_valid = false;
-            }
-        }
-
+        // DateTime objects are already validated by construction, so no additional date validation needed
+        // The frontend is responsible for creating valid DateTime objects
+        
         validation
     }
 
     /// Enhanced validation for spend money form that includes date validation
-    pub fn validate_spend_money_form_with_date(&self, description: &str, amount_input: &str, date: Option<&str>, child_created_at: Option<&str>) -> MoneyFormValidation {
-        let mut validation = self.validate_spend_money_form(description, amount_input);
+    pub fn validate_spend_money_form_with_date(&self, description: &str, amount_input: &str, date: Option<&chrono::DateTime<chrono::FixedOffset>>, child_created_at: Option<&str>) -> MoneyFormValidation {
+        let validation = self.validate_spend_money_form(description, amount_input);
 
-        // Add date validation if date is provided
-        if let Some(date_str) = date {
-            if let Err(date_error) = self.validate_transaction_date(date_str, child_created_at) {
-                validation.errors.push(MoneyValidationError::InvalidAmountFormat(date_error)); // Reusing existing error type
-                validation.is_valid = false;
-            }
-        }
-
+        // DateTime objects are already validated by construction, so no additional date validation needed
+        // The frontend is responsible for creating valid DateTime objects
+        
         validation
     }
 
     /// Check if a transaction date would require balance recalculation
     /// (i.e., it's being backdated)
-    /// Accepts both YYYY-MM-DD format (from date picker) and RFC 3339 format
-    pub fn is_backdated_transaction(&self, date: &str) -> Result<bool, String> {
-        // Try to parse as RFC 3339 first, then fall back to YYYY-MM-DD
-        let transaction_date = if let Ok(dt) = DateTime::parse_from_rfc3339(date) {
-            dt
-        } else {
-            // Try parsing as YYYY-MM-DD and convert to RFC 3339 with current time
-            match chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d") {
-                Ok(naive_date) => {
-                    // Convert to datetime at noon Eastern Time for consistency
-                    let naive_datetime = naive_date.and_hms_opt(12, 0, 0)
-                        .ok_or_else(|| "Failed to create datetime from date".to_string())?;
-                    
-                    // Create Eastern Time offset (EST/EDT)
-                    let eastern_offset = chrono::FixedOffset::west_opt(5 * 3600)
-                        .ok_or_else(|| "Failed to create Eastern timezone offset".to_string())?;
-                    
-                    eastern_offset.from_local_datetime(&naive_datetime)
-                        .single()
-                        .ok_or_else(|| "Failed to create timezone-aware datetime".to_string())?
-                }
-                Err(_) => {
-                    return Err(format!("Invalid date format: {}", date));
-                }
-            }
-        };
-
-        let now = Utc::now();
+    pub fn is_backdated_transaction(&self, transaction_date: &chrono::DateTime<chrono::FixedOffset>) -> bool {
+        let now = chrono::Utc::now();
         let now_with_tz = now.with_timezone(&transaction_date.timezone());
         
         // Consider backdated if more than 1 hour in the past
         // This gives some leeway for timezone differences and normal delays
-        let one_hour_ago = now_with_tz - Duration::hours(1);
+        let one_hour_ago = now_with_tz - chrono::Duration::hours(1);
         
-        Ok(transaction_date < one_hour_ago)
+        *transaction_date < one_hour_ago
     }
 
     /// Generate current RFC 3339 timestamp in Eastern Time

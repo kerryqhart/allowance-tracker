@@ -1,10 +1,26 @@
-Fix modal timing bug for edge calendar days
+Fix calendar date selection: Replace string dates with DateTime objects
 
-- Add modal_just_opened flag to prevent same-frame backdrop detection
-- Edge calendar days (top/bottom rows, left/right columns) now work properly
-- Prevents click event that opens modal from immediately closing it
-- Flag resets after one frame to restore normal backdrop click behavior
+**MAJOR ARCHITECTURE FIX**: Resolves transactions being created on wrong calendar day
 
-Resolves the "brief flicker and immediate disappearance" issue where
-clicking +$ buttons on edge calendar positions would fail to keep
-the Add Money modal open due to backdrop click detection timing. 
+**Root Cause**: Frontend was passing "YYYY-MM-DD" strings but backend expected 
+RFC 3339 format, causing "Invalid date format: premature end of input" errors.
+
+**Solution**: Implement proper DTO architecture with DateTime objects throughout:
+
+Frontend Changes:
+- Create DateTime<FixedOffset> objects from calendar selection (noon Eastern Time)
+- Remove string date parsing - construct valid DateTime objects immediately
+
+DTO & Backend Changes:
+- Update all request DTOs to use DateTime<FixedOffset> instead of Option<String>
+- Simplify transaction service - remove complex string parsing fallback logic
+- Update validation methods to accept DateTime references
+- Maintain "string dates never leave CSV layer" architectural principle
+
+Files Modified:
+- shared/src/lib.rs: DTO structures with DateTime fields
+- egui-frontend/src/ui/app_state.rs: Frontend DateTime object creation
+- backend/domain/: Simplified validation and transaction creation logic
+
+**Result**: Calendar clicks now correctly create transactions on selected day
+using structured data instead of error-prone string parsing. 

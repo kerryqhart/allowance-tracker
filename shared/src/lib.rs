@@ -55,8 +55,8 @@ pub struct CreateTransactionRequest {
     pub description: String,
     /// Transaction amount (positive for income, negative for expense)
     pub amount: f64,
-    /// Optional date override (RFC 3339) - uses current time if not provided
-    pub date: Option<String>,
+    /// Optional date override - uses current time if not provided
+    pub date: Option<DateTime<FixedOffset>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -216,7 +216,7 @@ pub struct ParentalControlResponse {
 pub struct SpendMoneyRequest {
     pub description: String,
     pub amount: f64,  // User provides positive amount, backend converts to negative
-    pub date: Option<String>,
+    pub date: Option<DateTime<FixedOffset>>,
 }
 
 /// Response after spending money
@@ -233,7 +233,7 @@ pub struct SpendMoneyResponse {
 pub struct AddMoneyRequest {
     pub description: String,
     pub amount: f64,
-    pub date: Option<String>,
+    pub date: Option<DateTime<FixedOffset>>,
 }
 
 /// Response after adding money

@@ -58,19 +58,12 @@ impl<C: Connection> TransactionService<C> {
         let now_millis = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64;
         let transaction_id = DomainTransaction::generate_id(command.amount, now_millis);
 
-        // ✅ FIXED: Create DateTime object instead of string
-        let transaction_date = match command.date {
-            Some(date_str) => {
-                // Parse the provided date string into a DateTime object
-                chrono::DateTime::parse_from_rfc3339(&date_str)
-                    .map_err(|e| anyhow!("Invalid date format: {}", e))?
-            },
-            None => {
-                // Create current time in Eastern timezone
-                let eastern_offset = chrono::FixedOffset::west_opt(5 * 3600).unwrap(); // EST (UTC-5)
-                chrono::Utc::now().with_timezone(&eastern_offset)
-            }
-        };
+        // ✅ FIXED: Use DateTime object directly from command (no parsing needed)
+        let transaction_date = command.date.unwrap_or_else(|| {
+            // Create current time in Eastern timezone if no date provided
+            let eastern_offset = chrono::FixedOffset::west_opt(5 * 3600).unwrap(); // EST (UTC-5)
+            chrono::Utc::now().with_timezone(&eastern_offset)
+        });
 
         let transaction_balance = self
             .balance_service

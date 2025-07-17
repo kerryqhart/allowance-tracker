@@ -14,7 +14,7 @@ pub mod transactions {
     pub struct CreateTransactionCommand {
         pub description: String,
         pub amount: f64,
-        pub date: Option<String>,
+        pub date: Option<chrono::DateTime<chrono::FixedOffset>>,
     }
 
     /// Query parameters for listing transactions.
