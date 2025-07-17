@@ -88,6 +88,7 @@ pub struct AllowanceTrackerApp {
     // Calendar interaction state
     pub selected_day: Option<chrono::NaiveDate>,
     pub active_overlay: Option<OverlayType>,
+    pub modal_just_opened: bool, // Prevents backdrop click detection on same frame modal opens
     
     // Modal states
     pub show_add_money_modal: bool,
@@ -164,6 +165,7 @@ impl AllowanceTrackerApp {
             // Calendar interaction state
             selected_day: None,
             active_overlay: None,
+            modal_just_opened: false,
             
             // Modal states
             show_add_money_modal: false,

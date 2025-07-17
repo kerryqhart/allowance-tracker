@@ -1314,6 +1314,7 @@ impl AllowanceTrackerApp {
                     
                     if ui.add_sized(glyph_size, button).clicked() {
                         self.active_overlay = Some(glyph.overlay_type());
+                        self.modal_just_opened = true; // Prevent backdrop click detection this frame
                         log::info!("🎯 Day menu glyph '{}' clicked for date: {}", glyph_text, selected_date);
                     }
                 });

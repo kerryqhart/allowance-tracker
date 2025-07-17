@@ -434,8 +434,8 @@ impl AllowanceTrackerApp {
                     });
                 });
                 
-                // Handle backdrop clicks to close modal
-                if ui.ctx().input(|i| i.pointer.any_click()) {
+                // Handle backdrop clicks to close modal (skip if modal was just opened this frame)
+                if !self.modal_just_opened && ui.ctx().input(|i| i.pointer.any_click()) {
                     let pointer_pos = ui.ctx().input(|i| i.pointer.interact_pos());
                     if let Some(pos) = pointer_pos {
                         // Check if the click was outside the modal area
@@ -455,6 +455,9 @@ impl AllowanceTrackerApp {
                         }
                     }
                 }
+                
+                // Reset the modal_just_opened flag at the end of the frame
+                self.modal_just_opened = false;
             });
     }
 
