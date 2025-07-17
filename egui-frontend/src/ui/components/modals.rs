@@ -4,30 +4,7 @@ use crate::ui::mappers::to_dto;
 use crate::backend::domain::commands::child::SetActiveChildCommand;
 
 impl AllowanceTrackerApp {
-    /// Render the spend money modal
-    pub fn render_spend_money_modal(&mut self, ctx: &egui::Context) {
-        if !self.show_spend_money_modal {
-            return;
-        }
 
-        egui::Window::new("Spend Money")
-            .collapsible(false)
-            .resizable(false)
-            .show(ctx, |ui| {
-                ui.text_edit_singleline(&mut self.spend_money_amount);
-                ui.text_edit_singleline(&mut self.spend_money_description);
-                ui.horizontal(|ui| {
-                    if ui.button("Spend").clicked() {
-                        // TODO: Implement spend money logic
-                        self.show_spend_money_modal = false;
-                        self.success_message = Some("Money spent!".to_string());
-                    }
-                    if ui.button("Cancel").clicked() {
-                        self.show_spend_money_modal = false;
-                    }
-                });
-            });
-    }
 
     /// Render the child selector modal
     pub fn render_child_selector_modal(&mut self, ctx: &egui::Context) {
@@ -203,19 +180,43 @@ impl AllowanceTrackerApp {
             return;
         }
         
+        // Handle SpendMoney with generic modal
+        if overlay_type == crate::ui::app_state::OverlayType::SpendMoney {
+            let config = crate::ui::app_state::MoneyTransactionModalConfig::expense_config();
+            let mut form_state = self.expense_form_state.clone();
+            let form_submitted = self.render_money_transaction_modal(
+                ctx,
+                &config,
+                &mut form_state,
+                true,
+                overlay_type,
+            );
+            
+            // Update the form state back to the struct
+            self.expense_form_state = form_state;
+            
+            if form_submitted {
+                // Submit to backend and handle response
+                let success = self.submit_expense_transaction();
+                if success {
+                    self.expense_form_state.clear();
+                    self.active_overlay = None;
+                    self.selected_day = None;
+                }
+                // Note: Error messages are handled in submit_expense_transaction()
+            }
+            return;
+        }
+        
         // Handle other overlay types with existing implementation
         let (overlay_color, title_text, content_text) = match overlay_type {
-            crate::ui::app_state::OverlayType::SpendMoney => (
-                egui::Color32::from_rgb(128, 128, 128), // Gray to match expense chips
-                "Spend Money", 
-                "Enter the amount you want to spend from your allowance"
-            ),
             crate::ui::app_state::OverlayType::CreateGoal => (
                 egui::Color32::from_rgb(199, 112, 221), // Pink for goals
                 "Create Goal",
                 "Set a savings goal for something special"
             ),
             crate::ui::app_state::OverlayType::AddMoney => unreachable!("AddMoney handled above"),
+            crate::ui::app_state::OverlayType::SpendMoney => unreachable!("SpendMoney handled above"),
         };
         
         // Use Area with Foreground order to ensure it appears above everything
@@ -975,7 +976,6 @@ impl AllowanceTrackerApp {
 
     /// Render all modals
     pub fn render_modals(&mut self, ctx: &egui::Context) {
-        self.render_spend_money_modal(ctx);
         self.render_child_selector_modal(ctx);
         self.render_day_action_overlay(ctx);
         self.render_parental_control_modal(ctx);

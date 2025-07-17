@@ -38,7 +38,7 @@ impl Backend {
         let data_path = home_dir.join("Documents").join("Allowance Tracker");
         
         // Create the CSV connection with the real data directory
-        println!("🔍 Backend::new() using real data path: {:?}", data_path);
+        log::info!("🔍 Backend::new() using real data path: {:?}", data_path);
         let csv_connection = Arc::new(CsvConnection::new(data_path)?);
         
         // Create services using the Arc<CsvConnection> pattern

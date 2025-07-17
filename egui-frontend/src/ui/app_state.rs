@@ -179,7 +179,6 @@ pub struct AllowanceTrackerApp {
     
     // Modal states
     pub show_add_money_modal: bool,
-    pub show_spend_money_modal: bool,
     pub show_child_selector: bool,
     #[allow(dead_code)]
     pub show_allowance_config_modal: bool,
@@ -203,8 +202,6 @@ pub struct AllowanceTrackerApp {
     // Form states
     pub add_money_amount: String,
     pub add_money_description: String,
-    pub spend_money_amount: String,
-    pub spend_money_description: String,
     
     // Add money form validation state
     pub add_money_description_error: Option<String>,
@@ -260,7 +257,6 @@ impl AllowanceTrackerApp {
             
             // Modal states
             show_add_money_modal: false,
-            show_spend_money_modal: false,
             show_child_selector: false,
             show_allowance_config_modal: false,
             
@@ -283,8 +279,6 @@ impl AllowanceTrackerApp {
             // Form states
             add_money_amount: String::new(),
             add_money_description: String::new(),
-            spend_money_amount: String::new(),
-            spend_money_description: String::new(),
             
             // Add money form validation state
             add_money_description_error: None,
@@ -722,6 +716,63 @@ impl AllowanceTrackerApp {
             Err(error) => {
                 log::error!("❌ Income transaction failed: {}", error);
                 self.error_message = Some(format!("Failed to add money: {}", error));
+                false
+            }
+        }
+    }
+
+    /// Submit expense transaction to backend using spend_money_complete
+    pub fn submit_expense_transaction(&mut self) -> bool {
+        use crate::backend::domain::money_management::MoneyManagementService;
+        
+        log::info!("💸 Submitting expense transaction - Description: '{}', Amount: '{}'", 
+                  self.expense_form_state.description, self.expense_form_state.amount);
+        
+        // Parse amount from form
+        let amount = match self.clean_and_parse_amount(&self.expense_form_state.amount) {
+            Ok(amount) => amount,
+            Err(error) => {
+                log::error!("❌ Failed to parse amount: {}", error);
+                self.error_message = Some(format!("Invalid amount: {}", error));
+                return false;
+            }
+        };
+        
+        // Create SpendMoneyRequest with selected date from calendar as proper DateTime object
+        let date_time = self.selected_day.map(|date| {
+            // Convert NaiveDate to DateTime at noon Eastern Time
+            let naive_datetime = date.and_hms_opt(12, 0, 0).unwrap();
+            let eastern_offset = chrono::FixedOffset::west_opt(5 * 3600).unwrap(); // EST (UTC-5)
+            eastern_offset.from_local_datetime(&naive_datetime).single().unwrap()
+        });
+        let request = shared::SpendMoneyRequest {
+            description: self.expense_form_state.description.trim().to_string(),
+            amount, // User enters positive amount, backend converts to negative
+            date: date_time,
+        };
+        
+        // Create MoneyManagementService instance
+        let money_service = MoneyManagementService::new();
+        
+        // Call backend with references to other services
+        match money_service.spend_money_complete(
+            request,
+            &self.backend.child_service,
+            &self.backend.transaction_service,
+        ) {
+            Ok(response) => {
+                log::info!("✅ Expense transaction successful: {}", response.success_message);
+                self.success_message = Some(response.success_message);
+                self.current_balance = response.new_balance;
+                
+                // Refresh calendar data to show the new transaction
+                self.load_calendar_data();
+                
+                true
+            }
+            Err(error) => {
+                log::error!("❌ Expense transaction failed: {}", error);
+                self.error_message = Some(format!("Failed to spend money: {}", error));
                 false
             }
         }
