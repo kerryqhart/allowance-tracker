@@ -61,9 +61,10 @@ impl eframe::App for AllowanceTrackerApp {
                 return;
             }
             
-            // STEP 2: Three-layer layout with subheader for toggle buttons
+            // STEP 2: Four-layer layout with selection controls bar and subheader for toggle buttons
             // Calculate layout areas
             let header_height = 80.0;
+            let selection_bar_height = if self.transaction_selection_mode { 50.0 } else { 0.0 };
             let subheader_height = 50.0;
             
             let header_rect = egui::Rect::from_min_size(
@@ -71,14 +72,20 @@ impl eframe::App for AllowanceTrackerApp {
                 egui::vec2(full_rect.width(), header_height)
             );
             
-            let subheader_y = full_rect.min.y + header_height;
+            let selection_bar_y = full_rect.min.y + header_height;
+            let selection_bar_rect = egui::Rect::from_min_size(
+                egui::pos2(full_rect.min.x, selection_bar_y),
+                egui::vec2(full_rect.width(), selection_bar_height)
+            );
+            
+            let subheader_y = full_rect.min.y + header_height + selection_bar_height;
             let subheader_rect = egui::Rect::from_min_size(
                 egui::pos2(full_rect.min.x, subheader_y),
                 egui::vec2(full_rect.width(), subheader_height)
             );
             
-            let content_y = full_rect.min.y + header_height + subheader_height;
-            let content_height = full_rect.height() - header_height - subheader_height;
+            let content_y = full_rect.min.y + header_height + selection_bar_height + subheader_height;
+            let content_height = full_rect.height() - header_height - selection_bar_height - subheader_height;
             let content_rect = egui::Rect::from_min_size(
                 egui::pos2(full_rect.min.x, content_y),
                 egui::vec2(full_rect.width(), content_height)
@@ -89,7 +96,14 @@ impl eframe::App for AllowanceTrackerApp {
                 self.render_header(ui);
             });
             
-            // Layer 2: Subheader (Calendar/Table toggle buttons)
+            // Layer 2: Selection controls bar (only when in selection mode)
+            if self.transaction_selection_mode {
+                ui.allocate_ui_at_rect(selection_bar_rect, |ui| {
+                    self.render_selection_controls_bar(ui);
+                });
+            }
+            
+            // Layer 3: Subheader (Calendar/Table toggle buttons)
             ui.allocate_ui_at_rect(subheader_rect, |ui| {
                 ui.horizontal(|ui| {
                     ui.add_space(20.0); // Left padding
@@ -105,7 +119,7 @@ impl eframe::App for AllowanceTrackerApp {
                 });
             });
             
-            // Layer 3: Content (main content area)
+            // Layer 4: Content (main content area)
             ui.allocate_ui_at_rect(content_rect, |ui| {
                 // Error and success messages
                 self.render_messages(ui);

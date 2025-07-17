@@ -270,6 +270,9 @@ pub struct RenderConfig {
     pub max_transactions: Option<usize>,
     pub enable_click_handler: bool,
     pub is_selected: bool,
+    // Transaction selection state (for deletion mode)
+    pub transaction_selection_mode: bool,
+    pub selected_transaction_ids: std::collections::HashSet<String>,
 }
 
 impl Default for RenderConfig {
@@ -279,6 +282,8 @@ impl Default for RenderConfig {
             max_transactions: Some(2),
             enable_click_handler: false,
             is_selected: false,
+            transaction_selection_mode: false,
+            selected_transaction_ids: std::collections::HashSet::new(),
         }
     }
 }
@@ -305,21 +310,29 @@ impl CalendarDay {
     
     /// Render this calendar day with configurable styling
     pub fn render(&self, ui: &mut egui::Ui, width: f32, height: f32) -> egui::Response {
-        self.render_with_config(ui, width, height, &RenderConfig::default())
+        let (response, _) = self.render_with_config(ui, width, height, &RenderConfig::default());
+        response
     }
     
     /// Render this calendar day for grid layout
     pub fn render_grid(&self, ui: &mut egui::Ui, width: f32, height: f32) -> egui::Response {
-        self.render_with_config(ui, width, height, &RenderConfig {
+        let (response, _) = self.render_with_config(ui, width, height, &RenderConfig {
             is_grid_layout: true,
             max_transactions: None,
             enable_click_handler: true,
             is_selected: false, // Default to not selected - this method doesn't know about selection
-        })
+            transaction_selection_mode: false,
+            selected_transaction_ids: std::collections::HashSet::new(),
+        });
+        response
     }
     
     /// Render this calendar day with specified configuration
-    pub fn render_with_config(&self, ui: &mut egui::Ui, width: f32, height: f32, config: &RenderConfig) -> egui::Response {
+    /// Returns (response, clicked_transaction_ids) where clicked_transaction_ids contains IDs of transactions whose checkboxes were clicked
+    pub fn render_with_config(&self, ui: &mut egui::Ui, width: f32, height: f32, config: &RenderConfig) -> (egui::Response, Vec<String>) {
+        // Initialize variable to collect checkbox clicks
+        let mut clicked_transaction_ids = Vec::new();
+        
         // Allocate space for this day cell and get hover/click detection - same approach as chips
         let (cell_rect, response) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover().union(egui::Sense::click()));
         let is_hovered = response.hovered();
@@ -407,7 +420,7 @@ impl CalendarDay {
         }
         
         // Draw the content within the allocated cell rectangle
-        ui.allocate_ui_at_rect(cell_rect, |ui| {
+        let ui_result = ui.allocate_ui_at_rect(cell_rect, |ui| {
             ui.vertical(|ui| {
                 ui.set_width(width);
                 ui.set_height(height);
@@ -502,19 +515,28 @@ impl CalendarDay {
                     chips.iter().take(chips.len())
                 };
                 
+                let mut local_clicked_ids = Vec::new();
                 for chip in chips_to_show {
-                    self.render_calendar_chip(ui, chip, width - 8.0, height, config.is_grid_layout);
+                    if let Some(transaction_id) = self.render_calendar_chip(ui, chip, width - 8.0, height, config) {
+                        local_clicked_ids.push(transaction_id);
+                    }
                     ui.add_space(1.0); // Smaller spacing between chips due to padding
                 }
-            });
+                
+                local_clicked_ids
+            })
         });
         
-        // Return the response for click handling by the caller
-        response
+        // Extract clicked transaction IDs from UI result
+        clicked_transaction_ids.extend(ui_result.inner.inner);
+        
+        // Return the response for click handling by the caller and clicked transaction IDs
+        (response, clicked_transaction_ids)
     }
     
     /// Render a single calendar chip with unified styling and hover effects
-    fn render_calendar_chip(&self, ui: &mut egui::Ui, chip: &CalendarChip, width: f32, _height: f32, is_grid_layout: bool) {
+    /// Returns the transaction ID if the checkbox was clicked (for selection toggle)
+    fn render_calendar_chip(&self, ui: &mut egui::Ui, chip: &CalendarChip, width: f32, _height: f32, config: &RenderConfig) -> Option<String> {
         
         // Get chip styling from the chip type
         let chip_color = chip.chip_type.primary_color();
@@ -522,62 +544,143 @@ impl CalendarDay {
         let uses_dotted_border = chip.chip_type.uses_dotted_border();
         
         // Calculate chip dimensions based on layout - use the thinner height for all chips
-        let (chip_width, chip_height, chip_font_size) = if is_grid_layout {
+        let (chip_width, chip_height, chip_font_size) = if config.is_grid_layout {
             ((width - 10.0).min(120.0), 18.0, 10.0)
         } else {
             (width * 0.85, 18.0, (width * 0.12).max(9.0).min(12.0)) // Force consistent height
         };
         
+        // Check if we should show checkbox (only for deletable transactions in selection mode)
+        let show_checkbox = config.transaction_selection_mode && 
+                            !matches!(chip.chip_type, CalendarChipType::FutureAllowance);
+        let checkbox_width = if show_checkbox { 16.0 } else { 0.0 };
+        let checkbox_spacing = if show_checkbox { 4.0 } else { 0.0 };
+        
+        // Adjust chip width to accommodate checkbox
+        let adjusted_chip_width = if show_checkbox {
+            chip_width - checkbox_width - checkbox_spacing
+        } else {
+            chip_width
+        };
+        
         // Opaque white background for all transaction chips
         let chip_background = egui::Color32::from_rgba_unmultiplied(255, 255, 255, 255);
         
+        let mut checkbox_clicked = None;
+        
         ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
-            // Unified chip rendering with hover effects for all types
-            let (rect, response) = ui.allocate_exact_size(egui::vec2(chip_width, chip_height), egui::Sense::hover());
-            
-            // Determine if we should show hover effect
-            let is_hovered = response.hovered();
-            
-            // Background color - slightly darker when hovered
-            let background_color = if is_hovered {
-                egui::Color32::from_rgba_unmultiplied(245, 245, 245, 255) // Light gray on hover
+            if show_checkbox {
+                // Horizontal layout with checkbox and chip
+                ui.horizontal(|ui| {
+                    // Checkbox on the left
+                    let is_selected = config.selected_transaction_ids.contains(&chip.transaction.id);
+                    let checkbox_response = ui.add_sized(
+                        [checkbox_width, checkbox_width],
+                        egui::Checkbox::new(&mut is_selected.clone(), "")
+                    );
+                    
+                    if checkbox_response.clicked() {
+                        checkbox_clicked = Some(chip.transaction.id.clone());
+                    }
+                    
+                    ui.add_space(checkbox_spacing);
+                    
+                    // Chip on the right
+                    let (rect, response) = ui.allocate_exact_size(egui::vec2(adjusted_chip_width, chip_height), egui::Sense::hover());
+                    
+                    // Determine if we should show hover effect
+                    let is_hovered = response.hovered();
+                    
+                    // Background color - slightly darker when hovered
+                    let background_color = if is_hovered {
+                        egui::Color32::from_rgba_unmultiplied(245, 245, 245, 255) // Light gray on hover
+                    } else {
+                        chip_background
+                    };
+                    
+                    // Draw background
+                    ui.painter().rect_filled(
+                        rect,
+                        egui::Rounding::same(4.0),
+                        background_color
+                    );
+                    
+                    // Draw border - solid or dotted based on chip type
+                    if uses_dotted_border {
+                        self.draw_dotted_border(ui, rect, chip_color);
+                    } else {
+                        // Draw solid border
+                        ui.painter().rect_stroke(
+                            rect,
+                            egui::Rounding::same(4.0),
+                            egui::Stroke::new(1.0, chip_color)
+                        );
+                    }
+                    
+                    // Draw text
+                    ui.painter().text(
+                        rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        &chip.display_amount,
+                        egui::FontId::new(chip_font_size, egui::FontFamily::Proportional),
+                        text_color,
+                    );
+                    
+                    // Show floating tooltip when hovering
+                    if is_hovered && !chip.transaction.description.is_empty() {
+                        self.show_transaction_tooltip(ui, &chip.transaction.description, rect);
+                    }
+                });
             } else {
-                chip_background
-            };
-            
-            // Draw background
-            ui.painter().rect_filled(
-                rect,
-                egui::Rounding::same(4.0),
-                background_color
-            );
-            
-            // Draw border - solid or dotted based on chip type
-            if uses_dotted_border {
-                self.draw_dotted_border(ui, rect, chip_color);
-            } else {
-                // Draw solid border
-                ui.painter().rect_stroke(
+                // Original chip rendering without checkbox
+                let (rect, response) = ui.allocate_exact_size(egui::vec2(chip_width, chip_height), egui::Sense::hover());
+                
+                // Determine if we should show hover effect
+                let is_hovered = response.hovered();
+                
+                // Background color - slightly darker when hovered
+                let background_color = if is_hovered {
+                    egui::Color32::from_rgba_unmultiplied(245, 245, 245, 255) // Light gray on hover
+                } else {
+                    chip_background
+                };
+                
+                // Draw background
+                ui.painter().rect_filled(
                     rect,
                     egui::Rounding::same(4.0),
-                    egui::Stroke::new(1.0, chip_color)
+                    background_color
                 );
-            }
-            
-            // Draw text
-            ui.painter().text(
-                rect.center(),
-                egui::Align2::CENTER_CENTER,
-                &chip.display_amount,
-                egui::FontId::new(chip_font_size, egui::FontFamily::Proportional),
-                text_color,
-            );
-            
-            // Show floating tooltip when hovering
-            if is_hovered && !chip.transaction.description.is_empty() {
-                self.show_transaction_tooltip(ui, &chip.transaction.description, rect);
+                
+                // Draw border - solid or dotted based on chip type
+                if uses_dotted_border {
+                    self.draw_dotted_border(ui, rect, chip_color);
+                } else {
+                    // Draw solid border
+                    ui.painter().rect_stroke(
+                        rect,
+                        egui::Rounding::same(4.0),
+                        egui::Stroke::new(1.0, chip_color)
+                    );
+                }
+                
+                // Draw text
+                ui.painter().text(
+                    rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    &chip.display_amount,
+                    egui::FontId::new(chip_font_size, egui::FontFamily::Proportional),
+                    text_color,
+                );
+                
+                // Show floating tooltip when hovering
+                if is_hovered && !chip.transaction.description.is_empty() {
+                    self.show_transaction_tooltip(ui, &chip.transaction.description, rect);
+                }
             }
         });
+        
+        checkbox_clicked
     }
     
     /// Show a floating tooltip with transaction description
@@ -1061,12 +1164,19 @@ impl AllowanceTrackerApp {
                             // Check if this day is selected
                             let is_selected = self.selected_day == Some(calendar_day.date);
                             
-                            let response = calendar_day.render_with_config(ui, cell_width, cell_height, &RenderConfig {
+                            let (response, clicked_transaction_ids) = calendar_day.render_with_config(ui, cell_width, cell_height, &RenderConfig {
                                 is_grid_layout: true,
                                 max_transactions: Some(2), // Limit transactions in grid view
                                 enable_click_handler: true,
                                 is_selected,
+                                transaction_selection_mode: self.transaction_selection_mode,
+                                selected_transaction_ids: self.selected_transaction_ids.clone(),
                             });
+                            
+                            // Handle checkbox clicks on transactions
+                            for transaction_id in clicked_transaction_ids {
+                                self.toggle_transaction_selection(&transaction_id);
+                            }
                             
                             // Handle click detection for current month days only
                             if response.clicked() && matches!(calendar_day.day_type, CalendarDayType::CurrentMonth) {

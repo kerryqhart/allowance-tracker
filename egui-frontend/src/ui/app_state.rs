@@ -28,6 +28,7 @@
 
 use log::info;
 use chrono::Datelike;
+use std::collections::HashSet;
 use shared::*;
 use crate::backend::Backend;
 use crate::ui::components::dropdown_menu::DropdownMenu;
@@ -103,6 +104,10 @@ pub struct AllowanceTrackerApp {
     pub parental_control_error: Option<String>,
     pub parental_control_loading: bool,
     
+    // Transaction selection state (for deletion)
+    pub transaction_selection_mode: bool,
+    pub selected_transaction_ids: HashSet<String>,
+    
     // Dropdown states using generalized component
     pub child_dropdown: DropdownMenu,
     pub settings_dropdown: DropdownMenu,
@@ -168,6 +173,10 @@ impl AllowanceTrackerApp {
             parental_control_input: String::new(),
             parental_control_error: None,
             parental_control_loading: false,
+            
+            // Transaction selection state
+            transaction_selection_mode: false,
+            selected_transaction_ids: HashSet::new(),
             
             // Dropdown states using generalized component
             child_dropdown: DropdownMenu::new("child_dropdown".to_string()),
@@ -322,13 +331,62 @@ impl AllowanceTrackerApp {
         match action {
             ProtectedAction::DeleteTransactions => {
                 log::info!("🗑️ Executing delete transactions action");
-                // This will be implemented in Phase 2
-                // For now, just show success message
-                self.success_message = Some("Delete mode activated! Select transactions to delete.".to_string());
-                // TODO: self.enter_transaction_selection_mode();
+                self.enter_transaction_selection_mode();
             }
         }
         
         self.pending_protected_action = None;
+    }
+    
+    // ====================
+    // TRANSACTION SELECTION METHODS
+    // ====================
+    
+    /// Enter transaction selection mode for deletion
+    pub fn enter_transaction_selection_mode(&mut self) {
+        log::info!("🎯 Entering transaction selection mode");
+        self.transaction_selection_mode = true;
+        self.selected_transaction_ids.clear();
+        self.success_message = Some("Select transactions to delete by clicking checkboxes. Click trash button when ready.".to_string());
+    }
+    
+    /// Exit transaction selection mode without deleting
+    pub fn exit_transaction_selection_mode(&mut self) {
+        log::info!("🚫 Exiting transaction selection mode");
+        self.transaction_selection_mode = false;
+        self.selected_transaction_ids.clear();
+        self.clear_messages();
+    }
+    
+    /// Toggle selection of a transaction
+    pub fn toggle_transaction_selection(&mut self, transaction_id: &str) {
+        if self.selected_transaction_ids.contains(transaction_id) {
+            log::info!("➖ Deselecting transaction: {}", transaction_id);
+            self.selected_transaction_ids.remove(transaction_id);
+        } else {
+            log::info!("✅ Selecting transaction: {}", transaction_id);
+            self.selected_transaction_ids.insert(transaction_id.to_string());
+        }
+    }
+    
+    /// Check if a transaction is selected
+    pub fn is_transaction_selected(&self, transaction_id: &str) -> bool {
+        self.selected_transaction_ids.contains(transaction_id)
+    }
+    
+    /// Get count of selected transactions
+    pub fn selected_transaction_count(&self) -> usize {
+        self.selected_transaction_ids.len()
+    }
+    
+    /// Clear all selected transactions
+    pub fn clear_transaction_selection(&mut self) {
+        log::info!("🧹 Clearing all transaction selections");
+        self.selected_transaction_ids.clear();
+    }
+    
+    /// Check if any transactions are selected
+    pub fn has_selected_transactions(&self) -> bool {
+        !self.selected_transaction_ids.is_empty()
     }
 } 

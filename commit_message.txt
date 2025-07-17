@@ -1,34 +1,42 @@
-feat: Implement complete parental control system for transaction deletion
+feat: Implement Phase 2 - Transaction Selection & Deletion UI
 
-✨ Features Added:
-- Two-stage parental control modal (Question1 → Question2 → Success)
-- Integration with existing ParentalControlService backend
-- Clean modal UI with proper centering and consistent styling
+Complete transaction deletion system with granular selection and real-time feedback.
+Builds upon Phase 1 parental control to provide secure transaction management.
 
-🏗️ Implementation Details:
-- Added ParentalControlStage and ProtectedAction enums
-- Implemented 5 helper methods for flow management
-- Created modal component with proper state management
-- Wired settings menu to trigger parental control challenge
+## Core Features
+- **Selection State**: HashSet-based transaction ID tracking in app state
+- **Checkbox UI**: Historical transaction chips show checkboxes in deletion mode  
+- **Selection Controls**: Yellow bar with real-time count and action buttons
+- **Backend Integration**: Actual deletion via TransactionService::delete_transactions_domain
+- **Complete Flow**: Settings → Parental Control → Selection → Deletion
 
-🎨 UI/UX Improvements:
-- Compact 300×160 modal size
-- Purple outline buttons with white background and black text
-- Proper button centering with equal sizing (70×32)
-- Clean typography and spacing throughout
+## User Experience
+- Settings gear → "Delete transactions" triggers parental control
+- After authentication: yellow "🗑️ Delete Mode" bar appears
+- Checkboxes appear on historical transactions (not future allowances)
+- Real-time selection count: "(3 selected)"
+- Red delete button enabled only when transactions selected
+- Cancel button exits without deleting
+- Success/error feedback with automatic calendar reload
 
-🔒 Security:
-- Challenge question: "What's cooler than cool?" → "ice cold"
-- Re-authentication required each time
-- Proper error handling and loading states
-- Audit trail via existing backend service
+## Technical Implementation
+- **App State**: transaction_selection_mode flag + selected_transaction_ids HashSet
+- **Calendar Renderer**: RenderConfig extended with selection state
+- **Transaction Chips**: Conditional checkbox rendering with click detection
+- **UI Layout**: Four-layer layout with dynamic selection controls bar
+- **State Management**: Helper methods for toggle/clear/count operations
 
-📋 Phase 1 Complete:
-- Parental control system ready for transaction deletion
-- Foundation laid for Phase 2 (transaction selection UI)
-- All existing functionality preserved
+## Security & UX Requirements ✅
+✅ Simple checkboxes (not super slick - rarely used feature)
+✅ Granular selection only (no bulk "Select All Month") 
+✅ Re-authentication each time (security over convenience)
+✅ Future allowances not selectable (they're generated, not stored)
+✅ No final confirmation dialog (git backup provides safety)
 
-Files modified:
-- egui-frontend/src/ui/app_state.rs (state management)
-- egui-frontend/src/ui/components/modals.rs (modal UI)
-- egui-frontend/src/ui/components/header.rs (settings integration) 
+## Files Modified
+- egui-frontend/src/ui/app_state.rs: Selection state management
+- egui-frontend/src/ui/components/calendar_renderer.rs: Checkbox UI
+- egui-frontend/src/ui/components/header.rs: Selection controls bar
+- egui-frontend/src/ui/app_coordinator.rs: Layout integration
+
+Phase 1 + 2 now provide complete secure transaction deletion workflow. 

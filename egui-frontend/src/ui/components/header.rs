@@ -301,4 +301,124 @@ impl AllowanceTrackerApp {
             ui.colored_label(egui::Color32::GREEN, format!("✅ {}", success));
         }
     }
+    
+    /// Render transaction selection controls bar (appears when in selection mode)
+    pub fn render_selection_controls_bar(&mut self, ui: &mut egui::Ui) {
+        if !self.transaction_selection_mode {
+            return; // Only show when in selection mode
+        }
+        
+        log::info!("🎯 RENDER_SELECTION_CONTROLS_BAR called");
+        
+        // Selection controls bar with distinct styling
+        let frame = egui::Frame::none()
+            .fill(egui::Color32::from_rgba_unmultiplied(255, 248, 220, 200)) // Light yellow background
+            .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(255, 215, 0))) // Gold border
+            .inner_margin(egui::Margin::symmetric(15.0, 8.0))
+            .rounding(egui::Rounding::same(8.0));
+        
+        frame.show(ui, |ui| {
+            ui.horizontal(|ui| {
+                // Selection mode indicator on the left
+                ui.add(egui::Label::new(
+                    egui::RichText::new("🗑️ Delete Mode")
+                        .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))
+                        .strong()
+                        .color(egui::Color32::from_rgb(180, 100, 0)) // Dark orange
+                ).selectable(false));
+                
+                ui.add_space(10.0);
+                
+                // Selected count
+                let count = self.selected_transaction_count();
+                ui.add(egui::Label::new(
+                    egui::RichText::new(format!("({} selected)", count))
+                        .font(egui::FontId::new(14.0, egui::FontFamily::Proportional))
+                        .color(egui::Color32::from_rgb(100, 100, 100))
+                ).selectable(false));
+                
+                // Push right-side controls to the right
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    // Exit selection mode button
+                    let exit_button = ui.add_sized(
+                        [80.0, 28.0],
+                        egui::Button::new(
+                            egui::RichText::new("Cancel")
+                                .font(egui::FontId::new(13.0, egui::FontFamily::Proportional))
+                                .color(egui::Color32::WHITE)
+                        )
+                        .fill(egui::Color32::from_rgb(128, 128, 128)) // Gray background
+                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(100, 100, 100)))
+                        .rounding(egui::Rounding::same(4.0))
+                    );
+                    
+                    if exit_button.clicked() {
+                        log::info!("❌ Exit selection mode button clicked");
+                        self.exit_transaction_selection_mode();
+                    }
+                    
+                    ui.add_space(10.0);
+                    
+                    // Delete button (only enabled when transactions are selected)
+                    let delete_enabled = self.has_selected_transactions();
+                    let delete_color = if delete_enabled {
+                        egui::Color32::from_rgb(220, 53, 69) // Red
+                    } else {
+                        egui::Color32::from_rgb(180, 180, 180) // Disabled gray
+                    };
+                    
+                    let delete_button = ui.add_enabled(
+                        delete_enabled,
+                        egui::Button::new(
+                            egui::RichText::new(format!("🗑️ Delete ({})", count))
+                                .font(egui::FontId::new(13.0, egui::FontFamily::Proportional))
+                                .color(egui::Color32::WHITE)
+                        )
+                        .fill(delete_color)
+                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(200, 50, 60)))
+                        .rounding(egui::Rounding::same(4.0))
+                    );
+                    
+                    if delete_button.clicked() && delete_enabled {
+                        log::info!("🗑️ Delete selected transactions button clicked");
+                        self.delete_selected_transactions();
+                    }
+                });
+            });
+        });
+        
+        ui.add_space(8.0); // Space below the selection bar
+    }
+    
+    /// Delete the selected transactions
+    fn delete_selected_transactions(&mut self) {
+        if self.selected_transaction_ids.is_empty() {
+            log::warn!("⚠️ No transactions selected for deletion");
+            return;
+        }
+        
+        let transaction_ids: Vec<String> = self.selected_transaction_ids.iter().cloned().collect();
+        log::info!("🗑️ Attempting to delete {} transactions: {:?}", transaction_ids.len(), transaction_ids);
+        
+        // Call the backend delete service
+        let command = crate::backend::domain::commands::transactions::DeleteTransactionsCommand {
+            transaction_ids: transaction_ids.clone(),
+        };
+        
+        match self.backend.transaction_service.delete_transactions_domain(command) {
+            Ok(result) => {
+                log::info!("✅ Successfully deleted {} transactions", result.deleted_count);
+                self.success_message = Some(format!("Deleted {} transactions", result.deleted_count));
+                
+                // Exit selection mode and reload data
+                self.exit_transaction_selection_mode();
+                self.load_calendar_data();
+                self.load_balance();
+            }
+            Err(e) => {
+                log::error!("❌ Failed to delete transactions: {}", e);
+                self.error_message = Some(format!("Failed to delete transactions: {}", e));
+            }
+        }
+    }
 } 
