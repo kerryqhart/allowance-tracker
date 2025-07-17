@@ -117,6 +117,11 @@ pub struct AllowanceTrackerApp {
     pub add_money_description: String,
     pub spend_money_amount: String,
     pub spend_money_description: String,
+    
+    // Add money form validation state
+    pub add_money_description_error: Option<String>,
+    pub add_money_amount_error: Option<String>,
+    pub add_money_is_valid: bool,
 }
 
 impl AllowanceTrackerApp {
@@ -187,6 +192,11 @@ impl AllowanceTrackerApp {
             add_money_description: String::new(),
             spend_money_amount: String::new(),
             spend_money_description: String::new(),
+            
+            // Add money form validation state
+            add_money_description_error: None,
+            add_money_amount_error: None,
+            add_money_is_valid: true,
         })
     }
 
@@ -388,5 +398,114 @@ impl AllowanceTrackerApp {
     /// Check if any transactions are selected
     pub fn has_selected_transactions(&self) -> bool {
         !self.selected_transaction_ids.is_empty()
+    }
+    
+    // ====================
+    // ADD MONEY FORM VALIDATION METHODS
+    // ====================
+    
+    /// Validate the add money form and update validation state
+    pub fn validate_add_money_form(&mut self) {
+        self.add_money_description_error = None;
+        self.add_money_amount_error = None;
+        
+        // Validate description
+        let description = self.add_money_description.trim();
+        if description.is_empty() {
+            self.add_money_description_error = Some("Description is required".to_string());
+        } else if description.len() > 70 {
+            self.add_money_description_error = Some(format!("Description too long ({}/70 characters)", description.len()));
+        }
+        
+        // Validate amount
+        let amount_input = self.add_money_amount.trim();
+        if amount_input.is_empty() {
+            // Don't show "Amount is required" error immediately - let the grayed button be sufficient
+            self.add_money_amount_error = None;
+        } else {
+            // Clean and parse amount
+            match self.clean_and_parse_amount(amount_input) {
+                Ok(amount) => {
+                    if amount <= 0.0 {
+                        self.add_money_amount_error = Some("Amount must be positive".to_string());
+                    } else if amount > 1_000_000.0 {
+                        self.add_money_amount_error = Some("Amount too large (max $1,000,000)".to_string());
+                    } else if amount < 0.01 {
+                        self.add_money_amount_error = Some("Amount too small (min $0.01)".to_string());
+                    } else if self.has_too_many_decimal_places(amount) {
+                        self.add_money_amount_error = Some("Maximum 2 decimal places allowed".to_string());
+                    }
+                }
+                Err(error) => {
+                    self.add_money_amount_error = Some(error);
+                }
+            }
+        }
+        
+        // Update overall validation state
+        self.add_money_is_valid = self.add_money_description_error.is_none() && self.add_money_amount_error.is_none();
+    }
+    
+    /// Clean and parse amount input string (similar to MoneyManagementService)
+    fn clean_and_parse_amount(&self, amount_input: &str) -> Result<f64, String> {
+        // Clean the input - remove dollar signs, spaces, commas
+        let cleaned = amount_input
+            .trim()
+            .replace("$", "")
+            .replace(",", "")
+            .replace(" ", "");
+
+        // Handle empty input after cleaning
+        if cleaned.is_empty() {
+            return Err("Amount cannot be empty".to_string());
+        }
+
+        // Try to parse as float
+        cleaned.parse::<f64>()
+            .map_err(|_| "Invalid number format".to_string())
+    }
+    
+    /// Check if amount has too many decimal places
+    fn has_too_many_decimal_places(&self, _amount: f64) -> bool {
+        // Check the original input string instead of the parsed float
+        let input = self.add_money_amount.trim();
+        if let Some(decimal_pos) = input.find('.') {
+            let decimal_part = &input[decimal_pos + 1..];
+            // Reject if more than 2 decimal places
+            if decimal_part.len() > 2 {
+                return true;
+            }
+        }
+        false
+    }
+    
+    /// Format amount for currency display ($XX.XX)
+    pub fn format_currency_amount(&self, amount: f64) -> String {
+        format!("${:.2}", amount)
+    }
+    
+    /// Clear add money form and validation state
+    pub fn clear_add_money_form(&mut self) {
+        self.add_money_description.clear();
+        self.add_money_amount.clear();
+        self.add_money_description_error = None;
+        self.add_money_amount_error = None;
+        self.add_money_is_valid = true;
+    }
+    
+    /// Auto-format amount field as user types (adds $ and proper decimal formatting)
+    pub fn auto_format_amount_field(&mut self) {
+        let input = self.add_money_amount.clone();
+        
+        // Only auto-format if the input looks like a valid number
+        if let Ok(amount) = self.clean_and_parse_amount(&input) {
+            // Only format if the amount is reasonable and has <= 2 decimal places
+            if amount > 0.0 && amount < 1_000_000.0 && !self.has_too_many_decimal_places(amount) {
+                // Format as $XX.XX but only if user isn't currently typing
+                if !input.ends_with('.') && !input.ends_with('0') {
+                    self.add_money_amount = format!("{:.2}", amount);
+                }
+            }
+        }
     }
 } 

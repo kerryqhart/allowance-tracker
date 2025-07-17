@@ -1,15 +1,10 @@
-Phase 1: Fix z-index issue and add form fields to Add Money modal
+Improve Add Money modal text fields: styling, width, and character limit
 
-- Replace egui::Window with egui::Area using egui::Order::Foreground
-- Add proper layering with full-screen semi-transparent backdrop
-- Implement description and amount input fields for Add Money overlay
-- Add form field clearing on cancel/backdrop click
-- Remove problematic render_add_money_modal() method
-- Enhanced modal styling with consistent spacing and sizing
-- Added auto-focus on description field when modal opens
+- Fix text field visibility by setting extreme_bg_color for egui 0.28 compatibility
+- Widen description field from 350px to 400px for better text visibility  
+- Increase character limit from 64 to 70 characters with updated validation
+- Adjust warning threshold to 56 characters (80% of new limit)
+- Update character counter display to show "X/70"
 
-This resolves the z-index issue where the modal appeared behind glyphs
-and provides the foundation for Phase 2 (validation) and Phase 3 (backend integration).
-
-The modal now properly appears above all other UI elements and includes
-working form fields ready for validation and backend integration. 
+These changes make the Add Money form more user-friendly with visible
+text inputs and more room for descriptive transaction entries. 

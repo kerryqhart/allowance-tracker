@@ -36,6 +36,10 @@ pub fn setup_kid_friendly_style(ctx: &egui::Context) {
         style.visuals.panel_fill = egui::Color32::TRANSPARENT; // Make panels transparent so our background shows through
         style.visuals.button_frame = true;
         
+        // CRITICAL: Set text edit background color so text fields are visible
+        // In egui 0.28, text edits use extreme_bg_color (not text_edit_bg_color which was added later)
+        style.visuals.extreme_bg_color = egui::Color32::from_rgb(248, 248, 248); // Light gray background for text edits
+        
         // Use Chalkboard font family if available, otherwise fall back to Proportional
         let font_family = if ctx.fonts(|fonts| fonts.families().contains(&egui::FontFamily::Name("Chalkboard".into()))) {
             egui::FontFamily::Name("Chalkboard".into())
