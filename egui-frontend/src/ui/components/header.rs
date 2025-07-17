@@ -271,9 +271,9 @@ impl AllowanceTrackerApp {
                     self.success_message = Some("Configure allowance clicked (not implemented yet)".to_string());
                 }
                 3 => {
-                    // Delete transactions - placeholder action
+                    // Delete transactions - trigger parental control
                     log::info!("🗑️ Delete transactions menu item clicked");
-                    self.success_message = Some("Delete transactions clicked (not implemented yet)".to_string());
+                    self.start_parental_control_challenge(crate::ui::app_state::ProtectedAction::DeleteTransactions);
                 }
                 4 => {
                     // Export data - placeholder action

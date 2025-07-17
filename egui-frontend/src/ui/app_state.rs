@@ -47,6 +47,21 @@ pub enum OverlayType {
     CreateGoal,
 }
 
+/// Stages of the parental control challenge flow
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParentalControlStage {
+    Question1,      // "Are you Mom or Dad?"
+    Question2,      // "What's cooler than cool?"
+    Authenticated,  // Success state
+}
+
+/// Types of protected actions that require parental control
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProtectedAction {
+    DeleteTransactions,
+    // Future extensions: ConfigureAllowance, ExportData, etc.
+}
+
 /// Main application struct for the egui allowance tracker
 pub struct AllowanceTrackerApp {
     pub backend: Backend,
@@ -79,6 +94,14 @@ pub struct AllowanceTrackerApp {
     pub show_child_selector: bool,
     #[allow(dead_code)]
     pub show_allowance_config_modal: bool,
+    
+    // Parental control state
+    pub show_parental_control_modal: bool,
+    pub parental_control_stage: ParentalControlStage,
+    pub pending_protected_action: Option<ProtectedAction>,
+    pub parental_control_input: String,
+    pub parental_control_error: Option<String>,
+    pub parental_control_loading: bool,
     
     // Dropdown states using generalized component
     pub child_dropdown: DropdownMenu,
@@ -137,6 +160,14 @@ impl AllowanceTrackerApp {
             show_spend_money_modal: false,
             show_child_selector: false,
             show_allowance_config_modal: false,
+            
+            // Parental control state
+            show_parental_control_modal: false,
+            parental_control_stage: ParentalControlStage::Question1,
+            pending_protected_action: None,
+            parental_control_input: String::new(),
+            parental_control_error: None,
+            parental_control_loading: false,
             
             // Dropdown states using generalized component
             child_dropdown: DropdownMenu::new("child_dropdown".to_string()),
@@ -203,5 +234,101 @@ impl AllowanceTrackerApp {
     pub fn clear_messages(&mut self) {
         self.error_message = None;
         self.success_message = None;
+    }
+
+    // ====================
+    // PARENTAL CONTROL METHODS
+    // ====================
+
+    /// Start parental control challenge for a specific action
+    pub fn start_parental_control_challenge(&mut self, action: ProtectedAction) {
+        log::info!("🔒 Starting parental control challenge for: {:?}", action);
+        self.pending_protected_action = Some(action);
+        self.parental_control_stage = ParentalControlStage::Question1;
+        self.parental_control_input.clear();
+        self.parental_control_error = None;
+        self.parental_control_loading = false;
+        self.show_parental_control_modal = true;
+    }
+    
+    /// Handle "Yes" button click on first question
+    pub fn parental_control_advance_to_question2(&mut self) {
+        log::info!("🔒 Advancing to parental control question 2");
+        self.parental_control_stage = ParentalControlStage::Question2;
+        self.parental_control_input.clear();
+        self.parental_control_error = None;
+    }
+    
+    /// Cancel parental control challenge
+    pub fn cancel_parental_control_challenge(&mut self) {
+        log::info!("🔒 Cancelling parental control challenge");
+        self.show_parental_control_modal = false;
+        self.pending_protected_action = None;
+        self.parental_control_stage = ParentalControlStage::Question1;
+        self.parental_control_input.clear();
+        self.parental_control_error = None;
+        self.parental_control_loading = false;
+    }
+    
+    /// Submit answer for validation
+    pub fn submit_parental_control_answer(&mut self) {
+        if self.parental_control_input.trim().is_empty() {
+            self.parental_control_error = Some("Please enter an answer".to_string());
+            return;
+        }
+        
+        log::info!("🔒 Submitting parental control answer for validation");
+        self.parental_control_loading = true;
+        self.parental_control_error = None;
+        
+        // Create command for backend
+        let command = crate::backend::domain::commands::parental_control::ValidateParentalControlCommand {
+            answer: self.parental_control_input.clone(),
+        };
+        
+        // Call backend service
+        match self.backend.parental_control_service.validate_answer(command) {
+            Ok(result) => {
+                self.parental_control_loading = false;
+                
+                if result.success {
+                    log::info!("✅ Parental control validation successful");
+                    self.parental_control_stage = ParentalControlStage::Authenticated;
+                    
+                    // Execute the pending action
+                    if let Some(action) = self.pending_protected_action {
+                        self.execute_protected_action(action);
+                    }
+                    
+                    // Close modal after brief success display
+                    self.show_parental_control_modal = false;
+                    self.success_message = Some("Access granted!".to_string());
+                } else {
+                    log::info!("❌ Parental control validation failed");
+                    self.parental_control_error = Some(result.message);
+                    self.parental_control_input.clear();
+                }
+            }
+            Err(e) => {
+                self.parental_control_loading = false;
+                log::error!("🚨 Parental control validation error: {}", e);
+                self.parental_control_error = Some("Validation failed. Please try again.".to_string());
+            }
+        }
+    }
+    
+    /// Execute the action after successful authentication
+    fn execute_protected_action(&mut self, action: ProtectedAction) {
+        match action {
+            ProtectedAction::DeleteTransactions => {
+                log::info!("🗑️ Executing delete transactions action");
+                // This will be implemented in Phase 2
+                // For now, just show success message
+                self.success_message = Some("Delete mode activated! Select transactions to delete.".to_string());
+                // TODO: self.enter_transaction_selection_mode();
+            }
+        }
+        
+        self.pending_protected_action = None;
     }
 } 
