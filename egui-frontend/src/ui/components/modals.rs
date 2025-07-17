@@ -4,31 +4,6 @@ use crate::ui::mappers::to_dto;
 use crate::backend::domain::commands::child::SetActiveChildCommand;
 
 impl AllowanceTrackerApp {
-    /// Render the add money modal
-    pub fn render_add_money_modal(&mut self, ctx: &egui::Context) {
-        if !self.show_add_money_modal {
-            return;
-        }
-
-        egui::Window::new("Add Money")
-            .collapsible(false)
-            .resizable(false)
-            .show(ctx, |ui| {
-                ui.text_edit_singleline(&mut self.add_money_amount);
-                ui.text_edit_singleline(&mut self.add_money_description);
-                ui.horizontal(|ui| {
-                    if ui.button("Add").clicked() {
-                        // TODO: Implement add money logic
-                        self.show_add_money_modal = false;
-                        self.success_message = Some("Money added!".to_string());
-                    }
-                    if ui.button("Cancel").clicked() {
-                        self.show_add_money_modal = false;
-                    }
-                });
-            });
-    }
-
     /// Render the spend money modal
     pub fn render_spend_money_modal(&mut self, ctx: &egui::Context) {
         if !self.show_spend_money_modal {
@@ -219,97 +194,197 @@ impl AllowanceTrackerApp {
             ),
         };
         
-        // Create a more focused modal dialog positioned above the glyphs
-        egui::Window::new(title_text)
-            .collapsible(false)
-            .resizable(false)
-            .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 100.0)) // Position in upper portion of screen
-            .fixed_size(egui::vec2(450.0, 280.0))
-            .frame(egui::Frame::window(&ctx.style())
-                .fill(egui::Color32::WHITE) // Solid white background
-                .stroke(egui::Stroke::new(3.0, overlay_color))
-                .rounding(egui::Rounding::same(16.0))
-                .shadow(egui::Shadow {
-                    offset: egui::vec2(6.0, 6.0),
-                    blur: 20.0,
-                    spread: 0.0,
-                    color: egui::Color32::from_rgba_unmultiplied(0, 0, 0, 100),
-                }))
+        // Use Area with Foreground order to ensure it appears above everything
+        egui::Area::new(egui::Id::new("day_action_overlay"))
+            .order(egui::Order::Foreground)
+            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
             .show(ctx, |ui| {
-                // Add a subtle backdrop click detector
-                let backdrop_response = ui.ctx().input(|i| i.pointer.any_click());
-                if backdrop_response {
-                    // Check if click was outside the window bounds
-                    let window_rect = ui.available_rect_before_wrap();
+                // Full screen semi-transparent background
+                let screen_rect = ctx.screen_rect();
+                ui.painter().rect_filled(
+                    screen_rect,
+                    egui::Rounding::ZERO,
+                    egui::Color32::from_rgba_unmultiplied(0, 0, 0, 80) // Subtle dark background
+                );
+                
+                // Center the modal content
+                ui.allocate_ui_at_rect(screen_rect, |ui| {
+                    ui.centered_and_justified(|ui| {
+                        // Modal card with proper styling
+                        egui::Frame::window(&ui.style())
+                            .fill(egui::Color32::WHITE)
+                            .stroke(egui::Stroke::new(3.0, overlay_color))
+                            .rounding(egui::Rounding::same(16.0))
+                            .inner_margin(egui::Margin::same(25.0))
+                            .shadow(egui::Shadow {
+                                offset: egui::vec2(6.0, 6.0),
+                                blur: 20.0,
+                                spread: 0.0,
+                                color: egui::Color32::from_rgba_unmultiplied(0, 0, 0, 100),
+                            })
+                            .show(ui, |ui| {
+                                // Set modal size
+                                ui.set_min_size(egui::vec2(450.0, 350.0));
+                                ui.set_max_size(egui::vec2(450.0, 350.0));
+                                
+                                ui.vertical_centered(|ui| {
+                                    ui.add_space(15.0);
+                                    
+                                    // Title with icon
+                                    let title_icon = match overlay_type {
+                                        crate::ui::app_state::OverlayType::AddMoney => "💰",
+                                        crate::ui::app_state::OverlayType::SpendMoney => "💸",
+                                        crate::ui::app_state::OverlayType::CreateGoal => "🎯",
+                                    };
+                                    
+                                    ui.label(egui::RichText::new(format!("{} {}", title_icon, title_text))
+                                         .font(egui::FontId::new(28.0, egui::FontFamily::Proportional))
+                                         .strong()
+                                         .color(overlay_color));
+                                    
+                                    ui.add_space(15.0);
+                                    
+                                    // Content - different for each overlay type
+                                    match overlay_type {
+                                        crate::ui::app_state::OverlayType::AddMoney => {
+                                            // Form fields for Add Money
+                                            ui.label(egui::RichText::new("Enter the amount you want to add to your allowance")
+                                                .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))
+                                                .color(egui::Color32::from_rgb(80, 80, 80)));
+                                            
+                                            ui.add_space(20.0);
+                                            
+                                            // Description field
+                                            ui.horizontal(|ui| {
+                                                ui.label(egui::RichText::new("Description:")
+                                                    .font(egui::FontId::new(14.0, egui::FontFamily::Proportional))
+                                                    .color(egui::Color32::from_rgb(60, 60, 60)));
+                                            });
+                                            ui.add_space(5.0);
+                                            
+                                            let description_response = ui.add(
+                                                egui::TextEdit::singleline(&mut self.add_money_description)
+                                                    .hint_text("What is this money for?")
+                                                    .desired_width(350.0)
+                                                    .font(egui::FontId::new(14.0, egui::FontFamily::Proportional))
+                                            );
+                                            
+                                            ui.add_space(15.0);
+                                            
+                                            // Amount field  
+                                            ui.horizontal(|ui| {
+                                                ui.label(egui::RichText::new("Amount:")
+                                                    .font(egui::FontId::new(14.0, egui::FontFamily::Proportional))
+                                                    .color(egui::Color32::from_rgb(60, 60, 60)));
+                                            });
+                                            ui.add_space(5.0);
+                                            
+                                            let _amount_response = ui.add(
+                                                egui::TextEdit::singleline(&mut self.add_money_amount)
+                                                    .hint_text("$0.00")
+                                                    .desired_width(150.0)
+                                                    .font(egui::FontId::new(14.0, egui::FontFamily::Proportional))
+                                            );
+                                            
+                                            // Auto-focus description field if empty
+                                            if self.add_money_description.is_empty() {
+                                                description_response.request_focus();
+                                            }
+                                        },
+                                        _ => {
+                                            // Default content for other overlay types
+                                            ui.label(egui::RichText::new(content_text)
+                                                .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))
+                                                .color(egui::Color32::from_rgb(80, 80, 80)));
+                                        }
+                                    }
+                                    
+                                    ui.add_space(30.0);
+                                    
+                                    // Buttons
+                                    ui.horizontal(|ui| {
+                                        ui.add_space(50.0);
+                                        
+                                        // OK button (text changes based on overlay type)
+                                        let ok_text = match overlay_type {
+                                            crate::ui::app_state::OverlayType::AddMoney => "Add Money",
+                                            crate::ui::app_state::OverlayType::SpendMoney => "Spend Money", 
+                                            crate::ui::app_state::OverlayType::CreateGoal => "Create Goal",
+                                        };
+                                        
+                                        let ok_button = egui::Button::new(egui::RichText::new(ok_text)
+                                            .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))
+                                            .color(egui::Color32::WHITE))
+                                            .fill(overlay_color)
+                                            .rounding(egui::Rounding::same(10.0))
+                                            .min_size(egui::vec2(120.0, 40.0));
+                                        
+                                        if ui.add(ok_button).clicked() {
+                                            match overlay_type {
+                                                crate::ui::app_state::OverlayType::AddMoney => {
+                                                    // TODO: Implement add money logic in next phase
+                                                    log::info!("💰 Add Money clicked - Description: '{}', Amount: '{}'", 
+                                                              self.add_money_description, self.add_money_amount);
+                                                    self.success_message = Some("Add Money functionality coming in next phase!".to_string());
+                                                },
+                                                _ => {
+                                                    // Default behavior for other overlays
+                                                }
+                                            }
+                                            self.active_overlay = None;
+                                            self.selected_day = None;
+                                        }
+                                        
+                                        ui.add_space(30.0);
+                                        
+                                        // Cancel button
+                                        let cancel_button = egui::Button::new(egui::RichText::new("Cancel")
+                                            .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))
+                                            .color(egui::Color32::from_rgb(100, 100, 100)))
+                                            .fill(egui::Color32::from_rgb(245, 245, 245))
+                                            .stroke(egui::Stroke::new(1.5, egui::Color32::from_rgb(200, 200, 200)))
+                                            .rounding(egui::Rounding::same(10.0))
+                                            .min_size(egui::vec2(90.0, 40.0));
+                                        
+                                        if ui.add(cancel_button).clicked() {
+                                            // Clear form fields when canceling Add Money
+                                            if overlay_type == crate::ui::app_state::OverlayType::AddMoney {
+                                                self.add_money_description.clear();
+                                                self.add_money_amount.clear();
+                                            }
+                                            self.active_overlay = None;
+                                            self.selected_day = None;
+                                        }
+                                    });
+                                    
+                                    ui.add_space(15.0);
+                                });
+                            });
+                    });
+                });
+                
+                // Handle backdrop clicks to close modal
+                if ui.ctx().input(|i| i.pointer.any_click()) {
                     let pointer_pos = ui.ctx().input(|i| i.pointer.interact_pos());
                     if let Some(pos) = pointer_pos {
-                        if !window_rect.contains(pos) {
+                        // Check if the click was outside the modal area
+                        let modal_center = screen_rect.center();
+                        let modal_rect = egui::Rect::from_center_size(
+                            modal_center,
+                            egui::vec2(450.0, 350.0)
+                        );
+                        
+                        if !modal_rect.contains(pos) {
+                            // Clear form fields when clicking backdrop on Add Money
+                            if overlay_type == crate::ui::app_state::OverlayType::AddMoney {
+                                self.add_money_description.clear();
+                                self.add_money_amount.clear();
+                            }
                             self.active_overlay = None;
                             self.selected_day = None;
                         }
                     }
                 }
-                
-                ui.vertical_centered(|ui| {
-                    ui.add_space(25.0);
-                    
-                    // Title with icon
-                    let title_icon = match overlay_type {
-                        crate::ui::app_state::OverlayType::AddMoney => "💰",
-                        crate::ui::app_state::OverlayType::SpendMoney => "💸",
-                        crate::ui::app_state::OverlayType::CreateGoal => "🎯",
-                    };
-                    
-                                         ui.label(egui::RichText::new(format!("{} {}", title_icon, title_text))
-                         .font(egui::FontId::new(28.0, egui::FontFamily::Proportional))
-                         .strong()
-                         .color(overlay_color)); // Use overlay color directly on white background
-                    
-                    ui.add_space(15.0);
-                    
-                    // Content
-                    ui.label(egui::RichText::new(content_text)
-                        .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))
-                        .color(egui::Color32::from_rgb(80, 80, 80)));
-                    
-                    ui.add_space(40.0);
-                    
-                    // Buttons
-                    ui.horizontal(|ui| {
-                        ui.add_space(80.0);
-                        
-                        // OK button
-                        let ok_button = egui::Button::new(egui::RichText::new("OK")
-                            .font(egui::FontId::new(18.0, egui::FontFamily::Proportional))
-                            .color(egui::Color32::WHITE))
-                            .fill(overlay_color)
-                            .rounding(egui::Rounding::same(10.0))
-                            .min_size(egui::vec2(90.0, 40.0));
-                        
-                        if ui.add(ok_button).clicked() {
-                            self.active_overlay = None;
-                            self.selected_day = None;
-                        }
-                        
-                        ui.add_space(30.0);
-                        
-                        // Cancel button
-                        let cancel_button = egui::Button::new(egui::RichText::new("Cancel")
-                            .font(egui::FontId::new(18.0, egui::FontFamily::Proportional))
-                            .color(egui::Color32::from_rgb(100, 100, 100)))
-                            .fill(egui::Color32::from_rgb(245, 245, 245))
-                            .stroke(egui::Stroke::new(1.5, egui::Color32::from_rgb(200, 200, 200)))
-                            .rounding(egui::Rounding::same(10.0))
-                            .min_size(egui::vec2(90.0, 40.0));
-                        
-                        if ui.add(cancel_button).clicked() {
-                            self.active_overlay = None;
-                            self.selected_day = None;
-                        }
-                    });
-                    
-                    ui.add_space(25.0);
-                });
             });
     }
 
@@ -576,7 +651,6 @@ impl AllowanceTrackerApp {
 
     /// Render all modals
     pub fn render_modals(&mut self, ctx: &egui::Context) {
-        self.render_add_money_modal(ctx);
         self.render_spend_money_modal(ctx);
         self.render_child_selector_modal(ctx);
         self.render_day_action_overlay(ctx);

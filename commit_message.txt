@@ -1,42 +1,15 @@
-feat: Implement Phase 2 - Transaction Selection & Deletion UI
+Phase 1: Fix z-index issue and add form fields to Add Money modal
 
-Complete transaction deletion system with granular selection and real-time feedback.
-Builds upon Phase 1 parental control to provide secure transaction management.
+- Replace egui::Window with egui::Area using egui::Order::Foreground
+- Add proper layering with full-screen semi-transparent backdrop
+- Implement description and amount input fields for Add Money overlay
+- Add form field clearing on cancel/backdrop click
+- Remove problematic render_add_money_modal() method
+- Enhanced modal styling with consistent spacing and sizing
+- Added auto-focus on description field when modal opens
 
-## Core Features
-- **Selection State**: HashSet-based transaction ID tracking in app state
-- **Checkbox UI**: Historical transaction chips show checkboxes in deletion mode  
-- **Selection Controls**: Yellow bar with real-time count and action buttons
-- **Backend Integration**: Actual deletion via TransactionService::delete_transactions_domain
-- **Complete Flow**: Settings → Parental Control → Selection → Deletion
+This resolves the z-index issue where the modal appeared behind glyphs
+and provides the foundation for Phase 2 (validation) and Phase 3 (backend integration).
 
-## User Experience
-- Settings gear → "Delete transactions" triggers parental control
-- After authentication: yellow "🗑️ Delete Mode" bar appears
-- Checkboxes appear on historical transactions (not future allowances)
-- Real-time selection count: "(3 selected)"
-- Red delete button enabled only when transactions selected
-- Cancel button exits without deleting
-- Success/error feedback with automatic calendar reload
-
-## Technical Implementation
-- **App State**: transaction_selection_mode flag + selected_transaction_ids HashSet
-- **Calendar Renderer**: RenderConfig extended with selection state
-- **Transaction Chips**: Conditional checkbox rendering with click detection
-- **UI Layout**: Four-layer layout with dynamic selection controls bar
-- **State Management**: Helper methods for toggle/clear/count operations
-
-## Security & UX Requirements ✅
-✅ Simple checkboxes (not super slick - rarely used feature)
-✅ Granular selection only (no bulk "Select All Month") 
-✅ Re-authentication each time (security over convenience)
-✅ Future allowances not selectable (they're generated, not stored)
-✅ No final confirmation dialog (git backup provides safety)
-
-## Files Modified
-- egui-frontend/src/ui/app_state.rs: Selection state management
-- egui-frontend/src/ui/components/calendar_renderer.rs: Checkbox UI
-- egui-frontend/src/ui/components/header.rs: Selection controls bar
-- egui-frontend/src/ui/app_coordinator.rs: Layout integration
-
-Phase 1 + 2 now provide complete secure transaction deletion workflow. 
+The modal now properly appears above all other UI elements and includes
+working form fields ready for validation and backend integration. 
