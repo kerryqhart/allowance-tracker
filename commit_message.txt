@@ -1,8 +1,18 @@
-Restore clean minimal transaction table implementation
+Implement working hover effects for transaction table using egui Button approach
 
-- Clean white headers instead of colorful gradients  
-- Custom horizontal layout with fine-tuned spacing
-- Column spacing: 6.5px, Row spacing: 1.5px  
-- Optimized column widths: 18%, 48%, 17%, 17%
-- Hover detection infrastructure (needs ScrollArea fix)
-- Removed dependency on egui_extras::TableBuilder 
+✅ SUCCESS: Transaction row hover effects now working perfectly!
+
+SOLUTION: Replace complex manual overlay system with egui's built-in Button hover:
+- Each row is now a transparent egui::Button with built-in hover detection
+- Cell backgrounds become more opaque when row is hovered (55 → 120 alpha)
+- Content drawn on top of button using ui.allocate_ui_at_rect()
+- Maintains exact same visual appearance and spacing as before
+
+BENEFITS:
+- ✅ Works with egui's layout system instead of fighting it  
+- ✅ Handles scrolling, resizing, and layout changes automatically
+- ✅ Clean, maintainable code (no manual calculations or debug logs)
+- ✅ Leverages framework's native hover detection system
+- ✅ Resilient and extensible for future table features
+
+This was the right approach - working WITH the framework rather than against it. 

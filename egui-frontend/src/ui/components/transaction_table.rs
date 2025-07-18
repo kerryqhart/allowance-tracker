@@ -124,177 +124,180 @@ pub fn render_responsive_transaction_table(ui: &mut egui::Ui, available_rect: eg
                             
                             // Transaction rows (like calendar day cards)
                             for transaction in transactions.iter().take(15) {
-                                // Row with individual cells (like calendar days) - detect hover on the horizontal layout itself
-                                let row_response = ui.horizontal(|ui| {
-                                    // Fine-tuned data column spacing
-                                    ui.spacing_mut().item_spacing.x = 6.5; // Reduced from 7.5px
-                                    // Fine-tuned vertical spacing to make rows tighter
-                                    ui.spacing_mut().item_spacing.y = 0.5; // Reduced from 1.0px
-                                    
-                                    // Use reduced width to match content constraint and avoid scroll bar overlap
-                                    let content_width_minus_scrollbar = content_width_with_scroll - 20.0;
-                                    let row_widths = [
-                                        content_width_minus_scrollbar * 0.18, // date (reduced from 0.20)
-                                        content_width_minus_scrollbar * 0.48, // description (increased from 0.40)
-                                        content_width_minus_scrollbar * 0.17, // amount (reduced from 0.20)
-                                        content_width_minus_scrollbar * 0.17, // balance (reduced from 0.20)
-                                    ];
-                                    
-                                    let cell_bg_color = egui::Color32::from_rgba_unmultiplied(255, 255, 255, 55);
-                                    let cell_border_color = egui::Color32::from_rgba_unmultiplied(200, 200, 200, 100);
-                                    
-                                    // Render cells with exact same spacing as headers
-                                    for (i, &width) in row_widths.iter().enumerate() {
-                                        match i {
-                                            0 => {
-                                                // Date cell
-                                                ui.allocate_ui_with_layout(
-                                                    egui::vec2(width, row_height),
-                                                    egui::Layout::centered_and_justified(egui::Direction::TopDown),
-                                                    |ui| {
-                                                        let cell_rect = ui.available_rect_before_wrap();
-                                                        
-                                                        // Draw calendar-style cell background
-                                                        ui.painter().rect_filled(
-                                                            cell_rect,
-                                                            egui::Rounding::same(0.0), // No rounding
-                                                            cell_bg_color
-                                                        );
-                                                        
-                                                        // Draw cell border (minimal)
-                                                        ui.painter().rect_stroke(
-                                                            cell_rect,
-                                                            egui::Rounding::same(0.0), // No rounding
-                                                            egui::Stroke::new(0.0, cell_border_color) // No border
-                                                        );
-                                                        
-                                                        let date_display = transaction.date.format("%b %d, %Y").to_string();
-                                                        ui.label(egui::RichText::new(date_display)
-                                                            .font(egui::FontId::new(content_font_size, font_family.clone()))
-                                                            .strong()
-                                                            .color(egui::Color32::BLACK));
-                                                    },
-                                                );
-                                            },
-                                            1 => {
-                                                // Description cell
-                                                ui.allocate_ui_with_layout(
-                                                    egui::vec2(width, row_height),
-                                                    egui::Layout::centered_and_justified(egui::Direction::TopDown),
-                                                    |ui| {
-                                                        let cell_rect = ui.available_rect_before_wrap();
-                                                        
-                                                        // Draw calendar-style cell background
-                                                        ui.painter().rect_filled(
-                                                            cell_rect,
-                                                            egui::Rounding::same(0.0), // No rounding
-                                                            cell_bg_color
-                                                        );
-                                                        
-                                                        // Draw cell border (minimal)
-                                                        ui.painter().rect_stroke(
-                                                            cell_rect,
-                                                            egui::Rounding::same(0.0), // No rounding
-                                                            egui::Stroke::new(0.0, cell_border_color) // No border
-                                                        );
-                                                        
-                                                        ui.label(egui::RichText::new(&transaction.description)
-                                                            .font(egui::FontId::new(content_font_size, font_family.clone()))
-                                                            .strong()
-                                                            .color(egui::Color32::BLACK));
-                                                    },
-                                                );
-                                            },
-                                            2 => {
-                                                // Amount cell  
-                                                ui.allocate_ui_with_layout(
-                                                    egui::vec2(width, row_height),
-                                                    egui::Layout::centered_and_justified(egui::Direction::TopDown),
-                                                    |ui| {
-                                                        let cell_rect = ui.available_rect_before_wrap();
-                                                        
-                                                        // Draw calendar-style cell background
-                                                        ui.painter().rect_filled(
-                                                            cell_rect,
-                                                            egui::Rounding::same(0.0), // No rounding
-                                                            cell_bg_color
-                                                        );
-                                                        
-                                                        // Draw cell border (minimal)
-                                                        ui.painter().rect_stroke(
-                                                            cell_rect,
-                                                            egui::Rounding::same(0.0), // No rounding
-                                                            egui::Stroke::new(0.0, cell_border_color) // No border
-                                                        );
-                                                        
-                                                        let amount_color = if transaction.amount >= 0.0 {
-                                                            egui::Color32::from_rgb(34, 139, 34) // Green for positive
-                                                        } else {
-                                                            egui::Color32::from_rgb(220, 20, 60) // Red for negative
-                                                        };
-                                                        
-                                                        let amount_text = if transaction.amount >= 0.0 {
-                                                            format!("+${:.2}", transaction.amount)
-                                                        } else {
-                                                            format!("-${:.2}", transaction.amount.abs())
-                                                        };
-                                                        
-                                                        ui.colored_label(
-                                                            amount_color,
-                                                            egui::RichText::new(amount_text)
-                                                                .font(egui::FontId::new(content_font_size, font_family.clone()))
-                                                                .strong()
-                                                        );
-                                                    },
-                                                );
-                                            },
-                                            3 => {
-                                                // Balance cell
-                                                ui.allocate_ui_with_layout(
-                                                    egui::vec2(width, row_height),
-                                                    egui::Layout::centered_and_justified(egui::Direction::TopDown),
-                                                    |ui| {
-                                                        let cell_rect = ui.available_rect_before_wrap();
-                                                        
-                                                        // Draw calendar-style cell background
-                                                        ui.painter().rect_filled(
-                                                            cell_rect,
-                                                            egui::Rounding::same(0.0), // No rounding
-                                                            cell_bg_color
-                                                        );
-                                                        
-                                                        // Draw cell border (minimal)
-                                                        ui.painter().rect_stroke(
-                                                            cell_rect,
-                                                            egui::Rounding::same(0.0), // No rounding
-                                                            egui::Stroke::new(0.0, cell_border_color) // No border
-                                                        );
-                                                        
-                                                        ui.label(egui::RichText::new(format!("${:.2}", transaction.balance))
-                                                                .font(egui::FontId::new(content_font_size, font_family.clone()))
-                                                                .strong()
-                                                                .color(egui::Color32::BLACK));
-                                                    },
-                                                );
-                                            },
-                                            _ => {} // No more columns
-                                        }
-                                        
-                                        // No manual spacing - let item_spacing.x handle it
-                                    }
-                                }); // End horizontal layout
+                                // 🎯 BUTTON APPROACH: Use egui's built-in button hover instead of manual detection
+                                let button_response = ui.add_sized(
+                                    [content_width_with_scroll - 20.0, row_height],
+                                    egui::Button::new("")
+                                        .fill(egui::Color32::TRANSPARENT) // Invisible until hovered
+                                        .stroke(egui::Stroke::NONE) // No border
+                                        .rounding(egui::Rounding::same(2.0)) // Slight rounding like calendar
+                                );
                                 
-                                // Apply hover effect - SIMPLIFIED approach without ScrollArea interference
-                                let is_row_hovered = row_response.response.hovered();
-                                if is_row_hovered {
-                                    // Draw hover overlay on top of the entire row (same approach as calendar)
-                                    let row_rect = row_response.response.rect;
-                                    ui.painter().rect_filled(
-                                        row_rect,
-                                        egui::Rounding::same(2.0),
-                                        egui::Color32::from_rgba_unmultiplied(255, 255, 255, 120) // More opaque white overlay (same as calendar)
-                                    );
-                                }
+                                // Check if button is hovered for styling
+                                let is_hovered = button_response.hovered();
+                                
+                                // Draw the row content ON TOP of the button
+                                let button_rect = button_response.rect;
+                                ui.allocate_ui_at_rect(button_rect, |ui| {
+                                    ui.horizontal(|ui| {
+                                        // Fine-tuned data column spacing
+                                        ui.spacing_mut().item_spacing.x = 6.5; // Reduced from 7.5px
+                                        // Fine-tuned vertical spacing to make rows tighter
+                                        ui.spacing_mut().item_spacing.y = 0.5; // Reduced from 1.0px
+                                        
+                                        // Use reduced width to match content constraint and avoid scroll bar overlap
+                                        let content_width_minus_scrollbar = content_width_with_scroll - 20.0;
+                                        let row_widths = [
+                                            content_width_minus_scrollbar * 0.18, // date (reduced from 0.20)
+                                            content_width_minus_scrollbar * 0.48, // description (increased from 0.40)
+                                            content_width_minus_scrollbar * 0.17, // amount (reduced from 0.20)
+                                            content_width_minus_scrollbar * 0.17, // balance (reduced from 0.20)
+                                        ];
+                                        
+                                        let cell_bg_color = if is_hovered {
+                                            egui::Color32::from_rgba_unmultiplied(255, 255, 255, 120) // More opaque when hovered
+                                        } else {
+                                            egui::Color32::from_rgba_unmultiplied(255, 255, 255, 55) // Normal transparency
+                                        };
+                                        let cell_border_color = egui::Color32::from_rgba_unmultiplied(200, 200, 200, 100);
+                                        
+                                        // Render cells with exact same spacing as headers
+                                        for (i, &width) in row_widths.iter().enumerate() {
+                                            match i {
+                                                0 => {
+                                                    // Date cell
+                                                    ui.allocate_ui_with_layout(
+                                                        egui::vec2(width, row_height),
+                                                        egui::Layout::centered_and_justified(egui::Direction::TopDown),
+                                                        |ui| {
+                                                            let cell_rect = ui.available_rect_before_wrap();
+                                                            
+                                                            // Draw calendar-style cell background
+                                                            ui.painter().rect_filled(
+                                                                cell_rect,
+                                                                egui::Rounding::same(0.0), // No rounding
+                                                                cell_bg_color
+                                                            );
+                                                            
+                                                            // Draw cell border (minimal)
+                                                            ui.painter().rect_stroke(
+                                                                cell_rect,
+                                                                egui::Rounding::same(0.0), // No rounding
+                                                                egui::Stroke::new(0.0, cell_border_color) // No border
+                                                            );
+                                                            
+                                                            let date_display = transaction.date.format("%b %d, %Y").to_string();
+                                                            ui.add(egui::Label::new(egui::RichText::new(date_display)
+                                                                .font(egui::FontId::new(content_font_size, font_family.clone()))
+                                                                .strong()
+                                                                .color(egui::Color32::BLACK))
+                                                                .selectable(false)); // Non-interactive
+                                                        },
+                                                    );
+                                                },
+                                                1 => {
+                                                    // Description cell
+                                                    ui.allocate_ui_with_layout(
+                                                        egui::vec2(width, row_height),
+                                                        egui::Layout::centered_and_justified(egui::Direction::TopDown),
+                                                        |ui| {
+                                                            let cell_rect = ui.available_rect_before_wrap();
+                                                            
+                                                            // Draw calendar-style cell background
+                                                            ui.painter().rect_filled(
+                                                                cell_rect,
+                                                                egui::Rounding::same(0.0), // No rounding
+                                                                cell_bg_color
+                                                            );
+                                                            
+                                                            // Draw cell border (minimal)
+                                                            ui.painter().rect_stroke(
+                                                                cell_rect,
+                                                                egui::Rounding::same(0.0), // No rounding
+                                                                egui::Stroke::new(0.0, cell_border_color) // No border
+                                                            );
+                                                            
+                                                            ui.add(egui::Label::new(egui::RichText::new(&transaction.description)
+                                                                .font(egui::FontId::new(content_font_size, font_family.clone()))
+                                                                .color(egui::Color32::BLACK))
+                                                                .selectable(false)); // Non-interactive
+                                                        },
+                                                    );
+                                                },
+                                                2 => {
+                                                    // Amount cell  
+                                                    ui.allocate_ui_with_layout(
+                                                        egui::vec2(width, row_height),
+                                                        egui::Layout::centered_and_justified(egui::Direction::TopDown),
+                                                        |ui| {
+                                                            let cell_rect = ui.available_rect_before_wrap();
+                                                            
+                                                            // Draw calendar-style cell background
+                                                            ui.painter().rect_filled(
+                                                                cell_rect,
+                                                                egui::Rounding::same(0.0), // No rounding
+                                                                cell_bg_color
+                                                            );
+                                                            
+                                                            // Draw cell border (minimal)  
+                                                            ui.painter().rect_stroke(
+                                                                cell_rect,
+                                                                egui::Rounding::same(0.0), // No rounding
+                                                                egui::Stroke::new(0.0, cell_border_color) // No border
+                                                            );
+                                                            
+                                                            // Color-code based on amount (keeping existing logic)
+                                                            let amount_color = if transaction.amount > 0.0 {
+                                                                egui::Color32::from_rgb(34, 139, 34) // Forest green for positive
+                                                            } else {
+                                                                egui::Color32::from_rgb(220, 20, 60) // Crimson for negative
+                                                            };
+                                                            
+                                                            ui.add(egui::Label::new(egui::RichText::new(format!("${:.2}", transaction.amount))
+                                                                .font(egui::FontId::new(content_font_size, font_family.clone()))
+                                                                .strong()
+                                                                .color(amount_color))
+                                                                .selectable(false)); // Non-interactive
+                                                        },
+                                                    );
+                                                },
+                                                3 => {
+                                                    // Balance cell
+                                                    ui.allocate_ui_with_layout(
+                                                        egui::vec2(width, row_height),
+                                                        egui::Layout::centered_and_justified(egui::Direction::TopDown),
+                                                        |ui| {
+                                                            let cell_rect = ui.available_rect_before_wrap();
+                                                            
+                                                            // Draw calendar-style cell background
+                                                            ui.painter().rect_filled(
+                                                                cell_rect,
+                                                                egui::Rounding::same(0.0), // No rounding
+                                                                cell_bg_color
+                                                            );
+                                                            
+                                                            // Draw cell border (minimal)
+                                                            ui.painter().rect_stroke(
+                                                                cell_rect,
+                                                                egui::Rounding::same(0.0), // No rounding
+                                                                egui::Stroke::new(0.0, cell_border_color) // No border
+                                                            );
+                                                            
+                                                            ui.add(egui::Label::new(egui::RichText::new(format!("${:.2}", transaction.balance))
+                                                                    .font(egui::FontId::new(content_font_size, font_family.clone()))
+                                                                    .strong()
+                                                                    .color(egui::Color32::BLACK))
+                                                                    .selectable(false)); // Non-interactive
+                                                        },
+                                                    );
+                                                },
+                                                _ => {} // No more columns
+                                            }
+                                            
+                                            // No manual spacing - let item_spacing.x handle it
+                                        }
+                                    }); // End horizontal layout
+                                }); // End allocate_ui_at_rect
                         
                                 ui.add_space(row_spacing); // Space between rows
                             }
