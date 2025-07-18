@@ -27,13 +27,12 @@ impl AllowanceTrackerApp {
             // Render content based on selected tab with toggle header
             match self.current_tab {
                 MainTab::Calendar => {
-                    // Reserve space for bottom margin before drawing calendar
-                    let mut available_rect = ui.available_rect_before_wrap();
-                    available_rect.max.y -= 30.0; // Reserve 30px bottom margin
+                    // Use full available space - let calendar manage its own margins
+                    let available_rect = ui.available_rect_before_wrap();
                     self.draw_calendar_section_with_toggle(ui, available_rect, &self.calendar_transactions.clone());
                     
-                    // Add bottom spacing to ensure the calendar doesn't touch the edge
-                    ui.add_space(30.0);
+                    // No bottom spacing - test for other padding sources
+                    // ui.add_space(0.0); // Removed entirely
                 }
                 MainTab::Table => {
                     // Filter out future allowances - table should only show actual transactions
@@ -42,13 +41,12 @@ impl AllowanceTrackerApp {
                         .cloned()
                         .collect();
                     
-                    // Reserve space for bottom margin before drawing table
-                    let mut available_rect = ui.available_rect_before_wrap();
-                    available_rect.max.y -= 30.0; // Reserve 30px bottom margin
+                    // Use full available space - let table manage its own margins
+                    let available_rect = ui.available_rect_before_wrap();
                     self.draw_transactions_section_with_toggle(ui, available_rect, &actual_transactions);
                     
-                    // Add bottom spacing to ensure the table doesn't touch the edge
-                    ui.add_space(30.0);
+                    // Small bottom spacing to prevent edge contact
+                    ui.add_space(10.0);
                 }
             }
         });

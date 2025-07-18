@@ -1027,8 +1027,9 @@ impl AllowanceTrackerApp {
         // Step 1: Calculate cell width from horizontal space (unchanged - works fine)
         let cell_width = (calendar_width - total_spacing) / 7.0;
         
-        // Step 2: Work backwards from desired calendar size to calculate cell height  
-        let desired_calendar_height = available_rect.height(); // Use 100% of available space
+        // Step 2: Work backwards from desired calendar size to calculate cell height
+        // Use full available height - positioning creates the top margin  
+        let desired_calendar_height = available_rect.height(); // Use full space, positioning handles top margin
         let calendar_container_padding = 20.0;
         let header_height = 30.0;
         let vertical_spacing = CALENDAR_CARD_SPACING * 5.0; // 5 gaps between 6 rows
@@ -1045,6 +1046,8 @@ impl AllowanceTrackerApp {
         
         // Use the calculated card height directly - no artificial limits
         let final_card_height = card_height;
+        
+
         
         let card_rect = egui::Rect::from_min_size(
             egui::pos2(available_rect.left() + 20.0, available_rect.top() + 20.0),

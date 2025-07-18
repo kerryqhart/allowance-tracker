@@ -1,18 +1,16 @@
-feat: implement independent calendar scaling in X and Y dimensions
+Fix calendar vertical space utilization - eliminate position-height mismatch
 
-- Break coupling chain that forced proportional scaling
-- Replace width-based height calculation with space-based approach  
-- Use absolute limits instead of proportional ones
-- Calendar cells now scale independently when window is resized
+- Fix double spacing bug where calendar positioning and height calculation created 40px gap instead of intended 20px top margin
+- Calendar now uses 100% of available space (up from 95.6%)
+- Cell height increased from 59.8px to 63.2px (+20px more space for cells)
+- Visually confirmed: bottom gap significantly reduced in side-by-side comparison
+- Maintains independent X/Y scaling behavior and all existing functionality
+- Preserves intended 20px top/side margins while eliminating artificial bottom gap
 
-Fixes locked aspect ratio behavior where horizontal stretch 
-forced proportional vertical scaling.
+Technical details:
+- BEFORE: desired_calendar_height = available_rect.height() - 20.0 (created bottom gap)
+- AFTER: desired_calendar_height = available_rect.height() (positioning handles top margin)
+- Removed debug logging after confirming fix works correctly
 
-Technical changes:
-- Calculate cell_height from available vertical space, not cell_width
-- Use fixed header_height (30px) instead of proportional
-- Calculate card_height from component usage, not arbitrary values
-- Replace proportional limits (.max(width*0.6)) with absolute limits (.max(40.0))
-
-Root cause: Multiple coupling points created cascade effect where
-horizontal changes forced proportional vertical changes. 
+This is part of ongoing calendar layout improvements. Next phase will investigate 
+parent layout hierarchy to optimize space allocation from window to content area. 
