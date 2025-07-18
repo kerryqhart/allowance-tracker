@@ -17,6 +17,7 @@
 
 use eframe::egui;
 use crate::ui::app_state::{AllowanceTrackerApp, MainTab};
+use shared::TransactionType;
 
 impl AllowanceTrackerApp {
     /// Render the main content area
@@ -35,10 +36,16 @@ impl AllowanceTrackerApp {
                     ui.add_space(30.0);
                 }
                 MainTab::Table => {
+                    // Filter out future allowances - table should only show actual transactions
+                    let actual_transactions: Vec<_> = self.calendar_transactions.iter()
+                        .filter(|t| t.transaction_type != TransactionType::FutureAllowance)
+                        .cloned()
+                        .collect();
+                    
                     // Reserve space for bottom margin before drawing table
                     let mut available_rect = ui.available_rect_before_wrap();
                     available_rect.max.y -= 30.0; // Reserve 30px bottom margin
-                    self.draw_transactions_section_with_toggle(ui, available_rect, &self.calendar_transactions.clone());
+                    self.draw_transactions_section_with_toggle(ui, available_rect, &actual_transactions);
                     
                     // Add bottom spacing to ensure the table doesn't touch the edge
                     ui.add_space(30.0);

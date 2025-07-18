@@ -432,6 +432,13 @@ impl CalendarDay {
                 ui.horizontal(|ui| {
                     ui.set_width(width - 8.0); // Account for padding
                     
+                    // Check if Chalkboard font is available (shared by day number and balance)
+                    let font_family = if ui.ctx().fonts(|fonts| fonts.families().contains(&egui::FontFamily::Name("Chalkboard".into()))) {
+                        egui::FontFamily::Name("Chalkboard".into())
+                    } else {
+                        egui::FontFamily::Proportional
+                    };
+                    
                     // Day number in upper left (only for current month days)
                     if matches!(self.day_type, CalendarDayType::CurrentMonth) {
                         let day_font_size = if config.is_grid_layout {
@@ -445,14 +452,14 @@ impl CalendarDay {
                         
                         // Create the rich text with emphasis for today
                         let rich_text = egui::RichText::new(self.day_number.to_string())
-                            .font(egui::FontId::new(day_font_size, egui::FontFamily::Proportional))
+                            .font(egui::FontId::new(day_font_size, font_family.clone()))
                             .color(day_text_color)
                             .strong();
                         
                         if self.is_today {
                             // Use manual underline for today's date (more subtle than native)
                             let rich_text_bold = egui::RichText::new(self.day_number.to_string())
-                                .font(egui::FontId::new(day_font_size, egui::FontFamily::Proportional))
+                                .font(egui::FontId::new(day_font_size, font_family.clone()))
                                 .color(day_text_color)
                                 .strong();
                             
@@ -494,7 +501,7 @@ impl CalendarDay {
                                 
                                 ui.add(egui::Label::new(
                                     egui::RichText::new(format!("${:.2}", balance))
-                                        .font(egui::FontId::new(balance_font_size, egui::FontFamily::Proportional))
+                                        .font(egui::FontId::new(balance_font_size, font_family.clone()))
                                         .color(balance_color)
                                 ).selectable(false)); // Disable selection to prevent dropdown interference
                             }
@@ -537,6 +544,13 @@ impl CalendarDay {
     /// Render a single calendar chip with unified styling and hover effects
     /// Returns the transaction ID if the checkbox was clicked (for selection toggle)
     fn render_calendar_chip(&self, ui: &mut egui::Ui, chip: &CalendarChip, width: f32, _height: f32, config: &RenderConfig) -> Option<String> {
+        
+        // Check if Chalkboard font is available
+        let font_family = if ui.ctx().fonts(|fonts| fonts.families().contains(&egui::FontFamily::Name("Chalkboard".into()))) {
+            egui::FontFamily::Name("Chalkboard".into())
+        } else {
+            egui::FontFamily::Proportional
+        };
         
         // Get chip styling from the chip type
         let chip_color = chip.chip_type.primary_color();
@@ -622,7 +636,7 @@ impl CalendarDay {
                         rect.center(),
                         egui::Align2::CENTER_CENTER,
                         &chip.display_amount,
-                        egui::FontId::new(chip_font_size, egui::FontFamily::Proportional),
+                        egui::FontId::new(chip_font_size, font_family.clone()),
                         text_color,
                     );
                     
@@ -669,7 +683,7 @@ impl CalendarDay {
                     rect.center(),
                     egui::Align2::CENTER_CENTER,
                     &chip.display_amount,
-                    egui::FontId::new(chip_font_size, egui::FontFamily::Proportional),
+                    egui::FontId::new(chip_font_size, font_family.clone()),
                     text_color,
                 );
                 
@@ -685,6 +699,13 @@ impl CalendarDay {
     
     /// Show a floating tooltip with transaction description
     fn show_transaction_tooltip(&self, ui: &mut egui::Ui, description: &str, chip_rect: egui::Rect) {
+        // Check if Chalkboard font is available
+        let font_family = if ui.ctx().fonts(|fonts| fonts.families().contains(&egui::FontFamily::Name("Chalkboard".into()))) {
+            egui::FontFamily::Name("Chalkboard".into())
+        } else {
+            egui::FontFamily::Proportional
+        };
+        
         // Get cursor position for tooltip positioning
         let cursor_pos = ui.ctx().pointer_interact_pos().unwrap_or(chip_rect.center());
         
@@ -772,7 +793,7 @@ impl CalendarDay {
                             ui.add_space(tooltip_padding.x);
                             ui.add(egui::Label::new(
                                 egui::RichText::new(description)
-                                    .font(egui::FontId::new(tooltip_font_size, egui::FontFamily::Proportional))
+                                    .font(egui::FontId::new(tooltip_font_size, font_family.clone()))
                                     .color(tooltip_text_color)
                             ).selectable(false)); // Disable selection to prevent dropdown interference
                         });
@@ -984,6 +1005,13 @@ impl AllowanceTrackerApp {
 
     /// Draw calendar section with toggle header integrated
     pub fn draw_calendar_section_with_toggle(&mut self, ui: &mut egui::Ui, available_rect: egui::Rect, transactions: &[Transaction]) {
+        // Check if Chalkboard font is available
+        let font_family = if ui.ctx().fonts(|fonts| fonts.families().contains(&egui::FontFamily::Name("Chalkboard".into()))) {
+            egui::FontFamily::Name("Chalkboard".into())
+        } else {
+            egui::FontFamily::Proportional
+        };
+        
         // Use the existing draw_calendar_section method but with toggle header
         ui.add_space(15.0);
         
@@ -1056,7 +1084,7 @@ impl AllowanceTrackerApp {
                                                 
                                                 // Draw text - disable selection to prevent dropdown interference
                                                 ui.add(egui::Label::new(egui::RichText::new(*day_name)
-                                                    .font(egui::FontId::new(12.0, egui::FontFamily::Proportional))
+                                                    .font(egui::FontId::new(12.0, font_family.clone()))
                                                     .strong()
                                                     .color(egui::Color32::DARK_GRAY))
                                                     .selectable(false));

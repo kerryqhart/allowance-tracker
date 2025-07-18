@@ -33,33 +33,26 @@ impl AllowanceTrackerApp {
         let content_width = available_rect.width() - 40.0;
         let card_padding = 15.0;
         
-        // Calculate card height based on number of transactions
+        // Calculate table dimensions to use maximum space (no internal header needed)
         let header_height = 60.0;
         let row_height = 45.0;
-        let title_height = 100.0; // Include space for toggle header
-        let num_rows = transactions.len().min(15); // Show max 15 rows
-        let card_height = title_height + header_height + (row_height * num_rows as f32) + card_padding * 2.0;
+        let num_rows = transactions.len().min(20); // Show more rows since we have more space
+        let min_card_height = header_height + (row_height * num_rows as f32) + card_padding * 2.0;
         
-        // Ensure card doesn't exceed available rectangle bounds
-        let max_available_height = available_rect.height() - 40.0;
-        let final_card_height = card_height.min(max_available_height);
+        // Use more available space - reduce margins to expand table
+        let max_available_height = available_rect.height() - 20.0; // Reduced margin 
+        let final_card_height = min_card_height.max(max_available_height * 0.85); // Use 85% of available space
         
         let card_rect = egui::Rect::from_min_size(
-            egui::pos2(available_rect.left() + 20.0, available_rect.top() + 20.0),
+            egui::pos2(available_rect.left() + 20.0, available_rect.top() + 10.0), // Reduced top margin
             egui::vec2(content_width, final_card_height)
         );
         
-        // Draw card background
-        self.draw_card_background(ui, card_rect);
+        // No background - let gradient show through (like calendar)
+        // No internal header - title is now in subheader
         
-        // Draw toggle header
-        self.draw_toggle_header(ui, card_rect, "Recent Transactions");
-        
-        // Draw table content with proper spacing for header
-        let table_rect = egui::Rect::from_min_size(
-            card_rect.min + egui::vec2(0.0, 60.0), // Leave space for toggle header
-            egui::vec2(card_rect.width(), card_rect.height() - 60.0)
-        );
+        // Draw table content using full available space
+        let table_rect = card_rect; // Use entire card area for table
         
         // Use the existing beautiful table implementation
         render_responsive_transaction_table(ui, table_rect, transactions);

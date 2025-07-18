@@ -153,8 +153,11 @@ impl AllowanceTrackerApp {
                 self.draw_calendar_navigation_controls(ui);
             }
             MainTab::Table => {
-                // Future: Table-specific controls (filters, sorting, etc.)
-                // For now, leave empty
+                // Show table title in subheader
+                ui.label(egui::RichText::new("📋 Recent Transactions")
+                    .font(egui::FontId::new(18.0, egui::FontFamily::Proportional))
+                    .color(egui::Color32::WHITE)
+                    .strong());
             }
         }
     }

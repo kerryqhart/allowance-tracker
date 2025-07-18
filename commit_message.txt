@@ -1,31 +1,8 @@
-Implement complete spend money functionality with generic modal system
+Restore clean minimal transaction table implementation
 
-🎯 SPEND MONEY FEATURE COMPLETE:
-- Add expense form state using MoneyTransactionFormState for consistency
-- Implement submit_expense_transaction() with full backend integration
-- Convert SpendMoney to generic modal system (gray theme)
-- Wire up calendar click → spend money modal → backend submission
-
-🧹 ARCHITECTURE IMPROVEMENTS:
-- Remove old hardcoded spend money modal implementation
-- Clean up legacy form fields and modal state 
-- Consolidate all money transaction forms using generic system
-- Maintain consistent UX between add/spend money flows
-
-🔧 BACKEND INTEGRATION:
-- Uses existing spend_money_complete() service with full business logic
-- Proper DateTime handling from calendar selection (noon Eastern Time)
-- User enters positive amounts, backend converts to negative
-- Updates current balance and refreshes calendar automatically
-
-🐛 UI CLEANUP:
-- Remove debug println! statements from money management
-- Convert backend initialization to proper log::info!
-- Clean user experience without debug noise
-
-✅ FULLY FUNCTIONAL:
-Calendar click → Gray "Spend Money" modal → Form validation → 
-Backend submission → Balance update → Transaction appears on calendar
-
-Both add money (green) and spend money (gray) now use the same modern, 
-consistent modal architecture with proper error handling and validation. 
+- Clean white headers instead of colorful gradients  
+- Custom horizontal layout with fine-tuned spacing
+- Column spacing: 6.5px, Row spacing: 1.5px  
+- Optimized column widths: 18%, 48%, 17%, 17%
+- Hover detection infrastructure (needs ScrollArea fix)
+- Removed dependency on egui_extras::TableBuilder 
