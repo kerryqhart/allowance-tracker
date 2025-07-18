@@ -1,18 +1,18 @@
-Implement working hover effects for transaction table using egui Button approach
+feat: implement independent calendar scaling in X and Y dimensions
 
-✅ SUCCESS: Transaction row hover effects now working perfectly!
+- Break coupling chain that forced proportional scaling
+- Replace width-based height calculation with space-based approach  
+- Use absolute limits instead of proportional ones
+- Calendar cells now scale independently when window is resized
 
-SOLUTION: Replace complex manual overlay system with egui's built-in Button hover:
-- Each row is now a transparent egui::Button with built-in hover detection
-- Cell backgrounds become more opaque when row is hovered (55 → 120 alpha)
-- Content drawn on top of button using ui.allocate_ui_at_rect()
-- Maintains exact same visual appearance and spacing as before
+Fixes locked aspect ratio behavior where horizontal stretch 
+forced proportional vertical scaling.
 
-BENEFITS:
-- ✅ Works with egui's layout system instead of fighting it  
-- ✅ Handles scrolling, resizing, and layout changes automatically
-- ✅ Clean, maintainable code (no manual calculations or debug logs)
-- ✅ Leverages framework's native hover detection system
-- ✅ Resilient and extensible for future table features
+Technical changes:
+- Calculate cell_height from available vertical space, not cell_width
+- Use fixed header_height (30px) instead of proportional
+- Calculate card_height from component usage, not arbitrary values
+- Replace proportional limits (.max(width*0.6)) with absolute limits (.max(40.0))
 
-This was the right approach - working WITH the framework rather than against it. 
+Root cause: Multiple coupling points created cascade effect where
+horizontal changes forced proportional vertical changes. 

@@ -1021,20 +1021,30 @@ impl AllowanceTrackerApp {
         // Calendar takes up full available width to align with navigation buttons
         let calendar_width = content_width;
         
-        // Calculate cell dimensions proportionally  
+        // HYPOTHESIS A: Break the coupling chain at multiple points
         let total_spacing = CALENDAR_CARD_SPACING * 6.0;
+        
+        // Step 1: Calculate cell width from horizontal space (unchanged - works fine)
         let cell_width = (calendar_width - total_spacing) / 7.0;
-        let cell_height = cell_width * 0.8;
         
-        // Header height proportional to cell size
-        let header_height = cell_height * 0.4;
+        // Step 2: Work backwards from desired calendar size to calculate cell height  
+        let desired_calendar_height = available_rect.height(); // Use 100% of available space
+        let calendar_container_padding = 20.0;
+        let header_height = 30.0;
+        let vertical_spacing = CALENDAR_CARD_SPACING * 5.0; // 5 gaps between 6 rows
         
-        // Draw the card container with toggle header
-        let card_height = (header_height + cell_height * 6.0) + 200.0; // Space for 6 weeks + toggle header + padding
+        // Calculate cell height to fill the desired space
+        let available_height_for_cells = desired_calendar_height - calendar_container_padding - header_height - vertical_spacing;
+        let calculated_cell_height = (available_height_for_cells / 6.0).max(40.0); // 6 rows, with minimum
         
-        // Ensure card doesn't exceed available rectangle bounds
-        let max_available_height = available_rect.height() - 40.0;
-        let final_card_height = card_height.min(max_available_height);
+        // Apply truly independent limits (not proportional to width!)
+        let cell_height = calculated_cell_height.min(200.0); // Maximum: not too huge
+        
+        // Step 4: Calculate actual card height based on what we're using
+        let card_height = header_height + (cell_height * 6.0) + vertical_spacing + calendar_container_padding;
+        
+        // Use the calculated card height directly - no artificial limits
+        let final_card_height = card_height;
         
         let card_rect = egui::Rect::from_min_size(
             egui::pos2(available_rect.left() + 20.0, available_rect.top() + 20.0),
