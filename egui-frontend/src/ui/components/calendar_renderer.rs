@@ -260,7 +260,7 @@ impl CalendarChip {
             id: "ellipsis".to_string(),
             child_id: "ellipsis".to_string(),
             amount: 0.0,
-            description: "More transactions...".to_string(),
+            description: "Click to see more transactions".to_string(),
             date: chrono::Utc::now().with_timezone(&chrono::FixedOffset::east_opt(0).unwrap()),
             balance: 0.0,
             transaction_type: shared::TransactionType::Income, // Dummy type
@@ -298,6 +298,7 @@ pub struct RenderConfig {
     // Transaction selection state (for deletion mode)
     pub transaction_selection_mode: bool,
     pub selected_transaction_ids: std::collections::HashSet<String>,
+    pub expanded_day: Option<NaiveDate>,
 }
 
 impl Default for RenderConfig {
@@ -308,6 +309,7 @@ impl Default for RenderConfig {
             is_selected: false,
             transaction_selection_mode: false,
             selected_transaction_ids: std::collections::HashSet::new(),
+            expanded_day: None,
         }
     }
 }
@@ -346,6 +348,7 @@ impl CalendarDay {
             is_selected: false, // Default to not selected - this method doesn't know about selection
             transaction_selection_mode: false,
             selected_transaction_ids: std::collections::HashSet::new(),
+            expanded_day: None,
         });
         response
     }
@@ -540,7 +543,13 @@ impl CalendarDay {
                 let chips = CalendarChip::from_transactions(self.transactions.clone(), config.is_grid_layout);
                 
                 // Calculate how many chips can fit dynamically based on available space
-                let (chips_to_show_count, needs_ellipsis) = self.calculate_transaction_display_limit(height, chips.len());
+                let (chips_to_show_count, needs_ellipsis) = if config.expanded_day == Some(self.date) {
+                    // Day is expanded - show all transaction chips, no ellipsis needed
+                    (chips.len(), false)
+                } else {
+                    // Normal calculation based on available space
+                    self.calculate_transaction_display_limit(height, chips.len())
+                };
                 
                 let chips_to_show = chips.iter().take(chips_to_show_count);
                 
@@ -552,10 +561,68 @@ impl CalendarDay {
                     ui.add_space(1.0); // Smaller spacing between chips due to padding
                 }
                 
-                // Show "..." chip if there are more transactions
-                if needs_ellipsis {
+                // Show "..." chip if there are more transactions (normal state)
+                // OR show collapse button if this day is expanded
+                if config.expanded_day == Some(self.date) {
+                    // Day is expanded - show collapse button
+                    ui.add_space(8.0); // Extra space before collapse button
+                    
+                    let collapse_width = width - 8.0;
+                    let collapse_height = 20.0;
+                    
+                    let (collapse_rect, collapse_response) = ui.allocate_exact_size(
+                        egui::vec2(collapse_width, collapse_height), 
+                        egui::Sense::hover().union(egui::Sense::click())
+                    );
+                    
+                    // Style the collapse button
+                    let collapse_bg_color = if collapse_response.hovered() {
+                        egui::Color32::from_rgba_unmultiplied(200, 200, 200, 180)
+                    } else {
+                        egui::Color32::from_rgba_unmultiplied(160, 160, 160, 120)
+                    };
+                    
+                    // Draw collapse button background
+                    ui.painter().rect_filled(
+                        collapse_rect,
+                        egui::Rounding::same(3.0),
+                        collapse_bg_color
+                    );
+                    
+                    // Draw collapse button border
+                    ui.painter().rect_stroke(
+                        collapse_rect,
+                        egui::Rounding::same(3.0),
+                        egui::Stroke::new(1.0, egui::Color32::from_rgb(120, 120, 120))
+                    );
+                    
+                    // Draw "^" symbol
+                    ui.painter().text(
+                        collapse_rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        "^",
+                        egui::FontId::new(14.0, egui::FontFamily::Proportional),
+                        egui::Color32::from_rgb(80, 80, 80),
+                    );
+                    
+                    // Handle collapse click
+                    if collapse_response.clicked() {
+                        local_clicked_ids.push("COLLAPSE_CLICKED".to_string());
+                    }
+                    
+                    // Show tooltip on hover
+                    if collapse_response.hovered() {
+                        collapse_response.on_hover_text("Click to collapse");
+                    }
+                    
+                } else if needs_ellipsis {
+                    // Normal state - show ellipsis chip
                     let ellipsis_chip = CalendarChip::create_ellipsis();
-                    self.render_calendar_chip(ui, &ellipsis_chip, width - 8.0, height, config);
+                    if let Some(result) = self.render_calendar_chip(ui, &ellipsis_chip, width - 8.0, height, config) {
+                        if result == "ELLIPSIS_CLICKED" {
+                            local_clicked_ids.push("ELLIPSIS_CLICKED".to_string());
+                        }
+                    }
                 }
                 
                 local_clicked_ids
@@ -571,6 +638,8 @@ impl CalendarDay {
     
     /// Render a single calendar chip with unified styling and hover effects
     /// Returns the transaction ID if the checkbox was clicked (for selection toggle)
+    /// Returns "ELLIPSIS_CLICKED" if the ellipsis chip was clicked (for expansion toggle)
+    /// Returns "COLLAPSE_CLICKED" if the collapse button was clicked (handled separately)
     fn render_calendar_chip(&self, ui: &mut egui::Ui, chip: &CalendarChip, width: f32, _height: f32, config: &RenderConfig) -> Option<String> {
         
         // Check if Chalkboard font is available
@@ -675,10 +744,20 @@ impl CalendarDay {
                 });
             } else {
                 // Original chip rendering without checkbox
-                let (rect, response) = ui.allocate_exact_size(egui::vec2(chip_width, chip_height), egui::Sense::hover());
+                let sense = if matches!(chip.chip_type, CalendarChipType::Ellipsis) {
+                    egui::Sense::hover().union(egui::Sense::click()) // Ellipsis chips are clickable
+                } else {
+                    egui::Sense::hover() // Regular chips only hover
+                };
+                let (rect, response) = ui.allocate_exact_size(egui::vec2(chip_width, chip_height), sense);
                 
                 // Determine if we should show hover effect
                 let is_hovered = response.hovered();
+                
+                // Check for ellipsis click
+                if response.clicked() && matches!(chip.chip_type, CalendarChipType::Ellipsis) {
+                    checkbox_clicked = Some("ELLIPSIS_CLICKED".to_string());
+                }
                 
                 // Background color - slightly darker when hovered
                 let background_color = if is_hovered {
@@ -1283,27 +1362,63 @@ impl AllowanceTrackerApp {
         let mut selected_day_rect: Option<egui::Rect> = None;
         let mut selected_day_date: Option<NaiveDate> = None;
         for (_week_index, week_days) in all_days.chunks(7).enumerate() {
-            let week_response = ui.horizontal(|ui| {
+            // Calculate row height - use expanded height if any day in this row is expanded
+            let row_height = if let Some(expanded_day) = week_days.iter().find(|day| self.expanded_day == Some(day.date)) {
+                // Calculate exact height needed for all chips in the expanded day
+                let chip_count = expanded_day.transactions.len();
+                let base_height = cell_height;
+                let header_space = 45.0; // Day number + balance + spacing
+                let bottom_padding = 10.0;
+                let collapse_button_height = 25.0; // Space for collapse button
+                let chip_height = 18.0;
+                let chip_spacing = 1.0;
+                
+                let chips_height = if chip_count > 0 {
+                    (chip_count as f32 * chip_height) + ((chip_count - 1) as f32 * chip_spacing)
+                } else {
+                    0.0
+                };
+                
+                let needed_height = header_space + chips_height + collapse_button_height + bottom_padding;
+                needed_height.max(base_height) // Don't go smaller than normal
+            } else {
+                cell_height // Normal height
+            };
+            
+            let _week_response = ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = CALENDAR_CARD_SPACING; // Horizontal spacing between day cards
                 for calendar_day in week_days.iter() {
                     let ui_response = ui.allocate_ui_with_layout(
-                        egui::vec2(cell_width, cell_height),
+                        egui::vec2(cell_width, row_height),
                         egui::Layout::top_down(egui::Align::LEFT),
                         |ui| {
                             // Check if this day is selected
                             let is_selected = self.selected_day == Some(calendar_day.date);
                             
-                            let (response, clicked_transaction_ids) = calendar_day.render_with_config(ui, cell_width, cell_height, &RenderConfig {
+                            let (response, clicked_transaction_ids) = calendar_day.render_with_config(ui, cell_width, row_height, &RenderConfig {
                                 is_grid_layout: true,
                                 enable_click_handler: true,
                                 is_selected,
                                 transaction_selection_mode: self.transaction_selection_mode,
                                 selected_transaction_ids: self.selected_transaction_ids.clone(),
+                                expanded_day: self.expanded_day,
                             });
                             
-                            // Handle checkbox clicks on transactions
+                            // Handle checkbox clicks on transactions, ellipsis clicks, and collapse clicks
                             for transaction_id in clicked_transaction_ids {
-                                self.toggle_transaction_selection(&transaction_id);
+                                if transaction_id == "ELLIPSIS_CLICKED" {
+                                    // Toggle expansion for this day
+                                    if self.expanded_day == Some(calendar_day.date) {
+                                        self.expanded_day = None; // Collapse if already expanded
+                                    } else {
+                                        self.expanded_day = Some(calendar_day.date); // Expand this day
+                                    }
+                                } else if transaction_id == "COLLAPSE_CLICKED" {
+                                    // Collapse the expanded day
+                                    self.expanded_day = None;
+                                } else {
+                                    self.toggle_transaction_selection(&transaction_id);
+                                }
                             }
                             
                             // Handle click detection for current month days only

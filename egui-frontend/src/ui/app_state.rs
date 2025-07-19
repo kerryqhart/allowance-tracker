@@ -174,6 +174,7 @@ pub struct AllowanceTrackerApp {
     
     // Calendar interaction state
     pub selected_day: Option<chrono::NaiveDate>,
+    pub expanded_day: Option<chrono::NaiveDate>, // Track which day is expanded to show all chips
     pub active_overlay: Option<OverlayType>,
     pub modal_just_opened: bool, // Prevents backdrop click detection on same frame modal opens
     
@@ -252,6 +253,7 @@ impl AllowanceTrackerApp {
             
             // Calendar interaction state
             selected_day: None,
+            expanded_day: None,
             active_overlay: None,
             modal_just_opened: false,
             

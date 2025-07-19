@@ -1,42 +1,17 @@
-feat: implement dynamic calendar scaling with consistent margins
+Enhance calendar day expansion with precise sizing and collapse button
 
-This commit fixes calendar layout issues to provide optimal space utilization
-and consistent visual margins.
+Features:
+- Replace 2x height with precise calculation based on chip count
+- Add collapse button with "^" symbol at bottom of expanded days
+- Improved expand/collapse interaction flow
+- Dynamic row height calculation using actual transaction count
+- Better user experience with clear visual feedback
 
-## Key Changes
+Technical changes:
+- Calculate exact height: header + chips + collapse button + padding
+- Add COLLAPSE_CLICKED handling alongside ELLIPSIS_CLICKED
+- Enhanced tooltip system for expand ("...") and collapse ("^") actions
+- Maintain responsive design principles with proper spacing
 
-### 1. Dynamic Row Calculation
-- Calendar now detects whether a month needs 5 or 6 rows
-- Cell height automatically adjusts to fill available space optimally
-- July 2025 (35 days, 5 rows): larger cells, no wasted space
-- August 2025 (37 days, 6 rows): optimal fit as before
-
-### 2. Consistent Margin System  
-- Fixed bottom margin to match 20px side margins
-- Resolved double-subtraction bug that created uneven spacing
-- All margins now consistent: 20px on all sides
-
-### 3. Independent X/Y Scaling
-- Calendar scales independently on horizontal and vertical axes
-- Maintains aspect ratio constraints while maximizing space usage
-- Responsive design works across different window sizes
-
-### 4. Code Cleanup
-- Removed debug logging and temporary investigation files
-- Cleaned up unused variables and test artifacts
-- Simplified calculation logic for maintainability
-
-## Technical Details
-
-- Uses `calendar_days_count` to calculate `rows_needed = ceil(days/7)`
-- Dynamic `cell_height = available_space / rows_needed`
-- Fixed container height: `available_height - 40px` (20px + 20px internal padding)
-- Maintains 5px spacing between calendar elements
-
-## Files Modified
-- `egui-frontend/src/ui/components/calendar_renderer.rs`
-- Removed: test investigation files and debug artifacts
-
-## Result
-Calendar now provides optimal space utilization with perfect visual consistency
-across all calendar layouts, regardless of month length. 
+This creates a much more polished and intuitive calendar expansion system
+that scales properly with transaction count and provides clear interaction cues. 
