@@ -1,17 +1,17 @@
-Enhance calendar day expansion with precise sizing and collapse button
+Polish collapse button with drawn triangle and remove tooltip
 
-Features:
-- Replace 2x height with precise calculation based on chip count
-- Add collapse button with "^" symbol at bottom of expanded days
-- Improved expand/collapse interaction flow
-- Dynamic row height calculation using actual transaction count
-- Better user experience with clear visual feedback
+Improvements:
+- Replace Unicode triangle symbol with programmatically drawn triangle
+- Remove "Click to collapse" tooltip for cleaner interaction
+- Fix font compatibility issues (Unicode symbol rendered as square)
+- Use egui painter for reliable cross-platform triangle rendering
+- Maintain perfect alignment with calendar day borders
 
 Technical changes:
-- Calculate exact height: header + chips + collapse button + padding
-- Add COLLAPSE_CLICKED handling alongside ELLIPSIS_CLICKED
-- Enhanced tooltip system for expand ("...") and collapse ("^") actions
-- Maintain responsive design principles with proper spacing
+- Draw triangle using egui::Shape::convex_polygon for consistent rendering
+- 8px triangle size with medium gray color for visibility
+- Remove tooltip hover text for minimalist UX
+- Font-independent geometric drawing instead of character dependency
 
-This creates a much more polished and intuitive calendar expansion system
-that scales properly with transaction count and provides clear interaction cues. 
+The collapse button now renders consistently across all systems with a
+clean, professional triangle indicator and minimal interface. 

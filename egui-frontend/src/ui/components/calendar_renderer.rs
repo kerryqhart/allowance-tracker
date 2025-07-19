@@ -561,62 +561,8 @@ impl CalendarDay {
                     ui.add_space(1.0); // Smaller spacing between chips due to padding
                 }
                 
-                // Show "..." chip if there are more transactions (normal state)
-                // OR show collapse button if this day is expanded
-                if config.expanded_day == Some(self.date) {
-                    // Day is expanded - show collapse button
-                    ui.add_space(8.0); // Extra space before collapse button
-                    
-                    let collapse_width = width - 8.0;
-                    let collapse_height = 20.0;
-                    
-                    let (collapse_rect, collapse_response) = ui.allocate_exact_size(
-                        egui::vec2(collapse_width, collapse_height), 
-                        egui::Sense::hover().union(egui::Sense::click())
-                    );
-                    
-                    // Style the collapse button
-                    let collapse_bg_color = if collapse_response.hovered() {
-                        egui::Color32::from_rgba_unmultiplied(200, 200, 200, 180)
-                    } else {
-                        egui::Color32::from_rgba_unmultiplied(160, 160, 160, 120)
-                    };
-                    
-                    // Draw collapse button background
-                    ui.painter().rect_filled(
-                        collapse_rect,
-                        egui::Rounding::same(3.0),
-                        collapse_bg_color
-                    );
-                    
-                    // Draw collapse button border
-                    ui.painter().rect_stroke(
-                        collapse_rect,
-                        egui::Rounding::same(3.0),
-                        egui::Stroke::new(1.0, egui::Color32::from_rgb(120, 120, 120))
-                    );
-                    
-                    // Draw "^" symbol
-                    ui.painter().text(
-                        collapse_rect.center(),
-                        egui::Align2::CENTER_CENTER,
-                        "^",
-                        egui::FontId::new(14.0, egui::FontFamily::Proportional),
-                        egui::Color32::from_rgb(80, 80, 80),
-                    );
-                    
-                    // Handle collapse click
-                    if collapse_response.clicked() {
-                        local_clicked_ids.push("COLLAPSE_CLICKED".to_string());
-                    }
-                    
-                    // Show tooltip on hover
-                    if collapse_response.hovered() {
-                        collapse_response.on_hover_text("Click to collapse");
-                    }
-                    
-                } else if needs_ellipsis {
-                    // Normal state - show ellipsis chip
+                // Show ellipsis chip for normal state (not expanded)
+                if !config.expanded_day.map_or(false, |expanded_date| expanded_date == self.date) && needs_ellipsis {
                     let ellipsis_chip = CalendarChip::create_ellipsis();
                     if let Some(result) = self.render_calendar_chip(ui, &ellipsis_chip, width - 8.0, height, config) {
                         if result == "ELLIPSIS_CLICKED" {
@@ -628,6 +574,55 @@ impl CalendarDay {
                 local_clicked_ids
             })
         });
+        
+        // Render collapse button OUTSIDE content flow if day is expanded
+        if config.expanded_day == Some(self.date) {
+            let collapse_height = 22.0;
+            let collapse_rect = egui::Rect::from_min_size(
+                egui::pos2(cell_rect.left(), cell_rect.bottom() - collapse_height),
+                egui::vec2(cell_rect.width(), collapse_height)
+            );
+            
+            // Check for hover and click
+            let collapse_response = ui.allocate_rect(collapse_rect, egui::Sense::hover().union(egui::Sense::click()));
+            
+            // Style as solid white bar (no border)
+            let collapse_bg_color = if collapse_response.hovered() {
+                egui::Color32::from_rgba_unmultiplied(245, 245, 245, 255) // Very light gray on hover
+            } else {
+                egui::Color32::WHITE // Solid white
+            };
+            
+            // Draw collapse button background - no rounding for perfect border alignment
+            ui.painter().rect_filled(
+                collapse_rect,
+                egui::Rounding::ZERO, // No rounding for perfect border alignment
+                collapse_bg_color
+            );
+            
+            // Draw triangle symbol using painter (more reliable than Unicode)
+            let triangle_size = 8.0;
+            let center = collapse_rect.center();
+            
+            // Define triangle points (pointing up for "collapse")
+            let triangle_points = [
+                egui::pos2(center.x, center.y - triangle_size / 2.0), // Top point
+                egui::pos2(center.x - triangle_size / 2.0, center.y + triangle_size / 2.0), // Bottom left
+                egui::pos2(center.x + triangle_size / 2.0, center.y + triangle_size / 2.0), // Bottom right
+            ];
+            
+            // Draw filled triangle
+            ui.painter().add(egui::Shape::convex_polygon(
+                triangle_points.to_vec(),
+                egui::Color32::from_rgb(120, 120, 120), // Medium gray for visibility
+                egui::Stroke::NONE,
+            ));
+            
+            // Handle collapse click
+            if collapse_response.clicked() {
+                clicked_transaction_ids.push("COLLAPSE_CLICKED".to_string());
+            }
+        }
         
         // Extract clicked transaction IDs from UI result
         clicked_transaction_ids.extend(ui_result.inner.inner);
