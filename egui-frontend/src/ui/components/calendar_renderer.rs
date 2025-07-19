@@ -174,6 +174,8 @@ pub enum CalendarChipType {
     Income,
     /// Future allowance transaction (estimated)
     FutureAllowance,
+    /// Ellipsis indicator for overflow transactions
+    Ellipsis,
 }
 
 impl CalendarChipType {
@@ -183,12 +185,16 @@ impl CalendarChipType {
             CalendarChipType::Expense => egui::Color32::from_rgb(128, 128, 128), // Gray for expenses
             CalendarChipType::Income => egui::Color32::from_rgb(46, 160, 67), // Green for income
             CalendarChipType::FutureAllowance => egui::Color32::from_rgb(46, 160, 67), // Green for future allowances
+            CalendarChipType::Ellipsis => egui::Color32::from_rgb(120, 120, 120), // Medium gray for ellipsis
         }
     }
     
     /// Get the text color for this chip type
     pub fn text_color(&self) -> egui::Color32 {
-        self.primary_color() // Use same color as border for text
+        match self {
+            CalendarChipType::Ellipsis => egui::Color32::from_rgb(120, 120, 120), // Medium gray - same as border for visibility
+            _ => self.primary_color(), // Use same color as border for other chip types
+        }
     }
     
     /// Whether this chip type should use a dotted border
@@ -246,6 +252,26 @@ impl CalendarChip {
             .map(|transaction| Self::from_transaction(transaction, is_grid_layout))
             .collect()
     }
+    
+    /// Create an ellipsis chip to indicate overflow transactions
+    pub fn create_ellipsis() -> Self {
+        // Create a dummy transaction for the ellipsis chip (only the display_amount matters)
+        let dummy_transaction = Transaction {
+            id: "ellipsis".to_string(),
+            child_id: "ellipsis".to_string(),
+            amount: 0.0,
+            description: "More transactions...".to_string(),
+            date: chrono::Utc::now().with_timezone(&chrono::FixedOffset::east_opt(0).unwrap()),
+            balance: 0.0,
+            transaction_type: shared::TransactionType::Income, // Dummy type
+        };
+        
+        Self {
+            chip_type: CalendarChipType::Ellipsis,
+            transaction: dummy_transaction,
+            display_amount: "...".to_string(),
+        }
+    }
 }
 
 /// Represents a single day in the calendar with its associated state and rendering logic
@@ -267,7 +293,6 @@ pub struct CalendarDay {
 /// Configuration for calendar day rendering
 pub struct RenderConfig {
     pub is_grid_layout: bool,
-    pub max_transactions: Option<usize>,
     pub enable_click_handler: bool,
     pub is_selected: bool,
     // Transaction selection state (for deletion mode)
@@ -279,7 +304,6 @@ impl Default for RenderConfig {
     fn default() -> Self {
         Self {
             is_grid_layout: false,
-            max_transactions: Some(2),
             enable_click_handler: false,
             is_selected: false,
             transaction_selection_mode: false,
@@ -318,7 +342,6 @@ impl CalendarDay {
     pub fn render_grid(&self, ui: &mut egui::Ui, width: f32, height: f32) -> egui::Response {
         let (response, _) = self.render_with_config(ui, width, height, &RenderConfig {
             is_grid_layout: true,
-            max_transactions: None,
             enable_click_handler: true,
             is_selected: false, // Default to not selected - this method doesn't know about selection
             transaction_selection_mode: false,
@@ -516,11 +539,10 @@ impl CalendarDay {
                 // Convert transactions to calendar chips
                 let chips = CalendarChip::from_transactions(self.transactions.clone(), config.is_grid_layout);
                 
-                let chips_to_show = if let Some(max) = config.max_transactions {
-                    chips.iter().take(max)
-                } else {
-                    chips.iter().take(chips.len())
-                };
+                // Calculate how many chips can fit dynamically based on available space
+                let (chips_to_show_count, needs_ellipsis) = self.calculate_transaction_display_limit(height, chips.len());
+                
+                let chips_to_show = chips.iter().take(chips_to_show_count);
                 
                 let mut local_clicked_ids = Vec::new();
                 for chip in chips_to_show {
@@ -528,6 +550,12 @@ impl CalendarDay {
                         local_clicked_ids.push(transaction_id);
                     }
                     ui.add_space(1.0); // Smaller spacing between chips due to padding
+                }
+                
+                // Show "..." chip if there are more transactions
+                if needs_ellipsis {
+                    let ellipsis_chip = CalendarChip::create_ellipsis();
+                    self.render_calendar_chip(ui, &ellipsis_chip, width - 8.0, height, config);
                 }
                 
                 local_clicked_ids
@@ -909,6 +937,52 @@ impl CalendarDay {
             egui::Stroke::new(stroke_width, color)
         );
     }
+    
+    /// Calculate how many transaction chips can fit in the available calendar day space
+    /// Returns (chips_that_fit, needs_ellipsis)
+    fn calculate_transaction_display_limit(&self, available_height: f32, total_transaction_count: usize) -> (usize, bool) {
+        // Constants based on actual chip measurements
+        const CHIP_HEIGHT: f32 = 18.0;
+        const CHIP_SPACING: f32 = 1.0;
+        const HEADER_SPACE: f32 = 38.0; // Realistic estimate for day number + balance + spacing
+        const BOTTOM_PADDING: f32 = 8.0; // Reasonable padding
+        
+        // Calculate available space for transaction area
+        let available_for_transactions = available_height - HEADER_SPACE - BOTTOM_PADDING;
+        
+        // Calculate maximum chips that can physically fit (ignoring ellipsis for now)
+        let max_chips_that_fit = if available_for_transactions < CHIP_HEIGHT {
+            0
+        } else {
+            // How many full chips + spacing can fit
+            ((available_for_transactions + CHIP_SPACING) / (CHIP_HEIGHT + CHIP_SPACING)).floor() as usize
+        };
+        
+        // Now apply the logic based on physical capacity vs available transactions
+        if max_chips_that_fit == 0 {
+            // No space for anything
+            return (0, false);
+        } else if max_chips_that_fit == 1 {
+            // Space for only 1 chip
+            if total_transaction_count <= 1 {
+                // 1 or 0 transactions → show them all
+                return (total_transaction_count, false);
+            } else {
+                // >1 transactions → show "..." only
+                return (0, true);
+            }
+        } else {
+            // Space for 2+ chips
+            if total_transaction_count <= max_chips_that_fit {
+                // All transactions fit → show them all
+                return (total_transaction_count, false);
+            } else {
+                // More transactions than space → show (max-1) + ellipsis
+                let chips_to_show = max_chips_that_fit - 1;
+                return (chips_to_show, true);
+            }
+        }
+    }
 }
 
 impl AllowanceTrackerApp {
@@ -1138,7 +1212,7 @@ impl AllowanceTrackerApp {
         let old_month = self.selected_month;
         let old_year = self.selected_year;
         
-        log::info!("🗓️  Navigating from {}/{} with delta {}", old_month, old_year, delta);
+        println!("🗓️  Navigating from {}/{} with delta {}", old_month, old_year, delta);
         
         if delta > 0 {
             if self.selected_month == 12 {
@@ -1156,16 +1230,16 @@ impl AllowanceTrackerApp {
             }
         }
         
-        log::info!("🗓️  Navigation complete: {}/{} → {}/{}", 
+        println!("🗓️  Navigation complete: {}/{} → {}/{}", 
                   old_month, old_year, self.selected_month, self.selected_year);
         
         if self.selected_month == 6 {
-            log::info!("🗓️  🎯 Navigated to June {} - about to load calendar data", self.selected_year);
+            println!("🗓️  🎯 Navigated to June {} - about to load calendar data", self.selected_year);
         }
         
         self.load_calendar_data();
         
-        log::info!("🔄 Calendar data reloaded for {}/{}", self.selected_month, self.selected_year);
+        println!("🔄 Calendar data reloaded for {}/{}", self.selected_month, self.selected_year);
     }
     
     /// Get color for day header based on index
@@ -1196,7 +1270,7 @@ impl AllowanceTrackerApp {
                 .collect()
         } else {
             // No calendar data available - return empty calendar
-            log::warn!("⚠️ No calendar month data available for {}/{}", self.selected_month, self.selected_year);
+            println!("⚠️ No calendar month data available for {}/{}", self.selected_month, self.selected_year);
             Vec::new()
         };
         
@@ -1221,7 +1295,6 @@ impl AllowanceTrackerApp {
                             
                             let (response, clicked_transaction_ids) = calendar_day.render_with_config(ui, cell_width, cell_height, &RenderConfig {
                                 is_grid_layout: true,
-                                max_transactions: Some(2), // Limit transactions in grid view
                                 enable_click_handler: true,
                                 is_selected,
                                 transaction_selection_mode: self.transaction_selection_mode,
@@ -1308,18 +1381,18 @@ impl AllowanceTrackerApp {
                 // Clicking the same day - deselect it
                 self.selected_day = None;
                 self.active_overlay = None;
-                log::info!("📅 Deselected day: {}", clicked_date);
+                println!("📅 Deselected day: {}", clicked_date);
             } else {
                 // Clicking a different day - select it and clear overlay
                 self.selected_day = Some(clicked_date);
                 self.active_overlay = None;
-                log::info!("📅 Selected day: {}", clicked_date);
+                println!("📅 Selected day: {}", clicked_date);
             }
         } else {
             // No day selected - select this day
             self.selected_day = Some(clicked_date);
             self.active_overlay = None;
-            log::info!("📅 Selected day: {}", clicked_date);
+            println!("📅 Selected day: {}", clicked_date);
         }
     }
 
@@ -1372,7 +1445,7 @@ impl AllowanceTrackerApp {
                     if ui.add_sized(glyph_size, button).clicked() {
                         self.active_overlay = Some(glyph.overlay_type());
                         self.modal_just_opened = true; // Prevent backdrop click detection this frame
-                        log::info!("🎯 Day menu glyph '{}' clicked for date: {}", glyph_text, selected_date);
+                        println!("🎯 Day menu glyph '{}' clicked for date: {}", glyph_text, selected_date);
                     }
                 });
         }
