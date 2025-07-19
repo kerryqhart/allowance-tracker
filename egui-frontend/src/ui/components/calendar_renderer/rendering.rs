@@ -31,308 +31,22 @@ use chrono::{NaiveDate, Datelike, Weekday};
 use shared::Transaction;
 use crate::ui::app_state::{AllowanceTrackerApp, OverlayType};
 
-/// Represents the different types of day menu glyphs that can be displayed above a selected day
-#[derive(Debug, Clone, PartialEq)]
-pub enum DayMenuGlyph {
-    AddMoney,
-    SpendMoney,
-}
+// Import types, styling, and layout from the same module
+use super::types::*;
+use super::styling::*;
+use super::layout::*;
 
-impl DayMenuGlyph {
-    /// Get the text to display for this glyph
-    pub fn text(&self) -> &'static str {
-        match self {
-            DayMenuGlyph::AddMoney => "+$",
-            DayMenuGlyph::SpendMoney => "-$",
-        }
-    }
-    
-    /// Get the overlay type this glyph should activate
-    pub fn overlay_type(&self) -> OverlayType {
-        match self {
-            DayMenuGlyph::AddMoney => OverlayType::AddMoney,
-            DayMenuGlyph::SpendMoney => OverlayType::SpendMoney,
-        }
-    }
-    
-    /// Get all available glyphs in order
-    pub fn all() -> Vec<DayMenuGlyph> {
-        vec![
-            DayMenuGlyph::AddMoney,
-            DayMenuGlyph::SpendMoney,
-        ]
-    }
-    
-    /// Get glyphs that should be shown for a specific date based on business rules
-    pub fn for_date(date: NaiveDate) -> Vec<DayMenuGlyph> {
-        let today = chrono::Local::now().date_naive();
-        
-        // Don't show glyphs for future dates (can't future-date transactions)
-        if date > today {
-            return Vec::new();
-        }
-        
-        // Don't show glyphs for dates older than 45 days (prevent arbitrary backdating)
-        let cutoff_date = today - chrono::Duration::days(45);
-        if date < cutoff_date {
-            return Vec::new();
-        }
-        
-        // For current day and valid past days, show income and expense glyphs
-        Self::all()
-    }
-}
 
-/// Consistent spacing for all calendar elements - controls gaps between day cards, headers, etc.
-/// This value determines the visual tightness/looseness of the calendar layout.
-const CALENDAR_CARD_SPACING: f32 = 5.0; // Spacing in pixels between calendar elements
 
-/// Represents the type of calendar day for clear distinction between different day types
-#[derive(Debug, Clone, PartialEq)]
-pub enum CalendarDayType {
-    /// A day in the current month being displayed
-    CurrentMonth,
-    /// A filler day (padding) from previous or next month to fill the calendar grid
-    FillerDay,
-}
 
-impl CalendarDayType {
-    /// Get the background color for this day type
-    pub fn background_color(&self, is_today: bool) -> egui::Color32 {
-        if is_today {
-            // Light yellow tint for today (10% more opacity)
-            egui::Color32::from_rgba_unmultiplied(255, 248, 220, 110)
-        } else {
-            match self {
-                CalendarDayType::CurrentMonth => {
-                    // Semi-transparent white background (10% more opacity)
-                    egui::Color32::from_rgba_unmultiplied(255, 255, 255, 55)
-                }
-                CalendarDayType::FillerDay => {
-                    // Darker gray for filler days (increased opacity for better visibility)
-                    egui::Color32::from_rgba_unmultiplied(120, 120, 120, 120)
-                }
-            }
-        }
-    }
 
-    /// Get the border color for this day type
-    pub fn border_color(&self, is_today: bool) -> egui::Color32 {
-        if is_today {
-            // Pink outline for better visibility against gradient background
-            egui::Color32::from_rgb(232, 150, 199)
-        } else {
-            match self {
-                CalendarDayType::CurrentMonth => {
-                    // Normal border
-                    egui::Color32::from_rgba_unmultiplied(200, 200, 200, 100)
-                }
-                CalendarDayType::FillerDay => {
-                    // Lighter border for filler days (increased opacity for better visibility)
-                    egui::Color32::from_rgba_unmultiplied(150, 150, 150, 140)
-                }
-            }
-        }
-    }
 
-    /// Get the day number text color for this day type
-    pub fn day_text_color(&self) -> egui::Color32 {
-        // Use normal colors for all days
-        match self {
-            CalendarDayType::CurrentMonth => {
-                // Bold black for current month days (including today)
-                egui::Color32::BLACK
-            }
-            CalendarDayType::FillerDay => {
-                // Gray for filler days
-                egui::Color32::from_rgb(150, 150, 150)
-            }
-        }
-    }
 
-    /// Get the balance text color for this day type
-    pub fn balance_text_color(&self) -> egui::Color32 {
-        match self {
-            CalendarDayType::CurrentMonth => {
-                // Normal gray
-                egui::Color32::GRAY
-            }
-            CalendarDayType::FillerDay => {
-                // More subdued gray for filler day balance
-                egui::Color32::from_rgb(120, 120, 120)
-            }
-        }
-    }
-}
 
-/// Represents the type of calendar transaction chip for visual distinction
-#[derive(Debug, Clone, PartialEq)]
-pub enum CalendarChipType {
-    /// Negative amount transaction (completed)
-    Expense,
-    /// Positive amount transaction (completed)
-    Income,
-    /// Future allowance transaction (estimated)
-    FutureAllowance,
-    /// Ellipsis indicator for overflow transactions
-    Ellipsis,
-}
 
-impl CalendarChipType {
-    /// Get the primary color for this chip type
-    pub fn primary_color(&self) -> egui::Color32 {
-        match self {
-            CalendarChipType::Expense => egui::Color32::from_rgb(128, 128, 128), // Gray for expenses
-            CalendarChipType::Income => egui::Color32::from_rgb(46, 160, 67), // Green for income
-            CalendarChipType::FutureAllowance => egui::Color32::from_rgb(46, 160, 67), // Green for future allowances
-            CalendarChipType::Ellipsis => egui::Color32::from_rgb(120, 120, 120), // Medium gray for ellipsis
-        }
-    }
-    
-    /// Get the text color for this chip type
-    pub fn text_color(&self) -> egui::Color32 {
-        match self {
-            CalendarChipType::Ellipsis => egui::Color32::from_rgb(120, 120, 120), // Medium gray - same as border for visibility
-            _ => self.primary_color(), // Use same color as border for other chip types
-        }
-    }
-    
-    /// Whether this chip type should use a dotted border
-    pub fn uses_dotted_border(&self) -> bool {
-        matches!(self, CalendarChipType::FutureAllowance)
-    }
-}
 
-/// Represents a transaction chip displayed on the calendar
-#[derive(Debug, Clone)]
-pub struct CalendarChip {
-    /// The type of chip (expense, income, or future allowance)
-    pub chip_type: CalendarChipType,
-    /// The original transaction data
-    pub transaction: Transaction,
-    /// Pre-formatted display amount (e.g., "+$5.00", "-$2.50")
-    pub display_amount: String,
-}
-
-impl CalendarChip {
-    /// Create a new CalendarChip from a transaction
-    pub fn from_transaction(transaction: Transaction, is_grid_layout: bool) -> Self {
-        // Determine chip type based on transaction
-        let chip_type = match transaction.transaction_type {
-            shared::TransactionType::Income => CalendarChipType::Income,
-            shared::TransactionType::Expense => CalendarChipType::Expense,
-            shared::TransactionType::FutureAllowance => CalendarChipType::FutureAllowance,
-        };
-        
-        // Format display amount based on type and layout
-        let display_amount = if transaction.amount > 0.0 {
-            if is_grid_layout {
-                format!("+${:.2}", transaction.amount)
-            } else {
-                format!("+${:.0}", transaction.amount)
-            }
-        } else {
-            if is_grid_layout {
-                format!("-${:.2}", transaction.amount.abs())
-            } else {
-                format!("-${:.0}", transaction.amount.abs())
-            }
-        };
-        
-        Self {
-            chip_type,
-            transaction,
-            display_amount,
-        }
-    }
-    
-    /// Convert a vector of transactions to calendar chips
-    pub fn from_transactions(transactions: Vec<Transaction>, is_grid_layout: bool) -> Vec<Self> {
-        transactions.into_iter()
-            .map(|transaction| Self::from_transaction(transaction, is_grid_layout))
-            .collect()
-    }
-    
-    /// Create an ellipsis chip to indicate overflow transactions
-    pub fn create_ellipsis() -> Self {
-        // Create a dummy transaction for the ellipsis chip (only the display_amount matters)
-        let dummy_transaction = Transaction {
-            id: "ellipsis".to_string(),
-            child_id: "ellipsis".to_string(),
-            amount: 0.0,
-            description: "Click to see more transactions".to_string(),
-            date: chrono::Utc::now().with_timezone(&chrono::FixedOffset::east_opt(0).unwrap()),
-            balance: 0.0,
-            transaction_type: shared::TransactionType::Income, // Dummy type
-        };
-        
-        Self {
-            chip_type: CalendarChipType::Ellipsis,
-            transaction: dummy_transaction,
-            display_amount: "...".to_string(),
-        }
-    }
-}
-
-/// Represents a single day in the calendar with its associated state and rendering logic
-pub struct CalendarDay {
-    /// The day number (1-31)
-    pub day_number: u32,
-    /// The full date for this day
-    pub date: NaiveDate,
-    /// Whether this day is today
-    pub is_today: bool,
-    /// The type of day (current month or filler day)
-    pub day_type: CalendarDayType,
-    /// Transactions that occurred on this day
-    pub transactions: Vec<Transaction>,
-    /// The balance at the end of this day (for current month days only)
-    pub balance: Option<f64>,
-}
-
-/// Configuration for calendar day rendering
-pub struct RenderConfig {
-    pub is_grid_layout: bool,
-    pub enable_click_handler: bool,
-    pub is_selected: bool,
-    // Transaction selection state (for deletion mode)
-    pub transaction_selection_mode: bool,
-    pub selected_transaction_ids: std::collections::HashSet<String>,
-    pub expanded_day: Option<NaiveDate>,
-}
-
-impl Default for RenderConfig {
-    fn default() -> Self {
-        Self {
-            is_grid_layout: false,
-            enable_click_handler: false,
-            is_selected: false,
-            transaction_selection_mode: false,
-            selected_transaction_ids: std::collections::HashSet::new(),
-            expanded_day: None,
-        }
-    }
-}
 
 impl CalendarDay {
-    /// Create a new CalendarDay instance
-    pub fn new(day_number: u32, date: NaiveDate, is_today: bool, day_type: CalendarDayType) -> Self {
-        Self {
-            day_number,
-            date,
-            is_today,
-            day_type,
-            transactions: Vec::new(),
-            balance: None,
-        }
-    }
-
-    /// Add a transaction to this day
-    pub fn add_transaction(&mut self, transaction: Transaction) {
-        // Update balance from the transaction (this is the balance after the transaction)
-        self.balance = Some(transaction.balance);
-        self.transactions.push(transaction);
-    }
     
     /// Render this calendar day with configurable styling
     pub fn render(&self, ui: &mut egui::Ui, width: f32, height: f32) -> egui::Response {
@@ -458,20 +172,12 @@ impl CalendarDay {
                 ui.horizontal(|ui| {
                     ui.set_width(width - 8.0); // Account for padding
                     
-                    // Check if Chalkboard font is available (shared by day number and balance)
-                    let font_family = if ui.ctx().fonts(|fonts| fonts.families().contains(&egui::FontFamily::Name("Chalkboard".into()))) {
-                        egui::FontFamily::Name("Chalkboard".into())
-                    } else {
-                        egui::FontFamily::Proportional
-                    };
+                    // Get the font family for calendar rendering
+                    let font_family = get_calendar_font_family(ui.ctx());
                     
                     // Day number in upper left (only for current month days)
                     if matches!(self.day_type, CalendarDayType::CurrentMonth) {
-                        let day_font_size = if config.is_grid_layout {
-                            16.0
-                        } else {
-                            (width * 0.15).max(14.0).min(18.0)
-                        };
+                        let day_font_size = get_day_number_font_size(config.is_grid_layout, width);
                         
                         // Day number text color using centralized color scheme
                         let day_text_color = self.day_type.day_text_color();
@@ -516,11 +222,7 @@ impl CalendarDay {
                         if let Some(balance) = self.balance {
                             // Only show balance for current month days, not for filler days
                             if matches!(self.day_type, CalendarDayType::CurrentMonth) {
-                                let balance_font_size = if config.is_grid_layout {
-                                    11.0
-                                } else {
-                                    (width * 0.12).max(10.0).min(14.0)
-                                };
+                                let balance_font_size = get_balance_font_size(config.is_grid_layout, width);
                                 
                                 // Balance text color using centralized color scheme
                                 let balance_color = self.day_type.balance_text_color();
@@ -548,7 +250,7 @@ impl CalendarDay {
                     (chips.len(), false)
                 } else {
                     // Normal calculation based on available space
-                    self.calculate_transaction_display_limit(height, chips.len())
+                    calculate_transaction_display_limit(height, chips.len())
                 };
                 
                 let chips_to_show = chips.iter().take(chips_to_show_count);
@@ -637,24 +339,16 @@ impl CalendarDay {
     /// Returns "COLLAPSE_CLICKED" if the collapse button was clicked (handled separately)
     fn render_calendar_chip(&self, ui: &mut egui::Ui, chip: &CalendarChip, width: f32, _height: f32, config: &RenderConfig) -> Option<String> {
         
-        // Check if Chalkboard font is available
-        let font_family = if ui.ctx().fonts(|fonts| fonts.families().contains(&egui::FontFamily::Name("Chalkboard".into()))) {
-            egui::FontFamily::Name("Chalkboard".into())
-        } else {
-            egui::FontFamily::Proportional
-        };
+        // Get the font family for calendar rendering
+        let font_family = get_calendar_font_family(ui.ctx());
         
         // Get chip styling from the chip type
         let chip_color = chip.chip_type.primary_color();
         let text_color = chip.chip_type.text_color();
         let uses_dotted_border = chip.chip_type.uses_dotted_border();
         
-        // Calculate chip dimensions based on layout - use the thinner height for all chips
-        let (chip_width, chip_height, chip_font_size) = if config.is_grid_layout {
-            ((width - 10.0).min(120.0), 18.0, 10.0)
-        } else {
-            (width * 0.85, 18.0, (width * 0.12).max(9.0).min(12.0)) // Force consistent height
-        };
+        // Calculate chip dimensions based on layout
+        let (chip_width, chip_height, chip_font_size) = calculate_chip_dimensions(config.is_grid_layout, width);
         
         // Check if we should show checkbox (only for deletable transactions in selection mode)
         let show_checkbox = config.transaction_selection_mode && 
@@ -801,20 +495,16 @@ impl CalendarDay {
     
     /// Show a floating tooltip with transaction description
     fn show_transaction_tooltip(&self, ui: &mut egui::Ui, description: &str, chip_rect: egui::Rect) {
-        // Check if Chalkboard font is available
-        let font_family = if ui.ctx().fonts(|fonts| fonts.families().contains(&egui::FontFamily::Name("Chalkboard".into()))) {
-            egui::FontFamily::Name("Chalkboard".into())
-        } else {
-            egui::FontFamily::Proportional
-        };
+        // Get the font family for calendar rendering
+        let font_family = get_calendar_font_family(ui.ctx());
         
         // Get cursor position for tooltip positioning
         let cursor_pos = ui.ctx().pointer_interact_pos().unwrap_or(chip_rect.center());
         
         // Calculate tooltip dimensions (estimate based on text length)
-        let tooltip_font_size = 12.0;
-        let tooltip_padding = egui::vec2(8.0, 6.0);
-        let max_tooltip_width = 200.0;
+        let tooltip_font_size = tooltip::FONT_SIZE;
+        let tooltip_padding = tooltip::PADDING;
+        let max_tooltip_width = tooltip::MAX_WIDTH;
         
         // Estimate tooltip size (rough approximation)
         let char_width = tooltip_font_size * 0.6; // Approximate character width
@@ -823,7 +513,7 @@ impl CalendarDay {
         let tooltip_size = egui::vec2(text_width + tooltip_padding.x * 2.0, text_height + tooltip_padding.y * 2.0);
         
         // Smart positioning: offset from cursor, but avoid screen boundaries
-        let default_offset = egui::vec2(10.0, -25.0); // Right and up from cursor
+        let default_offset = tooltip::DEFAULT_OFFSET; // Right and up from cursor
         let screen_rect = ui.ctx().screen_rect();
         
         // Calculate initial position
@@ -856,9 +546,9 @@ impl CalendarDay {
             .order(egui::Order::Foreground) // Show above everything else
             .show(ui.ctx(), |ui| {
                 // Tooltip styling
-                let tooltip_bg_color = egui::Color32::from_rgba_unmultiplied(40, 40, 40, 240); // Dark semi-transparent
-                let tooltip_text_color = egui::Color32::WHITE;
-                let tooltip_border_color = egui::Color32::from_rgba_unmultiplied(100, 100, 100, 200);
+                let tooltip_bg_color = tooltip::background_color();
+                let tooltip_text_color = tooltip::text_color();
+                let tooltip_border_color = tooltip::border_color();
                 
                 // Draw tooltip background with rounded corners
                 let tooltip_rect = egui::Rect::from_min_size(ui.cursor().min, tooltip_size);
@@ -868,7 +558,7 @@ impl CalendarDay {
                 ui.painter().rect_filled(
                     shadow_rect,
                     egui::Rounding::same(6.0),
-                    egui::Color32::from_rgba_unmultiplied(0, 0, 0, 60)
+                    tooltip::shadow_color()
                 );
                 
                 // Draw main tooltip background
@@ -1012,138 +702,11 @@ impl CalendarDay {
         );
     }
     
-    /// Calculate how many transaction chips can fit in the available calendar day space
-    /// Returns (chips_that_fit, needs_ellipsis)
-    fn calculate_transaction_display_limit(&self, available_height: f32, total_transaction_count: usize) -> (usize, bool) {
-        // Constants based on actual chip measurements
-        const CHIP_HEIGHT: f32 = 18.0;
-        const CHIP_SPACING: f32 = 1.0;
-        const HEADER_SPACE: f32 = 38.0; // Realistic estimate for day number + balance + spacing
-        const BOTTOM_PADDING: f32 = 8.0; // Reasonable padding
-        
-        // Calculate available space for transaction area
-        let available_for_transactions = available_height - HEADER_SPACE - BOTTOM_PADDING;
-        
-        // Calculate maximum chips that can physically fit (ignoring ellipsis for now)
-        let max_chips_that_fit = if available_for_transactions < CHIP_HEIGHT {
-            0
-        } else {
-            // How many full chips + spacing can fit
-            ((available_for_transactions + CHIP_SPACING) / (CHIP_HEIGHT + CHIP_SPACING)).floor() as usize
-        };
-        
-        // Now apply the logic based on physical capacity vs available transactions
-        if max_chips_that_fit == 0 {
-            // No space for anything
-            return (0, false);
-        } else if max_chips_that_fit == 1 {
-            // Space for only 1 chip
-            if total_transaction_count <= 1 {
-                // 1 or 0 transactions → show them all
-                return (total_transaction_count, false);
-            } else {
-                // >1 transactions → show "..." only
-                return (0, true);
-            }
-        } else {
-            // Space for 2+ chips
-            if total_transaction_count <= max_chips_that_fit {
-                // All transactions fit → show them all
-                return (total_transaction_count, false);
-            } else {
-                // More transactions than space → show (max-1) + ellipsis
-                let chips_to_show = max_chips_that_fit - 1;
-                return (chips_to_show, true);
-            }
-        }
-    }
+
 }
 
 impl AllowanceTrackerApp {
-    /// Convert backend CalendarDay to frontend CalendarDay structure
-    fn convert_backend_calendar_day(&self, backend_day: &shared::CalendarDay, day_index: usize) -> CalendarDay {
-        // Convert day type from backend to frontend enum
-        let day_type = match backend_day.day_type {
-            shared::CalendarDayType::MonthDay => CalendarDayType::CurrentMonth,
-            shared::CalendarDayType::PaddingBefore | shared::CalendarDayType::PaddingAfter => CalendarDayType::FillerDay,
-        };
-        
-        // Create date for this day
-        let date = if backend_day.day == 0 {
-            // For filler days, calculate the actual previous/next month days they represent
-            match backend_day.day_type {
-                shared::CalendarDayType::PaddingBefore => {
-                    // Calculate previous month date
-                    let (prev_year, prev_month) = if self.selected_month == 1 {
-                        (self.selected_year - 1, 12)
-                    } else {
-                        (self.selected_year, self.selected_month - 1)
-                    };
-                    
-                    // Get the last day of previous month
-                    let prev_month_first = NaiveDate::from_ymd_opt(prev_year, prev_month, 1).unwrap();
-                    let next_month_first = if prev_month == 12 {
-                        NaiveDate::from_ymd_opt(prev_year + 1, 1, 1).unwrap()
-                    } else {
-                        NaiveDate::from_ymd_opt(prev_year, prev_month + 1, 1).unwrap()
-                    };
-                    let days_in_prev_month = (next_month_first - prev_month_first).num_days() as u32;
-                    
-                    // Calculate which day of previous month this represents
-                    // First day of current month
-                    let current_month_first = NaiveDate::from_ymd_opt(self.selected_year, self.selected_month, 1).unwrap();
-                    let weekday_of_first = current_month_first.weekday().num_days_from_sunday() as usize;
-                    
-                    // This filler day represents (days_in_prev_month - weekday_of_first + day_index + 1)
-                    let prev_day = days_in_prev_month - weekday_of_first as u32 + day_index as u32 + 1;
-                    NaiveDate::from_ymd_opt(prev_year, prev_month, prev_day).unwrap()
-                }
-                shared::CalendarDayType::PaddingAfter => {
-                    // Calculate next month date
-                    let (next_year, next_month) = if self.selected_month == 12 {
-                        (self.selected_year + 1, 1)
-                    } else {
-                        (self.selected_year, self.selected_month + 1)
-                    };
-                    
-                    // Find how many days we are past the end of current month
-                    let current_month_first = NaiveDate::from_ymd_opt(self.selected_year, self.selected_month, 1).unwrap();
-                    let next_month_first = if self.selected_month == 12 {
-                        NaiveDate::from_ymd_opt(self.selected_year + 1, 1, 1).unwrap()
-                    } else {
-                        NaiveDate::from_ymd_opt(self.selected_year, self.selected_month + 1, 1).unwrap()
-                    };
-                    let days_in_current_month = (next_month_first - current_month_first).num_days() as u32;
-                    let weekday_of_first = current_month_first.weekday().num_days_from_sunday() as usize;
-                    
-                    // Calculate which day of next month this represents
-                    let next_day = day_index as u32 - (weekday_of_first + days_in_current_month as usize) as u32 + 1;
-                    NaiveDate::from_ymd_opt(next_year, next_month, next_day).unwrap()
-                }
-                shared::CalendarDayType::MonthDay => {
-                    // This shouldn't happen for day == 0, but fallback
-                    NaiveDate::from_ymd_opt(self.selected_year, self.selected_month, 1).unwrap()
-                }
-            }
-        } else {
-            NaiveDate::from_ymd_opt(self.selected_year, self.selected_month, backend_day.day).unwrap()
-        };
-        
-        // Check if this is today
-        let today = chrono::Local::now();
-        let is_today = today.year() == self.selected_year 
-            && today.month() == self.selected_month 
-            && today.day() == backend_day.day;
-        
-        CalendarDay {
-            day_number: backend_day.day,
-            date,
-            is_today,
-            day_type,
-            transactions: backend_day.transactions.clone(),
-            balance: Some(backend_day.balance),
-        }
-    }
+
     
 
     
@@ -1156,12 +719,8 @@ impl AllowanceTrackerApp {
         // DEBUG: Log calendar entry point
         // Calendar rendering with responsive layout
         
-        // Check if Chalkboard font is available
-        let font_family = if ui.ctx().fonts(|fonts| fonts.families().contains(&egui::FontFamily::Name("Chalkboard".into()))) {
-            egui::FontFamily::Name("Chalkboard".into())
-        } else {
-            egui::FontFamily::Proportional
-        };
+        // Get the font family for calendar rendering
+        let font_family = get_calendar_font_family(ui.ctx());
         
         // Use the existing draw_calendar_section method but with toggle header
         ui.add_space(15.0);
@@ -1188,7 +747,7 @@ impl AllowanceTrackerApp {
         let final_card_height = actual_available_rect.height() - 40.0; // 40px total: 20px bottom margin + 20px internal padding
         
         // Calculate dynamic cell height based on calendar data
-        let header_height = 30.0;
+        let header_height = header::HEADER_HEIGHT;
         let calendar_container_padding = 20.0;
         
         // Get calendar data to determine row count
@@ -1241,7 +800,7 @@ impl AllowanceTrackerApp {
                                                 let header_rect = ui.available_rect_before_wrap();
                                                 
                                                 // Draw card-like background
-                                                let bg_color = egui::Color32::from_rgba_unmultiplied(255, 255, 255, 180);
+                                                let bg_color = header::background_color();
                                                 ui.painter().rect_filled(
                                                     header_rect,
                                                     egui::Rounding::same(2.0),
@@ -1249,7 +808,7 @@ impl AllowanceTrackerApp {
                                                 );
                                                 
                                                 // Draw border
-                                                let border_color = egui::Color32::from_rgba_unmultiplied(150, 150, 150, 200);
+                                                let border_color = header::border_color();
                                                 ui.painter().rect_stroke(
                                                     header_rect,
                                                     egui::Rounding::same(2.0),
@@ -1258,7 +817,7 @@ impl AllowanceTrackerApp {
                                                 
                                                 // Draw text - disable selection to prevent dropdown interference
                                                 ui.add(egui::Label::new(egui::RichText::new(*day_name)
-                                                    .font(egui::FontId::new(12.0, font_family.clone()))
+                                                    .font(egui::FontId::new(header::HEADER_FONT_SIZE, font_family.clone()))
                                                     .strong()
                                                     .color(egui::Color32::DARK_GRAY))
                                                     .selectable(false));
@@ -1281,56 +840,9 @@ impl AllowanceTrackerApp {
         });
     }
     
-    /// Navigate to a different month
-    pub fn navigate_month(&mut self, delta: i32) {
-        let old_month = self.selected_month;
-        let old_year = self.selected_year;
-        
-        println!("🗓️  Navigating from {}/{} with delta {}", old_month, old_year, delta);
-        
-        if delta > 0 {
-            if self.selected_month == 12 {
-                self.selected_month = 1;
-                self.selected_year += 1;
-            } else {
-                self.selected_month += 1;
-            }
-        } else if delta < 0 {
-            if self.selected_month == 1 {
-                self.selected_month = 12;
-                self.selected_year -= 1;
-            } else {
-                self.selected_month -= 1;
-            }
-        }
-        
-        println!("🗓️  Navigation complete: {}/{} → {}/{}", 
-                  old_month, old_year, self.selected_month, self.selected_year);
-        
-        if self.selected_month == 6 {
-            println!("🗓️  🎯 Navigated to June {} - about to load calendar data", self.selected_year);
-        }
-        
-        self.load_calendar_data();
-        
-        println!("🔄 Calendar data reloaded for {}/{}", self.selected_month, self.selected_year);
-    }
+
     
-    /// Get color for day header based on index
-    pub fn get_day_header_color(&self, day_index: usize) -> egui::Color32 {
-        // Use smooth pink-to-purple gradient matching the draw_day_header_gradient function
-        let t = day_index as f32 / 6.0; // 0.0 to 1.0
-        
-        // Interpolate between pink and purple (no blue)
-        let pink = egui::Color32::from_rgb(255, 182, 193); // Light pink
-        let purple = egui::Color32::from_rgb(186, 85, 211); // Purple
-        
-        egui::Color32::from_rgb(
-            (pink.r() as f32 * (1.0 - t) + purple.r() as f32 * t) as u8,
-            (pink.g() as f32 * (1.0 - t) + purple.g() as f32 * t) as u8,
-            (pink.b() as f32 * (1.0 - t) + purple.b() as f32 * t) as u8,
-        )
-    }
+
     
     /// Draw calendar days with responsive sizing using CalendarDay components
     pub fn draw_calendar_days_responsive(&mut self, ui: &mut egui::Ui, _transactions: &[Transaction], cell_width: f32, cell_height: f32) {
@@ -1447,119 +959,11 @@ impl AllowanceTrackerApp {
         }
     }
     
-    /// Calculate the height needed for the calendar grid
-    pub fn calculate_calendar_grid_height(&self, day_height: f32) -> f32 {
-        // Calculate number of weeks needed for the current month
-        let first_day = match NaiveDate::from_ymd_opt(self.selected_year, self.selected_month, 1) {
-            Some(date) => date,
-            None => return day_height * 6.0, // fallback to 6 weeks
-        };
-        
-        let days_in_month = match first_day.with_day(1) {
-            Some(first) => {
-                let next_month = if self.selected_month == 12 {
-                    first.with_year(self.selected_year + 1).unwrap().with_month(1).unwrap()
-                } else {
-                    first.with_month(self.selected_month + 1).unwrap()
-                };
-                (next_month - chrono::Duration::days(1)).day()
-            }
-            None => 31, // fallback
-        };
-        
-        let first_day_offset = match first_day.weekday() {
-            Weekday::Mon => 0,
-            Weekday::Tue => 1,
-            Weekday::Wed => 2,
-            Weekday::Thu => 3,
-            Weekday::Fri => 4,
-            Weekday::Sat => 5,
-            Weekday::Sun => 6,
-        };
-        
-        // Calculate number of weeks needed
-        let total_cells = first_day_offset + days_in_month as usize;
-        let weeks_needed = (total_cells + 6) / 7; // Round up
-        
-        weeks_needed as f32 * day_height + 10.0 // Add some spacing
-    }
-    
-    /// Handle clicking on a calendar day - toggle selection and clear overlay
-    pub fn handle_day_click(&mut self, clicked_date: NaiveDate) {
-        if let Some(selected_date) = self.selected_day {
-            if selected_date == clicked_date {
-                // Clicking the same day - deselect it
-                self.selected_day = None;
-                self.active_overlay = None;
-                println!("📅 Deselected day: {}", clicked_date);
-            } else {
-                // Clicking a different day - select it and clear overlay
-                self.selected_day = Some(clicked_date);
-                self.active_overlay = None;
-                println!("📅 Selected day: {}", clicked_date);
-            }
-        } else {
-            // No day selected - select this day
-            self.selected_day = Some(clicked_date);
-            self.active_overlay = None;
-            println!("📅 Selected day: {}", clicked_date);
-        }
-    }
 
-    /// Render action icons above the selected day
-    pub fn render_day_action_icons(&mut self, ui: &mut egui::Ui, day_cell_rect: egui::Rect, selected_date: NaiveDate) {
-        // Get glyphs that should be shown for this specific date
-        let glyphs = DayMenuGlyph::for_date(selected_date);
-        
-        // If no glyphs should be shown for this date, return early
-        if glyphs.is_empty() {
-            return;
-        }
-        
-        // Shared styling for all glyphs - wider to accommodate two characters
-        let glyph_size = egui::vec2(48.0, 22.0);
-        let glyph_spacing = 6.0;
-        
-        // Shared colors - using the same pink as selected day
-        let outline_color = egui::Color32::from_rgb(199, 112, 221); // Same as selected day
-        let background_color = egui::Color32::WHITE;
-        let text_color = outline_color; // Same pink as outline
-        
-        // Calculate the actual width of the glyphs by measuring them
-        let total_glyph_width = glyph_size.x * glyphs.len() as f32;
-        let total_spacing = glyph_spacing * (glyphs.len() - 1) as f32;
-        let total_width = total_glyph_width + total_spacing;
-        
-        // Position each glyph individually for precise control
-        let center_x = day_cell_rect.center().x;
-        let start_x = center_x - (total_width / 2.0);
-        let glyphs_y = day_cell_rect.top() - glyph_size.y - 25.0; // More space above
-        
-        // Render each glyph as a separate Area for precise positioning
-        for (i, glyph) in glyphs.iter().enumerate() {
-            let glyph_x = start_x + (i as f32 * (glyph_size.x + glyph_spacing));
-            let glyph_pos = egui::pos2(glyph_x, glyphs_y);
-            
-            egui::Area::new(egui::Id::new(format!("day_menu_glyph_{}", i)))
-                .fixed_pos(glyph_pos)
-                .order(egui::Order::Foreground)
-                .show(ui.ctx(), |ui| {
-                    let glyph_text = glyph.text();
-                    
-                    // Create a button with consistent styling
-                    let button = egui::Button::new(egui::RichText::new(glyph_text).color(text_color))
-                        .fill(background_color)
-                        .stroke(egui::Stroke::new(2.0, outline_color))
-                        .rounding(egui::Rounding::same(4.0));
-                    
-                    if ui.add_sized(glyph_size, button).clicked() {
-                        self.active_overlay = Some(glyph.overlay_type());
-                        self.modal_just_opened = true; // Prevent backdrop click detection this frame
-                        println!("🎯 Day menu glyph '{}' clicked for date: {}", glyph_text, selected_date);
-                    }
-                });
-        }
-    }
+    
+
+
+
     
 
 } 
