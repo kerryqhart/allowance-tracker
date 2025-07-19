@@ -27,6 +27,8 @@
 
 use eframe::egui;
 use crate::ui::app_state::AllowanceTrackerApp;
+use crate::ui::components::styling::{setup_kid_friendly_style, draw_image_background};
+use crate::ui::components::modals::*;
 use crate::ui::*;
 
 impl eframe::App for AllowanceTrackerApp {
@@ -54,7 +56,7 @@ impl eframe::App for AllowanceTrackerApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             // Draw image background with blue overlay first
             let full_rect = ui.available_rect_before_wrap();
-            crate::ui::draw_image_background(ui, full_rect);
+            draw_image_background(ui, full_rect);
             
             if self.loading {
                 self.render_loading_screen(ui);
@@ -169,7 +171,7 @@ impl AllowanceTrackerApp {
 
     /// Draw calendar month navigation controls
     fn draw_calendar_navigation_controls(&mut self, ui: &mut egui::Ui) {
-        use crate::ui::components::theme::colors;
+        use crate::ui::components::styling::colors;
         
         ui.horizontal(|ui| {
             // Previous month button with consistent hover styling

@@ -17,7 +17,7 @@
 
 use eframe::egui;
 use crate::ui::app_state::{AllowanceTrackerApp, MainTab};
-use crate::ui::components::theme::colors;
+use crate::ui::components::styling::colors;
 
 impl AllowanceTrackerApp {
     /// Draw card background with proper styling
@@ -52,7 +52,7 @@ impl AllowanceTrackerApp {
     
     /// Draw just the Calendar/Table toggle buttons (for subheader)
     pub fn draw_tab_toggle_buttons(&mut self, ui: &mut egui::Ui) {
-        use crate::ui::components::theme::colors;
+        use crate::ui::components::styling::colors;
         
         ui.horizontal(|ui| {
             // Table button (rendered first so it appears on the right in right-to-left layout)

@@ -1,23 +1,26 @@
 //! # Theme Configuration
 //!
-//! This module provides centralized color and style configuration for the allowance tracker app.
-//! All visual styling should use these constants to ensure consistency and easy theme management.
+//! This module provides the core theme structure and definitions for the allowance tracker app.
+//! It defines the main theme system that organizes colors and styling into logical groups.
 //!
-//! ## Future Theming Support
-//! This module is designed to support multiple themes/skins in the future. Currently it provides
-//! the default "Kid-Friendly" theme, but the structure allows for easy addition of new themes.
+//! ## Theme Structure:
+//! The theme is organized into focused color groups:
+//! - `InteractiveColors` - Buttons, dropdowns, hover states
+//! - `LayoutColors` - Backgrounds, gradients, containers
+//! - `TypographyColors` - Text colors for different contexts
+//! - `CalendarColors` - Calendar-specific styling
+//! - `TableColors` - Table headers, rows, borders
 //!
-//! ## Usage
-//! ```rust
-//! use crate::ui::components::theme::{Theme, CURRENT_THEME};
-//! 
-//! // Use theme colors
-//! let color = CURRENT_THEME.interactive.hover_border;
-//! ```
+//! ## Future Theming Support:
+//! This structure is designed to support multiple themes in the future while maintaining
+//! a consistent API for components.
 
 use eframe::egui::Color32;
 
 /// Main theme configuration structure
+/// 
+/// This is the central theme definition that organizes all visual styling
+/// into logical, focused groups for easy management and consistency.
 #[derive(Debug, Clone)]
 pub struct Theme {
     /// Interactive element colors (buttons, dropdowns, etc.)
@@ -204,25 +207,4 @@ impl Theme {
         let index = header_index.min(3); // Clamp to valid range
         self.table.header_colors[index]
     }
-}
-
-/// Convenience constants for the most commonly used colors
-pub mod colors {
-    use super::CURRENT_THEME;
-    use eframe::egui::Color32;
-    
-    // Interactive colors - most commonly used
-    pub const HOVER_BORDER: Color32 = CURRENT_THEME.interactive.hover_border;
-    pub const HOVER_BACKGROUND: Color32 = CURRENT_THEME.interactive.hover_background;
-    pub const ACTIVE_BACKGROUND: Color32 = CURRENT_THEME.interactive.active_background;
-    pub const INACTIVE_BACKGROUND: Color32 = CURRENT_THEME.interactive.inactive_background;
-    
-    // Typography colors
-    pub const TEXT_PRIMARY: Color32 = CURRENT_THEME.typography.primary;
-    pub const TEXT_SECONDARY: Color32 = CURRENT_THEME.typography.secondary;
-    pub const TEXT_WHITE: Color32 = CURRENT_THEME.typography.white;
-    
-    // Layout colors
-    pub const CARD_BACKGROUND: Color32 = CURRENT_THEME.layout.card_background;
-    pub const CARD_BORDER: Color32 = CURRENT_THEME.layout.card_border;
 } 

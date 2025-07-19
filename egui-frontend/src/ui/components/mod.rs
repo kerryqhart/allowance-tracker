@@ -5,7 +5,7 @@
 //!
 //! ## Module Organization:
 //! - `data_loading` - Backend data loading and state management
-//! - `styling` - Visual styling, colors, and theme management
+//! - `styling` - Unified styling system (theme, colors, functions)
 //! - `transaction_table` - Transaction table rendering and formatting
 //! - `modals` - Modal dialogs and popup interfaces
 //! - `header` - Application header with navigation and balance display
@@ -26,10 +26,9 @@ pub mod modals;
 pub mod styling;
 pub mod tab_manager;
 pub mod table_renderer;
-pub mod theme;
 pub mod transaction_table;
 pub mod ui_components;
 
-pub use styling::{setup_kid_friendly_style, draw_solid_purple_background, draw_image_background, draw_card_container, draw_day_header_gradient, get_table_header_color};
-pub use theme::*;
+// Re-export the unified styling system
+pub use styling::*;
 pub use transaction_table::*; 
