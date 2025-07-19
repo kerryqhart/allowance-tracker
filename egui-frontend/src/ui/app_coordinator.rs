@@ -62,10 +62,10 @@ impl eframe::App for AllowanceTrackerApp {
             }
             
             // STEP 2: Four-layer layout with selection controls bar and subheader for toggle buttons
-            // Calculate layout areas
-            let header_height = 80.0;
+            // Calculate layout areas - optimized reservations for better space utilization
+            let header_height = 70.0; // Reduced from 80px
             let selection_bar_height = if self.transaction_selection_mode { 50.0 } else { 0.0 };
-            let subheader_height = 50.0;
+            let subheader_height = 40.0; // Reduced from 50px
             
             let header_rect = egui::Rect::from_min_size(
                 full_rect.min,
@@ -90,6 +90,11 @@ impl eframe::App for AllowanceTrackerApp {
                 egui::pos2(full_rect.min.x, content_y),
                 egui::vec2(full_rect.width(), content_height)
             );
+            
+            // DEBUG: Log parent space allocation
+            log::info!("🏢 WINDOW SPACE: full_rect.height={:.0}, content_height={:.0}, reserved={:.0}px", 
+                      full_rect.height(), content_height, 
+                      header_height + selection_bar_height + subheader_height);
             
             // Layer 1: Header (existing function, positioned in header area)
             ui.allocate_ui_at_rect(header_rect, |ui| {

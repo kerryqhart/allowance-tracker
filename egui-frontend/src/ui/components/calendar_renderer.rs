@@ -1005,6 +1005,9 @@ impl AllowanceTrackerApp {
 
     /// Draw calendar section with toggle header integrated
     pub fn draw_calendar_section_with_toggle(&mut self, ui: &mut egui::Ui, available_rect: egui::Rect, transactions: &[Transaction]) {
+        // DEBUG: Log calendar entry point
+        // Calendar rendering with responsive layout
+        
         // Check if Chalkboard font is available
         let font_family = if ui.ctx().fonts(|fonts| fonts.families().contains(&egui::FontFamily::Name("Chalkboard".into()))) {
             egui::FontFamily::Name("Chalkboard".into())
@@ -1014,6 +1017,7 @@ impl AllowanceTrackerApp {
         
         // Use the existing draw_calendar_section method but with toggle header
         ui.add_space(15.0);
+        // Add top spacing for visual separation
         
         // Calculate responsive dimensions - same as original
         let content_width = available_rect.width() - 40.0;
@@ -1027,32 +1031,40 @@ impl AllowanceTrackerApp {
         // Step 1: Calculate cell width from horizontal space (unchanged - works fine)
         let cell_width = (calendar_width - total_spacing) / 7.0;
         
-        // Step 2: Work backwards from desired calendar size to calculate cell height
-        // Use full available height - positioning creates the top margin  
-        let desired_calendar_height = available_rect.height(); // Use full space, positioning handles top margin
-        let calendar_container_padding = 20.0;
+        // Step 2: Apply TEST RECTANGLE SUCCESS FORMULA 
+        // Use simple approach that worked perfectly: available_height - 40px margins
+        let actual_available_rect = ui.available_rect_before_wrap();
+                // Calculate optimal calendar dimensions
+        
+        // 🎯 CORRECT CALCULATION: Subtract larger bottom margin to match side margins
+        let final_card_height = actual_available_rect.height() - 40.0; // 40px total: 20px bottom margin + 20px internal padding
+        
+        // Calculate dynamic cell height based on calendar data
         let header_height = 30.0;
-        let vertical_spacing = CALENDAR_CARD_SPACING * 5.0; // 5 gaps between 6 rows
+        let calendar_container_padding = 20.0;
         
-        // Calculate cell height to fill the desired space
-        let available_height_for_cells = desired_calendar_height - calendar_container_padding - header_height - vertical_spacing;
-        let calculated_cell_height = (available_height_for_cells / 6.0).max(40.0); // 6 rows, with minimum
+        // Get calendar data to determine row count
+        let calendar_days_count = if let Some(ref calendar_month) = self.calendar_month {
+            calendar_month.days.len()
+        } else {
+            35 // Default fallback
+        };
         
-        // Apply truly independent limits (not proportional to width!)
-        let cell_height = calculated_cell_height.min(200.0); // Maximum: not too huge
+        let rows_needed = (calendar_days_count as f32 / 7.0).ceil();
+        let vertical_spacing = CALENDAR_CARD_SPACING * (rows_needed - 1.0);
+        let available_height_for_cells = final_card_height - calendar_container_padding - header_height - vertical_spacing;
+        let dynamic_cell_height = (available_height_for_cells / rows_needed).max(40.0).min(200.0);
         
-        // Step 4: Calculate actual card height based on what we're using
-        let card_height = header_height + (cell_height * 6.0) + vertical_spacing + calendar_container_padding;
-        
-        // Use the calculated card height directly - no artificial limits
-        let final_card_height = card_height;
+        // Dynamic cell height calculation complete
         
 
         
         let card_rect = egui::Rect::from_min_size(
-            egui::pos2(available_rect.left() + 20.0, available_rect.top() + 20.0),
+            egui::pos2(actual_available_rect.left() + 20.0, actual_available_rect.top() + 20.0),
             egui::vec2(content_width, final_card_height)
         );
+        
+        // Calendar container positioned with consistent margins
         
         // Draw calendar content (no background card)
         ui.allocate_ui_at_rect(card_rect, |ui| {
@@ -1062,9 +1074,10 @@ impl AllowanceTrackerApp {
                     egui::vec2(ui.available_width(), ui.available_height()),
                     egui::Layout::top_down(egui::Align::LEFT),
                     |ui| {
-                        // Constrain calendar to calculated width
+                        // Constrain calendar to calculated dimensions  
+                                                        // Render calendar with optimal sizing
                         ui.allocate_ui_with_layout(
-                            egui::vec2(calendar_width, ui.available_height()),
+                            egui::vec2(calendar_width, final_card_height),
                             egui::Layout::top_down(egui::Align::LEFT),
                             |ui| {
                                 // Day headers - consistent layout with automatic spacing matching day cards
@@ -1110,8 +1123,8 @@ impl AllowanceTrackerApp {
                                 
                                 ui.add_space(5.0); // Small gap between headers and calendar
                                 
-                                // Calendar days - use corrected manual method
-                                self.draw_calendar_days_responsive(ui, transactions, cell_width, cell_height);
+                                // Calendar days - use corrected manual method with dynamic cell height
+                                self.draw_calendar_days_responsive(ui, transactions, cell_width, dynamic_cell_height);
                             }
                         );
                     }
@@ -1189,13 +1202,14 @@ impl AllowanceTrackerApp {
         
         // Backend calendar data includes complete grid with filler days
         
+        // Dynamic cell height already calculated in parent function
+        
         // Render the calendar grid (dynamic weeks based on month needs) in proper row layout  
         // Process days in chunks of 7 (one week per row)
         let mut selected_day_rect: Option<egui::Rect> = None;
         let mut selected_day_date: Option<NaiveDate> = None;
-        
-        for week_days in all_days.chunks(7) {
-            ui.horizontal(|ui| {
+        for (_week_index, week_days) in all_days.chunks(7).enumerate() {
+            let week_response = ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = CALENDAR_CARD_SPACING; // Horizontal spacing between day cards
                 for calendar_day in week_days.iter() {
                     let ui_response = ui.allocate_ui_with_layout(
@@ -1241,6 +1255,8 @@ impl AllowanceTrackerApp {
             
             // No vertical spacing between week rows
         }
+        
+        // Calendar grid rendering complete
         
         // Render action icons above the selected day if one is selected
         if let (Some(day_rect), Some(day_date)) = (selected_day_rect, selected_day_date) {

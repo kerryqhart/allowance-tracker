@@ -29,6 +29,10 @@ impl AllowanceTrackerApp {
                 MainTab::Calendar => {
                     // Use full available space - let calendar manage its own margins
                     let available_rect = ui.available_rect_before_wrap();
+                    
+                    // DEBUG: Log tab manager space allocation
+                    log::info!("📋 TAB_MANAGER: available_rect.height={:.0}, passing to calendar", available_rect.height());
+                    
                     self.draw_calendar_section_with_toggle(ui, available_rect, &self.calendar_transactions.clone());
                     
                     // No bottom spacing - test for other padding sources
