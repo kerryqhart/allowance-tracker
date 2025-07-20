@@ -61,6 +61,18 @@ impl AllowanceTrackerApp {
                     // Small bottom spacing to prevent edge contact
                     ui.add_space(10.0);
                 }
+                MainTab::Goal => {
+                    // Use full available space - let goal manage its own margins
+                    let available_rect = ui.available_rect_before_wrap();
+                    
+                    // DEBUG: Log tab manager space allocation
+                    info!("🎯 TAB_MANAGER: available_rect.height={:.0}, passing to goal", available_rect.height());
+                    
+                    self.draw_goal_section(ui, available_rect);
+                    
+                    // Small bottom spacing to prevent edge contact
+                    ui.add_space(10.0);
+                }
             }
         });
     }

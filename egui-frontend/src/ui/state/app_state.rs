@@ -22,6 +22,7 @@ pub enum MainTab {
     Calendar,
     Table,
     Chart,
+    Goal,
 }
 
 /// Core application state containing essential app data

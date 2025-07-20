@@ -49,6 +49,7 @@ pub struct AllowanceTrackerApp {
     pub interaction: InteractionState, // User selections, dropdowns
     pub table: TableState,            // Transaction table pagination
     pub chart: ChartState,            // Chart visualization and time periods
+    pub goal: GoalUiState,            // Goal management and progress tracking
 }
 
 impl AllowanceTrackerApp {
@@ -77,6 +78,7 @@ impl AllowanceTrackerApp {
         let interaction = InteractionState::new();
         let table = TableState::new();
         let chart = ChartState::new();
+        let goal = GoalUiState::new();
         
         Ok(Self {
             // Modular state
@@ -88,6 +90,7 @@ impl AllowanceTrackerApp {
             interaction,
             table,
             chart,
+            goal,
         })
     }
 

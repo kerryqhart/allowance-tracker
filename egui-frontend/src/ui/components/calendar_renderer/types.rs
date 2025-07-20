@@ -142,6 +142,8 @@ pub enum CalendarChipType {
     Income,
     /// Future allowance transaction (estimated)
     FutureAllowance,
+    /// Goal completion indicator
+    Goal,
     /// Ellipsis indicator for overflow transactions
     Ellipsis,
 }
@@ -153,6 +155,7 @@ impl CalendarChipType {
             CalendarChipType::Expense => egui::Color32::from_rgb(128, 128, 128), // Gray for expenses
             CalendarChipType::Income => egui::Color32::from_rgb(46, 160, 67), // Green for income
             CalendarChipType::FutureAllowance => egui::Color32::from_rgb(46, 160, 67), // Green for future allowances
+            CalendarChipType::Goal => egui::Color32::from_rgb(199, 112, 221), // Purple for goals
             CalendarChipType::Ellipsis => egui::Color32::from_rgb(120, 120, 120), // Medium gray for ellipsis
         }
     }
@@ -185,7 +188,21 @@ pub struct CalendarChip {
 impl CalendarChip {
     /// Create a new CalendarChip from a transaction
     pub fn from_transaction(transaction: Transaction, is_grid_layout: bool) -> Self {
-        // Determine chip type based on transaction
+        // Check if this is a goal transaction (special ID indicates goal chip)
+        if transaction.id == "goal_completion" {
+            let display_amount = if is_grid_layout {
+                format!("Goal: ${:.2}", transaction.amount)
+            } else {
+                format!("Goal: ${:.0}", transaction.amount)
+            };
+            return Self {
+                chip_type: CalendarChipType::Goal,
+                transaction,
+                display_amount,
+            };
+        }
+        
+        // Determine chip type based on transaction type for regular transactions
         let chip_type = match transaction.transaction_type {
             shared::TransactionType::Income => CalendarChipType::Income,
             shared::TransactionType::Expense => CalendarChipType::Expense,
@@ -240,6 +257,7 @@ impl CalendarChip {
             display_amount: "...".to_string(),
         }
     }
+
 }
 
 /// Represents a single day in the calendar with its associated state and rendering logic

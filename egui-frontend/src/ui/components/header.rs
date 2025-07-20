@@ -170,6 +170,7 @@ impl AllowanceTrackerApp {
                             self.load_calendar_data();
                             self.reset_table_for_new_child(); // Reset table state for new child
                             self.load_chart_data(); // Refresh chart for new child
+                            self.load_goal_data(); // Load goal data for new child
                         }
                         Err(e) => {
                             self.ui.error_message = Some(format!("Failed to select child: {}", e));

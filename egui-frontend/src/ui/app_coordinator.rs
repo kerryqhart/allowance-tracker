@@ -258,6 +258,34 @@ impl AllowanceTrackerApp {
                     }
                 });
             }
+            MainTab::Goal => {
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    // Show goal title in subheader with proper vertical centering
+                    ui.label(egui::RichText::new("🎯 My Goal")
+                        .font(egui::FontId::new(18.0, egui::FontFamily::Proportional))
+                        .color(egui::Color32::WHITE)
+                        .strong());
+                    
+                    // Add cancel button if there's an active goal
+                    if self.goal.has_active_goal() {
+                        ui.add_space(20.0);
+                        
+                        // Match the styling of the inactive toggle buttons
+                        let cancel_button = egui::Button::new(egui::RichText::new("Cancel Goal")
+                                .font(egui::FontId::new(14.0, egui::FontFamily::Proportional))
+                                .strong()
+                                .color(egui::Color32::from_rgb(100, 100, 100))) // Same gray text as inactive buttons
+                            .fill(egui::Color32::from_rgb(240, 240, 240)) // Same light gray background as inactive buttons
+                            .stroke(egui::Stroke::new(1.5, egui::Color32::from_rgb(200, 200, 200))) // Same light gray border as inactive buttons
+                            .rounding(egui::Rounding::same(8.0)) // Same rounding as toggle buttons
+                            .min_size(egui::vec2(110.0, 35.0)); // Same height as toggle buttons
+                        
+                        if ui.add(cancel_button).clicked() {
+                            self.cancel_current_goal();
+                        }
+                    }
+                });
+            }
         }
     }
 
