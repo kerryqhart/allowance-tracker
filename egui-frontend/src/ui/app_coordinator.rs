@@ -185,17 +185,17 @@ impl AllowanceTrackerApp {
                             .color(if self.chart.selected_period == ChartPeriod::Days30 { 
                                 egui::Color32::WHITE 
                             } else { 
-                                egui::Color32::from_rgb(200, 200, 200) 
+                                egui::Color32::from_rgb(100, 100, 100) 
                             })
                     )
                     .min_size(egui::vec2(60.0, 28.0))
                     .rounding(egui::Rounding::same(6.0))
                     .fill(if self.chart.selected_period == ChartPeriod::Days30 {
-                        egui::Color32::from_rgba_unmultiplied(255, 255, 255, 40) // Semi-transparent white
+                        egui::Color32::from_rgb(100, 150, 255) // Active blue
                     } else {
-                        egui::Color32::TRANSPARENT
+                        egui::Color32::from_rgb(240, 240, 240) // Light gray background for inactive
                     })
-                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 100)));
+                    .stroke(egui::Stroke::new(1.5, egui::Color32::from_rgb(200, 200, 200)));
                     
                     if ui.add(days_30_button).clicked() {
                         self.chart.selected_period = ChartPeriod::Days30;
@@ -211,17 +211,17 @@ impl AllowanceTrackerApp {
                             .color(if self.chart.selected_period == ChartPeriod::Days90 { 
                                 egui::Color32::WHITE 
                             } else { 
-                                egui::Color32::from_rgb(200, 200, 200) 
+                                egui::Color32::from_rgb(100, 100, 100) 
                             })
                     )
                     .min_size(egui::vec2(60.0, 28.0))
                     .rounding(egui::Rounding::same(6.0))
                     .fill(if self.chart.selected_period == ChartPeriod::Days90 {
-                        egui::Color32::from_rgba_unmultiplied(255, 255, 255, 40) // Semi-transparent white
+                        egui::Color32::from_rgb(100, 150, 255) // Active blue
                     } else {
-                        egui::Color32::TRANSPARENT
+                        egui::Color32::from_rgb(240, 240, 240) // Light gray background for inactive
                     })
-                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 100)));
+                    .stroke(egui::Stroke::new(1.5, egui::Color32::from_rgb(200, 200, 200)));
                     
                     if ui.add(days_90_button).clicked() {
                         self.chart.selected_period = ChartPeriod::Days90;
@@ -237,17 +237,17 @@ impl AllowanceTrackerApp {
                             .color(if self.chart.selected_period == ChartPeriod::AllTime { 
                                 egui::Color32::WHITE 
                             } else { 
-                                egui::Color32::from_rgb(200, 200, 200) 
+                                egui::Color32::from_rgb(100, 100, 100) 
                             })
                     )
                     .min_size(egui::vec2(70.0, 28.0))
                     .rounding(egui::Rounding::same(6.0))
                     .fill(if self.chart.selected_period == ChartPeriod::AllTime {
-                        egui::Color32::from_rgba_unmultiplied(255, 255, 255, 40) // Semi-transparent white
+                        egui::Color32::from_rgb(100, 150, 255) // Active blue
                     } else {
-                        egui::Color32::TRANSPARENT
+                        egui::Color32::from_rgb(240, 240, 240) // Light gray background for inactive
                     })
-                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 100)));
+                    .stroke(egui::Stroke::new(1.5, egui::Color32::from_rgb(200, 200, 200)));
                     
                     if ui.add(all_time_button).clicked() {
                         self.chart.selected_period = ChartPeriod::AllTime;
