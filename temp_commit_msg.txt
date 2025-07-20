@@ -1,9 +1,0 @@
-Repository cleanup: Remove planning docs, unused dirs, add essential configs
-
-- Delete planning .md files: SYSTEMATIC_CLEANUP_PLAN.md, STATE_REFACTOR_LESSONS_LEARNED.md, UI_CLEANUP_PHASE4_PLAN.md, UI_MODULE_REORGANIZATION_PLAN.md
-- Delete lingering commit message: phase3_styling_commit_message.txt  
-- Remove unused directories: src-tauri/, test_data/
-- Add essential project files: .cursorrules, .gitignore, Cargo.toml
-- Clean up thousands of build artifacts from egui-frontend/target/
-
-This commit restores a clean git status and adds proper project configuration files. 
