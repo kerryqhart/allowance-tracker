@@ -154,6 +154,7 @@ impl AllowanceTrackerApp {
     /// Draw tab-specific controls for the subheader
     fn draw_tab_specific_controls(&mut self, ui: &mut egui::Ui) {
         use crate::ui::app_state::MainTab;
+        use crate::ui::components::chart_renderer::ChartPeriod;
         
         match self.current_tab() {
             MainTab::Calendar => {
@@ -165,6 +166,94 @@ impl AllowanceTrackerApp {
                     .font(egui::FontId::new(18.0, egui::FontFamily::Proportional))
                     .color(egui::Color32::WHITE)
                     .strong());
+            }
+            MainTab::Chart => {
+                ui.horizontal(|ui| {
+                    // Chart title on the left
+                    ui.label(egui::RichText::new("📊 Balance Chart")
+                        .font(egui::FontId::new(18.0, egui::FontFamily::Proportional))
+                        .color(egui::Color32::WHITE)
+                        .strong());
+                    
+                    ui.add_space(20.0); // Space between title and buttons
+                    
+                    // Time period buttons
+                    // 30 Days button
+                    let days_30_button = egui::Button::new(
+                        egui::RichText::new("30 Days")
+                            .font(egui::FontId::new(12.0, egui::FontFamily::Proportional))
+                            .color(if self.chart.selected_period == ChartPeriod::Days30 { 
+                                egui::Color32::WHITE 
+                            } else { 
+                                egui::Color32::from_rgb(200, 200, 200) 
+                            })
+                    )
+                    .min_size(egui::vec2(60.0, 28.0))
+                    .rounding(egui::Rounding::same(6.0))
+                    .fill(if self.chart.selected_period == ChartPeriod::Days30 {
+                        egui::Color32::from_rgba_unmultiplied(255, 255, 255, 40) // Semi-transparent white
+                    } else {
+                        egui::Color32::TRANSPARENT
+                    })
+                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 100)));
+                    
+                    if ui.add(days_30_button).clicked() {
+                        self.chart.selected_period = ChartPeriod::Days30;
+                        self.load_chart_data();
+                    }
+                    
+                    ui.add_space(8.0);
+                    
+                    // 90 Days button
+                    let days_90_button = egui::Button::new(
+                        egui::RichText::new("90 Days")
+                            .font(egui::FontId::new(12.0, egui::FontFamily::Proportional))
+                            .color(if self.chart.selected_period == ChartPeriod::Days90 { 
+                                egui::Color32::WHITE 
+                            } else { 
+                                egui::Color32::from_rgb(200, 200, 200) 
+                            })
+                    )
+                    .min_size(egui::vec2(60.0, 28.0))
+                    .rounding(egui::Rounding::same(6.0))
+                    .fill(if self.chart.selected_period == ChartPeriod::Days90 {
+                        egui::Color32::from_rgba_unmultiplied(255, 255, 255, 40) // Semi-transparent white
+                    } else {
+                        egui::Color32::TRANSPARENT
+                    })
+                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 100)));
+                    
+                    if ui.add(days_90_button).clicked() {
+                        self.chart.selected_period = ChartPeriod::Days90;
+                        self.load_chart_data();
+                    }
+                    
+                    ui.add_space(8.0);
+                    
+                    // All Time button
+                    let all_time_button = egui::Button::new(
+                        egui::RichText::new("All Time")
+                            .font(egui::FontId::new(12.0, egui::FontFamily::Proportional))
+                            .color(if self.chart.selected_period == ChartPeriod::AllTime { 
+                                egui::Color32::WHITE 
+                            } else { 
+                                egui::Color32::from_rgb(200, 200, 200) 
+                            })
+                    )
+                    .min_size(egui::vec2(70.0, 28.0))
+                    .rounding(egui::Rounding::same(6.0))
+                    .fill(if self.chart.selected_period == ChartPeriod::AllTime {
+                        egui::Color32::from_rgba_unmultiplied(255, 255, 255, 40) // Semi-transparent white
+                    } else {
+                        egui::Color32::TRANSPARENT
+                    })
+                    .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 100)));
+                    
+                    if ui.add(all_time_button).clicked() {
+                        self.chart.selected_period = ChartPeriod::AllTime;
+                        self.load_chart_data();
+                    }
+                });
             }
         }
     }

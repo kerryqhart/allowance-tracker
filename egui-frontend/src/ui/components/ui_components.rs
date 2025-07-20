@@ -99,6 +99,30 @@ impl AllowanceTrackerApp {
         if ui.add(calendar_button).clicked() {
             self.set_current_tab(MainTab::Calendar);
         }
+        
+        ui.add_space(8.0);
+        
+        // Chart button  
+        let chart_button = egui::Button::new(egui::RichText::new("📊 Chart")
+                .font(egui::FontId::new(14.0, egui::FontFamily::Proportional))
+                .strong()
+                .color(if self.current_tab() == MainTab::Chart { 
+                    egui::Color32::WHITE 
+                } else { 
+                    egui::Color32::from_rgb(100, 100, 100) 
+                }))
+            .fill(if self.current_tab() == MainTab::Chart {
+                egui::Color32::from_rgb(100, 150, 255) // Active blue
+            } else {
+                egui::Color32::from_rgb(240, 240, 240) // Light gray background for inactive
+            })
+            .stroke(egui::Stroke::new(1.5, egui::Color32::from_rgb(200, 200, 200)))
+            .rounding(egui::Rounding::same(8.0))
+            .min_size(egui::vec2(100.0, 35.0));
+        
+        if ui.add(chart_button).clicked() {
+            self.set_current_tab(MainTab::Chart);
+        }
         });
     }
 
