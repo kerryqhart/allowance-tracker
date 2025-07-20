@@ -168,6 +168,7 @@ impl AllowanceTrackerApp {
                             self.core.current_child = Some(crate::ui::mappers::to_dto(selected_child.clone()));
                             self.load_balance();
                             self.load_calendar_data();
+                            self.reset_table_for_new_child(); // Reset table state for new child
                         }
                         Err(e) => {
                             self.ui.error_message = Some(format!("Failed to select child: {}", e));

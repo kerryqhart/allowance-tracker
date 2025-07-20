@@ -31,6 +31,7 @@ use chrono::Datelike;
 use crate::ui::app_state::AllowanceTrackerApp;
 use crate::ui::mappers::to_dto;
 use crate::backend::domain::commands::transactions::TransactionListQuery;
+use shared::{Transaction, TransactionType};
 
 impl AllowanceTrackerApp {
     /// Load initial data
@@ -44,6 +45,7 @@ impl AllowanceTrackerApp {
                     self.core.current_child = Some(to_dto(child));
                     self.load_balance();
                     self.load_calendar_data();
+                    self.reset_table_for_new_child(); // Reset table state for initial load
                 }
                 self.ui.loading = false;
             }
@@ -52,6 +54,17 @@ impl AllowanceTrackerApp {
                 self.ui.loading = false;
             }
         }
+    }
+    
+    /// Reset table state when switching to a new child
+    pub fn reset_table_for_new_child(&mut self) {
+        log::info!("📋 Resetting table state for new child");
+        
+        // Clear all table state
+        self.table.reset();
+        
+        // Start loading transactions for the new child
+        self.load_initial_table_transactions();
     }
     
     /// Load current balance
@@ -181,6 +194,76 @@ impl AllowanceTrackerApp {
                 // self.calendar_transactions = Vec::new(); // Removed
                 self.calendar.calendar_month = None;
             }
+        }
+    }
+    
+    /// Load initial transactions for the table view
+    pub fn load_initial_table_transactions(&mut self) {
+        log::info!("📋 Loading initial transactions for table view");
+        
+        // Reset table state for fresh load
+        self.table.reset();
+        
+        // Start loading first batch
+        self.load_more_table_transactions();
+    }
+    
+    /// Load more transactions for infinite scroll
+    pub fn load_more_table_transactions(&mut self) {
+        let current_child = self.current_child().clone();
+        if let Some(child) = &current_child {
+            // Check if we can load more
+            if !self.table.can_load_more() {
+                log::info!("📋 Cannot load more transactions: already loading or no more available");
+                return;
+            }
+            
+            log::info!("📋 Loading more transactions for child: {} (cursor: {:?})", 
+                      child.name, self.table.next_cursor);
+            
+            // Mark as loading
+            self.table.start_loading();
+            
+            let query = TransactionListQuery {
+                after: self.table.next_cursor.clone(),
+                limit: Some(self.table.page_size),
+                start_date: None,
+                end_date: None,
+            };
+            
+            log::info!("📋 Making pagination request with query: {:?}", query);
+            
+            match self.backend().transaction_service.list_transactions_domain(query) {
+                Ok(result) => {
+                    log::info!("📋 Successfully loaded {} more transactions (has_more: {})", 
+                              result.transactions.len(), result.pagination.has_more);
+                    
+                    // Convert domain transactions to DTOs
+                    let dto_transactions: Vec<Transaction> = result
+                        .transactions
+                        .into_iter()
+                        .map(|domain_tx| crate::ui::mappers::TransactionMapper::to_dto(domain_tx))
+                        .filter(|t| t.transaction_type != TransactionType::FutureAllowance) // Filter out future allowances
+                        .collect();
+                    
+                    // Add to table state
+                    self.table.append_transactions(
+                        dto_transactions,
+                        result.pagination.has_more,
+                        result.pagination.next_cursor,
+                    );
+                    
+                    log::info!("📋 Table now has {} total transactions", self.table.transaction_count());
+                }
+                Err(e) => {
+                    log::error!("❌ Failed to load more transactions: {}", e);
+                    self.table.handle_error(format!("Failed to load transactions: {}", e));
+                    self.ui.error_message = Some(format!("Failed to load transactions: {}", e));
+                }
+            }
+        } else {
+            log::warn!("📋 No active child selected for table transactions");
+            self.table.handle_error("No child selected".to_string());
         }
     }
 } 

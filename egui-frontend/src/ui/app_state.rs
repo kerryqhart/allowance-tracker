@@ -47,6 +47,7 @@ pub struct AllowanceTrackerApp {
     pub modal: ModalState,            // All modal states
     pub form: FormState,              // Form validation, inputs
     pub interaction: InteractionState, // User selections, dropdowns
+    pub table: TableState,            // Transaction table pagination
 }
 
 impl AllowanceTrackerApp {
@@ -73,6 +74,7 @@ impl AllowanceTrackerApp {
         let modal = ModalState::new();
         let form = FormState::new();
         let interaction = InteractionState::new();
+        let table = TableState::new();
         
         Ok(Self {
             // Modular state
@@ -82,6 +84,7 @@ impl AllowanceTrackerApp {
             modal,
             form,
             interaction,
+            table,
         })
     }
 

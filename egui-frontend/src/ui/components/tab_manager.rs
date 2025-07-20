@@ -16,13 +16,13 @@
 //! - Future tabs can be easily added by extending the MainTab enum
 
 use eframe::egui;
+use log::info;
 use crate::ui::app_state::{AllowanceTrackerApp, MainTab};
-use shared::TransactionType;
 
 impl AllowanceTrackerApp {
     /// Render the main content area
     pub fn render_main_content(&mut self, ui: &mut egui::Ui) {
-        log::info!("📄 RENDER_MAIN_CONTENT called");
+        info!("📄 RENDER_MAIN_CONTENT called");
         ui.vertical(|ui| {
             // Render content based on selected tab with toggle header
             match self.current_tab() {
@@ -31,7 +31,7 @@ impl AllowanceTrackerApp {
                     let available_rect = ui.available_rect_before_wrap();
                     
                     // DEBUG: Log tab manager space allocation
-                    log::info!("📋 TAB_MANAGER: available_rect.height={:.0}, passing to calendar", available_rect.height());
+                    info!("📋 TAB_MANAGER: available_rect.height={:.0}, passing to calendar", available_rect.height());
                     
                     self.draw_calendar_section_with_toggle(ui, available_rect, &self.calendar.calendar_transactions.clone());
                     
@@ -39,15 +39,12 @@ impl AllowanceTrackerApp {
                     // ui.add_space(0.0); // Removed entirely
                 }
                 MainTab::Table => {
-                    // Filter out future allowances - table should only show actual transactions
-                    let actual_transactions: Vec<_> = self.calendar.calendar_transactions.iter()
-                        .filter(|t| t.transaction_type != TransactionType::FutureAllowance)
-                        .cloned()
-                        .collect();
+                    // Use table state for infinite scroll instead of calendar transactions
+                    let table_transactions = self.table.displayed_transactions.clone();
                     
                     // Use full available space - let table manage its own margins
                     let available_rect = ui.available_rect_before_wrap();
-                    self.draw_transactions_section_with_toggle(ui, available_rect, &actual_transactions);
+                    self.draw_transactions_section_with_toggle(ui, available_rect, &table_transactions);
                     
                     // Small bottom spacing to prevent edge contact
                     ui.add_space(10.0);

@@ -121,6 +121,7 @@ impl AllowanceTrackerApp {
                                                 self.core.current_child = Some(to_dto(child.clone()));
                                                 self.load_balance();
                                                 self.load_calendar_data();
+                                                self.reset_table_for_new_child(); // Reset table state for new child
                                                 self.modal.show_child_selector = false;
                                                 self.ui.success_message = Some("Child selected successfully!".to_string());
                                             }
