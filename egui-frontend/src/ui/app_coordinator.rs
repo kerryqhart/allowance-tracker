@@ -185,13 +185,43 @@ impl AllowanceTrackerApp {
             
             ui.add_space(15.0);
             
-            // Current month and year display - disable selection to prevent dropdown interference
+            // Calculate the maximum width needed for any month name + year
+            let font_id = egui::FontId::new(16.0, egui::FontFamily::Proportional);
+            let current_year = self.calendar.selected_year;
+            
+            // Test all month names with the current year to find the maximum width
+            let month_names = [
+                "January", "February", "March", "April", "May", "June",
+                "July", "August", "September", "October", "November", "December"
+            ];
+            
+            let max_width = month_names.iter()
+                .map(|month| {
+                    let text = format!("{} {}", month, current_year);
+                    ui.fonts(|f| f.layout_no_wrap(
+                        text, 
+                        font_id.clone(), 
+                        egui::Color32::WHITE
+                    )).size().x
+                })
+                .fold(0.0, f32::max);
+            
+            // Add padding for safety
+            let fixed_width = max_width + 20.0;
+            
+            // Current month and year display in fixed-width area
             let month_year_text = format!("{} {}", self.get_current_month_name(), self.calendar.selected_year);
-            ui.add(egui::Label::new(egui::RichText::new(month_year_text)
-                .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))
-                .color(egui::Color32::WHITE)
-                .strong())
-                .selectable(false)); // Disable text selection
+            ui.allocate_ui_with_layout(
+                egui::vec2(fixed_width, 35.0),
+                egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
+                |ui| {
+                    ui.add(egui::Label::new(egui::RichText::new(month_year_text)
+                        .font(font_id)
+                        .color(egui::Color32::WHITE)
+                        .strong())
+                        .selectable(false)); // Disable text selection
+                }
+            );
             
             ui.add_space(15.0);
             
