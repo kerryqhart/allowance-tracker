@@ -46,6 +46,7 @@ impl AllowanceTrackerApp {
                     self.load_balance();
                     self.load_calendar_data();
                     self.reset_table_for_new_child(); // Reset table state for initial load
+                    self.load_chart_data(); // Refresh chart for initial load
                 }
                 self.ui.loading = false;
             }

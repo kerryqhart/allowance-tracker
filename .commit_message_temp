@@ -1,0 +1,9 @@
+Fix chart view not refreshing when switching children
+
+- Add load_chart_data() calls to all child change handlers
+- Chart now refreshes alongside calendar and table views when switching children
+- Fixes issue where chart would show stale data from previous child
+- Chart refresh added to: header dropdown, child selector modal, and initial load
+
+The chart view was the only component missing refresh logic when children changed,
+causing it to display outdated data while other views updated correctly. 

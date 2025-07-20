@@ -2,10 +2,6 @@
 target/
 Cargo.lock
 
-# Frontend build artifacts
-/frontend/dist/
-node_modules/
-
 # Database files
 *.db
 *.db-shm
@@ -46,11 +42,3 @@ lcov.info
 
 # Rust-specific
 **/*.rs.bk
-
-# WebAssembly build artifacts
-*.wasm
-pkg/
-wasm-pack.log
-
-# Trunk build artifacts
-.trunk/
