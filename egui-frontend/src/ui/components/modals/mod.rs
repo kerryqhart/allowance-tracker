@@ -18,6 +18,7 @@ pub mod child_selector;
 pub mod parental_control;
 pub mod money_transaction;
 pub mod day_action_overlay;
+pub mod goal_creation;
 pub mod shared;
 
 // Re-export modal functions for easy access

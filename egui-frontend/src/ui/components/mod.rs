@@ -22,6 +22,7 @@ pub mod calendar_renderer;
 pub mod chart_renderer;
 pub mod data_loading;
 pub mod dropdown_menu;
+pub mod goal_renderer;
 pub mod header;
 pub mod modals;
 pub mod styling;

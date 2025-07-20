@@ -352,7 +352,7 @@ impl CalendarDay {
         
         // Check if we should show checkbox (only for deletable transactions in selection mode)
         let show_checkbox = config.transaction_selection_mode && 
-                            !matches!(chip.chip_type, CalendarChipType::FutureAllowance);
+                            !matches!(chip.chip_type, CalendarChipType::FutureAllowance | CalendarChipType::Goal);
         let checkbox_width = if show_checkbox { 16.0 } else { 0.0 };
         let checkbox_spacing = if show_checkbox { 4.0 } else { 0.0 };
         

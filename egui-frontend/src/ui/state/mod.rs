@@ -25,6 +25,7 @@ pub mod form_state;
 pub mod interaction_state;
 pub mod table_state;
 pub mod chart_state;
+pub mod goal_state;
 
 // Re-export all state components for easy access
 pub use app_state::*;
@@ -34,4 +35,5 @@ pub use modal_state::*;
 pub use form_state::*;
 pub use interaction_state::*;
 pub use table_state::*;
-pub use chart_state::*; 
+pub use chart_state::*;
+pub use goal_state::GoalUiState; 

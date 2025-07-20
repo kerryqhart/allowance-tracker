@@ -54,7 +54,31 @@ impl AllowanceTrackerApp {
         // Removed unused import: use crate::ui::components::styling::colors;
         
         ui.horizontal(|ui| {
-            // Chart button (appears rightmost due to right-to-left layout)
+            // Goal button (appears rightmost due to right-to-left layout)
+            let goal_button = egui::Button::new(egui::RichText::new("🎯 Goal")
+                .font(egui::FontId::new(14.0, egui::FontFamily::Proportional))
+                .strong()
+                .color(if self.current_tab() == MainTab::Goal { 
+                    egui::Color32::WHITE 
+                } else { 
+                    egui::Color32::from_rgb(100, 100, 100) 
+                }))
+            .fill(if self.current_tab() == MainTab::Goal {
+                egui::Color32::from_rgb(100, 150, 255) // Active blue
+            } else {
+                egui::Color32::from_rgb(240, 240, 240) // Light gray background for inactive
+            })
+            .stroke(egui::Stroke::new(1.5, egui::Color32::from_rgb(200, 200, 200)))
+            .rounding(egui::Rounding::same(8.0))
+            .min_size(egui::vec2(85.0, 35.0));
+        
+        if ui.add(goal_button).clicked() {
+            self.set_current_tab(MainTab::Goal);
+        }
+        
+        ui.add_space(8.0);
+        
+            // Chart button (appears second rightmost due to right-to-left layout)
             let chart_button = egui::Button::new(egui::RichText::new("📊 Chart")
                 .font(egui::FontId::new(14.0, egui::FontFamily::Proportional))
                 .strong()

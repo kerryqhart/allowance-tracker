@@ -113,12 +113,37 @@ impl AllowanceTrackerApp {
             && today.month() == self.calendar.selected_month 
             && today.day() == backend_day.day;
         
+        // Start with the backend transactions
+        let mut all_transactions = backend_day.transactions.clone();
+        
+        // Add goal chip if this day matches the goal completion date
+        if let (Some(goal), Some(calculation)) = (&self.goal.current_goal, &self.goal.goal_calculation) {
+            if let Some(completion_date_str) = &calculation.projected_completion_date {
+                if let Ok(completion_date) = chrono::DateTime::parse_from_rfc3339(completion_date_str) {
+                    let completion_naive_date = completion_date.date_naive();
+                    if completion_naive_date == date {
+                        // Create a goal "transaction" for the chip
+                        let goal_transaction = shared::Transaction {
+                            id: "goal_completion".to_string(),
+                            child_id: goal.child_id.clone(),
+                            amount: goal.target_amount, // Store the goal amount for display
+                            description: goal.description.clone(), // Just the description for tooltip
+                            date: completion_date,
+                            balance: backend_day.balance, // Use the day's balance
+                            transaction_type: shared::TransactionType::Income, // Dummy type for goal chip
+                        };
+                        all_transactions.push(goal_transaction);
+                    }
+                }
+            }
+        }
+        
         CalendarDay {
             day_number: backend_day.day,
             date,
             is_today,
             day_type,
-            transactions: backend_day.transactions.clone(),
+            transactions: all_transactions,
             balance: Some(backend_day.balance),
         }
     }
