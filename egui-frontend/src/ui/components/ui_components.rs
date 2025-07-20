@@ -70,7 +70,7 @@ impl AllowanceTrackerApp {
             })
             .stroke(egui::Stroke::new(1.5, egui::Color32::from_rgb(200, 200, 200)))
             .rounding(egui::Rounding::same(8.0))
-            .min_size(egui::vec2(90.0, 30.0));
+            .min_size(egui::vec2(90.0, 35.0));
         
         if ui.add(table_button).clicked() {
             self.set_current_tab(MainTab::Table);
@@ -94,7 +94,7 @@ impl AllowanceTrackerApp {
             })
             .stroke(egui::Stroke::new(1.5, egui::Color32::from_rgb(200, 200, 200)))
             .rounding(egui::Rounding::same(8.0))
-            .min_size(egui::vec2(110.0, 30.0));
+            .min_size(egui::vec2(110.0, 35.0));
         
         if ui.add(calendar_button).clicked() {
             self.set_current_tab(MainTab::Calendar);

@@ -110,13 +110,15 @@ impl eframe::App for AllowanceTrackerApp {
             
             // Layer 3: Subheader (Calendar/Table toggle buttons)
             ui.allocate_ui_at_rect(subheader_rect, |ui| {
-                ui.horizontal(|ui| {
+                ui.horizontal_centered(|ui| {
                     ui.add_space(20.0); // Left padding
                     
-                    // Tab-specific controls on the left
-                    self.draw_tab_specific_controls(ui);
+                    // Tab-specific controls on the left with vertical centering
+                    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                        self.draw_tab_specific_controls(ui);
+                    });
                     
-                    // Tab toggle buttons on the right
+                    // Tab toggle buttons on the right with vertical centering
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.add_space(20.0); // Right padding
                         self.draw_tab_toggle_buttons(ui);
