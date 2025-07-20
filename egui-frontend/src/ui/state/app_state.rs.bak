@@ -1,0 +1,258 @@
+//! # Core Application State
+//!
+//! This module contains the essential application state that forms the backbone
+//! of the allowance tracker app.
+//!
+//! ## Responsibilities:
+//! - Backend connection management
+//! - Current child selection
+//! - Current balance tracking
+//! - Main tab navigation state
+//!
+//! ## Purpose:
+//! This represents the core "business state" of the application - the fundamental
+//! data needed for the app to function, separate from UI-specific state.
+
+use shared::*;
+use crate::backend::Backend;
+use super::*; // Import all other state modules
+use anyhow;
+use std::collections::HashSet;
+use crate::ui::components::dropdown_menu::DropdownMenu;
+use chrono::Datelike;
+
+/// Tabs available in the main interface
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MainTab {
+    Calendar,
+    Table,
+}
+
+/// Core application state containing essential app data
+pub struct CoreAppState {
+    /// Backend connection for data access
+    pub backend: Backend,
+    
+    /// Currently selected child
+    pub current_child: Option<Child>,
+    
+    /// Current balance for the selected child
+    pub current_balance: f64,
+    
+    /// Currently active main tab (Calendar or Table)
+    pub current_tab: MainTab,
+}
+
+impl CoreAppState {
+    /// Create new core app state with backend connection
+    pub fn new(backend: Backend) -> Self {
+        Self {
+            backend,
+            current_child: None,
+            current_balance: 0.0,
+            current_tab: MainTab::Calendar, // Default to calendar view
+        }
+    }
+}
+
+/// Main application struct that composes all state modules
+/// 
+/// This struct brings together all the focused state modules into a single
+/// cohesive application state, following the composition pattern for better
+/// organization and maintainability.
+pub struct AllowanceTrackerApp {
+    /// Core application state (backend, child, balance, tab)
+    pub core: CoreAppState,
+    
+    /// General UI state (loading, messages)
+    pub ui: UIState,
+    
+    /// Calendar-specific state and navigation
+    pub calendar: CalendarState,
+    
+    /// Modal visibility and modal-specific state
+    pub modal: ModalState,
+    
+    /// Form inputs and validation states
+    pub form: FormState,
+    
+    /// User interaction state (selection, dropdowns)
+    pub interaction: InteractionState,
+    
+    // TEMPORARY MIGRATION FIELDS - Copy of old flat structure
+    // These allow existing impl blocks to work unchanged during migration
+    // Will be removed once migration is complete and replaced with nested access
+    
+    // Core fields (duplicated temporarily)
+    pub backend: Backend,
+    pub current_child: Option<Child>,
+    pub current_balance: f64,
+    pub current_tab: MainTab,
+    
+    // UI fields (duplicated temporarily) 
+    pub loading: bool,
+    pub error_message: Option<String>,
+    pub success_message: Option<String>,
+    
+    // Calendar fields (duplicated temporarily)
+    #[allow(dead_code)]
+    pub calendar_loading: bool,
+    pub calendar_transactions: Vec<Transaction>,
+    pub calendar_month: Option<shared::CalendarMonth>,
+    pub selected_month: u32,
+    pub selected_year: i32,
+    
+    // Calendar interaction fields (duplicated temporarily)
+    pub selected_day: Option<chrono::NaiveDate>,
+    pub expanded_day: Option<chrono::NaiveDate>,
+    pub active_overlay: Option<OverlayType>,
+    pub modal_just_opened: bool,
+    
+    // Modal fields (duplicated temporarily)
+    pub show_add_money_modal: bool,
+    pub show_child_selector: bool,
+    #[allow(dead_code)]
+    pub show_allowance_config_modal: bool,
+    pub show_parental_control_modal: bool,
+    pub parental_control_stage: ParentalControlStage,
+    pub pending_protected_action: Option<ProtectedAction>,
+    pub parental_control_input: String,
+    pub parental_control_error: Option<String>,
+    pub parental_control_loading: bool,
+    
+    // Interaction fields (duplicated temporarily)
+    pub transaction_selection_mode: bool,
+    pub selected_transaction_ids: std::collections::HashSet<String>,
+    pub child_dropdown: crate::ui::components::dropdown_menu::DropdownMenu,
+    pub settings_dropdown: crate::ui::components::dropdown_menu::DropdownMenu,
+    
+    // Form fields (duplicated temporarily)
+    pub add_money_amount: String,
+    pub add_money_description: String,
+    pub add_money_description_error: Option<String>,
+    pub add_money_amount_error: Option<String>,
+    pub add_money_is_valid: bool,
+    pub income_form_state: MoneyTransactionFormState,
+    pub expense_form_state: MoneyTransactionFormState,
+}
+
+impl AllowanceTrackerApp {
+    /// Create new application instance with eframe creation context
+    pub fn new(cc: &eframe::CreationContext<'_>) -> anyhow::Result<Self> {
+        log::info!("🚀 Initializing AllowanceTrackerApp with refactored UI");
+        
+        // Setup custom fonts including Chalkboard
+        crate::ui::setup_custom_fonts(&cc.egui_ctx);
+        
+        // Install image loaders for background support
+        egui_extras::install_image_loaders(&cc.egui_ctx);
+        
+        let backend = crate::backend::Backend::new()?;
+        
+        let now = chrono::Local::now();
+        let current_month = now.month();
+        let current_year = now.year();
+        
+        // Create a second backend instance for the temporary field
+        let backend_for_temp = crate::backend::Backend::new()?;
+        
+        Ok(Self {
+            core: CoreAppState::new(backend),
+            ui: UIState::new(),
+            calendar: CalendarState::new(),
+            modal: ModalState::new(),
+            form: FormState::new(),
+            interaction: InteractionState::new(),
+            
+            // TEMPORARY: Initialize old flat structure fields
+            backend: backend_for_temp,
+            current_child: None,
+            current_balance: 0.0,
+            current_tab: MainTab::Calendar,
+            
+            loading: true,
+            error_message: None,
+            success_message: None,
+            
+            calendar_loading: false,
+            calendar_transactions: Vec::new(),
+            calendar_month: None,
+            selected_month: current_month,
+            selected_year: current_year,
+            
+            selected_day: None,
+            expanded_day: None,
+            active_overlay: None,
+            modal_just_opened: false,
+            
+            show_add_money_modal: false,
+            show_child_selector: false,
+            show_allowance_config_modal: false,
+            show_parental_control_modal: false,
+            parental_control_stage: ParentalControlStage::Question1,
+            pending_protected_action: None,
+            parental_control_input: String::new(),
+            parental_control_error: None,
+            parental_control_loading: false,
+            
+            transaction_selection_mode: false,
+            selected_transaction_ids: HashSet::new(),
+            child_dropdown: DropdownMenu::new("child_dropdown".to_string()),
+            settings_dropdown: DropdownMenu::new("settings_dropdown".to_string()),
+            
+            add_money_amount: String::new(),
+            add_money_description: String::new(),
+            add_money_description_error: None,
+            add_money_amount_error: None,
+            add_money_is_valid: true,
+            income_form_state: MoneyTransactionFormState::new(),
+            expense_form_state: MoneyTransactionFormState::new(),
+        })
+    }
+    
+    /// Clear success and error messages
+    pub fn clear_messages(&mut self) {
+        self.ui.clear_messages();
+    }
+    
+    // Convenience getters for commonly accessed fields
+    /// Get the backend reference
+    pub fn backend(&self) -> &Backend {
+        &self.core.backend
+    }
+    
+    /// Get mutable backend reference
+    pub fn backend_mut(&mut self) -> &mut Backend {
+        &mut self.core.backend
+    }
+    
+    /// Get current child
+    pub fn current_child(&self) -> &Option<Child> {
+        &self.core.current_child
+    }
+    
+    /// Get current balance
+    pub fn current_balance(&self) -> f64 {
+        self.core.current_balance
+    }
+    
+    /// Get current tab
+    pub fn current_tab(&self) -> MainTab {
+        self.core.current_tab
+    }
+    
+    /// Set current tab
+    pub fn set_current_tab(&mut self, tab: MainTab) {
+        self.core.current_tab = tab;
+    }
+    
+    /// Check if app is loading
+    pub fn is_loading(&self) -> bool {
+        self.ui.loading
+    }
+    
+    /// Set loading state
+    pub fn set_loading(&mut self, loading: bool) {
+        self.ui.loading = loading;
+    }
+} 

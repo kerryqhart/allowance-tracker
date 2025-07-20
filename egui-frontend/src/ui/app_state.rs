@@ -13,18 +13,16 @@
 //!
 //! ## Purpose:
 //! This module serves as the central state management for the entire application,
-//! containing:
-//! - Backend connection and data access
-//! - Current user context (selected child, balance)
-//! - UI state (loading, messages, current tab)
-//! - Calendar state (selected month/year, transactions)
-//! - Modal visibility states
-//! - Form input states
+//! using a modular architecture with separate state modules for different concerns.
 //!
 //! ## State Management:
-//! The AllowanceTrackerApp struct holds all application state in a single location,
-//! making it easy to manage and pass between different UI components. This follows
-//! the single source of truth principle for state management.
+//! The AllowanceTrackerApp struct composes multiple focused state modules:
+//! - CoreAppState: Backend, child, balance, tab
+//! - UIState: Loading, messages
+//! - CalendarState: Calendar navigation, transactions
+//! - ModalState: Modal visibility and flow
+//! - FormState: Form inputs and validation
+//! - InteractionState: User selections, dropdowns
 
 use log::info;
 use chrono::{Datelike, TimeZone};
@@ -33,42 +31,11 @@ use shared::*;
 use crate::backend::Backend;
 use crate::ui::components::dropdown_menu::DropdownMenu;
 
-/// Tabs available in the main interface
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MainTab {
-    Calendar,
-    Table,
-}
+// Import all state modules
+use crate::ui::state::*;
 
-/// Types of overlays that can be shown for calendar day interaction
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OverlayType {
-    AddMoney,
-    SpendMoney,
-    CreateGoal,
-}
-
-/// Stages of the parental control challenge flow
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ParentalControlStage {
-    Question1,      // "Are you Mom or Dad?"
-    Question2,      // "What's cooler than cool?"
-    Authenticated,  // Success state
-}
-
-/// Types of protected actions that require parental control
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ProtectedAction {
-    DeleteTransactions,
-    // Future extensions: ConfigureAllowance, ExportData, etc.
-}
-
-/// Transaction type for money modal configuration
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TransactionType {
-    Income,
-    Expense,
-}
+// Re-export types from state modules to avoid duplication
+pub use crate::ui::state::{MainTab, OverlayType, ParentalControlStage, ProtectedAction, TransactionType};
 
 /// Generic configuration for money transaction modals (income/expense)
 pub struct MoneyTransactionModalConfig {
@@ -151,73 +118,61 @@ impl MoneyTransactionModalConfig {
 }
 
 /// Main application struct for the egui allowance tracker
+/// 
+/// This uses a modular architecture with focused state modules for maintainability.
 pub struct AllowanceTrackerApp {
-    pub backend: Backend,
+    // NEW: Modular state architecture
+    pub core: CoreAppState,           // Backend, child, balance, tab
+    pub ui: UIState,                  // Loading, messages
+    pub calendar: CalendarState,      // Calendar navigation, overlays  
+    pub modal: ModalState,            // All modal states
+    pub form: FormState,              // Form validation, inputs
+    pub interaction: InteractionState, // User selections, dropdowns
     
-    // Application state
+    // TEMPORARY: Backward compatibility fields during migration
+    // These mirror the modular fields to allow gradual component migration
+    pub backend: Backend,
     pub current_child: Option<Child>,
     pub current_balance: f64,
-    
-    // UI state
     pub loading: bool,
     pub error_message: Option<String>,
     pub success_message: Option<String>,
     pub current_tab: MainTab,
-    
-    // Calendar state
-    #[allow(dead_code)]
     pub calendar_loading: bool,
     pub calendar_transactions: Vec<Transaction>,
     pub calendar_month: Option<shared::CalendarMonth>,
     pub selected_month: u32,
     pub selected_year: i32,
-    
-    // Calendar interaction state
     pub selected_day: Option<chrono::NaiveDate>,
-    pub expanded_day: Option<chrono::NaiveDate>, // Track which day is expanded to show all chips
+    pub expanded_day: Option<chrono::NaiveDate>,
     pub active_overlay: Option<OverlayType>,
-    pub modal_just_opened: bool, // Prevents backdrop click detection on same frame modal opens
-    
-    // Modal states
+    pub modal_just_opened: bool,
     pub show_add_money_modal: bool,
     pub show_child_selector: bool,
-    #[allow(dead_code)]
     pub show_allowance_config_modal: bool,
-    
-    // Parental control state
     pub show_parental_control_modal: bool,
     pub parental_control_stage: ParentalControlStage,
     pub pending_protected_action: Option<ProtectedAction>,
     pub parental_control_input: String,
     pub parental_control_error: Option<String>,
     pub parental_control_loading: bool,
-    
-    // Transaction selection state (for deletion)
     pub transaction_selection_mode: bool,
     pub selected_transaction_ids: HashSet<String>,
-    
-    // Dropdown states using generalized component
     pub child_dropdown: DropdownMenu,
     pub settings_dropdown: DropdownMenu,
-    
-    // Form states
     pub add_money_amount: String,
     pub add_money_description: String,
-    
-    // Add money form validation state
     pub add_money_description_error: Option<String>,
     pub add_money_amount_error: Option<String>,
     pub add_money_is_valid: bool,
-    
-    // Generic money transaction form states
     pub income_form_state: MoneyTransactionFormState,
     pub expense_form_state: MoneyTransactionFormState,
 }
 
 impl AllowanceTrackerApp {
-    /// Create a new AllowanceTrackerApp with default values
+    /// Create a new AllowanceTrackerApp with modular architecture
     pub fn new(cc: &eframe::CreationContext<'_>) -> Result<Self, anyhow::Error> {
-        info!("🚀 Initializing AllowanceTrackerApp with refactored UI");
+        info!("🚀 Initializing AllowanceTrackerApp with modular architecture");
         
         // Setup custom fonts including Chalkboard
         crate::ui::setup_custom_fonts(&cc.egui_ctx);
@@ -231,121 +186,133 @@ impl AllowanceTrackerApp {
         let current_month = now.month();
         let current_year = now.year();
         
+        // Initialize modular state components
+        let core = CoreAppState::new(backend);
+        let ui = UIState::new();
+        let mut calendar = CalendarState::new();
+        calendar.selected_month = current_month;
+        calendar.selected_year = current_year;
+        let modal = ModalState::new();
+        let form = FormState::new();
+        let interaction = InteractionState::new();
+        
         Ok(Self {
-            backend,
+            // NEW: Modular state
+            core,
+            ui,
+            calendar,
+            modal,
+            form,
+            interaction,
             
-            // Application state
+            // TEMPORARY: Compatibility fields (mirror modular state - create directly)
+            backend: Backend::new()?,
             current_child: None,
             current_balance: 0.0,
-            
-            // UI state
             loading: true,
             error_message: None,
             success_message: None,
-            current_tab: MainTab::Calendar, // Default to calendar view
-            
-            // Calendar state
+            current_tab: MainTab::Calendar,
             calendar_loading: false,
             calendar_transactions: Vec::new(),
             calendar_month: None,
             selected_month: current_month,
             selected_year: current_year,
-            
-            // Calendar interaction state
             selected_day: None,
             expanded_day: None,
             active_overlay: None,
             modal_just_opened: false,
-            
-            // Modal states
             show_add_money_modal: false,
             show_child_selector: false,
             show_allowance_config_modal: false,
-            
-            // Parental control state
             show_parental_control_modal: false,
             parental_control_stage: ParentalControlStage::Question1,
             pending_protected_action: None,
             parental_control_input: String::new(),
             parental_control_error: None,
             parental_control_loading: false,
-            
-            // Transaction selection state
             transaction_selection_mode: false,
             selected_transaction_ids: HashSet::new(),
-            
-            // Dropdown states using generalized component
             child_dropdown: DropdownMenu::new("child_dropdown".to_string()),
             settings_dropdown: DropdownMenu::new("settings_dropdown".to_string()),
-            
-            // Form states
             add_money_amount: String::new(),
             add_money_description: String::new(),
-            
-            // Add money form validation state
             add_money_description_error: None,
             add_money_amount_error: None,
             add_money_is_valid: true,
-            
-            // Generic money transaction form states
             income_form_state: MoneyTransactionFormState::new(),
             expense_form_state: MoneyTransactionFormState::new(),
         })
     }
 
+    // TEMPORARY: Getter methods for backward compatibility
+    pub fn backend(&self) -> &Backend {
+        &self.core.backend
+    }
+    
+    pub fn current_child(&self) -> &Option<Child> {
+        &self.core.current_child
+    }
+    
+    pub fn current_balance(&self) -> f64 {
+        self.core.current_balance
+    }
+    
+    pub fn current_tab(&self) -> MainTab {
+        self.core.current_tab
+    }
+    
+    // TEMPORARY: Setter methods for state synchronization
+    pub fn set_current_tab(&mut self, tab: MainTab) {
+        self.core.current_tab = tab;
+        self.current_tab = tab; // Sync compatibility field
+    }
+    
+    pub fn set_loading(&mut self, loading: bool) {
+        self.ui.loading = loading;
+        self.loading = loading; // Sync compatibility field
+    }
+
     /// Navigate to the previous month
     pub fn navigate_to_previous_month(&mut self) {
-        if self.selected_month == 1 {
-            self.selected_month = 12;
-            self.selected_year -= 1;
-        } else {
-            self.selected_month -= 1;
-        }
+        self.calendar.navigate_to_previous_month();
+        
+        // Sync compatibility fields
+        self.selected_month = self.calendar.selected_month;
+        self.selected_year = self.calendar.selected_year;
+        self.calendar_loading = self.calendar.calendar_loading;
         
         // Reload calendar data for the new month
-        self.calendar_loading = true;
         self.load_calendar_data();
         log::info!("📅 Navigated to previous month: {}/{}", self.selected_month, self.selected_year);
     }
 
     /// Navigate to the next month
     pub fn navigate_to_next_month(&mut self) {
-        if self.selected_month == 12 {
-            self.selected_month = 1;
-            self.selected_year += 1;
-        } else {
-            self.selected_month += 1;
-        }
+        self.calendar.navigate_to_next_month();
+        
+        // Sync compatibility fields
+        self.selected_month = self.calendar.selected_month;
+        self.selected_year = self.calendar.selected_year;
+        self.calendar_loading = self.calendar.calendar_loading;
         
         // Reload calendar data for the new month
-        self.calendar_loading = true;
         self.load_calendar_data();
         log::info!("📅 Navigated to next month: {}/{}", self.selected_month, self.selected_year);
     }
 
     /// Get the current month name as a string
     pub fn get_current_month_name(&self) -> String {
-        match self.selected_month {
-            1 => "January",
-            2 => "February", 
-            3 => "March",
-            4 => "April",
-            5 => "May",
-            6 => "June",
-            7 => "July",
-            8 => "August",
-            9 => "September",
-            10 => "October",
-            11 => "November",
-            12 => "December",
-            _ => "Unknown"
-        }.to_string()
+        self.calendar.get_current_month_name()
     }
 
     /// Clear any error or success messages
     pub fn clear_messages(&mut self) {
-        self.error_message = None;
-        self.success_message = None;
+        self.ui.clear_messages();
+        
+        // Sync compatibility fields
+        self.error_message = self.ui.error_message.clone();
+        self.success_message = self.ui.success_message.clone();
     }
 
     // ====================
@@ -355,7 +322,7 @@ impl AllowanceTrackerApp {
     /// Start parental control challenge for a specific action
     pub fn start_parental_control_challenge(&mut self, action: ProtectedAction) {
         log::info!("🔒 Starting parental control challenge for: {:?}", action);
-        self.pending_protected_action = Some(action);
+        self.modal.pending_protected_action = Some(action);
         self.parental_control_stage = ParentalControlStage::Question1;
         self.parental_control_input.clear();
         self.parental_control_error = None;
@@ -375,7 +342,7 @@ impl AllowanceTrackerApp {
     pub fn cancel_parental_control_challenge(&mut self) {
         log::info!("🔒 Cancelling parental control challenge");
         self.show_parental_control_modal = false;
-        self.pending_protected_action = None;
+        self.modal.pending_protected_action = None;
         self.parental_control_stage = ParentalControlStage::Question1;
         self.parental_control_input.clear();
         self.parental_control_error = None;
@@ -408,7 +375,7 @@ impl AllowanceTrackerApp {
                     self.parental_control_stage = ParentalControlStage::Authenticated;
                     
                     // Execute the pending action
-                    if let Some(action) = self.pending_protected_action {
+                    if let Some(action) = self.modal.pending_protected_action {
                         self.execute_protected_action(action);
                     }
                     
@@ -434,11 +401,11 @@ impl AllowanceTrackerApp {
         match action {
             ProtectedAction::DeleteTransactions => {
                 log::info!("🗑️ Executing delete transactions action");
-                self.enter_transaction_selection_mode();
+                self.interaction.enter_transaction_selection_mode();
             }
         }
         
-        self.pending_protected_action = None;
+        self.modal.pending_protected_action = None;
     }
     
     // ====================
@@ -448,7 +415,7 @@ impl AllowanceTrackerApp {
     /// Enter transaction selection mode for deletion
     pub fn enter_transaction_selection_mode(&mut self) {
         log::info!("🎯 Entering transaction selection mode");
-        self.transaction_selection_mode = true;
+        self.interaction.transaction_selection_mode = true;
         self.selected_transaction_ids.clear();
         self.success_message = Some("Select transactions to delete by clicking checkboxes. Click trash button when ready.".to_string());
     }
@@ -456,7 +423,7 @@ impl AllowanceTrackerApp {
     /// Exit transaction selection mode without deleting
     pub fn exit_transaction_selection_mode(&mut self) {
         log::info!("🚫 Exiting transaction selection mode");
-        self.transaction_selection_mode = false;
+        self.interaction.transaction_selection_mode = false;
         self.selected_transaction_ids.clear();
         self.clear_messages();
     }
@@ -499,44 +466,44 @@ impl AllowanceTrackerApp {
     
     /// Validate the add money form and update validation state
     pub fn validate_add_money_form(&mut self) {
-        self.add_money_description_error = None;
-        self.add_money_amount_error = None;
+        self.form.add_money_description_error = None;
+        self.form.add_money_amount_error = None;
         
         // Validate description
-        let description = self.add_money_description.trim();
+        let description = self.form.add_money_description.trim();
         if description.is_empty() {
-            self.add_money_description_error = Some("Description is required".to_string());
+            self.form.add_money_description_error = Some("Description is required".to_string());
         } else if description.len() > 70 {
-            self.add_money_description_error = Some(format!("Description too long ({}/70 characters)", description.len()));
+            self.form.add_money_description_error = Some(format!("Description too long ({}/70 characters)", description.len()));
         }
         
         // Validate amount
-        let amount_input = self.add_money_amount.trim();
+        let amount_input = self.form.add_money_amount.trim();
         if amount_input.is_empty() {
             // Don't show "Amount is required" error immediately - let the grayed button be sufficient
-            self.add_money_amount_error = None;
+            self.form.add_money_amount_error = None;
         } else {
             // Clean and parse amount
             match self.clean_and_parse_amount(amount_input) {
                 Ok(amount) => {
                     if amount <= 0.0 {
-                        self.add_money_amount_error = Some("Amount must be positive".to_string());
+                        self.form.add_money_amount_error = Some("Amount must be positive".to_string());
                     } else if amount > 1_000_000.0 {
-                        self.add_money_amount_error = Some("Amount too large (max $1,000,000)".to_string());
+                        self.form.add_money_amount_error = Some("Amount too large (max $1,000,000)".to_string());
                     } else if amount < 0.01 {
-                        self.add_money_amount_error = Some("Amount too small (min $0.01)".to_string());
+                        self.form.add_money_amount_error = Some("Amount too small (min $0.01)".to_string());
                     } else if self.has_too_many_decimal_places(amount) {
-                        self.add_money_amount_error = Some("Maximum 2 decimal places allowed".to_string());
+                        self.form.add_money_amount_error = Some("Maximum 2 decimal places allowed".to_string());
                     }
                 }
                 Err(error) => {
-                    self.add_money_amount_error = Some(error);
+                    self.form.add_money_amount_error = Some(error);
                 }
             }
         }
         
         // Update overall validation state
-        self.add_money_is_valid = self.add_money_description_error.is_none() && self.add_money_amount_error.is_none();
+        self.form.add_money_is_valid = self.form.add_money_description_error.is_none() && self.form.add_money_amount_error.is_none();
     }
     
     /// Clean and parse amount input string (similar to MoneyManagementService)
@@ -561,7 +528,7 @@ impl AllowanceTrackerApp {
     /// Check if amount has too many decimal places
     fn has_too_many_decimal_places(&self, _amount: f64) -> bool {
         // Check the original input string instead of the parsed float
-        let input = self.add_money_amount.trim();
+        let input = self.form.add_money_amount.trim();
         if let Some(decimal_pos) = input.find('.') {
             let decimal_part = &input[decimal_pos + 1..];
             // Reject if more than 2 decimal places
@@ -579,16 +546,16 @@ impl AllowanceTrackerApp {
     
     /// Clear add money form and validation state
     pub fn clear_add_money_form(&mut self) {
-        self.add_money_description.clear();
-        self.add_money_amount.clear();
-        self.add_money_description_error = None;
-        self.add_money_amount_error = None;
-        self.add_money_is_valid = true;
+        self.form.add_money_description.clear();
+        self.form.add_money_amount.clear();
+        self.form.add_money_description_error = None;
+        self.form.add_money_amount_error = None;
+        self.form.add_money_is_valid = true;
     }
     
     /// Auto-format amount field as user types (adds $ and proper decimal formatting)
     pub fn auto_format_amount_field(&mut self) {
-        let input = self.add_money_amount.clone();
+        let input = self.form.add_money_amount.clone();
         
         // Only auto-format if the input looks like a valid number
         if let Ok(amount) = self.clean_and_parse_amount(&input) {
@@ -596,7 +563,7 @@ impl AllowanceTrackerApp {
             if amount > 0.0 && amount < 1_000_000.0 && !self.has_too_many_decimal_places(amount) {
                 // Format as $XX.XX but only if user isn't currently typing
                 if !input.ends_with('.') && !input.ends_with('0') {
-                    self.add_money_amount = format!("{:.2}", amount);
+                    self.form.add_money_amount = format!("{:.2}", amount);
                 }
             }
         }
@@ -671,10 +638,10 @@ impl AllowanceTrackerApp {
         use crate::backend::domain::money_management::MoneyManagementService;
         
         log::info!("💰 Submitting income transaction - Description: '{}', Amount: '{}'", 
-                  self.income_form_state.description, self.income_form_state.amount);
+                  self.form.income_form_state.description, self.form.income_form_state.amount);
         
         // Parse amount from form
-        let amount = match self.clean_and_parse_amount(&self.income_form_state.amount) {
+        let amount = match self.clean_and_parse_amount(&self.form.income_form_state.amount) {
             Ok(amount) => amount,
             Err(error) => {
                 log::error!("❌ Failed to parse amount: {}", error);
@@ -691,7 +658,7 @@ impl AllowanceTrackerApp {
             eastern_offset.from_local_datetime(&naive_datetime).single().unwrap()
         });
         let request = shared::AddMoneyRequest {
-            description: self.income_form_state.description.trim().to_string(),
+            description: self.form.income_form_state.description.trim().to_string(),
             amount,
             date: date_time,
         };
@@ -728,10 +695,10 @@ impl AllowanceTrackerApp {
         use crate::backend::domain::money_management::MoneyManagementService;
         
         log::info!("💸 Submitting expense transaction - Description: '{}', Amount: '{}'", 
-                  self.expense_form_state.description, self.expense_form_state.amount);
+                  self.form.expense_form_state.description, self.form.expense_form_state.amount);
         
         // Parse amount from form
-        let amount = match self.clean_and_parse_amount(&self.expense_form_state.amount) {
+        let amount = match self.clean_and_parse_amount(&self.form.expense_form_state.amount) {
             Ok(amount) => amount,
             Err(error) => {
                 log::error!("❌ Failed to parse amount: {}", error);
@@ -748,7 +715,7 @@ impl AllowanceTrackerApp {
             eastern_offset.from_local_datetime(&naive_datetime).single().unwrap()
         });
         let request = shared::SpendMoneyRequest {
-            description: self.expense_form_state.description.trim().to_string(),
+            description: self.form.expense_form_state.description.trim().to_string(),
             amount, // User enters positive amount, backend converts to negative
             date: date_time,
         };
