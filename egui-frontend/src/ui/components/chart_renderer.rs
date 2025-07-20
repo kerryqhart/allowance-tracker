@@ -17,6 +17,7 @@ use eframe::egui;
 use chrono::{NaiveDate, Duration};
 use shared::Transaction;
 use crate::ui::app_state::AllowanceTrackerApp;
+use crate::backend::domain::commands::transactions::TransactionListQuery;
 use log::{info, warn};
 
 /// Time period options for the chart
@@ -117,19 +118,18 @@ impl AllowanceTrackerApp {
             .map(|point| [point.timestamp, point.balance])
             .collect();
         
-        // Create the line connecting all points
+        // Create the line connecting all points (no name = no tooltip)
         let line_points: PlotPoints = raw_points.iter().copied().collect();
         let line = Line::new(line_points)
             .color(egui::Color32::from_rgb(100, 150, 255))
-            .stroke(egui::Stroke::new(2.0, egui::Color32::from_rgb(100, 150, 255)))
-            .name("Balance");
+            .stroke(egui::Stroke::new(2.0, egui::Color32::from_rgb(100, 150, 255)));
         
-        // Create individual data point markers
+        // Create individual data point markers (with name for tooltips)
         let marker_points: PlotPoints = raw_points.iter().copied().collect();
         let data_points = Points::new(marker_points)
             .color(egui::Color32::from_rgb(100, 150, 255))
             .filled(true)
-            .radius(4.0)
+            .radius(6.0) // Increased radius for easier hover detection
             .shape(MarkerShape::Circle)
             .name("Balance");
         
@@ -151,8 +151,19 @@ impl AllowanceTrackerApp {
             .allow_drag(false)
             .allow_zoom(false)
             .allow_scroll(false)
-            .show_x(false) // Remove x-axis crosshair
-            .show_y(false) // Remove y-axis crosshair
+            .show_x(true) // Show x coordinate on hover  
+            .show_y(true) // Show y coordinate on hover
+            .auto_bounds(egui::Vec2b::TRUE)
+            .show_background(false)
+            .coordinates_formatter(egui_plot::Corner::LeftBottom, egui_plot::CoordinatesFormatter::new(|point, _bounds| {
+                // Convert timestamp to readable date and format balance
+                if let Some(datetime) = chrono::DateTime::from_timestamp(point.x as i64, 0) {
+                    let date = datetime.format("%m/%d").to_string();
+                    format!("📅 {}: ${:.2}", date, point.y)
+                } else {
+                    format!("${:.2}", point.y)
+                }
+            }))
             .x_grid_spacer(|input| {
                 // Sparser x-axis grid - only show major marks
                 let mut marks = Vec::new();
@@ -236,6 +247,8 @@ impl AllowanceTrackerApp {
                 plot_ui.line(line);
                 plot_ui.points(data_points);
             });
+        
+        // For now, let's see if the built-in coordinate display works better
     }
     
     /// Load chart data for the selected period and child
@@ -250,29 +263,58 @@ impl AllowanceTrackerApp {
         // Calculate date range based on selected period
         let (start_date, end_date) = self.get_date_range_for_period(self.chart.selected_period);
         
-        info!("📊 Chart date range: {} to {}", start_date, end_date);
+        info!("📊 Chart date range: {} to {} ({} days)", start_date, end_date, (end_date - start_date).num_days());
         
-        // For now, we'll use a simple approach: get all transactions and filter by date
-        // In a real implementation, you'd want to call a backend service with date filters
+        // Fetch transactions directly from backend for the specified date range
+        // Convert dates to RFC3339 format for backend query
+        let start_date_str = start_date.and_hms_opt(0, 0, 0).unwrap().and_utc().to_rfc3339();
+        let end_date_str = end_date.and_hms_opt(23, 59, 59).unwrap().and_utc().to_rfc3339();
         
-        // Get transactions from the table state (which should have recent transactions)
-        let all_transactions = &self.table.displayed_transactions;
+        let query = TransactionListQuery {
+            after: None,
+            limit: Some(10000), // Get all transactions in the date range
+            start_date: Some(start_date_str.clone()),
+            end_date: Some(end_date_str.clone()),
+        };
         
-        // Filter transactions within the date range
-        let filtered_transactions: Vec<&Transaction> = all_transactions
-            .iter()
-            .filter(|tx| {
-                let tx_date = tx.date.date_naive();
-                tx_date >= start_date && tx_date <= end_date
-            })
-            .collect();
+        info!("📊 Fetching transactions from backend with query: start_date={}, end_date={}, limit=10000", start_date_str, end_date_str);
         
-        info!("📊 Found {} transactions in date range", filtered_transactions.len());
-        
-        // Prepare chart data points
-        self.chart.chart_data = self.prepare_chart_data(&filtered_transactions, start_date, end_date);
-        
-        info!("📊 Generated {} chart data points", self.chart.chart_data.len());
+        match self.backend().transaction_service.list_transactions_domain(query) {
+            Ok(result) => {
+                info!("📊 Successfully loaded {} transactions from backend for chart", result.transactions.len());
+                
+                // Convert domain transactions to DTO format for chart processing
+                let dto_transactions: Vec<shared::Transaction> = result.transactions
+                    .into_iter()
+                    .map(|tx| shared::Transaction {
+                        id: tx.id,
+                        child_id: tx.child_id,
+                        amount: tx.amount,
+                        balance: tx.balance,
+                        transaction_type: match tx.transaction_type {
+                            crate::backend::domain::models::transaction::TransactionType::Income => shared::TransactionType::Income,
+                            crate::backend::domain::models::transaction::TransactionType::Expense => shared::TransactionType::Expense,
+                            crate::backend::domain::models::transaction::TransactionType::FutureAllowance => shared::TransactionType::FutureAllowance,
+                        },
+                        description: tx.description,
+                        date: tx.date,
+                    })
+                    .collect();
+                
+                info!("📊 Converted to {} DTO transactions for chart", dto_transactions.len());
+                
+                // Convert to references for prepare_chart_data compatibility
+                let transaction_refs: Vec<&shared::Transaction> = dto_transactions.iter().collect();
+                
+                // Prepare chart data points
+                self.chart.chart_data = self.prepare_chart_data(&transaction_refs, start_date, end_date);
+                
+                info!("📊 Generated {} chart data points", self.chart.chart_data.len());
+            }
+            Err(e) => {
+                warn!("❌ Failed to load chart data from backend: {}", e);
+            }
+        }
     }
     
     /// Prepare chart data points from transactions
@@ -325,30 +367,42 @@ impl AllowanceTrackerApp {
                 }
             }
             ChartPeriod::Days90 => {
-                // Weekly balances (simplified - just sample every 7 days)
+                // Weekly balances with intelligent sampling
+                let mut sample_dates = Vec::new();
                 let mut current_date = start_date;
                 
+                // Generate weekly sample dates
                 while current_date <= end_date {
+                    sample_dates.push(current_date);
+                    current_date += Duration::days(7);
+                }
+                
+                // CRITICAL: Always include the end date as final sample if not already included
+                if let Some(&last_sample) = sample_dates.last() {
+                    if last_sample < end_date {
+                        sample_dates.push(end_date);
+                    }
+                }
+                
+                for &sample_date in &sample_dates {
                     // Find the last transaction on or before this date
                     let mut latest_balance = 0.0;
                     
                     for tx in &sorted_transactions {
                         let tx_date = tx.date.date_naive();
-                        if tx_date <= current_date {
+                        if tx_date <= sample_date {
                             latest_balance = tx.balance;
                         } else {
-                            break;
+                            break; // Since transactions are sorted by date
                         }
                     }
                     
-                    let timestamp = current_date.and_hms_opt(12, 0, 0).unwrap().and_utc().timestamp() as f64;
+                    let timestamp = sample_date.and_hms_opt(12, 0, 0).unwrap().and_utc().timestamp() as f64;
                     data_points.push(ChartDataPoint {
-                        date: current_date,
+                        date: sample_date,
                         balance: latest_balance,
                         timestamp,
                     });
-                    
-                    current_date += Duration::days(7);
                 }
             }
             ChartPeriod::AllTime => {
@@ -390,9 +444,46 @@ impl AllowanceTrackerApp {
         let start_date = match period {
             ChartPeriod::Days30 => today - Duration::days(30),
             ChartPeriod::Days90 => today - Duration::days(90),
-            ChartPeriod::AllTime => today - Duration::days(365), // 1 year
+            ChartPeriod::AllTime => {
+                // For true "All Time", get the earliest transaction date from backend
+                match self.get_earliest_transaction_date() {
+                    Some(earliest_date) => earliest_date,
+                    None => today - Duration::days(365), // Fallback if no transactions
+                }
+            }
         };
         
         (start_date, today)
+    }
+    
+    /// Get the earliest transaction date from the backend
+    fn get_earliest_transaction_date(&self) -> Option<NaiveDate> {
+        // Query backend for ALL transactions (no date filter) to find the earliest
+        let query = TransactionListQuery {
+            after: None,
+            limit: Some(10000), // Get all transactions
+            start_date: None, // No start date filter
+            end_date: None,   // No end date filter
+        };
+        
+        match self.backend().transaction_service.list_transactions_domain(query) {
+            Ok(result) => {
+                if result.transactions.is_empty() {
+                    return None;
+                }
+                
+                // Find the earliest transaction date
+                let earliest_tx = result.transactions
+                    .iter()
+                    .min_by_key(|tx| tx.date)?;
+                
+                let earliest_date = earliest_tx.date.date_naive();
+                Some(earliest_date)
+            }
+            Err(e) => {
+                warn!("Failed to get earliest transaction date: {}", e);
+                None
+            }
+        }
     }
 } 
