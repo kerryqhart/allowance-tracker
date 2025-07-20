@@ -185,7 +185,7 @@ impl AllowanceTrackerApp {
                             .color(if self.chart.selected_period == ChartPeriod::Days30 { 
                                 egui::Color32::WHITE 
                             } else { 
-                                egui::Color32::from_rgb(100, 100, 100) 
+                                egui::Color32::from_gray(200) 
                             })
                     )
                     .min_size(egui::vec2(60.0, 28.0))
@@ -199,6 +199,7 @@ impl AllowanceTrackerApp {
                     
                     if ui.add(days_30_button).clicked() {
                         self.chart.selected_period = ChartPeriod::Days30;
+                        self.chart.chart_data.clear(); // Clear data to force reload
                         self.load_chart_data();
                     }
                     
@@ -211,7 +212,7 @@ impl AllowanceTrackerApp {
                             .color(if self.chart.selected_period == ChartPeriod::Days90 { 
                                 egui::Color32::WHITE 
                             } else { 
-                                egui::Color32::from_rgb(100, 100, 100) 
+                                egui::Color32::from_gray(200) 
                             })
                     )
                     .min_size(egui::vec2(60.0, 28.0))
@@ -225,6 +226,7 @@ impl AllowanceTrackerApp {
                     
                     if ui.add(days_90_button).clicked() {
                         self.chart.selected_period = ChartPeriod::Days90;
+                        self.chart.chart_data.clear(); // Clear data to force reload
                         self.load_chart_data();
                     }
                     
@@ -251,6 +253,7 @@ impl AllowanceTrackerApp {
                     
                     if ui.add(all_time_button).clicked() {
                         self.chart.selected_period = ChartPeriod::AllTime;
+                        self.chart.chart_data.clear(); // Clear data to force reload
                         self.load_chart_data();
                     }
                 });
