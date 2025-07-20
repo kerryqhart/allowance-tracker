@@ -19,6 +19,7 @@
 //! Each module has a clear responsibility and minimal dependencies on others.
 
 pub mod calendar_renderer;
+pub mod chart_renderer;
 pub mod data_loading;
 pub mod dropdown_menu;
 pub mod header;

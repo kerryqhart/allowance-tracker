@@ -21,6 +21,7 @@ use crate::backend::Backend;
 pub enum MainTab {
     Calendar,
     Table,
+    Chart,
 }
 
 /// Core application state containing essential app data

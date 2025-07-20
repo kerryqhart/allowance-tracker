@@ -11,6 +11,7 @@
 //! - `form_state` - Form inputs and validation states
 //! - `interaction_state` - User interaction state (selection, dropdowns)
 //! - `table_state` - Transaction table pagination and display state
+//! - `chart_state` - Chart visualization and time period state
 //!
 //! ## Architecture:
 //! Each state module is focused and has minimal dependencies on others.
@@ -23,6 +24,7 @@ pub mod modal_state;
 pub mod form_state;
 pub mod interaction_state;
 pub mod table_state;
+pub mod chart_state;
 
 // Re-export all state components for easy access
 pub use app_state::*;
@@ -31,4 +33,5 @@ pub use calendar_state::*;
 pub use modal_state::*;
 pub use form_state::*;
 pub use interaction_state::*;
-pub use table_state::*; 
+pub use table_state::*;
+pub use chart_state::*; 

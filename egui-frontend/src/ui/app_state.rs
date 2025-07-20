@@ -48,6 +48,7 @@ pub struct AllowanceTrackerApp {
     pub form: FormState,              // Form validation, inputs
     pub interaction: InteractionState, // User selections, dropdowns
     pub table: TableState,            // Transaction table pagination
+    pub chart: ChartState,            // Chart visualization and time periods
 }
 
 impl AllowanceTrackerApp {
@@ -75,6 +76,7 @@ impl AllowanceTrackerApp {
         let form = FormState::new();
         let interaction = InteractionState::new();
         let table = TableState::new();
+        let chart = ChartState::new();
         
         Ok(Self {
             // Modular state
@@ -85,6 +87,7 @@ impl AllowanceTrackerApp {
             form,
             interaction,
             table,
+            chart,
         })
     }
 
