@@ -22,22 +22,41 @@ use crate::ui::components::styling::{colors, draw_card_container};
 
 impl AllowanceTrackerApp {
     /// Draw the main goal section
+    /// 
+    /// ## MARGIN STRUCTURE (DO NOT CHANGE WITHOUT USER APPROVAL):
+    /// 1. **EXTERNAL MARGINS**: 20px on all sides from window edge to card background
+    ///    - Creates `content_rect` with 40px total reduction (20px × 2 sides)
+    ///    - Card background drawn at `content_rect` (NOT `available_rect`)
+    ///    - This matches calendar/table visual consistency
+    /// 
+    /// 2. **INTERNAL MARGINS**: 30px left padding inside the card for content positioning
+    ///    - All content (text, progress bar, etc.) positioned 30px from card's left edge
+    ///    - Creates proper breathing room inside the white card background
+    /// 
+    /// 3. **VERTICAL PADDING**: 35px top/bottom inside the card for content spacing
+    ///    - Ensures content doesn't touch card edges vertically
     pub fn draw_goal_section(&mut self, ui: &mut egui::Ui, available_rect: egui::Rect) {
-        info!("🎯 DRAW_GOAL_SECTION called - available_rect.height={:.0}", available_rect.height());
-        
-        // Use the same card layout as calendar and table
+        // EXTERNAL MARGINS: 20px margins from window edge to card background
+        // This creates the white card size that matches other tabs' visual style
         let content_rect = egui::Rect::from_min_size(
             available_rect.min + egui::vec2(20.0, 20.0),
             egui::vec2(available_rect.width() - 40.0, available_rect.height() - 40.0),
         );
         
-        // Draw card background
+        // Draw white card background at the content_rect (NOT available_rect)
         draw_card_container(ui, content_rect, 10.0);
         
-        // Goal content area
+        // GOAL CONTENT AREA: Position all content inside the white card background
         ui.allocate_ui_at_rect(content_rect, |ui| {
             ui.vertical(|ui| {
-                ui.add_space(20.0); // Top padding
+                // VERTICAL PADDING: 35px top spacing inside card
+                ui.add_space(35.0); 
+                
+                // INTERNAL MARGINS: Create 30px left padding for content positioning
+                // This moves all content (text, progress bar, etc.) away from card's left edge
+                ui.horizontal(|ui| {
+                    ui.add_space(30.0); // INTERNAL LEFT MARGIN: Content positioning inside card
+                    ui.vertical(|ui| {
                 
                 if self.goal.loading {
                     self.draw_goal_loading_state(ui);
@@ -49,9 +68,12 @@ impl AllowanceTrackerApp {
                     self.draw_create_goal_card(ui);
                 }
                 
-                ui.add_space(20.0); // Bottom padding
-            });
-        });
+                // VERTICAL PADDING: 35px bottom spacing inside card  
+                ui.add_space(35.0);
+                    }); // End: INTERNAL content vertical layout
+                }); // End: INTERNAL left margin horizontal layout  
+            }); // End: Card content vertical layout
+        }); // End: Goal content area
     }
     
     /// Draw goal loading state
@@ -88,12 +110,13 @@ impl AllowanceTrackerApp {
         let calculation = if let Some(ref c) = self.goal.goal_calculation { c.clone() } else { return; };
         
         ui.vertical(|ui| {
-                // Goal description (header moved to subheader)
-                ui.label(egui::RichText::new(&goal.description)
-                    .font(egui::FontId::new(18.0, egui::FontFamily::Proportional))
-                    .color(colors::TEXT_PRIMARY));
+                // Goal description with kid-friendly labeling
+                ui.label(egui::RichText::new(format!("🎯 You're saving for: {}", goal.description))
+                    .font(egui::FontId::new(20.0, egui::FontFamily::Proportional))
+                    .color(colors::TEXT_PRIMARY)
+                    .strong());
                 
-                ui.add_space(15.0);
+                ui.add_space(25.0); // Increased spacing between sections
                 
                 // Goal amount and progress
                 ui.horizontal(|ui| {
@@ -118,12 +141,12 @@ impl AllowanceTrackerApp {
                         }));
                 });
                 
-                ui.add_space(15.0);
+                ui.add_space(20.0); // Better spacing before progress bar
                 
                 // Progress bar
                 self.draw_goal_progress_bar(ui, &calculation);
                 
-                ui.add_space(15.0);
+                ui.add_space(25.0); // Increased spacing after progress bar
                 
                 // Completion information
                 if calculation.amount_needed <= 0.0 {
@@ -194,7 +217,7 @@ impl AllowanceTrackerApp {
     /// Draw create goal card
     fn draw_create_goal_card(&mut self, ui: &mut egui::Ui) {
         ui.vertical_centered(|ui| {
-            ui.add_space(50.0);
+            ui.add_space(60.0); // Increased top spacing for better centering
             
             // No goal message
             ui.label(egui::RichText::new("🎯 No Goal Set")
@@ -202,13 +225,13 @@ impl AllowanceTrackerApp {
                 .color(colors::TEXT_PRIMARY)
                 .strong());
             
-            ui.add_space(10.0);
+            ui.add_space(15.0); // Increased spacing between title and description
             
             ui.label(egui::RichText::new("Set a savings goal to track your progress!")
                 .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))
                 .color(colors::TEXT_SECONDARY));
             
-            ui.add_space(30.0);
+            ui.add_space(40.0); // Increased spacing before button
             
             // Create goal button
             let create_button = egui::Button::new(egui::RichText::new("Create Goal")
