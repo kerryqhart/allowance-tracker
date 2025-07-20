@@ -76,29 +76,6 @@ impl AllowanceTrackerApp {
             });
     }
     
-    /// Render the actual modal content
-    fn render_parental_control_modal_content(&mut self, ui: &mut egui::Ui) {
-        // Modal card background - compact and constrained
-        let modal_size = egui::vec2(300.0, 160.0);
-        
-        egui::Frame::window(&ui.style())
-            .fill(egui::Color32::WHITE)
-            .stroke(egui::Stroke::new(2.0, egui::Color32::from_rgb(126, 120, 229))) // Purple border
-            .rounding(egui::Rounding::same(12.0))
-            .inner_margin(egui::Margin::same(16.0))
-            .show(ui, |ui| {
-                // Constrain the modal to exact size
-                ui.set_min_size(modal_size);
-                ui.set_max_size(modal_size);
-                
-                match self.modal.parental_control_stage {
-                    crate::ui::app_state::ParentalControlStage::Question1 => self.render_question1(ui),
-                    crate::ui::app_state::ParentalControlStage::Question2 => self.render_question2(ui),
-                    crate::ui::app_state::ParentalControlStage::Authenticated => self.render_success(ui),
-                }
-            });
-    }
-    
     /// Render first question: "Are you Mom or Dad?"
     fn render_question1(&mut self, ui: &mut egui::Ui) {
         ui.vertical_centered(|ui| {

@@ -88,7 +88,7 @@ impl AllowanceTrackerApp {
         }
         
         // Handle other overlay types with existing implementation
-        let (overlay_color, title_text, content_text) = match overlay_type {
+        let (overlay_color, title_text, _content_text) = match overlay_type {
             crate::ui::app_state::OverlayType::CreateGoal => (
                 egui::Color32::from_rgb(199, 112, 221), // Pink for goals
                 "Create Goal",

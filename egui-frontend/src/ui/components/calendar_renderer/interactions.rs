@@ -109,7 +109,6 @@ impl AllowanceTrackerApp {
                 self.calendar.modal_just_opened = true; // Prevent backdrop click detection this frame
                 true
             }
-            _ => false,
         }
     }
 

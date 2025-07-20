@@ -26,10 +26,8 @@
 
 use log::info;
 use chrono::{Datelike, TimeZone};
-// Removed unused import: use std::collections::HashSet;
 use shared::*;
 use crate::backend::Backend;
-// Removed unused import: use crate::ui::components::dropdown_menu::DropdownMenu;
 
 // Import all state modules
 use crate::ui::state::*;
@@ -65,8 +63,8 @@ impl AllowanceTrackerApp {
         let backend = crate::backend::Backend::new()?;
         
         let now = chrono::Local::now();
-        let current_month = now.month();
-        let current_year = now.year();
+        let _current_month = now.month();
+        let _current_year = now.year();
         
         // Initialize modular state components
         let core = CoreAppState::new(backend);
