@@ -1,9 +1,0 @@
-Fix subheader button alignment
-
-- Updated toggle buttons height from 30px to 35px to match navigation buttons
-- Improved vertical centering with proper layout alignment
-- Both navigation controls and view toggles now consistently aligned
-
-The Calendar/Table toggle buttons on the right now properly align with 
-the month navigation arrows on the left, eliminating the visual 
-misalignment that was caused by height differences. 
