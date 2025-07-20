@@ -1,5 +1,5 @@
 use eframe::egui;
-use chrono::{NaiveDate, Datelike};
+use chrono::NaiveDate;
 use shared::Transaction;
 use crate::ui::app_state::OverlayType;
 

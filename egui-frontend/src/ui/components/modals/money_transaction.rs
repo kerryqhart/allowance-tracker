@@ -24,7 +24,7 @@ impl AllowanceTrackerApp {
         config: &crate::ui::app_state::MoneyTransactionModalConfig,
         form_state: &mut crate::ui::app_state::MoneyTransactionFormState,
         is_visible: bool,
-        overlay_type: crate::ui::app_state::OverlayType,
+        _overlay_type: crate::ui::app_state::OverlayType,
     ) -> bool {
         if !is_visible {
             return false;
@@ -198,16 +198,19 @@ impl AllowanceTrackerApp {
                                         // Cancel button
                                         let cancel_button = egui::Button::new(egui::RichText::new("Cancel")
                                             .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))
-                                            .color(egui::Color32::from_rgb(100, 100, 100)))
-                                            .fill(egui::Color32::from_rgb(245, 245, 245))
-                                            .stroke(egui::Stroke::new(1.5, egui::Color32::from_rgb(200, 200, 200)))
+                                            .color(egui::Color32::WHITE))
+                                            .fill(egui::Color32::from_rgb(120, 120, 120))
+                                            .stroke(egui::Stroke::new(2.0, egui::Color32::from_rgb(120, 120, 120)))
                                             .rounding(egui::Rounding::same(10.0))
-                                            .min_size(egui::vec2(90.0, 40.0));
+                                            .min_size(egui::vec2(100.0, 40.0));
                                         
                                         if ui.add(cancel_button).clicked() {
+                                            // Clear form and close modal
                                             form_state.clear();
-                                            self.active_overlay = None;
-                                            self.selected_day = None;
+                                            self.calendar.selected_day = None;
+                                            
+                                            // TEMPORARY: Sync compatibility field
+                                            // self.selected_day = None; // Removed
                                         }
                                     });
                                     
@@ -217,27 +220,36 @@ impl AllowanceTrackerApp {
                     });
                 });
                 
-                // Handle backdrop clicks to close modal (skip if modal was just opened this frame)
-                if !self.modal_just_opened && ui.ctx().input(|i| i.pointer.any_click()) {
-                    let pointer_pos = ui.ctx().input(|i| i.pointer.interact_pos());
-                    if let Some(pos) = pointer_pos {
+                // Handle modal backdrop click to close
+                if is_visible {
+                    // Only detect backdrop clicks after the modal has been open for at least one frame
+                    // This prevents the modal from immediately closing when it's opened by a button click
+                    if !self.calendar.modal_just_opened && ui.ctx().input(|i| i.pointer.any_click()) {
                         // Check if the click was outside the modal area
-                        let modal_center = screen_rect.center();
-                        let modal_rect = egui::Rect::from_center_size(
-                            modal_center,
-                            egui::vec2(450.0, 350.0)
-                        );
-                        
-                        if !modal_rect.contains(pos) {
-                            form_state.clear();
-                            self.active_overlay = None;
-                            self.selected_day = None;
+                        if let Some(pointer_pos) = ui.ctx().input(|i| i.pointer.latest_pos()) {
+                            let modal_rect = egui::Rect::from_center_size(
+                                ui.ctx().screen_rect().center(),
+                                egui::vec2(450.0, 350.0)
+                            );
+                            
+                            if !modal_rect.contains(pointer_pos) {
+                                // Click was outside modal - close it
+                                form_state.clear();
+                                self.calendar.active_overlay = None;
+                                self.calendar.selected_day = None;
+                                
+                                // TEMPORARY: Sync compatibility fields
+                                // self.active_overlay = None; // Removed
+                                // self.selected_day = None; // Removed
+                            }
                         }
                     }
+                    
+                    // Reset the modal_just_opened flag after the first frame
+                    if self.calendar.modal_just_opened {
+                        self.calendar.modal_just_opened = false;
+                    }
                 }
-                
-                // Reset the modal_just_opened flag at the end of the frame
-                self.modal_just_opened = false;
             });
             
         form_submitted

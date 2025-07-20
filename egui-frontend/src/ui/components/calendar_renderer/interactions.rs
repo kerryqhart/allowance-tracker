@@ -1,30 +1,28 @@
 use eframe::egui;
 use chrono::NaiveDate;
-use crate::ui::app_state::{AllowanceTrackerApp, OverlayType};
+use crate::ui::app_state::AllowanceTrackerApp;
 use super::types::DayMenuGlyph;
 use super::styling::action_icons;
 
 impl AllowanceTrackerApp {
-    /// Handle clicking on a calendar day - toggle selection and clear overlay
-    pub fn handle_day_click(&mut self, clicked_date: NaiveDate) {
-        if let Some(selected_date) = self.selected_day {
+    /// Handle clicks on calendar days
+    pub fn handle_calendar_day_click(&mut self, clicked_date: chrono::NaiveDate) {
+        if let Some(selected_date) = self.calendar.selected_day {
             if selected_date == clicked_date {
-                // Clicking the same day - deselect it
-                self.selected_day = None;
-                self.active_overlay = None;
-                println!("📅 Deselected day: {}", clicked_date);
-            } else {
-                // Clicking a different day - select it and clear overlay
-                self.selected_day = Some(clicked_date);
-                self.active_overlay = None;
-                println!("📅 Selected day: {}", clicked_date);
+                // Clicking the same day again deselects it
+                self.calendar.selected_day = None;
+                
+                // TEMPORARY: Sync compatibility field
+                return;
             }
-        } else {
-            // No day selected - select this day
-            self.selected_day = Some(clicked_date);
-            self.active_overlay = None;
-            println!("📅 Selected day: {}", clicked_date);
         }
+        
+        // Select new day
+        self.calendar.selected_day = Some(clicked_date);
+        
+        // TEMPORARY: Sync compatibility field  
+        
+        log::info!("📅 Selected day: {}", clicked_date);
     }
 
     /// Render action icons above the selected day
@@ -74,8 +72,8 @@ impl AllowanceTrackerApp {
                         .rounding(egui::Rounding::same(4.0));
                     
                     if ui.add_sized(glyph_size, button).clicked() {
-                        self.active_overlay = Some(glyph.overlay_type());
-                        self.modal_just_opened = true; // Prevent backdrop click detection this frame
+                        self.calendar.active_overlay = Some(glyph.overlay_type());
+                        self.calendar.modal_just_opened = true; // Prevent backdrop click detection this frame
                         println!("🎯 Day menu glyph '{}' clicked for date: {}", glyph_text, selected_date);
                     }
                 });
@@ -84,40 +82,71 @@ impl AllowanceTrackerApp {
 
     /// Handle transaction deletion (placeholder for now)
     pub fn handle_transaction_deletion(&mut self) -> bool {
-        if self.selected_transaction_ids.is_empty() {
+        if self.interaction.selected_transaction_ids.is_empty() {
             println!("⚠️ No transactions selected for deletion");
             return false;
         }
 
         println!("🗑️ Would delete {} transactions: {:?}", 
-                 self.selected_transaction_ids.len(), 
-                 self.selected_transaction_ids);
+                 self.interaction.selected_transaction_ids.len(), 
+                 self.interaction.selected_transaction_ids);
 
         // TODO: Implement actual deletion logic
         // For now, just clear the selection
-        self.selected_transaction_ids.clear();
-        self.transaction_selection_mode = false;
+        self.interaction.selected_transaction_ids.clear();
+        self.interaction.transaction_selection_mode = false;
         
         true
     }
 
-    /// Handle calendar day expansion/collapse
-    pub fn toggle_day_expansion(&mut self, date: NaiveDate) {
-        if self.expanded_day == Some(date) {
-            self.expanded_day = None;
-            println!("📅 Collapsed day: {}", date);
-        } else {
-            self.expanded_day = Some(date);
-            println!("📅 Expanded day: {}", date);
+    /// Handle click on day action glyph (money buttons)
+    pub fn handle_action_glyph_click(&mut self, glyph: &DayMenuGlyph) -> bool {
+        // Create action overlay for the clicked glyph type
+        match glyph {
+            DayMenuGlyph::AddMoney | DayMenuGlyph::SpendMoney => {
+                log::info!("💰 Action glyph clicked: {:?}", glyph);
+                self.calendar.active_overlay = Some(glyph.overlay_type());
+                self.calendar.modal_just_opened = true; // Prevent backdrop click detection this frame
+                true
+            }
+            _ => false,
         }
     }
 
-    /// Handle clicking outside calendar to clear selection
+    /// Exit transaction selection mode
+    pub fn exit_transaction_selection(&mut self) {
+        if self.interaction.selected_transaction_ids.is_empty() {
+            log::info!("🔄 Exiting transaction selection mode (no transactions selected)");
+        } else {
+            log::info!("🔄 Exiting transaction selection mode. {} transaction(s) were selected: {:?}", 
+                      self.interaction.selected_transaction_ids.len(), 
+                      self.interaction.selected_transaction_ids);
+        }
+        
+        self.interaction.selected_transaction_ids.clear();
+        self.interaction.transaction_selection_mode = false;
+        self.clear_messages();
+    }
+
+    /// Toggle expanded state for a calendar day
+    pub fn toggle_day_expanded(&mut self, date: chrono::NaiveDate) {
+        if self.calendar.expanded_day == Some(date) {
+            self.calendar.expanded_day = None;
+            log::info!("📅 Collapsed day: {}", date);
+        } else {
+            self.calendar.expanded_day = Some(date);
+            log::info!("📅 Expanded day: {}", date);
+        }
+    }
+
+    /// Handle clicks outside of the calendar area to clear selection
     pub fn handle_calendar_background_click(&mut self) {
-        if self.selected_day.is_some() {
-            self.selected_day = None;
-            self.active_overlay = None;
-            println!("📅 Cleared day selection");
+        if self.calendar.selected_day.is_some() {
+            self.calendar.selected_day = None;
+            
+            // TEMPORARY: Sync compatibility field
+            
+            log::info!("📅 Cleared day selection");
         }
     }
 } 

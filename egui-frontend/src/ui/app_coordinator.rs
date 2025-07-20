@@ -28,8 +28,6 @@
 use eframe::egui;
 use crate::ui::app_state::AllowanceTrackerApp;
 use crate::ui::components::styling::{setup_kid_friendly_style, draw_image_background};
-use crate::ui::components::modals::*;
-use crate::ui::*;
 
 impl eframe::App for AllowanceTrackerApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
@@ -39,16 +37,16 @@ impl eframe::App for AllowanceTrackerApp {
         
         // Handle ESC key to close dropdown
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-            self.child_dropdown.is_open = false;
+            self.interaction.child_dropdown.is_open = false;
         }
         
         // Load initial data on first run
-        if self.loading && self.current_child.is_none() {
+        if self.ui.loading && self.current_child().is_none() {
             self.load_initial_data();
         }
         
         // Clear messages after a delay
-        if self.error_message.is_some() || self.success_message.is_some() {
+        if self.ui.error_message.is_some() || self.ui.success_message.is_some() {
             ctx.request_repaint_after(std::time::Duration::from_secs(5));
         }
         
@@ -58,7 +56,7 @@ impl eframe::App for AllowanceTrackerApp {
             let full_rect = ui.available_rect_before_wrap();
             draw_image_background(ui, full_rect);
             
-            if self.loading {
+            if self.ui.loading {
                 self.render_loading_screen(ui);
                 return;
             }
@@ -66,30 +64,30 @@ impl eframe::App for AllowanceTrackerApp {
             // STEP 2: Four-layer layout with selection controls bar and subheader for toggle buttons
             // Calculate layout areas - optimized reservations for better space utilization
             let header_height = 70.0; // Reduced from 80px
-            let selection_bar_height = if self.transaction_selection_mode { 50.0 } else { 0.0 };
-            let subheader_height = 40.0; // Reduced from 50px
+            let selection_bar_height = if self.interaction.transaction_selection_mode { 50.0 } else { 0.0 };
+            let subheader_height = 50.0; // Toggle buttons area
             
+            // Content area dimensions (remaining space after header, selection bar, and subheader)
+            let content_height = full_rect.height() - header_height - selection_bar_height - subheader_height;
+            
+            // Define rectangles for each layer
             let header_rect = egui::Rect::from_min_size(
                 full_rect.min,
                 egui::vec2(full_rect.width(), header_height)
             );
             
-            let selection_bar_y = full_rect.min.y + header_height;
             let selection_bar_rect = egui::Rect::from_min_size(
-                egui::pos2(full_rect.min.x, selection_bar_y),
+                egui::pos2(full_rect.left(), full_rect.top() + header_height),
                 egui::vec2(full_rect.width(), selection_bar_height)
             );
             
-            let subheader_y = full_rect.min.y + header_height + selection_bar_height;
             let subheader_rect = egui::Rect::from_min_size(
-                egui::pos2(full_rect.min.x, subheader_y),
+                egui::pos2(full_rect.left(), full_rect.top() + header_height + selection_bar_height),
                 egui::vec2(full_rect.width(), subheader_height)
             );
             
-            let content_y = full_rect.min.y + header_height + selection_bar_height + subheader_height;
-            let content_height = full_rect.height() - header_height - selection_bar_height - subheader_height;
             let content_rect = egui::Rect::from_min_size(
-                egui::pos2(full_rect.min.x, content_y),
+                egui::pos2(full_rect.left(), full_rect.top() + header_height + selection_bar_height + subheader_height),
                 egui::vec2(full_rect.width(), content_height)
             );
             
@@ -104,7 +102,7 @@ impl eframe::App for AllowanceTrackerApp {
             });
             
             // Layer 2: Selection controls bar (only when in selection mode)
-            if self.transaction_selection_mode {
+            if self.interaction.transaction_selection_mode {
                 ui.allocate_ui_at_rect(selection_bar_rect, |ui| {
                     self.render_selection_controls_bar(ui);
                 });
@@ -155,7 +153,7 @@ impl AllowanceTrackerApp {
     fn draw_tab_specific_controls(&mut self, ui: &mut egui::Ui) {
         use crate::ui::app_state::MainTab;
         
-        match self.current_tab {
+        match self.current_tab() {
             MainTab::Calendar => {
                 self.draw_calendar_navigation_controls(ui);
             }
@@ -182,13 +180,13 @@ impl AllowanceTrackerApp {
                 .min_size(egui::vec2(35.0, 35.0));
             
             if ui.add(prev_button).clicked() {
-                self.navigate_to_previous_month();
+                self.navigate_month(-1);
             }
             
             ui.add_space(15.0);
             
             // Current month and year display - disable selection to prevent dropdown interference
-            let month_year_text = format!("{} {}", self.get_current_month_name(), self.selected_year);
+            let month_year_text = format!("{} {}", self.get_current_month_name(), self.calendar.selected_year);
             ui.add(egui::Label::new(egui::RichText::new(month_year_text)
                 .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))
                 .color(egui::Color32::WHITE)

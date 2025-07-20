@@ -18,15 +18,15 @@ use crate::ui::app_state::AllowanceTrackerApp;
 impl AllowanceTrackerApp {
     /// Render day action overlay based on active overlay type
     pub fn render_day_action_overlay(&mut self, ctx: &egui::Context) {
-        let overlay_type = match self.active_overlay {
+        let overlay_type = match self.calendar.active_overlay {
             Some(overlay) => overlay,
-            None => return,
+            None => return, // No overlay to show
         };
         
         // Handle AddMoney with generic modal
         if overlay_type == crate::ui::app_state::OverlayType::AddMoney {
             let config = crate::ui::app_state::MoneyTransactionModalConfig::income_config();
-            let mut form_state = self.income_form_state.clone();
+            let mut form_state = self.form.income_form_state.clone();
             let form_submitted = self.render_money_transaction_modal(
                 ctx,
                 &config,
@@ -36,15 +36,19 @@ impl AllowanceTrackerApp {
             );
             
             // Update the form state back to the struct
-            self.income_form_state = form_state;
+            self.form.income_form_state = form_state;
             
             if form_submitted {
                 // Submit to backend and handle response
                 let success = self.submit_income_transaction();
                 if success {
-                    self.income_form_state.clear();
-                    self.active_overlay = None;
-                    self.selected_day = None;
+                    self.form.income_form_state.clear();
+                    self.calendar.active_overlay = None;
+                    self.calendar.selected_day = None;
+                    
+                    // TEMPORARY: Sync compatibility fields
+                    // self.active_overlay = None; // Removed
+                    // self.selected_day = None; // Removed
                 }
                 // Note: Error messages are handled in submit_income_transaction()
             }
@@ -54,7 +58,7 @@ impl AllowanceTrackerApp {
         // Handle SpendMoney with generic modal
         if overlay_type == crate::ui::app_state::OverlayType::SpendMoney {
             let config = crate::ui::app_state::MoneyTransactionModalConfig::expense_config();
-            let mut form_state = self.expense_form_state.clone();
+            let mut form_state = self.form.expense_form_state.clone();
             let form_submitted = self.render_money_transaction_modal(
                 ctx,
                 &config,
@@ -64,15 +68,19 @@ impl AllowanceTrackerApp {
             );
             
             // Update the form state back to the struct
-            self.expense_form_state = form_state;
+            self.form.expense_form_state = form_state;
             
             if form_submitted {
                 // Submit to backend and handle response
                 let success = self.submit_expense_transaction();
                 if success {
-                    self.expense_form_state.clear();
-                    self.active_overlay = None;
-                    self.selected_day = None;
+                    self.form.expense_form_state.clear();
+                    self.calendar.active_overlay = None;
+                    self.calendar.selected_day = None;
+                    
+                    // TEMPORARY: Sync compatibility fields
+                    // self.active_overlay = None; // Removed
+                    // self.selected_day = None; // Removed
                 }
                 // Note: Error messages are handled in submit_expense_transaction()
             }
@@ -150,40 +158,39 @@ impl AllowanceTrackerApp {
                                             
                                             ui.add_space(20.0);
                                             
-                                            // Description field with validation
+                                            // Character counter - shows how many characters are left
                                             ui.horizontal(|ui| {
                                                 ui.label(egui::RichText::new("Description:")
                                                     .font(egui::FontId::new(14.0, egui::FontFamily::Proportional))
                                                     .color(egui::Color32::from_rgb(60, 60, 60)));
                                                 
-                                                // Character count
-                                                let char_count = self.add_money_description.len();
-                                                let count_color = if char_count > 70 { 
-                                                    egui::Color32::from_rgb(220, 50, 50) // Red if over limit
-                                                } else if char_count > 56 { 
-                                                    egui::Color32::from_rgb(255, 140, 0) // Orange if approaching limit
-                                                } else { 
-                                                    egui::Color32::from_rgb(120, 120, 120) // Gray for normal
-                                                };
-                                                
                                                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                                    ui.label(egui::RichText::new(format!("{}/70", char_count))
+                                                    let char_count = self.form.add_money_description.len();
+                                                    let max_chars = 70;
+                                                    let color = if char_count > max_chars {
+                                                        egui::Color32::from_rgb(220, 50, 50) // Red if over limit
+                                                    } else if char_count > max_chars - 10 {
+                                                        egui::Color32::from_rgb(255, 165, 0) // Orange if close to limit
+                                                    } else {
+                                                        egui::Color32::from_rgb(120, 120, 120) // Gray normal
+                                                    };
+                                                    
+                                                    ui.label(egui::RichText::new(format!("{}/{}", char_count, max_chars))
                                                         .font(egui::FontId::new(12.0, egui::FontFamily::Proportional))
-                                                        .color(count_color));
+                                                        .color(color));
                                                 });
                                             });
                                             ui.add_space(5.0);
                                             
-                                            // Description field with default egui styling
                                             let description_response = ui.add(
-                                                egui::TextEdit::singleline(&mut self.add_money_description)
+                                                egui::TextEdit::singleline(&mut self.form.add_money_description)
                                                     .hint_text("What is this money for?")
                                                     .desired_width(400.0)
                                                     .font(egui::FontId::new(14.0, egui::FontFamily::Proportional))
                                             );
                                             
                                             // Show description error message
-                                            if let Some(error) = &self.add_money_description_error {
+                                            if let Some(error) = &self.form.add_money_description_error {
                                                 ui.add_space(3.0);
                                                 ui.label(egui::RichText::new(error)
                                                     .font(egui::FontId::new(12.0, egui::FontFamily::Proportional))
@@ -211,7 +218,7 @@ impl AllowanceTrackerApp {
                                                 
                                                 // Amount field with default egui styling
                                                 let _amount_response = ui.add(
-                                                    egui::TextEdit::singleline(&mut self.add_money_amount)
+                                                    egui::TextEdit::singleline(&mut self.form.add_money_amount)
                                                         .hint_text("0.00")
                                                         .desired_width(120.0)
                                                         .font(egui::FontId::new(14.0, egui::FontFamily::Proportional))
@@ -224,18 +231,99 @@ impl AllowanceTrackerApp {
                                             });
                                             
                                             // Show amount error message
-                                            if let Some(error) = &self.add_money_amount_error {
+                                            if let Some(error) = &self.form.add_money_amount_error {
                                                 ui.add_space(3.0);
                                                 ui.label(egui::RichText::new(error)
                                                     .font(egui::FontId::new(12.0, egui::FontFamily::Proportional))
                                                     .color(egui::Color32::from_rgb(220, 50, 50)));
                                             }
+                                            
+                                            ui.add_space(30.0);
+                                            
+                                            // Buttons
+                                            ui.horizontal(|ui| {
+                                                ui.add_space(50.0);
+                                                
+                                                // Submit button - only enabled if form is valid
+                                                let button_enabled = self.form.add_money_is_valid && !self.form.add_money_description.trim().is_empty() && !self.form.add_money_amount.trim().is_empty();
+                                                
+                                                let button_color = if button_enabled {
+                                                    egui::Color32::from_rgb(34, 139, 34) // Green
+                                                } else {
+                                                    egui::Color32::from_rgb(180, 180, 180) // Gray when disabled
+                                                };
+                                                
+                                                let add_button = egui::Button::new(egui::RichText::new("Add Extra Money")
+                                                    .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))
+                                                    .color(egui::Color32::WHITE))
+                                                    .fill(button_color)
+                                                    .stroke(egui::Stroke::new(2.0, button_color))
+                                                    .rounding(egui::Rounding::same(10.0))
+                                                    .min_size(egui::vec2(150.0, 40.0));
+                                                
+                                                let add_button_response = ui.add(add_button);
+                                                if add_button_response.clicked() && button_enabled {
+                                                    // Submit form using existing validation
+                                                    log::info!("💰 Add money form submitted: '{}', ${}", 
+                                                              self.form.add_money_description, self.form.add_money_amount);
+                                                    
+                                                    self.ui.success_message = Some("Add Extra Money functionality coming in next phase!".to_string());
+                                                    self.calendar.active_overlay = None;
+                                                    self.calendar.selected_day = None;
+                                                    
+                                                    // TEMPORARY: Sync compatibility fields
+                                                    // self.active_overlay = None; // Removed
+                                                    // self.selected_day = None; // Removed
+                                                }
+                                                
+                                                // Show tooltip for disabled button
+                                                if !button_enabled {
+                                                    add_button_response.on_hover_text("Please fix the errors above to continue");
+                                                }
+                                                
+                                                ui.add_space(30.0);
+                                                
+                                                // Cancel button
+                                                let cancel_button = egui::Button::new(egui::RichText::new("Cancel")
+                                                    .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))
+                                                    .color(egui::Color32::from_rgb(100, 100, 100)))
+                                                    .fill(egui::Color32::from_rgb(245, 245, 245))
+                                                    .stroke(egui::Stroke::new(1.5, egui::Color32::from_rgb(200, 200, 200)))
+                                                    .rounding(egui::Rounding::same(10.0))
+                                                    .min_size(egui::vec2(90.0, 40.0));
+                                                
+                                                if ui.add(cancel_button).clicked() {
+                                                    // Clear form fields when canceling Add Money
+                                                    self.clear_add_money_form();
+                                                    self.calendar.active_overlay = None;
+                                                    self.calendar.selected_day = None;
+                                                    
+                                                    // TEMPORARY: Sync compatibility fields
+                                                    // self.active_overlay = None; // Removed
+                                                    // self.selected_day = None; // Removed
+                                                }
+                                            });
+                                            
+                                            ui.add_space(15.0);
                                         },
                                         _ => {
                                             // Default content for other overlay types
-                                            ui.label(egui::RichText::new(content_text)
-                                                .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))
-                                                .color(egui::Color32::from_rgb(80, 80, 80)));
+                                            ui.label("Feature coming soon!");
+                                            
+                                            ui.add_space(20.0);
+                                            
+                                            // Cancel button for other types
+                                            let cancel_button = egui::Button::new("Cancel")
+                                                .min_size(egui::vec2(80.0, 35.0));
+                                            
+                                            if ui.add(cancel_button).clicked() {
+                                                self.calendar.active_overlay = None;
+                                                self.calendar.selected_day = None;
+                                                
+                                                // TEMPORARY: Sync compatibility fields
+                                                // self.active_overlay = None; // Removed
+                                                // self.selected_day = None; // Removed
+                                            }
                                         }
                                     }
                                     
@@ -255,7 +343,7 @@ impl AllowanceTrackerApp {
                                         // Check if button should be enabled (for Add Money, check validation)
                                         let button_enabled = match overlay_type {
                                             crate::ui::app_state::OverlayType::AddMoney => {
-                                                self.add_money_is_valid && !self.add_money_description.trim().is_empty() && !self.add_money_amount.trim().is_empty()
+                                                self.form.add_money_is_valid && !self.form.add_money_description.trim().is_empty() && !self.form.add_money_amount.trim().is_empty()
                                             },
                                             _ => true, // Other overlay types always enabled
                                         };
@@ -287,15 +375,15 @@ impl AllowanceTrackerApp {
                                                 crate::ui::app_state::OverlayType::AddMoney => {
                                                     // TODO: Implement add money logic in next phase
                                                     log::info!("💰 Add Extra Money clicked - Description: '{}', Amount: '{}'", 
-                                                              self.add_money_description, self.add_money_amount);
-                                                    self.success_message = Some("Add Extra Money functionality coming in next phase!".to_string());
+                                                              self.form.add_money_description, self.form.add_money_amount);
+                                                    self.ui.success_message = Some("Add Extra Money functionality coming in next phase!".to_string());
                                                 },
                                                 _ => {
                                                     // Default behavior for other overlays
                                                 }
                                             }
-                                            self.active_overlay = None;
-                                            self.selected_day = None;
+                                            self.calendar.active_overlay = None;
+                                            self.calendar.selected_day = None;
                                         }
                                         
                                         // Show tooltip for disabled button
@@ -319,8 +407,8 @@ impl AllowanceTrackerApp {
                                             if overlay_type == crate::ui::app_state::OverlayType::AddMoney {
                                                 self.clear_add_money_form();
                                             }
-                                            self.active_overlay = None;
-                                            self.selected_day = None;
+                                            self.calendar.active_overlay = None;
+                                            self.calendar.selected_day = None;
                                         }
                                     });
                                     
@@ -330,30 +418,30 @@ impl AllowanceTrackerApp {
                     });
                 });
                 
-                // Handle backdrop clicks to close modal (skip if modal was just opened this frame)
-                if !self.modal_just_opened && ui.ctx().input(|i| i.pointer.any_click()) {
+                // Handle backdrop clicks to close overlay (skip if modal was just opened this frame)
+                if !self.calendar.modal_just_opened && ui.ctx().input(|i| i.pointer.any_click()) {
                     let pointer_pos = ui.ctx().input(|i| i.pointer.interact_pos());
                     if let Some(pos) = pointer_pos {
-                        // Check if the click was outside the modal area
-                        let modal_center = screen_rect.center();
+                        // Check if the click was outside the overlay area
+                        let modal_center = ui.ctx().screen_rect().center();
                         let modal_rect = egui::Rect::from_center_size(
                             modal_center,
-                            egui::vec2(450.0, 350.0)
+                            egui::vec2(500.0, 400.0)
                         );
                         
                         if !modal_rect.contains(pos) {
-                            // Clear form fields when clicking backdrop on Add Money
-                            if overlay_type == crate::ui::app_state::OverlayType::AddMoney {
-                                self.clear_add_money_form();
-                            }
-                            self.active_overlay = None;
-                            self.selected_day = None;
+                            self.calendar.active_overlay = None;
+                            self.calendar.selected_day = None;
+                            
+                            // TEMPORARY: Sync compatibility fields
+                            // self.active_overlay = None; // Removed
+                            // self.selected_day = None; // Removed
                         }
                     }
                 }
                 
                 // Reset the modal_just_opened flag at the end of the frame
-                self.modal_just_opened = false;
+                self.calendar.modal_just_opened = false;
             });
     }
 } 

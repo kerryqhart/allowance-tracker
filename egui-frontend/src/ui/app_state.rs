@@ -26,147 +26,29 @@
 
 use log::info;
 use chrono::{Datelike, TimeZone};
-use std::collections::HashSet;
+// Removed unused import: use std::collections::HashSet;
 use shared::*;
 use crate::backend::Backend;
-use crate::ui::components::dropdown_menu::DropdownMenu;
+// Removed unused import: use crate::ui::components::dropdown_menu::DropdownMenu;
 
 // Import all state modules
 use crate::ui::state::*;
 
 // Re-export types from state modules to avoid duplication
 pub use crate::ui::state::{MainTab, OverlayType, ParentalControlStage, ProtectedAction, TransactionType};
-
-/// Generic configuration for money transaction modals (income/expense)
-pub struct MoneyTransactionModalConfig {
-    // Visual elements
-    pub title: &'static str,
-    pub icon: &'static str,
-    pub button_text: &'static str,
-    pub hint_text: &'static str,
-    pub color: egui::Color32,
-    
-    // Field configurations
-    pub description_placeholder: &'static str,
-    pub amount_placeholder: &'static str,
-    pub max_description_length: usize,
-    
-    // Transaction type for backend integration
-    pub transaction_type: TransactionType,
-}
-
-/// Generic form state for money transaction modals
-#[derive(Debug, Clone)]
-pub struct MoneyTransactionFormState {
-    pub description: String,
-    pub amount: String,
-    pub description_error: Option<String>,
-    pub amount_error: Option<String>,
-    pub is_valid: bool,
-}
-
-impl MoneyTransactionFormState {
-    pub fn new() -> Self {
-        Self {
-            description: String::new(),
-            amount: String::new(),
-            description_error: None,
-            amount_error: None,
-            is_valid: true,
-        }
-    }
-    
-    pub fn clear(&mut self) {
-        self.description.clear();
-        self.amount.clear();
-        self.description_error = None;
-        self.amount_error = None;
-        self.is_valid = true;
-    }
-}
-
-impl MoneyTransactionModalConfig {
-    /// Configuration for income (Add Money) modal
-    pub fn income_config() -> Self {
-        Self {
-            title: "Add Extra Money",
-            icon: "💰",
-            button_text: "Add Extra Money",
-            hint_text: "Enter the amount of money you received and what it was for",
-            color: egui::Color32::from_rgb(34, 139, 34), // Green
-            description_placeholder: "What is this money for?",
-            amount_placeholder: "0.00",
-            max_description_length: 70,
-            transaction_type: TransactionType::Income,
-        }
-    }
-    
-    /// Configuration for expense (Spend Money) modal  
-    pub fn expense_config() -> Self {
-        Self {
-            title: "Spend Money",
-            icon: "💸", 
-            button_text: "Spend Money",
-            hint_text: "Enter the amount you want to spend from your allowance",
-            color: egui::Color32::from_rgb(128, 128, 128), // Gray (as requested)
-            description_placeholder: "What did you buy?",
-            amount_placeholder: "0.00",
-            max_description_length: 70,
-            transaction_type: TransactionType::Expense,
-        }
-    }
-}
+pub use crate::ui::state::form_state::{MoneyTransactionModalConfig, MoneyTransactionFormState};
 
 /// Main application struct for the egui allowance tracker
 /// 
 /// This uses a modular architecture with focused state modules for maintainability.
 pub struct AllowanceTrackerApp {
-    // NEW: Modular state architecture
+    // Modular state architecture
     pub core: CoreAppState,           // Backend, child, balance, tab
     pub ui: UIState,                  // Loading, messages
     pub calendar: CalendarState,      // Calendar navigation, overlays  
     pub modal: ModalState,            // All modal states
     pub form: FormState,              // Form validation, inputs
     pub interaction: InteractionState, // User selections, dropdowns
-    
-    // TEMPORARY: Backward compatibility fields during migration
-    // These mirror the modular fields to allow gradual component migration
-    pub backend: Backend,
-    pub current_child: Option<Child>,
-    pub current_balance: f64,
-    pub loading: bool,
-    pub error_message: Option<String>,
-    pub success_message: Option<String>,
-    pub current_tab: MainTab,
-    pub calendar_loading: bool,
-    pub calendar_transactions: Vec<Transaction>,
-    pub calendar_month: Option<shared::CalendarMonth>,
-    pub selected_month: u32,
-    pub selected_year: i32,
-    pub selected_day: Option<chrono::NaiveDate>,
-    pub expanded_day: Option<chrono::NaiveDate>,
-    pub active_overlay: Option<OverlayType>,
-    pub modal_just_opened: bool,
-    pub show_add_money_modal: bool,
-    pub show_child_selector: bool,
-    pub show_allowance_config_modal: bool,
-    pub show_parental_control_modal: bool,
-    pub parental_control_stage: ParentalControlStage,
-    pub pending_protected_action: Option<ProtectedAction>,
-    pub parental_control_input: String,
-    pub parental_control_error: Option<String>,
-    pub parental_control_loading: bool,
-    pub transaction_selection_mode: bool,
-    pub selected_transaction_ids: HashSet<String>,
-    pub child_dropdown: DropdownMenu,
-    pub settings_dropdown: DropdownMenu,
-    pub add_money_amount: String,
-    pub add_money_description: String,
-    pub add_money_description_error: Option<String>,
-    pub add_money_amount_error: Option<String>,
-    pub add_money_is_valid: bool,
-    pub income_form_state: MoneyTransactionFormState,
-    pub expense_form_state: MoneyTransactionFormState,
 }
 
 impl AllowanceTrackerApp {
@@ -189,59 +71,19 @@ impl AllowanceTrackerApp {
         // Initialize modular state components
         let core = CoreAppState::new(backend);
         let ui = UIState::new();
-        let mut calendar = CalendarState::new();
-        calendar.selected_month = current_month;
-        calendar.selected_year = current_year;
+        let calendar = CalendarState::new(); // Uses current date
         let modal = ModalState::new();
         let form = FormState::new();
         let interaction = InteractionState::new();
         
         Ok(Self {
-            // NEW: Modular state
+            // Modular state
             core,
             ui,
             calendar,
             modal,
             form,
             interaction,
-            
-            // TEMPORARY: Compatibility fields (mirror modular state - create directly)
-            backend: Backend::new()?,
-            current_child: None,
-            current_balance: 0.0,
-            loading: true,
-            error_message: None,
-            success_message: None,
-            current_tab: MainTab::Calendar,
-            calendar_loading: false,
-            calendar_transactions: Vec::new(),
-            calendar_month: None,
-            selected_month: current_month,
-            selected_year: current_year,
-            selected_day: None,
-            expanded_day: None,
-            active_overlay: None,
-            modal_just_opened: false,
-            show_add_money_modal: false,
-            show_child_selector: false,
-            show_allowance_config_modal: false,
-            show_parental_control_modal: false,
-            parental_control_stage: ParentalControlStage::Question1,
-            pending_protected_action: None,
-            parental_control_input: String::new(),
-            parental_control_error: None,
-            parental_control_loading: false,
-            transaction_selection_mode: false,
-            selected_transaction_ids: HashSet::new(),
-            child_dropdown: DropdownMenu::new("child_dropdown".to_string()),
-            settings_dropdown: DropdownMenu::new("settings_dropdown".to_string()),
-            add_money_amount: String::new(),
-            add_money_description: String::new(),
-            add_money_description_error: None,
-            add_money_amount_error: None,
-            add_money_is_valid: true,
-            income_form_state: MoneyTransactionFormState::new(),
-            expense_form_state: MoneyTransactionFormState::new(),
         })
     }
 
@@ -265,26 +107,64 @@ impl AllowanceTrackerApp {
     // TEMPORARY: Setter methods for state synchronization
     pub fn set_current_tab(&mut self, tab: MainTab) {
         self.core.current_tab = tab;
-        self.current_tab = tab; // Sync compatibility field
     }
     
     pub fn set_loading(&mut self, loading: bool) {
         self.ui.loading = loading;
-        self.loading = loading; // Sync compatibility field
     }
 
-    /// Navigate to the previous month
-    pub fn navigate_to_previous_month(&mut self) {
-        self.calendar.navigate_to_previous_month();
+    /// Start parental control challenge for a specific action
+    pub fn start_parental_control_challenge(&mut self, action: ProtectedAction) {
+        log::info!("🔒 Starting parental control challenge for: {:?}", action);
+        self.modal.pending_protected_action = Some(action);
+        self.modal.parental_control_stage = ParentalControlStage::Question1;
+        self.modal.parental_control_input.clear();
+        self.modal.parental_control_error = None;
+        self.modal.parental_control_loading = false;
+        self.modal.show_parental_control_modal = true;
+    }
+
+    /// Cancel parental control challenge
+    pub fn cancel_parental_control_challenge(&mut self) {
+        log::info!("🔒 Cancelling parental control challenge");
+        self.modal.show_parental_control_modal = false;
+        self.modal.pending_protected_action = None;
+        self.modal.parental_control_stage = ParentalControlStage::Question1;
+        self.modal.parental_control_input.clear();
+        self.modal.parental_control_error = None;
+        self.modal.parental_control_loading = false;
+    }
+
+    /// Reset parental control state to question 1
+    pub fn reset_parental_control(&mut self) {
+        self.modal.parental_control_stage = ParentalControlStage::Question1;
+        self.modal.parental_control_input.clear();
+        self.modal.parental_control_error = None;
+        self.modal.parental_control_loading = false;
+    }
+
+    /// Advance to question 2
+    pub fn advance_to_question_2(&mut self) {
+        self.modal.parental_control_stage = ParentalControlStage::Question2;
+        self.modal.parental_control_input.clear();
+        self.modal.parental_control_error = None;
+    }
+
+    /// Mark authentication as successful
+    pub fn authenticate_parental_control(&mut self) {
+        self.modal.parental_control_stage = ParentalControlStage::Question1;
+        self.modal.parental_control_input.clear();
+        self.modal.parental_control_error = None;
+        self.modal.parental_control_loading = false;
         
         // Sync compatibility fields
-        self.selected_month = self.calendar.selected_month;
-        self.selected_year = self.calendar.selected_year;
-        self.calendar_loading = self.calendar.calendar_loading;
+        // self.selected_month = self.calendar.selected_month;
+        // self.selected_year = self.calendar.selected_year;
+        // self.calendar_loading = self.calendar.calendar_loading;
         
         // Reload calendar data for the new month
         self.load_calendar_data();
-        log::info!("📅 Navigated to previous month: {}/{}", self.selected_month, self.selected_year);
+        log::info!("📅 Navigated to previous month: {}/{}", self.calendar.selected_month, self.calendar.selected_year);
     }
 
     /// Navigate to the next month
@@ -292,13 +172,13 @@ impl AllowanceTrackerApp {
         self.calendar.navigate_to_next_month();
         
         // Sync compatibility fields
-        self.selected_month = self.calendar.selected_month;
-        self.selected_year = self.calendar.selected_year;
-        self.calendar_loading = self.calendar.calendar_loading;
+        // self.selected_month = self.calendar.selected_month;
+        // self.selected_year = self.calendar.selected_year;
+        // self.calendar_loading = self.calendar.calendar_loading;
         
         // Reload calendar data for the new month
         self.load_calendar_data();
-        log::info!("📅 Navigated to next month: {}/{}", self.selected_month, self.selected_year);
+        log::info!("📅 Navigated to next month: {}/{}", self.calendar.selected_month, self.calendar.selected_year);
     }
 
     /// Get the current month name as a string
@@ -311,68 +191,35 @@ impl AllowanceTrackerApp {
         self.ui.clear_messages();
         
         // Sync compatibility fields
-        self.error_message = self.ui.error_message.clone();
-        self.success_message = self.ui.success_message.clone();
+        // self.error_message = self.ui.error_message.clone(); // Removed
+        // self.success_message = self.ui.success_message.clone(); // Removed
     }
 
-    // ====================
-    // PARENTAL CONTROL METHODS
-    // ====================
-
-    /// Start parental control challenge for a specific action
-    pub fn start_parental_control_challenge(&mut self, action: ProtectedAction) {
-        log::info!("🔒 Starting parental control challenge for: {:?}", action);
-        self.modal.pending_protected_action = Some(action);
-        self.parental_control_stage = ParentalControlStage::Question1;
-        self.parental_control_input.clear();
-        self.parental_control_error = None;
-        self.parental_control_loading = false;
-        self.show_parental_control_modal = true;
-    }
-    
-    /// Handle "Yes" button click on first question
-    pub fn parental_control_advance_to_question2(&mut self) {
-        log::info!("🔒 Advancing to parental control question 2");
-        self.parental_control_stage = ParentalControlStage::Question2;
-        self.parental_control_input.clear();
-        self.parental_control_error = None;
-    }
-    
-    /// Cancel parental control challenge
-    pub fn cancel_parental_control_challenge(&mut self) {
-        log::info!("🔒 Cancelling parental control challenge");
-        self.show_parental_control_modal = false;
-        self.modal.pending_protected_action = None;
-        self.parental_control_stage = ParentalControlStage::Question1;
-        self.parental_control_input.clear();
-        self.parental_control_error = None;
-        self.parental_control_loading = false;
-    }
-    
-    /// Submit answer for validation
+    /// Submit answer for parental control validation
     pub fn submit_parental_control_answer(&mut self) {
-        if self.parental_control_input.trim().is_empty() {
-            self.parental_control_error = Some("Please enter an answer".to_string());
+        // Validate input
+        if self.modal.parental_control_input.trim().is_empty() {
+            self.modal.parental_control_error = Some("Please enter an answer".to_string());
             return;
         }
         
-        log::info!("🔒 Submitting parental control answer for validation");
-        self.parental_control_loading = true;
-        self.parental_control_error = None;
+        // Set loading state and clear errors
+        self.modal.parental_control_loading = true;
+        self.modal.parental_control_error = None;
         
-        // Create command for backend
+        // Create command for backend validation
         let command = crate::backend::domain::commands::parental_control::ValidateParentalControlCommand {
-            answer: self.parental_control_input.clone(),
+            answer: self.modal.parental_control_input.clone(),
         };
         
         // Call backend service
-        match self.backend.parental_control_service.validate_answer(command) {
+        match self.backend().parental_control_service.validate_answer(command) {
             Ok(result) => {
-                self.parental_control_loading = false;
+                self.modal.parental_control_loading = false;
                 
                 if result.success {
-                    log::info!("✅ Parental control validation successful");
-                    self.parental_control_stage = ParentalControlStage::Authenticated;
+                    log::info!("✅ Parental control authentication successful");
+                    self.modal.parental_control_stage = ParentalControlStage::Authenticated;
                     
                     // Execute the pending action
                     if let Some(action) = self.modal.pending_protected_action {
@@ -380,18 +227,18 @@ impl AllowanceTrackerApp {
                     }
                     
                     // Close modal after brief success display
-                    self.show_parental_control_modal = false;
-                    self.success_message = Some("Access granted!".to_string());
+                    self.modal.show_parental_control_modal = false;
+                    self.ui.success_message = Some("Access granted!".to_string());
                 } else {
                     log::info!("❌ Parental control validation failed");
-                    self.parental_control_error = Some(result.message);
-                    self.parental_control_input.clear();
+                    self.modal.parental_control_error = Some(result.message);
+                    self.modal.parental_control_input.clear();
                 }
             }
             Err(e) => {
-                self.parental_control_loading = false;
+                self.modal.parental_control_loading = false;
                 log::error!("🚨 Parental control validation error: {}", e);
-                self.parental_control_error = Some("Validation failed. Please try again.".to_string());
+                self.modal.parental_control_error = Some("Validation failed. Please try again.".to_string());
             }
         }
     }
@@ -401,7 +248,7 @@ impl AllowanceTrackerApp {
         match action {
             ProtectedAction::DeleteTransactions => {
                 log::info!("🗑️ Executing delete transactions action");
-                self.interaction.enter_transaction_selection_mode();
+                self.enter_transaction_selection_mode();
             }
         }
         
@@ -416,48 +263,61 @@ impl AllowanceTrackerApp {
     pub fn enter_transaction_selection_mode(&mut self) {
         log::info!("🎯 Entering transaction selection mode");
         self.interaction.transaction_selection_mode = true;
-        self.selected_transaction_ids.clear();
-        self.success_message = Some("Select transactions to delete by clicking checkboxes. Click trash button when ready.".to_string());
+        self.interaction.selected_transaction_ids.clear();
+        
+        // TEMPORARY: Sync compatibility fields
+        // self.transaction_selection_mode = true;
+        // self.selected_transaction_ids.clear();
+        
+        self.ui.success_message = Some("Select transactions to delete by clicking checkboxes. Click trash button when ready.".to_string());
     }
     
     /// Exit transaction selection mode without deleting
     pub fn exit_transaction_selection_mode(&mut self) {
         log::info!("🚫 Exiting transaction selection mode");
         self.interaction.transaction_selection_mode = false;
-        self.selected_transaction_ids.clear();
+        self.interaction.selected_transaction_ids.clear();
+        
+        // TEMPORARY: Sync compatibility fields
+        // self.transaction_selection_mode = false;
+        // self.selected_transaction_ids.clear();
+        
         self.clear_messages();
     }
     
     /// Toggle selection of a transaction
     pub fn toggle_transaction_selection(&mut self, transaction_id: &str) {
-        if self.selected_transaction_ids.contains(transaction_id) {
+        if self.interaction.selected_transaction_ids.contains(transaction_id) {
             log::info!("➖ Deselecting transaction: {}", transaction_id);
-            self.selected_transaction_ids.remove(transaction_id);
+            self.interaction.selected_transaction_ids.remove(transaction_id);
+            // self.selected_transaction_ids.remove(transaction_id); // Sync compatibility field
         } else {
             log::info!("✅ Selecting transaction: {}", transaction_id);
-            self.selected_transaction_ids.insert(transaction_id.to_string());
+            self.interaction.selected_transaction_ids.insert(transaction_id.to_string());
+            // self.selected_transaction_ids.insert(transaction_id.to_string()); // Sync compatibility field
         }
     }
     
     /// Check if a transaction is selected
     pub fn is_transaction_selected(&self, transaction_id: &str) -> bool {
-        self.selected_transaction_ids.contains(transaction_id)
+        self.interaction.selected_transaction_ids.contains(transaction_id)
     }
     
     /// Get count of selected transactions
     pub fn selected_transaction_count(&self) -> usize {
-        self.selected_transaction_ids.len()
+        self.interaction.selected_transaction_ids.len()
     }
     
     /// Clear all selected transactions
     pub fn clear_transaction_selection(&mut self) {
         log::info!("🧹 Clearing all transaction selections");
-        self.selected_transaction_ids.clear();
+        self.interaction.selected_transaction_ids.clear();
+        // self.selected_transaction_ids.clear(); // Sync compatibility field
     }
     
     /// Check if any transactions are selected
     pub fn has_selected_transactions(&self) -> bool {
-        !self.selected_transaction_ids.is_empty()
+        !self.interaction.selected_transaction_ids.is_empty()
     }
     
     // ====================
@@ -645,13 +505,13 @@ impl AllowanceTrackerApp {
             Ok(amount) => amount,
             Err(error) => {
                 log::error!("❌ Failed to parse amount: {}", error);
-                self.error_message = Some(format!("Invalid amount: {}", error));
+                self.ui.error_message = Some(format!("Invalid amount: {}", error));
                 return false;
             }
         };
         
         // Create AddMoneyRequest with selected date from calendar as proper DateTime object
-        let date_time = self.selected_day.map(|date| {
+        let date_time = self.calendar.selected_day.map(|date| {
             // Convert NaiveDate to DateTime at noon Eastern Time
             let naive_datetime = date.and_hms_opt(12, 0, 0).unwrap();
             let eastern_offset = chrono::FixedOffset::west_opt(5 * 3600).unwrap(); // EST (UTC-5)
@@ -669,13 +529,16 @@ impl AllowanceTrackerApp {
         // Call backend with references to other services
         match money_service.add_money_complete(
             request,
-            &self.backend.child_service,
-            &self.backend.transaction_service,
+            &self.backend().child_service,
+            &self.backend().transaction_service,
         ) {
             Ok(response) => {
                 log::info!("✅ Income transaction successful: {}", response.success_message);
-                self.success_message = Some(response.success_message);
-                self.current_balance = response.new_balance;
+                self.ui.success_message = Some(response.success_message);
+                self.core.current_balance = response.new_balance;
+                
+                // TEMPORARY: Sync compatibility field  
+                // self.current_balance = response.new_balance;
                 
                 // Refresh calendar data to show the new transaction
                 self.load_calendar_data();
@@ -684,7 +547,7 @@ impl AllowanceTrackerApp {
             }
             Err(error) => {
                 log::error!("❌ Income transaction failed: {}", error);
-                self.error_message = Some(format!("Failed to add money: {}", error));
+                self.ui.error_message = Some(format!("Failed to add money: {}", error));
                 false
             }
         }
@@ -702,13 +565,13 @@ impl AllowanceTrackerApp {
             Ok(amount) => amount,
             Err(error) => {
                 log::error!("❌ Failed to parse amount: {}", error);
-                self.error_message = Some(format!("Invalid amount: {}", error));
+                self.ui.error_message = Some(format!("Invalid amount: {}", error));
                 return false;
             }
         };
         
         // Create SpendMoneyRequest with selected date from calendar as proper DateTime object
-        let date_time = self.selected_day.map(|date| {
+        let date_time = self.calendar.selected_day.map(|date| {
             // Convert NaiveDate to DateTime at noon Eastern Time
             let naive_datetime = date.and_hms_opt(12, 0, 0).unwrap();
             let eastern_offset = chrono::FixedOffset::west_opt(5 * 3600).unwrap(); // EST (UTC-5)
@@ -726,13 +589,16 @@ impl AllowanceTrackerApp {
         // Call backend with references to other services
         match money_service.spend_money_complete(
             request,
-            &self.backend.child_service,
-            &self.backend.transaction_service,
+            &self.backend().child_service,
+            &self.backend().transaction_service,
         ) {
             Ok(response) => {
                 log::info!("✅ Expense transaction successful: {}", response.success_message);
-                self.success_message = Some(response.success_message);
-                self.current_balance = response.new_balance;
+                self.ui.success_message = Some(response.success_message);
+                self.core.current_balance = response.new_balance;
+                
+                // TEMPORARY: Sync compatibility field  
+                // self.current_balance = response.new_balance;
                 
                 // Refresh calendar data to show the new transaction
                 self.load_calendar_data();
@@ -741,7 +607,7 @@ impl AllowanceTrackerApp {
             }
             Err(error) => {
                 log::error!("❌ Expense transaction failed: {}", error);
-                self.error_message = Some(format!("Failed to spend money: {}", error));
+                self.ui.error_message = Some(format!("Failed to spend money: {}", error));
                 false
             }
         }

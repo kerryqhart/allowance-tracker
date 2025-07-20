@@ -20,7 +20,7 @@ use crate::backend::domain::commands::child::SetActiveChildCommand;
 impl AllowanceTrackerApp {
     /// Render the child selector modal
     pub fn render_child_selector_modal(&mut self, ctx: &egui::Context) {
-        if !self.show_child_selector {
+        if !self.modal.show_child_selector {
             return;
         }
 
@@ -35,7 +35,7 @@ impl AllowanceTrackerApp {
                     .strong());
                 
                 // List all children
-                match self.backend.child_service.list_children() {
+                match self.backend().child_service.list_children() {
                     Ok(children_result) => {
                         if children_result.children.is_empty() {
                             ui.label("No children found!");
@@ -44,7 +44,7 @@ impl AllowanceTrackerApp {
                             for child in children_result.children {
                                 ui.horizontal(|ui| {
                                     // Show if this is the current active child
-                                    let is_active = self.current_child.as_ref()
+                                    let is_active = self.current_child().as_ref()
                                         .map(|c| c.id == child.id)
                                         .unwrap_or(false);
                                     
@@ -116,16 +116,16 @@ impl AllowanceTrackerApp {
                                         let command = SetActiveChildCommand {
                                             child_id: child.id.clone(),
                                         };
-                                        match self.backend.child_service.set_active_child(command) {
+                                        match self.backend().child_service.set_active_child(command) {
                                             Ok(_) => {
-                                                self.current_child = Some(to_dto(child.clone()));
+                                                self.core.current_child = Some(to_dto(child.clone()));
                                                 self.load_balance();
                                                 self.load_calendar_data();
-                                                self.show_child_selector = false;
-                                                self.success_message = Some("Child selected successfully!".to_string());
+                                                self.modal.show_child_selector = false;
+                                                self.ui.success_message = Some("Child selected successfully!".to_string());
                                             }
                                             Err(e) => {
-                                                self.error_message = Some(format!("Failed to select child: {}", e));
+                                                self.ui.error_message = Some(format!("Failed to select child: {}", e));
                                             }
                                         }
                                     }
@@ -145,7 +145,7 @@ impl AllowanceTrackerApp {
                 
                 ui.horizontal(|ui| {
                     if ui.button("Cancel").clicked() {
-                        self.show_child_selector = false;
+                        self.modal.show_child_selector = false;
                     }
                     
                     if ui.button(egui::RichText::new("🔄 Refresh")

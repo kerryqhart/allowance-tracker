@@ -57,9 +57,9 @@ impl AllowanceTrackerApp {
                             
                             // Add spacing between settings and child selector
                             ui.add_space(15.0);
-                            if let Some(child) = &self.current_child {
+                            if let Some(child) = &self.current_child() {
                                 // Balance with clean styling (no color coding) - disable text selection
-                                ui.add(egui::Label::new(egui::RichText::new(format!("${:.2}", self.current_balance))
+                                ui.add(egui::Label::new(egui::RichText::new(format!("${:.2}", self.current_balance()))
                                     .font(egui::FontId::new(24.0, egui::FontFamily::Proportional))
                                     .strong()
                                     .color(egui::Color32::from_rgb(60, 60, 60))) // Same dark gray as title
@@ -77,7 +77,7 @@ impl AllowanceTrackerApp {
                                     hover_border_color: egui::Color32::from_rgb(126, 120, 229),
                                 };
                                 
-                                let (child_button_response, should_show_dropdown) = self.child_dropdown.render_button(ui, &button_config);
+                                let (child_button_response, should_show_dropdown) = self.interaction.child_dropdown.render_button(ui, &button_config);
                                 
                                 // Show dropdown if opened
                                 if should_show_dropdown {
@@ -93,7 +93,7 @@ impl AllowanceTrackerApp {
                                     hover_border_color: egui::Color32::from_rgb(232, 150, 199),
                                 };
                                 
-                                let (select_button_response, should_show_dropdown) = self.child_dropdown.render_button(ui, &button_config);
+                                let (select_button_response, should_show_dropdown) = self.interaction.child_dropdown.render_button(ui, &button_config);
                                 
                                 // Show dropdown if opened
                                 if should_show_dropdown {
@@ -110,7 +110,7 @@ impl AllowanceTrackerApp {
     /// Render child selector dropdown using generalized component
     pub fn render_child_dropdown_with_generalized_component(&mut self, ui: &mut egui::Ui, button_rect: egui::Rect) {
         // Load children from backend and build menu items
-        let children_list = match self.backend.child_service.list_children() {
+        let children_list = match self.backend().child_service.list_children() {
             Ok(children_result) => children_result.children,
             Err(_) => vec![],
         };
@@ -124,7 +124,7 @@ impl AllowanceTrackerApp {
             }]
         } else {
             children_list.iter().map(|child| {
-                let is_current = self.current_child.as_ref()
+                let is_current = self.current_child().as_ref()
                     .map(|c| c.id == child.id)
                     .unwrap_or(false);
                 
@@ -146,7 +146,7 @@ impl AllowanceTrackerApp {
         // Track which item was clicked to handle selection outside the closure
         let mut selected_index: Option<usize> = None;
         
-        let _clicked_item = self.child_dropdown.render_menu(ui, button_rect, &menu_items, &menu_config, |index| {
+        let _clicked_item = self.interaction.child_dropdown.render_menu(ui, button_rect, &menu_items, &menu_config, |index| {
             selected_index = Some(index);
         });
         
@@ -154,7 +154,7 @@ impl AllowanceTrackerApp {
         if let Some(index) = selected_index {
             if index < children_list.len() {
                 let selected_child = &children_list[index];
-                let is_current = self.current_child.as_ref()
+                let is_current = self.current_child().as_ref()
                     .map(|c| c.id == selected_child.id)
                     .unwrap_or(false);
                 
@@ -163,14 +163,14 @@ impl AllowanceTrackerApp {
                     let command = crate::backend::domain::commands::child::SetActiveChildCommand {
                         child_id: selected_child.id.clone(),
                     };
-                    match self.backend.child_service.set_active_child(command) {
+                    match self.backend().child_service.set_active_child(command) {
                         Ok(_) => {
-                            self.current_child = Some(crate::ui::mappers::to_dto(selected_child.clone()));
+                            self.core.current_child = Some(crate::ui::mappers::to_dto(selected_child.clone()));
                             self.load_balance();
                             self.load_calendar_data();
                         }
                         Err(e) => {
-                            self.error_message = Some(format!("Failed to select child: {}", e));
+                            self.ui.error_message = Some(format!("Failed to select child: {}", e));
                         }
                     }
                 }
@@ -189,7 +189,7 @@ impl AllowanceTrackerApp {
             hover_border_color: egui::Color32::from_rgb(126, 120, 229),
         };
         
-        let (settings_button_response, should_show_dropdown) = self.settings_dropdown.render_button(ui, &button_config);
+        let (settings_button_response, should_show_dropdown) = self.interaction.settings_dropdown.render_button(ui, &button_config);
         
         // Show dropdown if opened
         if should_show_dropdown {
@@ -248,7 +248,7 @@ impl AllowanceTrackerApp {
         // Track which item was clicked
         let mut selected_index: Option<usize> = None;
         
-        let _clicked_item = self.settings_dropdown.render_menu(ui, button_rect, &menu_items, &menu_config, |index| {
+        let _clicked_item = self.interaction.settings_dropdown.render_menu(ui, button_rect, &menu_items, &menu_config, |index| {
             selected_index = Some(index);
         });
         
@@ -258,17 +258,17 @@ impl AllowanceTrackerApp {
                 0 => {
                     // Profile - placeholder action
                     log::info!("📋 Profile menu item clicked");
-                    self.success_message = Some("Profile clicked (not implemented yet)".to_string());
+                    self.ui.success_message = Some("Profile clicked (not implemented yet)".to_string());
                 }
                 1 => {
                     // Create child - placeholder action
                     log::info!("👶 Create child menu item clicked");
-                    self.success_message = Some("Create child clicked (not implemented yet)".to_string());
+                    self.ui.success_message = Some("Create child clicked (not implemented yet)".to_string());
                 }
                 2 => {
                     // Configure allowance - placeholder action
                     log::info!("⚙️ Configure allowance menu item clicked");
-                    self.success_message = Some("Configure allowance clicked (not implemented yet)".to_string());
+                    self.ui.success_message = Some("Configure allowance clicked (not implemented yet)".to_string());
                 }
                 3 => {
                     // Delete transactions - trigger parental control
@@ -278,12 +278,12 @@ impl AllowanceTrackerApp {
                 4 => {
                     // Export data - placeholder action
                     log::info!("📤 Export data menu item clicked");
-                    self.success_message = Some("Export data clicked (not implemented yet)".to_string());
+                    self.ui.success_message = Some("Export data clicked (not implemented yet)".to_string());
                 }
                 5 => {
                     // Data directory - placeholder action
                     log::info!("📁 Data directory menu item clicked");
-                    self.success_message = Some("Data directory clicked (not implemented yet)".to_string());
+                    self.ui.success_message = Some("Data directory clicked (not implemented yet)".to_string());
                 }
                 _ => {
                     log::warn!("🚨 Unknown settings menu item clicked: {}", index);
@@ -294,17 +294,17 @@ impl AllowanceTrackerApp {
 
     /// Render error and success messages
     pub fn render_messages(&self, ui: &mut egui::Ui) {
-        if let Some(error) = &self.error_message {
+        if let Some(error) = &self.ui.error_message {
             ui.colored_label(egui::Color32::RED, format!("❌ {}", error));
         }
-        if let Some(success) = &self.success_message {
+        if let Some(success) = &self.ui.success_message {
             ui.colored_label(egui::Color32::GREEN, format!("✅ {}", success));
         }
     }
     
     /// Render transaction selection controls bar (appears when in selection mode)
     pub fn render_selection_controls_bar(&mut self, ui: &mut egui::Ui) {
-        if !self.transaction_selection_mode {
+        if !self.interaction.transaction_selection_mode {
             return; // Only show when in selection mode
         }
         
@@ -392,12 +392,12 @@ impl AllowanceTrackerApp {
     
     /// Delete the selected transactions
     fn delete_selected_transactions(&mut self) {
-        if self.selected_transaction_ids.is_empty() {
+        if self.interaction.selected_transaction_ids.is_empty() {
             log::warn!("⚠️ No transactions selected for deletion");
             return;
         }
         
-        let transaction_ids: Vec<String> = self.selected_transaction_ids.iter().cloned().collect();
+        let transaction_ids: Vec<String> = self.interaction.selected_transaction_ids.iter().cloned().collect();
         log::info!("🗑️ Attempting to delete {} transactions: {:?}", transaction_ids.len(), transaction_ids);
         
         // Call the backend delete service
@@ -405,10 +405,10 @@ impl AllowanceTrackerApp {
             transaction_ids: transaction_ids.clone(),
         };
         
-        match self.backend.transaction_service.delete_transactions_domain(command) {
+        match self.backend().transaction_service.delete_transactions_domain(command) {
             Ok(result) => {
                 log::info!("✅ Successfully deleted {} transactions", result.deleted_count);
-                self.success_message = Some(format!("Deleted {} transactions", result.deleted_count));
+                self.ui.success_message = Some(format!("Deleted {} transactions", result.deleted_count));
                 
                 // Exit selection mode and reload data
                 self.exit_transaction_selection_mode();
@@ -417,7 +417,7 @@ impl AllowanceTrackerApp {
             }
             Err(e) => {
                 log::error!("❌ Failed to delete transactions: {}", e);
-                self.error_message = Some(format!("Failed to delete transactions: {}", e));
+                self.ui.error_message = Some(format!("Failed to delete transactions: {}", e));
             }
         }
     }

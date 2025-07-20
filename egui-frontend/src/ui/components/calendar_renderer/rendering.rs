@@ -27,9 +27,9 @@
 //! - Proper date handling using chrono library
 
 use eframe::egui;
-use chrono::{NaiveDate, Datelike, Weekday};
+use chrono::NaiveDate;
 use shared::Transaction;
-use crate::ui::app_state::{AllowanceTrackerApp, OverlayType};
+use crate::ui::app_state::AllowanceTrackerApp;
 
 // Import types, styling, and layout from the same module
 use super::types::*;
@@ -751,7 +751,7 @@ impl AllowanceTrackerApp {
         let calendar_container_padding = 20.0;
         
         // Get calendar data to determine row count
-        let calendar_days_count = if let Some(ref calendar_month) = self.calendar_month {
+        let calendar_days_count = if let Some(ref calendar_month) = self.calendar.calendar_month {
             calendar_month.days.len()
         } else {
             35 // Default fallback
@@ -848,7 +848,7 @@ impl AllowanceTrackerApp {
     pub fn draw_calendar_days_responsive(&mut self, ui: &mut egui::Ui, _transactions: &[Transaction], cell_width: f32, cell_height: f32) {
         ui.spacing_mut().item_spacing.y = CALENDAR_CARD_SPACING; // Vertical spacing between week rows
         // Use calendar month data from backend (which includes balance data)
-        let all_days: Vec<CalendarDay> = if let Some(ref calendar_month) = self.calendar_month {
+        let all_days: Vec<CalendarDay> = if let Some(ref calendar_month) = self.calendar.calendar_month {
             // Convert backend calendar days to frontend calendar days
             calendar_month.days.iter()
                 .enumerate()
@@ -856,7 +856,7 @@ impl AllowanceTrackerApp {
                 .collect()
         } else {
             // No calendar data available - return empty calendar
-            println!("⚠️ No calendar month data available for {}/{}", self.selected_month, self.selected_year);
+            println!("⚠️ No calendar month data available for {}/{}", self.calendar.selected_month, self.calendar.selected_year);
             Vec::new()
         };
         
@@ -870,7 +870,7 @@ impl AllowanceTrackerApp {
         let mut selected_day_date: Option<NaiveDate> = None;
         for (_week_index, week_days) in all_days.chunks(7).enumerate() {
             // Calculate row height - use expanded height if any day in this row is expanded
-            let row_height = if let Some(expanded_day) = week_days.iter().find(|day| self.expanded_day == Some(day.date)) {
+            let row_height = if let Some(expanded_day) = week_days.iter().find(|day| self.calendar.expanded_day == Some(day.date)) {
                 // Calculate exact height needed for all chips in the expanded day
                 let chip_count = expanded_day.transactions.len();
                 let base_height = cell_height;
@@ -900,29 +900,29 @@ impl AllowanceTrackerApp {
                         egui::Layout::top_down(egui::Align::LEFT),
                         |ui| {
                             // Check if this day is selected
-                            let is_selected = self.selected_day == Some(calendar_day.date);
+                            let is_selected = self.calendar.selected_day == Some(calendar_day.date);
                             
                             let (response, clicked_transaction_ids) = calendar_day.render_with_config(ui, cell_width, row_height, &RenderConfig {
                                 is_grid_layout: true,
                                 enable_click_handler: true,
                                 is_selected,
-                                transaction_selection_mode: self.transaction_selection_mode,
-                                selected_transaction_ids: self.selected_transaction_ids.clone(),
-                                expanded_day: self.expanded_day,
+                                transaction_selection_mode: self.interaction.transaction_selection_mode,
+                                selected_transaction_ids: self.interaction.selected_transaction_ids.clone(),
+                                expanded_day: self.calendar.expanded_day,
                             });
                             
                             // Handle checkbox clicks on transactions, ellipsis clicks, and collapse clicks
                             for transaction_id in clicked_transaction_ids {
                                 if transaction_id == "ELLIPSIS_CLICKED" {
                                     // Toggle expansion for this day
-                                    if self.expanded_day == Some(calendar_day.date) {
-                                        self.expanded_day = None; // Collapse if already expanded
+                                    if self.calendar.expanded_day == Some(calendar_day.date) {
+                                        self.calendar.expanded_day = None; // Collapse if already expanded
                                     } else {
-                                        self.expanded_day = Some(calendar_day.date); // Expand this day
+                                        self.calendar.expanded_day = Some(calendar_day.date); // Expand this day
                                     }
                                 } else if transaction_id == "COLLAPSE_CLICKED" {
                                     // Collapse the expanded day
-                                    self.expanded_day = None;
+                                    self.calendar.expanded_day = None;
                                 } else {
                                     self.toggle_transaction_selection(&transaction_id);
                                 }
@@ -930,7 +930,7 @@ impl AllowanceTrackerApp {
                             
                             // Handle click detection for current month days only
                             if response.clicked() && matches!(calendar_day.day_type, CalendarDayType::CurrentMonth) {
-                                self.handle_day_click(calendar_day.date);
+                                self.handle_calendar_day_click(calendar_day.date);
                             }
                             
                             // Return whether this day is selected for later rect capture

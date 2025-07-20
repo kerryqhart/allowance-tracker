@@ -18,13 +18,13 @@ use crate::ui::app_state::AllowanceTrackerApp;
 impl AllowanceTrackerApp {
     /// Render the parental control modal
     pub fn render_parental_control_modal(&mut self, ctx: &egui::Context) {
-        if !self.show_parental_control_modal {
+        if !self.modal.show_parental_control_modal {
             return;
         }
         
-        log::info!("🔒 Rendering parental control modal - stage: {:?}", self.parental_control_stage);
+        log::info!("🔒 Rendering parental control modal - stage: {:?}", self.modal.parental_control_stage);
         
-        // Modal window with dark background
+        // Use Area with Foreground order to ensure it appears above everything
         egui::Area::new(egui::Id::new("parental_control_modal_overlay"))
             .order(egui::Order::Foreground)
             .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
@@ -38,11 +38,41 @@ impl AllowanceTrackerApp {
                 );
                 
                 // Center the modal content
-                ui.allocate_ui_at_rect(screen_rect, |ui| {
-                    ui.centered_and_justified(|ui| {
-                        self.render_parental_control_modal_content(ui);
-                    });
-                });
+                ui.allocate_ui_at_rect(
+                    screen_rect,
+                    |ui| {
+                        ui.centered_and_justified(|ui| {
+                            egui::Frame::window(&ui.style())
+                                .fill(egui::Color32::WHITE)
+                                .stroke(egui::Stroke::new(3.0, egui::Color32::from_rgb(220, 50, 50)))
+                                .rounding(egui::Rounding::same(15.0))
+                                .inner_margin(egui::Margin::same(20.0))
+                                .show(ui, |ui| {
+                                    // Set modal size
+                                    ui.set_min_size(egui::vec2(450.0, 350.0));
+                                    ui.set_max_size(egui::vec2(450.0, 350.0));
+                                    
+                                    ui.vertical_centered(|ui| {
+                                        ui.add_space(15.0);
+                                        
+                                        // Title
+                                        ui.label(egui::RichText::new("🔒 Parental Control")
+                                             .font(egui::FontId::new(28.0, egui::FontFamily::Proportional))
+                                             .strong()
+                                             .color(egui::Color32::from_rgb(220, 50, 50)));
+                                        
+                                        ui.add_space(15.0);
+                                        
+                                        // Content based on current stage
+                                        match self.modal.parental_control_stage {
+                                            crate::ui::app_state::ParentalControlStage::Question1 => self.render_question1(ui),
+                                            crate::ui::app_state::ParentalControlStage::Question2 => self.render_question2(ui),
+                                            crate::ui::app_state::ParentalControlStage::Authenticated => self.render_success(ui),
+                                        }
+                                    });
+                                })
+                        });
+                    })
             });
     }
     
@@ -61,7 +91,7 @@ impl AllowanceTrackerApp {
                 ui.set_min_size(modal_size);
                 ui.set_max_size(modal_size);
                 
-                match self.parental_control_stage {
+                match self.modal.parental_control_stage {
                     crate::ui::app_state::ParentalControlStage::Question1 => self.render_question1(ui),
                     crate::ui::app_state::ParentalControlStage::Question2 => self.render_question2(ui),
                     crate::ui::app_state::ParentalControlStage::Authenticated => self.render_success(ui),
@@ -117,7 +147,7 @@ impl AllowanceTrackerApp {
                 .stroke(egui::Stroke::new(1.5, egui::Color32::from_rgb(147, 51, 234))); // Purple outline
                 
                 if ui.add(yes_button).clicked() {
-                    self.parental_control_advance_to_question2();
+                    self.advance_to_question_2();
                 }
                 
                 ui.add_space(12.0);
@@ -168,70 +198,57 @@ impl AllowanceTrackerApp {
             ui.add_space(10.0);
             
             // Text input - more compact
-            let text_input = egui::TextEdit::singleline(&mut self.parental_control_input)
-                .hint_text("Enter your answer...")
-                .font(egui::FontId::new(13.0, egui::FontFamily::Proportional))
-                .desired_width(220.0);
+            let text_input = egui::TextEdit::singleline(&mut self.modal.parental_control_input)
+                .desired_width(300.0)
+                .font(egui::FontId::new(16.0, egui::FontFamily::Proportional));
             
             let input_response = ui.add(text_input);
             
-            // Auto-focus input field
-            if input_response.gained_focus() || self.parental_control_input.is_empty() {
+            // Auto-focus the input field when modal opens or when input is empty
+            if input_response.gained_focus() || self.modal.parental_control_input.is_empty() {
                 input_response.request_focus();
-            }
-            
-            // Handle Enter key
-            if input_response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                self.submit_parental_control_answer();
             }
             
             ui.add_space(10.0);
             
-            // Error message
-            if let Some(error) = &self.parental_control_error {
+            // Show error message if any
+            if let Some(error) = &self.modal.parental_control_error {
                 ui.label(egui::RichText::new(error)
-                    .font(egui::FontId::new(12.0, egui::FontFamily::Proportional))
-                    .color(egui::Color32::from_rgb(220, 53, 69))); // Red
+                    .font(egui::FontId::new(14.0, egui::FontFamily::Proportional))
+                    .color(egui::Color32::from_rgb(220, 50, 50)));
                 ui.add_space(5.0);
             }
             
-            // Buttons - properly centered
-            ui.horizontal_centered(|ui| {
-                // Calculate total width needed: button + space + button
-                let total_width = 70.0 + 12.0 + 70.0; // 152px total
-                let available_width = ui.available_width();
-                let offset = (available_width - total_width) / 2.0;
+            ui.add_space(20.0);
+            
+            // Buttons
+            ui.horizontal(|ui| {
+                ui.add_space(80.0);
                 
-                if offset > 0.0 {
-                    ui.add_space(offset);
-                }
-                
-                // Submit button
-                let submit_text = if self.parental_control_loading {
-                    "⏳ Checking..."
+                // Submit button with loading state
+                let submit_text = if self.modal.parental_control_loading {
+                    "Checking..."
                 } else {
                     "Submit"
                 };
                 
-                let submit_button = egui::Button::new(
-                    egui::RichText::new(submit_text)
-                        .font(egui::FontId::new(13.0, egui::FontFamily::Proportional))
-                        .color(if self.parental_control_loading {
-                            egui::Color32::GRAY
+                let submit_button = egui::Button::new(egui::RichText::new(submit_text)
+                        .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))
+                        .color(if self.modal.parental_control_loading {
+                            egui::Color32::from_rgb(120, 120, 120)
                         } else {
-                            egui::Color32::BLACK
-                        })
-                )
-                .min_size(egui::vec2(70.0, 32.0))
-                .rounding(egui::Rounding::same(6.0))
-                .fill(egui::Color32::WHITE)
-                .stroke(egui::Stroke::new(1.5, if self.parental_control_loading {
-                    egui::Color32::GRAY
+                            egui::Color32::WHITE
+                        }))
+                .fill(egui::Color32::from_rgb(220, 50, 50))
+                .stroke(egui::Stroke::new(1.5, if self.modal.parental_control_loading {
+                    egui::Color32::from_rgb(120, 120, 120)
                 } else {
-                    egui::Color32::from_rgb(147, 51, 234) // Purple outline
-                }));
+                    egui::Color32::from_rgb(220, 50, 50)
+                }))
+                .rounding(egui::Rounding::same(10.0))
+                .min_size(egui::vec2(120.0, 40.0));
                 
-                if ui.add(submit_button).clicked() && !self.parental_control_loading {
+                if ui.add(submit_button).clicked() && !self.modal.parental_control_loading {
                     self.submit_parental_control_answer();
                 }
                 

@@ -25,7 +25,7 @@ impl AllowanceTrackerApp {
         log::info!("📄 RENDER_MAIN_CONTENT called");
         ui.vertical(|ui| {
             // Render content based on selected tab with toggle header
-            match self.current_tab {
+            match self.current_tab() {
                 MainTab::Calendar => {
                     // Use full available space - let calendar manage its own margins
                     let available_rect = ui.available_rect_before_wrap();
@@ -33,14 +33,14 @@ impl AllowanceTrackerApp {
                     // DEBUG: Log tab manager space allocation
                     log::info!("📋 TAB_MANAGER: available_rect.height={:.0}, passing to calendar", available_rect.height());
                     
-                    self.draw_calendar_section_with_toggle(ui, available_rect, &self.calendar_transactions.clone());
+                    self.draw_calendar_section_with_toggle(ui, available_rect, &self.calendar.calendar_transactions.clone());
                     
                     // No bottom spacing - test for other padding sources
                     // ui.add_space(0.0); // Removed entirely
                 }
                 MainTab::Table => {
                     // Filter out future allowances - table should only show actual transactions
-                    let actual_transactions: Vec<_> = self.calendar_transactions.iter()
+                    let actual_transactions: Vec<_> = self.calendar.calendar_transactions.iter()
                         .filter(|t| t.transaction_type != TransactionType::FutureAllowance)
                         .cloned()
                         .collect();

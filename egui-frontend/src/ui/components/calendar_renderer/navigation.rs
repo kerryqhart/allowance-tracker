@@ -1,42 +1,41 @@
 use chrono::{NaiveDate, Datelike};
-use shared::Transaction;
 use crate::ui::app_state::AllowanceTrackerApp;
 use super::types::{CalendarDay, CalendarDayType};
 
 impl AllowanceTrackerApp {
     /// Navigate to a different month
     pub fn navigate_month(&mut self, delta: i32) {
-        let old_month = self.selected_month;
-        let old_year = self.selected_year;
+        let old_month = self.calendar.selected_month;
+        let old_year = self.calendar.selected_year;
         
         println!("🗓️  Navigating from {}/{} with delta {}", old_month, old_year, delta);
         
         if delta > 0 {
-            if self.selected_month == 12 {
-                self.selected_month = 1;
-                self.selected_year += 1;
+            if self.calendar.selected_month == 12 {
+                self.calendar.selected_month = 1;
+                self.calendar.selected_year += 1;
             } else {
-                self.selected_month += 1;
+                self.calendar.selected_month += 1;
             }
         } else if delta < 0 {
-            if self.selected_month == 1 {
-                self.selected_month = 12;
-                self.selected_year -= 1;
+            if self.calendar.selected_month == 1 {
+                self.calendar.selected_month = 12;
+                self.calendar.selected_year -= 1;
             } else {
-                self.selected_month -= 1;
+                self.calendar.selected_month -= 1;
             }
         }
         
         println!("🗓️  Navigation complete: {}/{} → {}/{}", 
-                  old_month, old_year, self.selected_month, self.selected_year);
+                  old_month, old_year, self.calendar.selected_month, self.calendar.selected_year);
         
-        if self.selected_month == 6 {
-            println!("🗓️  🎯 Navigated to June {} - about to load calendar data", self.selected_year);
+        if self.calendar.selected_month == 6 {
+            println!("🗓️  🎯 Navigated to June {} - about to load calendar data", self.calendar.selected_year);
         }
         
         self.load_calendar_data();
         
-        println!("🔄 Calendar data reloaded for {}/{}", self.selected_month, self.selected_year);
+        println!("🔄 Calendar data reloaded for {}/{}", self.calendar.selected_month, self.calendar.selected_year);
     }
 
     /// Convert backend CalendarDay to frontend CalendarDay structure
@@ -53,10 +52,10 @@ impl AllowanceTrackerApp {
             match backend_day.day_type {
                 shared::CalendarDayType::PaddingBefore => {
                     // Calculate previous month date
-                    let (prev_year, prev_month) = if self.selected_month == 1 {
-                        (self.selected_year - 1, 12)
+                    let (prev_year, prev_month) = if self.calendar.selected_month == 1 {
+                        (self.calendar.selected_year - 1, 12)
                     } else {
-                        (self.selected_year, self.selected_month - 1)
+                        (self.calendar.selected_year, self.calendar.selected_month - 1)
                     };
                     
                     // Get the last day of previous month
@@ -70,7 +69,7 @@ impl AllowanceTrackerApp {
                     
                     // Calculate which day of previous month this represents
                     // First day of current month
-                    let current_month_first = NaiveDate::from_ymd_opt(self.selected_year, self.selected_month, 1).unwrap();
+                    let current_month_first = NaiveDate::from_ymd_opt(self.calendar.selected_year, self.calendar.selected_month, 1).unwrap();
                     let weekday_of_first = current_month_first.weekday().num_days_from_sunday() as usize;
                     
                     // This filler day represents (days_in_prev_month - weekday_of_first + day_index + 1)
@@ -79,18 +78,18 @@ impl AllowanceTrackerApp {
                 }
                 shared::CalendarDayType::PaddingAfter => {
                     // Calculate next month date
-                    let (next_year, next_month) = if self.selected_month == 12 {
-                        (self.selected_year + 1, 1)
+                    let (next_year, next_month) = if self.calendar.selected_month == 12 {
+                        (self.calendar.selected_year + 1, 1)
                     } else {
-                        (self.selected_year, self.selected_month + 1)
+                        (self.calendar.selected_year, self.calendar.selected_month + 1)
                     };
                     
                     // Find how many days we are past the end of current month
-                    let current_month_first = NaiveDate::from_ymd_opt(self.selected_year, self.selected_month, 1).unwrap();
-                    let next_month_first = if self.selected_month == 12 {
-                        NaiveDate::from_ymd_opt(self.selected_year + 1, 1, 1).unwrap()
+                    let current_month_first = NaiveDate::from_ymd_opt(self.calendar.selected_year, self.calendar.selected_month, 1).unwrap();
+                    let next_month_first = if self.calendar.selected_month == 12 {
+                        NaiveDate::from_ymd_opt(self.calendar.selected_year + 1, 1, 1).unwrap()
                     } else {
-                        NaiveDate::from_ymd_opt(self.selected_year, self.selected_month + 1, 1).unwrap()
+                        NaiveDate::from_ymd_opt(self.calendar.selected_year, self.calendar.selected_month + 1, 1).unwrap()
                     };
                     let days_in_current_month = (next_month_first - current_month_first).num_days() as u32;
                     let weekday_of_first = current_month_first.weekday().num_days_from_sunday() as usize;
@@ -101,17 +100,17 @@ impl AllowanceTrackerApp {
                 }
                 shared::CalendarDayType::MonthDay => {
                     // This shouldn't happen for day == 0, but fallback
-                    NaiveDate::from_ymd_opt(self.selected_year, self.selected_month, 1).unwrap()
+                    NaiveDate::from_ymd_opt(self.calendar.selected_year, self.calendar.selected_month, 1).unwrap()
                 }
             }
         } else {
-            NaiveDate::from_ymd_opt(self.selected_year, self.selected_month, backend_day.day).unwrap()
+            NaiveDate::from_ymd_opt(self.calendar.selected_year, self.calendar.selected_month, backend_day.day).unwrap()
         };
         
         // Check if this is today
         let today = chrono::Local::now();
-        let is_today = today.year() == self.selected_year 
-            && today.month() == self.selected_month 
+        let is_today = today.year() == self.calendar.selected_year 
+            && today.month() == self.calendar.selected_month 
             && today.day() == backend_day.day;
         
         CalendarDay {
