@@ -25,14 +25,14 @@ pub struct ProgressBarConfig {
 impl Default for ProgressBarConfig {
     fn default() -> Self {
         Self {
-            amount_font_size: 20.0,
+            amount_font_size: 24.0, // Increased from 20.0 for bigger celebration text
             label_font_size: 14.0,
             target_font_size: 60.0,
             text_padding: 20.0,
             amount_label_spacing: 12.0,
             
             fill_color_active: egui::Color32::from_rgb(199, 112, 221), // Pink matching goal chip
-            fill_color_complete: egui::Color32::GREEN,
+            fill_color_complete: egui::Color32::from_rgb(199, 112, 221), // Changed from GREEN to pink
             background_color: egui::Color32::from_rgb(230, 230, 230),
         }
     }

@@ -19,6 +19,7 @@ use log::{info, error};
 // Add imports for the new orchestration methods
 use crate::backend::domain::child_service::ChildService;
 use crate::backend::domain::transaction_service::TransactionService;
+use crate::backend::domain::goal_service::GoalService;
 
 use crate::backend::storage::Connection;
 
@@ -63,6 +64,7 @@ impl MoneyManagementService {
         request: AddMoneyRequest,
         child_service: &ChildService,
         transaction_service: &TransactionService<C>,
+        goal_service: &GoalService,
     ) -> Result<AddMoneyResponse> {
 
         info!("💰 MONEY MANAGEMENT: Adding money - description: {}, amount: {}", request.description, request.amount);
@@ -119,7 +121,22 @@ impl MoneyManagementService {
         let transaction = TransactionMapper::to_dto(domain_tx);
         info!("✅ MONEY MANAGEMENT: Transaction created successfully: {:?}", transaction);
         
-        // Step 5: Generate success message with backdated handling
+        // Step 5: Check for goal completion after successful transaction
+        info!("🎯 MONEY MANAGEMENT: Checking for goal completion after transaction...");
+        match goal_service.check_and_complete_goals(&active_child.id) {
+            Ok(Some(completed_goal)) => {
+                info!("🎉 MONEY MANAGEMENT: Goal completed! Goal: {} ({})", completed_goal.id, completed_goal.description);
+            }
+            Ok(None) => {
+                info!("📊 MONEY MANAGEMENT: No goal completion triggered");
+            }
+            Err(e) => {
+                error!("❌ MONEY MANAGEMENT: Error checking goal completion: {}", e);
+                // Don't fail the transaction for goal checking errors
+            }
+        }
+        
+        // Step 6: Generate success message with backdated handling
         let success_message = if let Some(date) = &request.date {
             // Check if this was a backdated transaction
             if self.is_backdated_transaction(date) {
@@ -156,6 +173,7 @@ impl MoneyManagementService {
         request: SpendMoneyRequest,
         child_service: &ChildService,
         transaction_service: &TransactionService<C>,
+        goal_service: &GoalService,
     ) -> Result<SpendMoneyResponse> {
         info!("💸 MONEY MANAGEMENT: Spending money - description: {}, amount: {}", request.description, request.amount);
 
@@ -210,7 +228,23 @@ impl MoneyManagementService {
         let transaction = TransactionMapper::to_dto(domain_tx);
         info!("✅ MONEY MANAGEMENT: Transaction created successfully: {:?}", transaction);
         
-        // Step 5: Generate success message with backdated handling
+        // Step 5: Check for goal completion after successful transaction
+        // Note: Even spending can affect goal completion (though rarely)
+        info!("🎯 MONEY MANAGEMENT: Checking for goal completion after transaction...");
+        match goal_service.check_and_complete_goals(&active_child.id) {
+            Ok(Some(completed_goal)) => {
+                info!("🎉 MONEY MANAGEMENT: Goal completed! Goal: {} ({})", completed_goal.id, completed_goal.description);
+            }
+            Ok(None) => {
+                info!("📊 MONEY MANAGEMENT: No goal completion triggered");
+            }
+            Err(e) => {
+                error!("❌ MONEY MANAGEMENT: Error checking goal completion: {}", e);
+                // Don't fail the transaction for goal checking errors
+            }
+        }
+        
+        // Step 6: Generate success message with backdated handling
         let success_message = if let Some(date) = &request.date {
             // Check if this was a backdated transaction
             if self.is_backdated_transaction(date) {
@@ -1050,13 +1084,13 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_add_money_form_with_date_valid() {
+    fn test_validate_add_money_form_with_date_valid_date() {
         let service = create_test_service();
         
         let valid_date = chrono::Utc::now()
-            .checked_sub_signed(chrono::Duration::days(5))
+            .checked_sub_signed(chrono::Duration::hours(1))
             .unwrap()
-            .to_rfc3339();
+            .with_timezone(&chrono::FixedOffset::west_opt(5 * 3600).unwrap()); // Convert to FixedOffset
         
         let validation = service.validate_add_money_form_with_date(
             "Birthday gift", 
@@ -1075,7 +1109,7 @@ mod tests {
         let future_date = chrono::Utc::now()
             .checked_add_signed(chrono::Duration::days(1))
             .unwrap()
-            .to_rfc3339();
+            .with_timezone(&chrono::FixedOffset::west_opt(5 * 3600).unwrap()); // Convert to FixedOffset
         
         let validation = service.validate_add_money_form_with_date(
             "Birthday gift", 
@@ -1093,19 +1127,17 @@ mod tests {
         let service = create_test_service();
         
         // Current time (should not be backdated)
-        let now = chrono::Utc::now().to_rfc3339();
+        let now = chrono::Utc::now().with_timezone(&chrono::FixedOffset::west_opt(5 * 3600).unwrap());
         let result = service.is_backdated_transaction(&now);
-        assert!(result.is_ok());
-        assert!(!result.unwrap());
+        assert!(!result); // is_backdated_transaction returns bool, not Result
         
         // 2 hours ago (should be backdated)
         let backdated = chrono::Utc::now()
             .checked_sub_signed(chrono::Duration::hours(2))
             .unwrap()
-            .to_rfc3339();
+            .with_timezone(&chrono::FixedOffset::west_opt(5 * 3600).unwrap());
         let result = service.is_backdated_transaction(&backdated);
-        assert!(result.is_ok());
-        assert!(result.unwrap());
+        assert!(result); // is_backdated_transaction returns bool, not Result
     }
 
     #[test]

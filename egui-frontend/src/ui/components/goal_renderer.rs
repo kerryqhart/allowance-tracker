@@ -225,14 +225,20 @@ impl AllowanceTrackerApp {
                 // Graph header with consistent styling - HORIZONTALLY CENTERED
                 ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
                     let graph_title = if self.is_goal_complete() {
-                        "You did it!"
+                        "" // Empty title when goal is complete
                     } else {
                         "Are you getting closer?"
                     };
-                    ui.label(header_style.create_label(graph_title));
+                    if !graph_title.is_empty() {
+                        ui.label(header_style.create_label(graph_title));
+                    }
                 });
                 
-                ui.add_space(header_style.spacing_below);
+                // Only add spacing if we have a header
+                let graph_title = if self.is_goal_complete() { "" } else { "Are you getting closer?" };
+                if !graph_title.is_empty() {
+                    ui.add_space(header_style.spacing_below);
+                }
                 
                 // Render the graph in remaining space
                 if let Some(ref progress_graph) = self.goal.progress_graph {
@@ -275,14 +281,20 @@ impl AllowanceTrackerApp {
                     // Circular progress header with consistent styling - HORIZONTALLY CENTERED
                     ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
                         let circular_title = if self.is_goal_complete() {
-                            "All done!"
+                            "" // Empty title when goal is complete
                         } else {
                             "Days until..."
                         };
-                        ui.label(header_style.create_label(circular_title));
+                        if !circular_title.is_empty() {
+                            ui.label(header_style.create_label(circular_title));
+                        }
                     });
                     
-                    ui.add_space(header_style.spacing_below);
+                    // Only add spacing if we have a header
+                    let circular_title = if self.is_goal_complete() { "" } else { "Days until..." };
+                    if !circular_title.is_empty() {
+                        ui.add_space(header_style.spacing_below);
+                    }
                     
                     // Center just the circular progress component in remaining space
                     ui.vertical_centered(|ui| {
@@ -302,13 +314,20 @@ impl AllowanceTrackerApp {
                     // Header even in fallback state for consistency - HORIZONTALLY CENTERED
                     ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
                         let circular_title = if self.is_goal_complete() {
-                            "All done!"
+                            "" // Empty title when goal is complete
                         } else {
                             "Days until..."
                         };
-                        ui.label(header_style.create_label(circular_title));
+                        if !circular_title.is_empty() {
+                            ui.label(header_style.create_label(circular_title));
+                        }
                     });
-                    ui.add_space(header_style.spacing_below);
+                    
+                    // Only add spacing if we have a header
+                    let circular_title = if self.is_goal_complete() { "" } else { "Days until..." };
+                    if !circular_title.is_empty() {
+                        ui.add_space(header_style.spacing_below);
+                    }
                     
                     // Center the fallback message in remaining space
                     ui.vertical_centered(|ui| {
@@ -412,8 +431,8 @@ impl AllowanceTrackerApp {
         layout.content_spacing(ui, GoalContentType::CompletionInfo);
         if calculation.amount_needed <= 0.0 {
             ui.label(egui::RichText::new("🎉 Goal Complete! Congratulations!")
-                .font(egui::FontId::new(18.0, egui::FontFamily::Proportional))
-                .color(egui::Color32::GREEN)
+                .font(egui::FontId::new(22.0, egui::FontFamily::Proportional)) // Increased from 18.0
+                .color(egui::Color32::from_rgb(199, 112, 221)) // Changed from GREEN to pink
                 .strong());
         } else {
             self.draw_goal_completion_info(ui, &calculation);
