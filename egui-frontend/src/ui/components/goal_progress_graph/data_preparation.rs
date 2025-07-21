@@ -370,8 +370,8 @@ fn create_monthly_goal_data_points(
     }
 } 
 
-/// Convert domain transactions to goal graph data points
-/// Separates historical transactions (real) from future allowances (projection)
+/// Convert domain transactions to goal graph data points using daily balance calculation
+/// Uses the same logic as the calendar to ensure proper same-day transaction ordering
 /// Goal creation date determines the starting point for the graph
 pub fn convert_domain_transactions_to_data_points(
     transactions: &[crate::backend::domain::models::transaction::Transaction],
@@ -397,29 +397,51 @@ pub fn convert_domain_transactions_to_data_points(
     
     let today = chrono::Local::now().date_naive();
     
-    // Convert each transaction to a data point
-    // Note: Domain layer now provides proper balances for both historical and future transactions
+    // Group transactions by date to ensure we use the FINAL balance of each day
+    use std::collections::HashMap;
+    let mut transactions_by_date: HashMap<chrono::NaiveDate, Vec<&crate::backend::domain::models::transaction::Transaction>> = HashMap::new();
+    
     for transaction in transactions {
         let tx_date = transaction.date.date_naive();
-        let is_future = tx_date > today;
-        let is_goal_target = transaction.balance >= goal.target_amount;
+        transactions_by_date
+            .entry(tx_date)
+            .or_insert_with(Vec::new)
+            .push(transaction);
+    }
+    
+    // Process each date and use the final balance of the day (like calendar does)
+    let mut sorted_dates: Vec<chrono::NaiveDate> = transactions_by_date.keys().copied().collect();
+    sorted_dates.sort();
+    
+    for date in sorted_dates {
+        let day_transactions = transactions_by_date.get(&date).unwrap();
         
-        if is_future {
-            // Future allowance - use balance calculated by domain layer (BalanceService)
-            let mut data_point = GoalGraphDataPoint::new_projection(tx_date, transaction.balance);
-            if is_goal_target {
-                data_point.is_goal_target = true;
+        // Sort transactions within the day by full timestamp (critical for same-day ordering)
+        let mut sorted_day_transactions = day_transactions.clone();
+        sorted_day_transactions.sort_by(|a, b| a.date.cmp(&b.date));
+        
+        // Use the FINAL transaction's balance for this day (last transaction after sorting)
+        if let Some(final_transaction) = sorted_day_transactions.last() {
+            let is_future = date > today;
+            let is_goal_target = final_transaction.balance >= goal.target_amount;
+            
+            if is_future {
+                // Future allowance - use balance calculated by domain layer (BalanceService)
+                let mut data_point = GoalGraphDataPoint::new_projection(date, final_transaction.balance);
+                if is_goal_target {
+                    data_point.is_goal_target = true;
+                }
+                data_points.push(data_point);
+                
+                log::info!("  Day {}: final balance ${:.2} (future: {}, goal_target: {}) from {} transactions", 
+                           date, final_transaction.balance, is_future, is_goal_target, sorted_day_transactions.len());
+            } else {
+                // Historical transaction - use final balance from domain layer
+                data_points.push(GoalGraphDataPoint::new(date, final_transaction.balance, false));
+                
+                log::info!("  Day {}: final balance ${:.2} (historical, goal_target: {}) from {} transactions", 
+                           date, final_transaction.balance, is_goal_target, sorted_day_transactions.len());
             }
-            data_points.push(data_point);
-            
-            log::info!("  Transaction {}: {} - ${:.2} (future: {}, goal_target: {})", 
-                       transaction.id, tx_date, transaction.balance, is_future, is_goal_target);
-        } else {
-            // Historical transaction - use balance from domain layer
-            data_points.push(GoalGraphDataPoint::new(tx_date, transaction.balance, false));
-            
-            log::info!("  Transaction {}: {} - ${:.2} (future: {}, goal_target: {})", 
-                       transaction.id, tx_date, transaction.balance, is_future, false);
         }
     }
     

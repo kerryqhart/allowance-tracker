@@ -21,7 +21,7 @@ use crate::ui::app_state::AllowanceTrackerApp;
 use crate::ui::components::styling::colors;
 
 use crate::ui::components::goal_progress_bar::{
-    draw_progress_bar_with_target, 
+    draw_progress_bar_with_target_completion,
     GoalLayout, 
     GoalContentType
 };
@@ -186,12 +186,13 @@ impl AllowanceTrackerApp {
                 
                 let available_width = top_rect.width() - (internal_margin * 2.0);
                 
-                crate::ui::components::goal_progress_bar::draw_progress_bar_with_target(
+                crate::ui::components::goal_progress_bar::draw_progress_bar_with_target_completion(
                     ui,
                     calculation.current_balance,
                     goal.target_amount,
                     available_width,
-                    &layout_config
+                    &layout_config,
+                    self.is_goal_complete()
                 );
             });
         });
@@ -223,7 +224,12 @@ impl AllowanceTrackerApp {
             ui.vertical(|ui| {
                 // Graph header with consistent styling - HORIZONTALLY CENTERED
                 ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
-                    ui.label(header_style.create_label("Are you getting closer?"));
+                    let graph_title = if self.is_goal_complete() {
+                        "You did it!"
+                    } else {
+                        "Are you getting closer?"
+                    };
+                    ui.label(header_style.create_label(graph_title));
                 });
                 
                 ui.add_space(header_style.spacing_below);
@@ -268,7 +274,12 @@ impl AllowanceTrackerApp {
                 ui.vertical(|ui| {
                     // Circular progress header with consistent styling - HORIZONTALLY CENTERED
                     ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
-                        ui.label(header_style.create_label("Days until..."));
+                        let circular_title = if self.is_goal_complete() {
+                            "All done!"
+                        } else {
+                            "Days until..."
+                        };
+                        ui.label(header_style.create_label(circular_title));
                     });
                     
                     ui.add_space(header_style.spacing_below);
@@ -290,7 +301,12 @@ impl AllowanceTrackerApp {
                 ui.vertical(|ui| {
                     // Header even in fallback state for consistency - HORIZONTALLY CENTERED
                     ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
-                        ui.label(header_style.create_label("Days until..."));
+                        let circular_title = if self.is_goal_complete() {
+                            "All done!"
+                        } else {
+                            "Days until..."
+                        };
+                        ui.label(header_style.create_label(circular_title));
                     });
                     ui.add_space(header_style.spacing_below);
                     
@@ -421,12 +437,13 @@ impl AllowanceTrackerApp {
         
         layout.progress_bar_container(ui, |ui, available_width| {
             let layout_config = layout.progress_bar_config();
-            draw_progress_bar_with_target(
+            draw_progress_bar_with_target_completion(
                 ui,
                 calculation.current_balance,
                 target_amount,
                 available_width,
                 &layout_config,
+                self.is_goal_complete(),
             );
         });
     }

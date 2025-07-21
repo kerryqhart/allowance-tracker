@@ -224,10 +224,19 @@ impl CalendarService {
                                   day, new_projected_balance, transaction.id, day_final_balance - transaction.amount, transaction.amount);
                     } else {
                         // Normal transaction with stored balance
+                        // FIX: Use the final transaction's balance for the day, not just any transaction
                         day_final_balance = transaction.balance;
-                        log::debug!("🗓️ BALANCE DEBUG: Day {}: Using stored balance ${:.2} from transaction {}", 
+                        log::debug!("🗓️ BALANCE DEBUG: Day {}: Found stored balance ${:.2} from transaction {}", 
                                   day, transaction.balance, transaction.id);
                     }
+                }
+                
+                // TDD FIX: After processing all transactions, ensure we use the FINAL normal transaction's balance
+                // Find the last normal transaction (non-NaN balance) in chronological order
+                if let Some(final_normal_transaction) = sorted_day_transactions.iter().rev().find(|tx| !tx.balance.is_nan()) {
+                    day_final_balance = final_normal_transaction.balance;
+                    log::debug!("🗓️ BALANCE DEBUG: Day {}: Using final normal transaction balance ${:.2} from transaction {}", 
+                              day, final_normal_transaction.balance, final_normal_transaction.id);
                 }
                 
                 daily_balances.insert(day, day_final_balance);
@@ -1285,5 +1294,67 @@ mod tests {
         // Verify forward balance propagation still works
         let july_31_day = calendar.days.iter().find(|d| d.day == 31).unwrap();
         assert_eq!(july_31_day.balance, 12.0, "July 31st should carry forward final balance");
+    }
+
+    #[test]
+    fn test_calculate_daily_balances_same_day_multiple_transactions_bug() {
+        // TDD Test: This test replicates the bug where multiple transactions on the same day
+        // result in using an incorrect balance instead of the final transaction's balance
+        
+        use std::sync::Arc;
+        use tempfile::tempdir;
+        use crate::backend::storage::csv::CsvConnection;
+        use crate::backend::domain::balance_service::BalanceService;
+        use crate::backend::domain::child_service::ChildService;
+        use crate::backend::domain::commands::child::CreateChildCommand;
+
+        let service = CalendarService::new();
+        
+        // Create test infrastructure
+        let temp_dir = tempdir().unwrap();
+        let connection = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
+        let balance_service = BalanceService::new(connection.clone());
+        let child_service = ChildService::new(connection.clone());
+        
+        // Create a test child
+        let child_result = child_service.create_child(CreateChildCommand {
+            name: "Test Child".to_string(),
+            birthdate: "2015-01-01".to_string(),
+        }).unwrap();
+        let child_id = &child_result.child.id;
+
+        // REPLICATE THE BUG: Create multiple transactions on July 21st that show the wrong balance
+        // This mirrors the user's issue: July 20th = $16.62, July 21st should be $19.62 but shows $18.62
+        let transactions = vec![
+            // July 20th - final balance $16.62
+            create_test_transaction("2025-07-20T12:00:00Z", 5.0, 16.62, "July 20 transaction"),
+            
+            // July 21st - multiple transactions, final balance should be $19.62
+            create_test_transaction("2025-07-21T09:00:00Z", 1.00, 17.62, "July 21 first transaction (+$1)"),  // Earlier in day
+            create_test_transaction("2025-07-21T15:00:00Z", 2.00, 19.62, "July 21 second transaction (+$2)"), // Later in day - FINAL balance
+            
+            // July 22nd - to verify balance carries forward correctly
+            create_test_transaction("2025-07-22T12:00:00Z", 1.00, 20.62, "July 22 transaction"),
+        ];
+        
+        // Calculate daily balances
+        let daily_balances = service.calculate_daily_balances_with_projection(
+            7, // July
+            2025,
+            &transactions,
+            31, // days in July
+            &balance_service,
+            child_id,
+        );
+        
+        // VERIFY THE BUG: July 21st should show $19.62 (final transaction balance)
+        // but the current buggy implementation will show $17.62 or $18.62 (earlier transaction balance)
+        assert_eq!(daily_balances.get(&20), Some(&16.62), "July 20th should show $16.62");
+        
+        // This assertion should FAIL initially (showing the bug), then PASS after the fix
+        assert_eq!(daily_balances.get(&21), Some(&19.62), 
+                   "July 21st should show final balance $19.62 from the last transaction, not an earlier transaction balance");
+        
+        assert_eq!(daily_balances.get(&22), Some(&20.62), "July 22nd should show $20.62");
     }
 } 

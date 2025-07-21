@@ -443,7 +443,7 @@ impl GoalService {
         let mut all_transactions = historical_result.transactions;
         all_transactions.extend(future_allowances);
         
-        // Sort by date for proper chronological order
+        // Sort by date AND time for proper chronological order (critical for same-day transactions)
         all_transactions.sort_by(|a, b| a.date.cmp(&b.date));
         
         info!("Total goal progression points: {} (historical) + {} (future) = {}", 

@@ -142,6 +142,15 @@ impl eframe::App for AllowanceTrackerApp {
 }
 
 impl AllowanceTrackerApp {
+    /// Check if the current goal is complete (helper function)
+    pub fn is_goal_complete(&self) -> bool {
+        if let Some(ref calculation) = self.goal.goal_calculation {
+            calculation.amount_needed <= 0.0
+        } else {
+            false
+        }
+    }
+
     /// Render the loading screen
     pub fn render_loading_screen(&self, ui: &mut egui::Ui) {
         ui.vertical_centered(|ui| {
@@ -270,8 +279,15 @@ impl AllowanceTrackerApp {
                     if self.goal.has_active_goal() {
                         ui.add_space(20.0);
                         
+                        // Change button text based on goal completion status
+                        let button_text = if self.is_goal_complete() {
+                            "Start new goal"
+                        } else {
+                            "Cancel Goal"
+                        };
+                        
                         // Match the styling of the inactive toggle buttons
-                        let cancel_button = egui::Button::new(egui::RichText::new("Cancel Goal")
+                        let cancel_button = egui::Button::new(egui::RichText::new(button_text)
                                 .font(egui::FontId::new(14.0, egui::FontFamily::Proportional))
                                 .strong()
                                 .color(egui::Color32::from_rgb(100, 100, 100))) // Same gray text as inactive buttons
