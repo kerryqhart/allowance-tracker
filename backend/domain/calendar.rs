@@ -209,9 +209,18 @@ impl CalendarService {
         // For each day, calculate balances with NaN projection support
         for day in 1..=days_in_month {
             if let Some(day_transactions) = transactions_by_day.get(&day) {
-                // Sort transactions by full timestamp (not just date) to get proper chronological order
+                // Sort transactions by full timestamp, and by balance as secondary criteria for same timestamps
                 let mut sorted_day_transactions = day_transactions.clone();
-                sorted_day_transactions.sort_by(|a, b| a.date.cmp(&b.date));
+                sorted_day_transactions.sort_by(|a, b| {
+                    // Primary sort: timestamp
+                    let time_cmp = a.date.cmp(&b.date);
+                    if time_cmp != std::cmp::Ordering::Equal {
+                        time_cmp
+                    } else {
+                        // Secondary sort: balance (higher balance = later in sequence)
+                        a.balance.partial_cmp(&b.balance).unwrap_or(std::cmp::Ordering::Equal)
+                    }
+                });
                 
                 // Check if we need to calculate projected balance for NaN transactions
                 let mut day_final_balance = previous_balance;
@@ -235,8 +244,8 @@ impl CalendarService {
                 // Find the last normal transaction (non-NaN balance) in chronological order
                 if let Some(final_normal_transaction) = sorted_day_transactions.iter().rev().find(|tx| !tx.balance.is_nan()) {
                     day_final_balance = final_normal_transaction.balance;
-                    log::debug!("🗓️ BALANCE DEBUG: Day {}: Using final normal transaction balance ${:.2} from transaction {}", 
-                              day, final_normal_transaction.balance, final_normal_transaction.id);
+                    log::info!("🔍 BACKEND BALANCE DEBUG: Day {}: Using final normal transaction balance ${:.2} from transaction {} (had {} transactions)", 
+                              day, final_normal_transaction.balance, final_normal_transaction.id, sorted_day_transactions.len());
                 }
                 
                 daily_balances.insert(day, day_final_balance);

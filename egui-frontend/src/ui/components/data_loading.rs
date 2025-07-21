@@ -147,6 +147,18 @@ impl AllowanceTrackerApp {
                 log::info!("📊 Successfully loaded calendar month with {} days for {}/{}", 
                           calendar_month.days.len(), self.calendar.selected_month, self.calendar.selected_year);
                 
+                // DEBUG: Log July 21st specifically
+                if self.calendar.selected_month == 7 && self.calendar.selected_year == 2025 {
+                    if let Some(july_21) = calendar_month.days.iter().find(|d| d.day == 21) {
+                        log::info!("🔍 FRONTEND DEBUG: July 21st from backend - balance: ${:.2}, transactions: {}", 
+                                  july_21.balance, july_21.transactions.len());
+                        for (i, tx) in july_21.transactions.iter().enumerate() {
+                            log::info!("🔍 FRONTEND DEBUG: July 21st transaction {}: {} at {} = balance ${:.2}", 
+                                      i + 1, tx.description, tx.date.format("%H:%M:%S"), tx.balance);
+                        }
+                    }
+                }
+                
                 // Extract transactions from all calendar days (for backward compatibility)
                 let mut all_transactions = Vec::new();
                 for day in &calendar_month.days {
