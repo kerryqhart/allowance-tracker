@@ -5,7 +5,7 @@
 //!
 //! ## Responsibilities:
 //! - Loading states
-//! - User feedback messages (success/error)
+//! - User feedback messages (error only)
 //! - General UI status indicators
 //!
 //! ## Purpose:
@@ -20,9 +20,6 @@ pub struct UIState {
     
     /// Error message to display to the user
     pub error_message: Option<String>,
-    
-    /// Success message to display to the user
-    pub success_message: Option<String>,
 }
 
 impl UIState {
@@ -31,25 +28,16 @@ impl UIState {
         Self {
             loading: true, // Start with loading=true during app initialization
             error_message: None,
-            success_message: None,
         }
     }
     
-    /// Clear any error or success messages
+    /// Clear any error messages
     pub fn clear_messages(&mut self) {
         self.error_message = None;
-        self.success_message = None;
     }
     
     /// Set an error message
     pub fn set_error(&mut self, message: String) {
         self.error_message = Some(message);
-        self.success_message = None; // Clear success when showing error
-    }
-    
-    /// Set a success message
-    pub fn set_success(&mut self, message: String) {
-        self.success_message = Some(message);
-        self.error_message = None; // Clear error when showing success
     }
 } 

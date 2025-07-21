@@ -1,17 +1,11 @@
-Fix goal progression graph balance calculation architecture
+Remove debug UI success messages
 
-- Move balance calculations from UI layer to domain layer using BalanceService
-- Fix future allowance projections that were showing $NaN balances
-- GoalService now calls BalanceService.calculate_projected_balance_for_transaction()
-  for proper future allowance balance calculation
-- UI layer simplified to use domain-provided balances instead of manual calculation
-- Goal progression graph now correctly shows projection line to future goal completion
-- Add missing log::warn import to goal_service.rs
+- Removed success_message field from UIState
+- Removed success message rendering from header
+- Cleaned up all success message usages throughout UI components
+- Eliminates green "debug-looking" messages that appeared after transactions
+- UI now provides cleaner user experience without persistent notifications
 
-This follows proper domain-driven design where business logic stays in the domain layer
-and UI layer acts as a thin presentation layer. The goal graph now properly displays:
-- Solid line: historical transactions with stored balances
-- Dotted line: future allowance projections with calculated balances
-- Goal target marker when projection reaches target amount
-
-Fixes issue where future allowances appeared as $NaN and projection line was missing. 
+This removes the debug UI feature entirely as requested, making the
+interface cleaner by eliminating the success messages that were
+appearing when adding money or using delete functionality. 

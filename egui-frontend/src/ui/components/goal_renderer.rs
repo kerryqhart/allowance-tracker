@@ -529,7 +529,7 @@ impl AllowanceTrackerApp {
         match self.backend().goal_service.cancel_goal(command) {
             Ok(_result) => {
                 info!("✅ Successfully cancelled goal");
-                self.ui.success_message = Some("Goal cancelled successfully".to_string());
+                // Success feedback removed
                 // Reload goal data to update UI
                 self.load_goal_data();
             }
@@ -553,7 +553,7 @@ impl AllowanceTrackerApp {
         match self.backend().goal_service.create_goal(command) {
             Ok(_result) => {
                 info!("✅ Successfully created goal");
-                self.ui.success_message = Some("Goal created successfully".to_string());
+                // Success feedback removed
                 self.goal.hide_creation_modal();
                 // Reload goal data to update UI
                 self.load_goal_data();
