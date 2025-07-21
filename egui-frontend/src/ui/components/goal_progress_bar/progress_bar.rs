@@ -52,6 +52,17 @@ pub fn draw_progress_bar_with_target(
     available_width: f32,
     layout_config: &ProgressBarLayoutConfig,
 ) {
+    draw_progress_bar_with_target_completion(ui, current_balance, target_amount, available_width, layout_config, false);
+}
+
+pub fn draw_progress_bar_with_target_completion(
+    ui: &mut egui::Ui,
+    current_balance: f64,
+    target_amount: f64,
+    available_width: f32,
+    layout_config: &ProgressBarLayoutConfig,
+    is_goal_complete: bool,
+) {
     let style_config = ProgressBarConfig::default();
     
     let progress = if target_amount > 0.0 {
@@ -107,62 +118,105 @@ pub fn draw_progress_bar_with_target(
         let amount_font = egui::FontId::new(style_config.amount_font_size, egui::FontFamily::Proportional);
         let label_font = egui::FontId::new(style_config.label_font_size, egui::FontFamily::Proportional);
         
-        // Text content
-        let saved_amount_text = format!("${:.0}", current_balance);
-        let saved_label_text = "saved".to_string();
-        let remaining_amount_text = format!("${:.0}", remaining_amount);
-        let remaining_label_text = "to go!".to_string();
+        // Text content (conditional based on goal completion)
+        let (saved_amount_text, saved_label_text, remaining_amount_text, remaining_label_text) = if is_goal_complete {
+            // Goal complete: show celebration message
+            (
+                format!("You saved ${:.0} of ${:.0}! 🎉✨", current_balance, target_amount),
+                "".to_string(), // Empty label for celebration message
+                "".to_string(), // No remaining amount text
+                "".to_string(), // No remaining label
+            )
+        } else {
+            // Goal in progress: show normal progress
+            (
+                format!("${:.0}", current_balance),
+                "saved".to_string(),
+                format!("${:.0}", remaining_amount),
+                "to go!".to_string(),
+            )
+        };
         
-        // Draw "saved" section on filled portion (if it fits)
-        if progress > 0.0 {
-            let filled_width = rect.width() * progress as f32;
-            
-            let saved_amount_size = ui.painter().layout_no_wrap(
+        // Draw text based on completion status
+        if is_goal_complete {
+            // Goal complete: center celebration message across full width
+            let celebration_size = ui.painter().layout_no_wrap(
                 saved_amount_text.clone(),
                 amount_font.clone(),
                 egui::Color32::WHITE
             ).size();
             
-            let saved_label_size = ui.painter().layout_no_wrap(
-                saved_label_text.clone(),
-                label_font.clone(),
-                egui::Color32::WHITE
-            ).size();
-            
-            let total_width = saved_amount_size.x.max(saved_label_size.x);
-            if total_width + style_config.text_padding <= filled_width {
-                let center_x = rect.min.x + filled_width / 2.0;
+            if celebration_size.x + style_config.text_padding <= rect.width() {
+                let center_x = rect.center().x;
+                let center_y = rect.center().y;
                 
-                // Amount (top line)
-                let amount_pos = egui::pos2(
-                    center_x - saved_amount_size.x / 2.0,
-                    rect.center().y - saved_amount_size.y / 2.0 - style_config.amount_label_spacing
+                // Center the celebration message
+                let text_pos = egui::pos2(
+                    center_x - celebration_size.x / 2.0,
+                    center_y - celebration_size.y / 2.0
                 );
                 ui.painter().text(
-                    amount_pos,
+                    text_pos,
                     egui::Align2::LEFT_TOP,
                     saved_amount_text,
                     amount_font.clone(),
                     egui::Color32::WHITE
                 );
+            }
+        } else {
+            // Goal in progress: draw normal "saved" section on filled portion
+            if progress > 0.0 {
+                let filled_width = rect.width() * progress as f32;
                 
-                // Label (bottom line)
-                let label_pos = egui::pos2(
-                    center_x - saved_label_size.x / 2.0,
-                    rect.center().y + saved_label_size.y / 2.0 - 2.0
-                );
-                ui.painter().text(
-                    label_pos,
-                    egui::Align2::LEFT_TOP,
-                    saved_label_text,
+                let saved_amount_size = ui.painter().layout_no_wrap(
+                    saved_amount_text.clone(),
+                    amount_font.clone(),
+                    egui::Color32::WHITE
+                ).size();
+                
+                let saved_label_size = ui.painter().layout_no_wrap(
+                    saved_label_text.clone(),
                     label_font.clone(),
                     egui::Color32::WHITE
-                );
+                ).size();
+                
+                let total_width = saved_amount_size.x.max(saved_label_size.x);
+                if total_width + style_config.text_padding <= filled_width {
+                    let center_x = rect.min.x + filled_width / 2.0;
+                    
+                    // Amount (top line)
+                    let amount_pos = egui::pos2(
+                        center_x - saved_amount_size.x / 2.0,
+                        rect.center().y - saved_amount_size.y / 2.0 - style_config.amount_label_spacing
+                    );
+                    ui.painter().text(
+                        amount_pos,
+                        egui::Align2::LEFT_TOP,
+                        saved_amount_text,
+                        amount_font.clone(),
+                        egui::Color32::WHITE
+                    );
+                    
+                    // Label (bottom line) - only if we have a label
+                    if !saved_label_text.is_empty() {
+                        let label_pos = egui::pos2(
+                            center_x - saved_label_size.x / 2.0,
+                            rect.center().y + saved_label_size.y / 2.0 - 2.0
+                        );
+                        ui.painter().text(
+                            label_pos,
+                            egui::Align2::LEFT_TOP,
+                            saved_label_text,
+                            label_font.clone(),
+                            egui::Color32::WHITE
+                        );
+                    }
+                }
             }
         }
         
         // Draw "to go!" section on unfilled portion (if it fits and there's remaining amount)
-        if progress < 1.0 && remaining_amount > 0.0 {
+        if !is_goal_complete && progress < 1.0 && remaining_amount > 0.0 && !remaining_amount_text.is_empty() {
             let filled_width = rect.width() * progress as f32;
             let unfilled_width = rect.width() - filled_width;
             
