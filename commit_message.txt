@@ -1,15 +1,21 @@
-feat: Fix calendar balance bug and add goal celebration features
+fix: Resolve calendar balance bug using TDD approach
 
-Backend Fixes:
-- Fix calendar balance calculation using TDD approach
-- Add unit test for same-day multiple transaction bug
-- Ensure final transaction balance is used for each day
+Root Cause:
+- UI layer was hardcoding all transaction timestamps to 12:00:00
+- Same-day transactions had identical timestamps causing unstable sorting
+- Backend used wrong transaction balance instead of final daily balance
 
-Goal Celebration Features:
-- Add goal completion detection helper function
-- Change graph title to "You did it!" when complete
-- Change circular progress to "All done!" when complete  
-- Update progress bar to "You saved $xx of $xx! 🎉✨"
-- Change cancel button to "Start new goal" when complete
+TDD Investigation:
+- Used systematic bottom-up layer testing approach
+- Added debug logs to trace data flow through frontend/backend
+- Identified UI timestamp creation as the culprit layer
 
-Note: Frontend still shows balance bug, requires further debugging 
+Fix Applied:
+- Replace hardcoded noon (12:00:00) with current time
+- Use chrono::Local::now() for hour/minute/second precision
+- Ensures unique timestamps for same-day transactions
+
+Result:
+- July 21st now shows correct final balance ($19.62 not $18.62)
+- Backend balance calculation working correctly
+- Chronological transaction ordering preserved 

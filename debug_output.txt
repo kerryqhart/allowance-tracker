@@ -1,0 +1,908 @@
+warning: profiles for the non root package will be ignored, specify profiles at the workspace root:
+package:   /Users/kerryh/Library/Mobile Documents/com~apple~CloudDocs/Documents/Code/windsurf_try/allowance-tracker/egui-frontend/Cargo.toml
+workspace: /Users/kerryh/Library/Mobile Documents/com~apple~CloudDocs/Documents/Code/windsurf_try/allowance-tracker/Cargo.toml
+warning: field `config` is never read
+  --> egui-frontend/src/ui/components/goal_progress_graph/graph_renderer.rs:18:5
+   |
+16 | pub struct GoalProgressGraph {
+   |            ----------------- field in this struct
+17 |     /// Configuration for data preparation
+18 |     config: GoalGraphConfig,
+   |     ^^^^^^
+   |
+   = note: `GoalProgressGraph` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+   = note: `#[warn(dead_code)]` on by default
+
+warning: function `estimate_goal_completion_date` is never used
+   --> egui-frontend/src/ui/components/goal_progress_graph/data_preparation.rs:105:4
+    |
+105 | fn estimate_goal_completion_date(
+    |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `allowance-tracker-egui` (lib) generated 2 warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.77s
+     Running `target/debug/allowance-tracker-egui`
+[2025-07-21T20:06:27Z INFO  allowance_tracker_egui] Starting Allowance Tracker egui application
+[2025-07-21T20:06:27Z INFO  allowance_tracker_egui] ✅ Successfully loaded custom app icon
+[2025-07-21T20:06:27Z INFO  allowance_tracker_egui] Launching egui window
+[2025-07-21T20:06:27Z INFO  eframe] Both the glow and wgpu renderers are available. Using wgpu.
+[2025-07-21T20:06:27Z INFO  wgpu_core::instance] Adapter Metal AdapterInfo { name: "Apple M4", vendor: 0, device: 0, device_type: IntegratedGpu, driver: "", driver_info: "", backend: Metal }
+[2025-07-21T20:06:27Z INFO  wgpu_core::instance] Adapter Metal AdapterInfo { name: "Apple M4", vendor: 0, device: 0, device_type: IntegratedGpu, driver: "", driver_info: "", backend: Metal }
+[2025-07-21T20:06:27Z INFO  allowance_tracker_egui] Persistence storage available
+[2025-07-21T20:06:27Z INFO  allowance_tracker_egui::ui::app_state] 🚀 Initializing AllowanceTrackerApp with modular architecture
+[2025-07-21T20:06:27Z INFO  allowance_tracker_egui::ui::fonts] 🎨 Successfully loaded font: /System/Library/Fonts/Supplemental/Chalkboard.ttc
+[2025-07-21T20:06:27Z INFO  allowance_tracker_egui::ui::fonts] ✅ Chalkboard font loaded successfully!
+[2025-07-21T20:06:27Z INFO  allowance_tracker_egui::ui::fonts] 🎨 Successfully loaded emoji font: /System/Library/Fonts/Apple Color Emoji.ttc
+[2025-07-21T20:06:27Z INFO  allowance_tracker_egui::ui::fonts] ✅ Added emoji support to Proportional font family
+[2025-07-21T20:06:27Z INFO  allowance_tracker_egui::ui::fonts] ✅ Added emoji support to Monospace font family
+[2025-07-21T20:06:27Z INFO  allowance_tracker_egui::ui::fonts] ✅ Apple Color Emoji font loaded and added to default fonts!
+[2025-07-21T20:06:27Z INFO  allowance_tracker_egui::backend] 🔍 Backend::new() using real data path: "/Users/kerryh/Documents/Allowance Tracker"
+[2025-07-21T20:06:27Z INFO  allowance_tracker_egui] Successfully initialized Allowance Tracker app
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::ui::components::data_loading] 📊 Loading initial data
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::ui::components::data_loading] 💰 Loading balance for child: Keiko Hart (ID: child::1751114531477)
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::ui::components::data_loading] 💰 DEBUG: About to call list_transactions_domain with query: TransactionListQuery { after: None, limit: Some(1), start_date: None, end_date: None }
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::transaction_service] 🎯 ALLOWANCE DEBUG: list_transactions_domain() called - this will trigger allowance check
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::transaction_service] 🎯 ALLOWANCE DEBUG: check_and_issue_pending_allowances() called
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::transaction_service] 🎯 ALLOWANCE DEBUG: Found active child: child::1751114531477
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::transaction_service] 🎯 ALLOWANCE DEBUG: Checking allowances from 2025-07-14 to 2025-07-21
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] Checking for pending allowances for child: child::1751114531477 from 2025-07-14 to 2025-07-21
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🎯 ALLOWANCE DEBUG: has_allowance_for_date() called for child child::1751114531477 on date 2025-07-18
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🎯 ALLOWANCE DEBUG: Retrieved 12 total transactions for allowance check
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🎯 ALLOWANCE DEBUG: Looking for allowances on date prefix: 2025-07-18
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🎯 ALLOWANCE DEBUG: Found positive transaction on target date: in-1752854911051-1a78 ($5.00) - Weekly allowance
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🎯 ALLOWANCE DEBUG: ✅ Found existing allowance 1 for child::1751114531477 on 2025-07-18: Weekly allowance
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🎯 ALLOWANCE DEBUG: has_allowance_for_date() result: true (found 1 allowances)
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] Found 0 pending allowances for child: child::1751114531477
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::transaction_service] 🎯 ALLOWANCE DEBUG: Found 0 pending allowances
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::transaction_service] 🎯 ALLOWANCE DEBUG: Total allowances issued: 0
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::ui::components::data_loading] 💰 DEBUG: list_transactions_domain returned 1 transactions
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::ui::components::data_loading] 📊 Updated balance from latest transaction in-1753124501217-3c20: $18.62
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::ui::components::data_loading] 📊 Balance update complete - Final balance: $18.62
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::ui::components::data_loading] 📅 Loading calendar data for 7/2025
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::ui::components::data_loading] 🗓️  Querying transactions from 2025-07-01 to 2025-07-31
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::calendar] 🗓️ CALENDAR: Getting calendar month with transactions for 7/2025
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::transaction_service] 🗓️ Getting transactions for calendar: month=7, year=2025
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::transaction_service] 🗓️ Fetching historical transactions up to: 2025-07-31T23:59:59Z
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::transaction_service] 🎯 ALLOWANCE DEBUG: list_transactions_domain() called - this will trigger allowance check
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::transaction_service] 🎯 ALLOWANCE DEBUG: check_and_issue_pending_allowances() called
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::transaction_service] 🎯 ALLOWANCE DEBUG: Found active child: child::1751114531477
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::transaction_service] 🎯 ALLOWANCE DEBUG: Checking allowances from 2025-07-14 to 2025-07-21
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] Checking for pending allowances for child: child::1751114531477 from 2025-07-14 to 2025-07-21
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🎯 ALLOWANCE DEBUG: has_allowance_for_date() called for child child::1751114531477 on date 2025-07-18
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🎯 ALLOWANCE DEBUG: Retrieved 12 total transactions for allowance check
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🎯 ALLOWANCE DEBUG: Looking for allowances on date prefix: 2025-07-18
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🎯 ALLOWANCE DEBUG: Found positive transaction on target date: in-1752854911051-1a78 ($5.00) - Weekly allowance
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🎯 ALLOWANCE DEBUG: ✅ Found existing allowance 1 for child::1751114531477 on 2025-07-18: Weekly allowance
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🎯 ALLOWANCE DEBUG: has_allowance_for_date() result: true (found 1 allowances)
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] Found 0 pending allowances for child: child::1751114531477
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::transaction_service] 🎯 ALLOWANCE DEBUG: Found 0 pending allowances
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::transaction_service] 🎯 ALLOWANCE DEBUG: Total allowances issued: 0
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::transaction_service] 🗓️ Found 12 historical transactions
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::transaction_service] 🗓️ Generating future allowances for child child::1751114531477 from 2025-07-01 to 2025-07-31
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: Generating future allowances for child child::1751114531477 from 2025-07-01 to 2025-07-31
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: Retrieved allowance config: Some(AllowanceConfig { id: "allowance::child::1751114531477::1751114550694", child_id: "child::1751114531477", amount: 5.0, day_of_week: 5, is_active: true, created_at: "2025-06-28T12:42:30.694187+00:00", updated_at: "2025-06-28T12:42:30.694187+00:00" })
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: Found active config - amount: $5.00, day_of_week: 5 (Friday)
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: Current date: 2025-07-21
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: Checking date 2025-07-01 - day_of_week: 2 (Tue), is_future: false, matches_allowance_day: false
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: ❌ Date 2025-07-01 is not in the future (current: 2025-07-21)
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: Checking date 2025-07-02 - day_of_week: 3 (Wed), is_future: false, matches_allowance_day: false
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: ❌ Date 2025-07-02 is not in the future (current: 2025-07-21)
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: Checking date 2025-07-03 - day_of_week: 4 (Thu), is_future: false, matches_allowance_day: false
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: ❌ Date 2025-07-03 is not in the future (current: 2025-07-21)
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: Checking date 2025-07-04 - day_of_week: 5 (Fri), is_future: false, matches_allowance_day: true
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: ❌ Date 2025-07-04 is not in the future (current: 2025-07-21)
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: Checking date 2025-07-05 - day_of_week: 6 (Sat), is_future: false, matches_allowance_day: false
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: ❌ Date 2025-07-05 is not in the future (current: 2025-07-21)
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: Checking date 2025-07-06 - day_of_week: 0 (Sun), is_future: false, matches_allowance_day: false
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: ❌ Date 2025-07-06 is not in the future (current: 2025-07-21)
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: Checking date 2025-07-07 - day_of_week: 1 (Mon), is_future: false, matches_allowance_day: false
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: ❌ Date 2025-07-07 is not in the future (current: 2025-07-21)
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: Checking date 2025-07-08 - day_of_week: 2 (Tue), is_future: false, matches_allowance_day: false
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: ❌ Date 2025-07-08 is not in the future (current: 2025-07-21)
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: Checking date 2025-07-09 - day_of_week: 3 (Wed), is_future: false, matches_allowance_day: false
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: ❌ Date 2025-07-09 is not in the future (current: 2025-07-21)
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: Checking date 2025-07-10 - day_of_week: 4 (Thu), is_future: false, matches_allowance_day: false
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: ❌ Date 2025-07-10 is not in the future (current: 2025-07-21)
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: Checking date 2025-07-11 - day_of_week: 5 (Fri), is_future: false, matches_allowance_day: true
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: ❌ Date 2025-07-11 is not in the future (current: 2025-07-21)
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: Checking date 2025-07-12 - day_of_week: 6 (Sat), is_future: false, matches_allowance_day: false
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: ❌ Date 2025-07-12 is not in the future (current: 2025-07-21)
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: Checking date 2025-07-13 - day_of_week: 0 (Sun), is_future: false, matches_allowance_day: false
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: ❌ Date 2025-07-13 is not in the future (current: 2025-07-21)
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: Checking date 2025-07-14 - day_of_week: 1 (Mon), is_future: false, matches_allowance_day: false
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: ❌ Date 2025-07-14 is not in the future (current: 2025-07-21)
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: Checking date 2025-07-15 - day_of_week: 2 (Tue), is_future: false, matches_allowance_day: false
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: ❌ Date 2025-07-15 is not in the future (current: 2025-07-21)
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: Checking date 2025-07-16 - day_of_week: 3 (Wed), is_future: false, matches_allowance_day: false
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: ❌ Date 2025-07-16 is not in the future (current: 2025-07-21)
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: Checking date 2025-07-17 - day_of_week: 4 (Thu), is_future: false, matches_allowance_day: false
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: ❌ Date 2025-07-17 is not in the future (current: 2025-07-21)
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: Checking date 2025-07-18 - day_of_week: 5 (Fri), is_future: false, matches_allowance_day: true
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: ❌ Date 2025-07-18 is not in the future (current: 2025-07-21)
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: Checking date 2025-07-19 - day_of_week: 6 (Sat), is_future: false, matches_allowance_day: false
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: ❌ Date 2025-07-19 is not in the future (current: 2025-07-21)
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: Checking date 2025-07-20 - day_of_week: 0 (Sun), is_future: false, matches_allowance_day: false
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: ❌ Date 2025-07-20 is not in the future (current: 2025-07-21)
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: Checking date 2025-07-21 - day_of_week: 1 (Mon), is_future: false, matches_allowance_day: false
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: ❌ Date 2025-07-21 is not in the future (current: 2025-07-21)
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: Checking date 2025-07-22 - day_of_week: 2 (Tue), is_future: true, matches_allowance_day: false
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: ❌ Future date 2025-07-22 doesn't match allowance day (got 2, need 5)
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: Checking date 2025-07-23 - day_of_week: 3 (Wed), is_future: true, matches_allowance_day: false
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: ❌ Future date 2025-07-23 doesn't match allowance day (got 3, need 5)
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: Checking date 2025-07-24 - day_of_week: 4 (Thu), is_future: true, matches_allowance_day: false
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: ❌ Future date 2025-07-24 doesn't match allowance day (got 4, need 5)
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: Checking date 2025-07-25 - day_of_week: 5 (Fri), is_future: true, matches_allowance_day: true
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: ✅ CREATING future allowance for child::1751114531477 on 2025-07-25
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: Generated future allowance for child::1751114531477 on 2025-07-25 (day_of_week: 5, expected: 5, datetime: 2025-07-25 12:00:00 +00:00)
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: Checking date 2025-07-26 - day_of_week: 6 (Sat), is_future: true, matches_allowance_day: false
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: ❌ Future date 2025-07-26 doesn't match allowance day (got 6, need 5)
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: Checking date 2025-07-27 - day_of_week: 0 (Sun), is_future: true, matches_allowance_day: false
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: ❌ Future date 2025-07-27 doesn't match allowance day (got 0, need 5)
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: Checking date 2025-07-28 - day_of_week: 1 (Mon), is_future: true, matches_allowance_day: false
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: ❌ Future date 2025-07-28 doesn't match allowance day (got 1, need 5)
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: Checking date 2025-07-29 - day_of_week: 2 (Tue), is_future: true, matches_allowance_day: false
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: ❌ Future date 2025-07-29 doesn't match allowance day (got 2, need 5)
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: Checking date 2025-07-30 - day_of_week: 3 (Wed), is_future: true, matches_allowance_day: false
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: ❌ Future date 2025-07-30 doesn't match allowance day (got 3, need 5)
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: Checking date 2025-07-31 - day_of_week: 4 (Thu), is_future: true, matches_allowance_day: false
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: ❌ Future date 2025-07-31 doesn't match allowance day (got 4, need 5)
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: Checked 31 days total, generated 1 future allowance transactions for child: child::1751114531477
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔮 ALLOWANCE DEBUG: ✅ Generated future allowances:
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service]   - future-allowance::child::1751114531477::2025-07-25 on 2025-07-25: $5.00
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::transaction_service] 🗓️ Generated 1 future allowances
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::transaction_service] 🗓️ Future allowance 1: id=future-allowance::child::1751114531477::2025-07-25, date=2025-07-25 12:00:00 +00:00, amount=5
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::transaction_service] 🗓️ Total transactions for calendar: 13
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::calendar] 🗓️ CALENDAR: Domain service returned 13 transactions for calendar
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::calendar] 🗓️ CALENDAR: Total transactions for calendar: 13 transactions
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::calendar] 🗓️ CALENDAR: DTO Transaction 1: id=in-1753125868955-a4e0, date=2025-07-21 12:00:00 -05:00, amount=1, description=test balance=19.62
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::calendar] 🗓️ CALENDAR: DTO Transaction 2: id=in-1753124501217-3c20, date=2025-07-21 12:00:00 -05:00, amount=2, description=Fun test balance=18.62
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::calendar] 🗓️ CALENDAR: DTO Transaction 3: id=in-1752854911051-1a78, date=2025-07-18 07:00:00 -05:00, amount=5, description=Weekly allowance balance=16.62
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::calendar] 🗓️ CALENDAR: DTO Transaction 4: id=ex-1752193719999-9999, date=2025-07-13 19:28:33.337813 -05:00, amount=-10, description=Math app extra levels balance=11.620000000000001
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::calendar] 🗓️ CALENDAR: DTO Transaction 5: id=in-1752282220233-78a8, date=2025-07-11 07:00:00 -05:00, amount=5, description=Weekly allowance balance=21.62
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::calendar] 🔍 BACKEND BALANCE DEBUG: Day 4: Using final normal transaction balance $24.62 from transaction transaction::income::1751603227503 (had 1 transactions)
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::calendar] 🔍 BACKEND BALANCE DEBUG: Day 10: Using final normal transaction balance $16.62 from transaction ex-1752193713337-2cb0 (had 1 transactions)
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::calendar] 🔍 BACKEND BALANCE DEBUG: Day 11: Using final normal transaction balance $21.62 from transaction in-1752282220233-78a8 (had 1 transactions)
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::calendar] 🔍 BACKEND BALANCE DEBUG: Day 13: Using final normal transaction balance $11.62 from transaction ex-1752193719999-9999 (had 1 transactions)
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::calendar] 🔍 BACKEND BALANCE DEBUG: Day 18: Using final normal transaction balance $16.62 from transaction in-1752854911051-1a78 (had 1 transactions)
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::calendar] 🔍 BACKEND BALANCE DEBUG: Day 21: Using final normal transaction balance $18.62 from transaction in-1753124501217-3c20 (had 2 transactions)
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::calendar] 🗓️ CALENDAR: Generated calendar with 35 days using projected balances
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::calendar] 🗓️ CALENDAR: Total transactions in calendar days: 8
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::ui::components::data_loading] 📊 Successfully loaded calendar month with 35 days for 7/2025
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::ui::components::data_loading] 🔍 FRONTEND DEBUG: July 21st from backend - balance: $18.62, transactions: 2
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::ui::components::data_loading] 🔍 FRONTEND DEBUG: July 21st transaction 1: test at 12:00:00 = balance $19.62
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::ui::components::data_loading] 🔍 FRONTEND DEBUG: July 21st transaction 2: Fun test at 12:00:00 = balance $18.62
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::ui::components::data_loading] 🔄 Converted to 8 DTO transactions
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::ui::components::data_loading] 🗓️  Found 0 June 2025 transactions
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::ui::components::data_loading] 📋 Resetting table state for new child
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::ui::components::data_loading] 📋 Loading initial transactions for table view
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::ui::components::data_loading] 📋 Loading more transactions for child: Keiko Hart (cursor: None)
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::ui::components::data_loading] 📋 Making pagination request with query: TransactionListQuery { after: None, limit: Some(50), start_date: None, end_date: None }
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::transaction_service] 🎯 ALLOWANCE DEBUG: list_transactions_domain() called - this will trigger allowance check
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::transaction_service] 🎯 ALLOWANCE DEBUG: check_and_issue_pending_allowances() called
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::transaction_service] 🎯 ALLOWANCE DEBUG: Found active child: child::1751114531477
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::transaction_service] 🎯 ALLOWANCE DEBUG: Checking allowances from 2025-07-14 to 2025-07-21
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] Checking for pending allowances for child: child::1751114531477 from 2025-07-14 to 2025-07-21
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🎯 ALLOWANCE DEBUG: has_allowance_for_date() called for child child::1751114531477 on date 2025-07-18
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🎯 ALLOWANCE DEBUG: Retrieved 12 total transactions for allowance check
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🎯 ALLOWANCE DEBUG: Looking for allowances on date prefix: 2025-07-18
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🎯 ALLOWANCE DEBUG: Found positive transaction on target date: in-1752854911051-1a78 ($5.00) - Weekly allowance
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🎯 ALLOWANCE DEBUG: ✅ Found existing allowance 1 for child::1751114531477 on 2025-07-18: Weekly allowance
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🎯 ALLOWANCE DEBUG: has_allowance_for_date() result: true (found 1 allowances)
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] Found 0 pending allowances for child: child::1751114531477
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::transaction_service] 🎯 ALLOWANCE DEBUG: Found 0 pending allowances
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::transaction_service] 🎯 ALLOWANCE DEBUG: Total allowances issued: 0
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::ui::components::data_loading] 📋 Successfully loaded 12 more transactions (has_more: false)
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::ui::components::data_loading] 📋 Table now has 12 total transactions
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::ui::components::chart_renderer] 📊 Loading chart data for child: Keiko Hart (period: Days30)
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::ui::components::chart_renderer] 📊 Chart date range: 2025-06-21 to 2025-07-21 (30 days)
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::ui::components::chart_renderer] 📊 Fetching transactions from backend with query: start_date=2025-06-21T00:00:00+00:00, end_date=2025-07-21T23:59:59+00:00, limit=10000
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::transaction_service] 🎯 ALLOWANCE DEBUG: list_transactions_domain() called - this will trigger allowance check
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::transaction_service] 🎯 ALLOWANCE DEBUG: check_and_issue_pending_allowances() called
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::transaction_service] 🎯 ALLOWANCE DEBUG: Found active child: child::1751114531477
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::transaction_service] 🎯 ALLOWANCE DEBUG: Checking allowances from 2025-07-14 to 2025-07-21
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] Checking for pending allowances for child: child::1751114531477 from 2025-07-14 to 2025-07-21
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🎯 ALLOWANCE DEBUG: has_allowance_for_date() called for child child::1751114531477 on date 2025-07-18
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🎯 ALLOWANCE DEBUG: Retrieved 12 total transactions for allowance check
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🎯 ALLOWANCE DEBUG: Looking for allowances on date prefix: 2025-07-18
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🎯 ALLOWANCE DEBUG: Found positive transaction on target date: in-1752854911051-1a78 ($5.00) - Weekly allowance
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🎯 ALLOWANCE DEBUG: ✅ Found existing allowance 1 for child::1751114531477 on 2025-07-18: Weekly allowance
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🎯 ALLOWANCE DEBUG: has_allowance_for_date() result: true (found 1 allowances)
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] Found 0 pending allowances for child: child::1751114531477
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::transaction_service] 🎯 ALLOWANCE DEBUG: Found 0 pending allowances
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::transaction_service] 🎯 ALLOWANCE DEBUG: Total allowances issued: 0
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::ui::components::chart_renderer] 📊 Successfully loaded 9 transactions from backend for chart
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::ui::components::chart_renderer] 📊 Converted to 9 DTO transactions for chart
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::ui::components::chart_renderer] 📊 Generated 31 chart data points
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::ui::components::goal_renderer] 🎯 Loading goal data from backend
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::goal_service] Getting current goal: GetCurrentGoalCommand { child_id: Some("child::1751114531477") }
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::goal_service] Calculating goal completion for child: child::1751114531477, target: $20.00
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::transaction_service] 🎯 ALLOWANCE DEBUG: list_transactions_domain() called - this will trigger allowance check
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::transaction_service] 🎯 ALLOWANCE DEBUG: check_and_issue_pending_allowances() called
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::transaction_service] 🎯 ALLOWANCE DEBUG: Found active child: child::1751114531477
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::transaction_service] 🎯 ALLOWANCE DEBUG: Checking allowances from 2025-07-14 to 2025-07-21
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] Checking for pending allowances for child: child::1751114531477 from 2025-07-14 to 2025-07-21
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🎯 ALLOWANCE DEBUG: has_allowance_for_date() called for child child::1751114531477 on date 2025-07-18
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🎯 ALLOWANCE DEBUG: Retrieved 12 total transactions for allowance check
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🎯 ALLOWANCE DEBUG: Looking for allowances on date prefix: 2025-07-18
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🎯 ALLOWANCE DEBUG: Found positive transaction on target date: in-1752854911051-1a78 ($5.00) - Weekly allowance
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🎯 ALLOWANCE DEBUG: ✅ Found existing allowance 1 for child::1751114531477 on 2025-07-18: Weekly allowance
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🎯 ALLOWANCE DEBUG: has_allowance_for_date() result: true (found 1 allowances)
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] Found 0 pending allowances for child: child::1751114531477
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::transaction_service] 🎯 ALLOWANCE DEBUG: Found 0 pending allowances
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::transaction_service] 🎯 ALLOWANCE DEBUG: Total allowances issued: 0
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] Getting allowance config: GetAllowanceConfigCommand { child_id: Some("child::1751114531477") }
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] Found allowance config for child: child::1751114531477
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::backend::domain::allowance_service] 🔍 DEBUG: Allowance config details - day_of_week: 5, day_name: Friday, amount: 5, is_active: true
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::ui::components::goal_renderer] ✅ Successfully loaded goal data
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:28Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:29Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:31Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:32Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:33Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:33Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:33Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:33Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:33Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:33Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:33Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:33Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:33Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:33Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:33Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:33Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:33Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:33Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:33Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:33Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:33Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:33Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:33Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:33Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:33Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:33Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:33Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:33Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:33Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:33Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:33Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:33Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:34Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:35Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:35Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:35Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:35Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:35Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:35Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:35Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:35Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:35Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:35Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:35Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:35Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:35Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:35Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2
+[2025-07-21T20:06:35Z INFO  allowance_tracker_egui::ui::app_coordinator] 🔄 APP UPDATE called - main render loop
+[2025-07-21T20:06:35Z INFO  allowance_tracker_egui::ui::app_coordinator] 🏢 WINDOW SPACE: full_rect.height=769, content_height=649, reserved=120px
+[2025-07-21T20:06:35Z INFO  allowance_tracker_egui::ui::components::header] 🏠 RENDER_HEADER called
+[2025-07-21T20:06:35Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📄 RENDER_MAIN_CONTENT called
+[2025-07-21T20:06:35Z INFO  allowance_tracker_egui::ui::components::tab_manager] 📋 TAB_MANAGER: available_rect.height=649, passing to calendar
+[2025-07-21T20:06:35Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::rendering] 📅 CALENDAR DEBUG: available_rect = [[8.0 128.0] - [1110.0 777.0]]
+[2025-07-21T20:06:35Z INFO  allowance_tracker_egui::ui::components::calendar_renderer::navigation] 🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: $18.62, frontend balance: $18.62, transactions: 2

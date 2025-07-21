@@ -503,6 +503,7 @@ impl AllowanceTrackerApp {
     /// Submit income transaction to backend
     pub fn submit_income_transaction(&mut self) -> bool {
         use crate::backend::domain::money_management::MoneyManagementService;
+        use chrono::Timelike; // Import for hour(), minute(), second() methods
         
         log::info!("💰 Submitting income transaction - Description: '{}', Amount: '{}'", 
                   self.form.income_form_state.description, self.form.income_form_state.amount);
@@ -519,8 +520,9 @@ impl AllowanceTrackerApp {
         
         // Create AddMoneyRequest with selected date from calendar as proper DateTime object
         let date_time = self.calendar.selected_day.map(|date| {
-            // Convert NaiveDate to DateTime at noon Eastern Time
-            let naive_datetime = date.and_hms_opt(12, 0, 0).unwrap();
+            // TDD FIX: Use current time instead of hardcoded noon to avoid timestamp conflicts
+            let now = chrono::Local::now();
+            let naive_datetime = date.and_hms_opt(now.hour(), now.minute(), now.second()).unwrap();
             let eastern_offset = chrono::FixedOffset::west_opt(5 * 3600).unwrap(); // EST (UTC-5)
             eastern_offset.from_local_datetime(&naive_datetime).single().unwrap()
         });
@@ -563,6 +565,7 @@ impl AllowanceTrackerApp {
     /// Submit expense transaction to backend using spend_money_complete
     pub fn submit_expense_transaction(&mut self) -> bool {
         use crate::backend::domain::money_management::MoneyManagementService;
+        use chrono::Timelike; // Import for hour(), minute(), second() methods
         
         log::info!("💸 Submitting expense transaction - Description: '{}', Amount: '{}'", 
                   self.form.expense_form_state.description, self.form.expense_form_state.amount);
@@ -579,8 +582,9 @@ impl AllowanceTrackerApp {
         
         // Create SpendMoneyRequest with selected date from calendar as proper DateTime object
         let date_time = self.calendar.selected_day.map(|date| {
-            // Convert NaiveDate to DateTime at noon Eastern Time
-            let naive_datetime = date.and_hms_opt(12, 0, 0).unwrap();
+            // TDD FIX: Use current time instead of hardcoded noon to avoid timestamp conflicts
+            let now = chrono::Local::now();
+            let naive_datetime = date.and_hms_opt(now.hour(), now.minute(), now.second()).unwrap();
             let eastern_offset = chrono::FixedOffset::west_opt(5 * 3600).unwrap(); // EST (UTC-5)
             eastern_offset.from_local_datetime(&naive_datetime).single().unwrap()
         });

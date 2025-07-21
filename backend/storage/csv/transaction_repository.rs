@@ -768,4 +768,64 @@ mod tests {
         
         Ok(())
     }
+
+    #[test]
+    fn test_timestamp_precision_preservation_tdd() -> Result<()> {
+        // TDD Test: Verify storage layer preserves exact timestamps to the second
+        // This replicates the bug where multiple transactions on same day get 12:00:00 instead of actual times
+        
+        use chrono::Timelike; // Import trait for hour() and minute() methods
+        
+        let (repo, _env) = setup_test_repo()?;
+        
+        // Create transactions with precise timestamps on the same day (July 21st)
+        let tx1 = DomainTransaction {
+            id: "tx_09_00".to_string(),
+            child_id: "test_child".to_string(),
+            date: chrono::DateTime::parse_from_rfc3339("2025-07-21T09:00:00Z").unwrap(),
+            description: "Morning transaction".to_string(),
+            amount: 1.00,
+            balance: 17.62,
+            transaction_type: DomainTransactionType::Income,
+        };
+        
+        let tx2 = DomainTransaction {
+            id: "tx_15_00".to_string(),
+            child_id: "test_child".to_string(),
+            date: chrono::DateTime::parse_from_rfc3339("2025-07-21T15:00:00Z").unwrap(),
+            description: "Afternoon transaction".to_string(),
+            amount: 2.00,
+            balance: 19.62,
+            transaction_type: DomainTransactionType::Income,
+        };
+        
+        // Store transactions
+        repo.store_transaction(&tx1)?;
+        repo.store_transaction(&tx2)?;
+        
+        // Retrieve transactions
+        let retrieved_tx1 = repo.get_transaction("test_child", "tx_09_00")?.unwrap();
+        let retrieved_tx2 = repo.get_transaction("test_child", "tx_15_00")?.unwrap();
+        
+        // CRITICAL TEST: Verify exact timestamps are preserved
+        assert_eq!(retrieved_tx1.date.hour(), 9, "Transaction 1 should preserve 09:00 hour");
+        assert_eq!(retrieved_tx1.date.minute(), 0, "Transaction 1 should preserve 00 minutes");
+        
+        assert_eq!(retrieved_tx2.date.hour(), 15, "Transaction 2 should preserve 15:00 hour");
+        assert_eq!(retrieved_tx2.date.minute(), 0, "Transaction 2 should preserve 00 minutes");
+        
+        // Verify they are different times (not both defaulted to 12:00:00)
+        assert_ne!(retrieved_tx1.date.hour(), retrieved_tx2.date.hour(), 
+                   "Transactions should have different hours, not both 12:00:00");
+        
+        // Verify chronological order is maintained
+        assert!(retrieved_tx1.date < retrieved_tx2.date, 
+                "Morning transaction should be earlier than afternoon transaction");
+        
+        println!("✅ Storage layer preserves timestamp precision:");
+        println!("   TX1: {} (hour: {})", retrieved_tx1.date.to_rfc3339(), retrieved_tx1.date.hour());
+        println!("   TX2: {} (hour: {})", retrieved_tx2.date.to_rfc3339(), retrieved_tx2.date.hour());
+        
+        Ok(())
+    }
 } 
