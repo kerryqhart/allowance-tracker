@@ -1,8 +1,0 @@
-fix: clean up compilation warnings
-
-- Move profile configurations from egui-frontend to workspace root
-- Remove unused `config` field from GoalProgressGraph struct  
-- Remove unused `estimate_goal_completion_date` function
-- Clean up related imports and constructor methods
-
-All unit tests continue to pass. Build now compiles without warnings. 
