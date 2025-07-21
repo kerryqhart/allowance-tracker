@@ -26,25 +26,302 @@ use crate::ui::components::goal_progress_bar::{
     GoalContentType
 };
 
+/// Shared styling configuration for all section headers in the goal card
+#[derive(Debug, Clone)]
+struct SectionHeaderStyle {
+    font_size: f32,
+    font_family: egui::FontFamily,
+    color: egui::Color32,
+    spacing_below: f32,
+}
+
+impl Default for SectionHeaderStyle {
+    fn default() -> Self {
+        Self {
+            font_size: 24.0,
+            font_family: egui::FontFamily::Proportional,
+            color: egui::Color32::from_rgb(50, 50, 50),
+            spacing_below: 20.0,
+        }
+    }
+}
+
+impl SectionHeaderStyle {
+    /// Create a styled header label
+    fn create_label(&self, text: &str) -> egui::RichText {
+        egui::RichText::new(text)
+            .font(egui::FontId::new(self.font_size, self.font_family.clone()))
+            .color(self.color)
+    }
+}
+
 impl AllowanceTrackerApp {
     /// Draw the main goal section using the centralized layout system
     pub fn draw_goal_section(&mut self, ui: &mut egui::Ui, available_rect: egui::Rect) {
+        log::info!("🎯 GOAL_SECTION: Received {}w x {}h from tab manager", available_rect.width(), available_rect.height());
+        
         let layout = GoalLayout::new();
         
-        layout.card_container(ui, available_rect, |ui| {
-            if self.goal.loading {
-                layout.content_spacing(ui, GoalContentType::LoadingState);
-                self.draw_goal_loading_state(ui);
-            } else if let Some(error) = &self.goal.error_message.clone() {
-                layout.content_spacing(ui, GoalContentType::ErrorState);
-                self.draw_goal_error_state(ui, error);
-            } else if self.goal.has_active_goal() {
-                self.draw_current_goal_card_with_layout(ui, &layout);
-            } else {
-                layout.content_spacing(ui, GoalContentType::CreateGoal);
-                self.draw_create_goal_card(ui);
-            }
+        // Check if we should use 3-section layout
+        if self.goal.has_active_goal() && self.should_use_three_section_layout() {
+            log::info!("✅ Using NEW 3-section layout with direct rendering");
+            self.ensure_goal_components_loaded();
+            self.draw_three_section_goal_card_direct(ui, available_rect);
+        } else {
+            // Use normal card_container for other cases  
+            layout.card_container(ui, available_rect, |ui| {
+                if self.goal.loading {
+                    layout.content_spacing(ui, GoalContentType::LoadingState);
+                    self.draw_goal_loading_state(ui);
+                } else if let Some(error) = &self.goal.error_message.clone() {
+                    layout.content_spacing(ui, GoalContentType::ErrorState);
+                    self.draw_goal_error_state(ui, error);
+                } else if self.goal.has_active_goal() {
+                    log::info!("📄 Using legacy layout");
+                    self.draw_current_goal_card_with_layout(ui, &layout);
+                } else {
+                    layout.content_spacing(ui, GoalContentType::CreateGoal);
+                    self.draw_create_goal_card(ui);
+                }
+            });
+        }
+    }
+    
+    /// Check if we should use the 3-section layout
+    fn should_use_three_section_layout(&self) -> bool {
+        // FORCE 3-section layout for debugging positioning (ignore components ready check)
+        self.goal.has_active_goal()
+    }
+    
+    /// Ensure goal components are loaded for 3-section layout
+    fn ensure_goal_components_loaded(&mut self) {
+        self.goal.initialize_components();
+        // Data loading will happen during render to avoid borrowing conflicts
+    }
+    
+    /// Draw the 3-section goal card with DIRECT rendering (no nested UI hierarchies)
+    fn draw_three_section_goal_card_direct(&mut self, ui: &mut egui::Ui, available_rect: egui::Rect) {
+        let goal = if let Some(ref g) = self.goal.current_goal { g.clone() } else { return; };
+        let calculation = if let Some(ref c) = self.goal.goal_calculation { c.clone() } else { return; };
+        
+        log::info!("🎨 Drawing DIRECT 3-section goal card");
+        log::info!("🏠 Direct available space: {}w x {}h", available_rect.width(), available_rect.height());
+        
+        // Calculate margins and sections with DIRECT rectangle calculations
+        let card_margin = 20.0;
+        let internal_margin = 35.0;
+        let vertical_padding = 35.0;
+        let section_gap = 10.0;
+        
+        // Calculate unified card rectangle
+        let unified_card_rect = egui::Rect::from_min_size(
+            available_rect.min + egui::vec2(card_margin, card_margin),
+            egui::vec2(
+                available_rect.width() - (card_margin * 2.0),
+                available_rect.height() - (card_margin * 2.0)
+            ),
+        );
+        
+        // Draw single unified background
+        crate::ui::components::styling::draw_card_container(ui, unified_card_rect, 10.0);
+        
+        // Calculate internal content area
+        let content_rect = egui::Rect::from_min_size(
+            unified_card_rect.min + egui::vec2(internal_margin, vertical_padding),
+            egui::vec2(
+                unified_card_rect.width() - (internal_margin * 2.0),
+                unified_card_rect.height() - (vertical_padding * 2.0)
+            ),
+        );
+        
+        // Calculate section rectangles DIRECTLY
+        let top_height = content_rect.height() * 0.30; // Top section = 30% height
+        let bottom_height = content_rect.height() * 0.70 - section_gap; // Bottom = 70% - gap
+        
+        // Top section (progress bar)
+        let top_rect = egui::Rect::from_min_size(
+            content_rect.min,
+            egui::vec2(content_rect.width(), top_height)
+        );
+        
+        // Bottom sections 
+        let bottom_start_y = content_rect.min.y + top_height + section_gap;
+        let bottom_left_width = content_rect.width() * (2.0/3.0) - (section_gap / 2.0);
+        let bottom_right_width = content_rect.width() * (1.0/3.0) - (section_gap / 2.0);
+        
+        let bottom_left_rect = egui::Rect::from_min_size(
+            egui::pos2(content_rect.min.x, bottom_start_y),
+            egui::vec2(bottom_left_width, bottom_height)
+        );
+        
+        let bottom_right_rect = egui::Rect::from_min_size(
+            egui::pos2(content_rect.min.x + bottom_left_width + section_gap, bottom_start_y),
+            egui::vec2(bottom_right_width, bottom_height)
+        );
+        
+        log::info!("📐 DIRECT Section rectangles:");
+        log::info!("   Top: [{:.1} {:.1}] - [{:.1} {:.1}]", top_rect.min.x, top_rect.min.y, top_rect.max.x, top_rect.max.y);
+        log::info!("   Bottom-left: [{:.1} {:.1}] - [{:.1} {:.1}]", bottom_left_rect.min.x, bottom_left_rect.min.y, bottom_left_rect.max.x, bottom_left_rect.max.y);
+        log::info!("   Bottom-right: [{:.1} {:.1}] - [{:.1} {:.1}]", bottom_right_rect.min.x, bottom_right_rect.min.y, bottom_right_rect.max.x, bottom_right_rect.max.y);
+        log::info!("   📍 Bottom sections should start at same Y: left={:.1}, right={:.1}", bottom_left_rect.min.y, bottom_right_rect.min.y);
+        
+        // TOP SECTION: Progress bar (DIRECT rendering)
+        ui.allocate_ui_at_rect(top_rect, |ui| {
+            log::info!("🎯 Rendering progress bar in top section");
+            
+            let header_style = SectionHeaderStyle::default();
+            
+            ui.vertical_centered(|ui| {
+                // Goal header with consistent styling
+                ui.label(header_style.create_label(&format!("Goal: {}", goal.description)));
+                
+                ui.add_space(header_style.spacing_below);
+                
+                // Progress bar using existing component (taller to fill 30% section)
+                let layout_config = crate::ui::components::goal_progress_bar::ProgressBarLayoutConfig {
+                    height: 90.0,  // Increased from 70.0 to better fill the 30% top section
+                    rounding: 3.0,
+                    internal_spacing: 20.0,
+                };
+                
+                let available_width = top_rect.width() - (internal_margin * 2.0);
+                
+                crate::ui::components::goal_progress_bar::draw_progress_bar_with_target(
+                    ui,
+                    calculation.current_balance,
+                    goal.target_amount,
+                    available_width,
+                    &layout_config
+                );
+            });
         });
+        
+        // BOTTOM-LEFT SECTION: Goal progress graph (with margins)
+        log::info!("🎯 Bottom-left section rendering goal progression graph");
+        
+        // Load graph data if needed using our helper method
+        self.load_goal_component_data_if_needed(&goal);
+        
+        // Apply margins to the graph area 
+        let graph_margin = 15.0;
+        let graph_rect = egui::Rect::from_min_size(
+            bottom_left_rect.min + egui::vec2(graph_margin, graph_margin),
+            egui::vec2(
+                bottom_left_rect.width() - (graph_margin * 2.0),
+                bottom_left_rect.height() - (graph_margin * 2.0)
+            ),
+        );
+        
+        log::info!("🎯 Graph rect (with margins): [{:.1} {:.1}] - [{:.1} {:.1}]", 
+                   graph_rect.min.x, graph_rect.min.y, graph_rect.max.x, graph_rect.max.y);
+
+        
+        // DIRECT RENDERING: No nested UI hierarchy
+        ui.allocate_ui_at_rect(graph_rect, |ui| {
+            let header_style = SectionHeaderStyle::default();
+            
+            ui.vertical(|ui| {
+                // Graph header with consistent styling - HORIZONTALLY CENTERED
+                ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+                    ui.label(header_style.create_label("Are you getting closer?"));
+                });
+                
+                ui.add_space(header_style.spacing_below);
+                
+                // Render the graph in remaining space
+                if let Some(ref progress_graph) = self.goal.progress_graph {
+                    progress_graph.render(ui, &goal, &calculation);
+                } else {
+                    // Fallback state - centered message
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(ui.available_height() / 3.0);
+                        ui.label(egui::RichText::new("⏳ Initializing graph...")
+                            .font(egui::FontId::new(12.0, egui::FontFamily::Proportional))
+                            .color(egui::Color32::from_rgb(120, 120, 120)));
+                    });
+                }
+            });
+        });
+        
+        // BOTTOM-RIGHT SECTION: Circular progress component (centered)
+        log::info!("🎯 Bottom-right section rendering circular progress component");
+        
+        // Apply same margins to the right section for consistent alignment
+        let right_margin = 15.0; // Match the graph_margin
+        let right_rect_with_margin = egui::Rect::from_min_size(
+            bottom_right_rect.min + egui::vec2(right_margin, right_margin),
+            egui::vec2(
+                bottom_right_rect.width() - (right_margin * 2.0),
+                bottom_right_rect.height() - (right_margin * 2.0)
+            ),
+        );
+        
+
+        
+        // Update circular progress data if needed and render it
+        if let Some(mut circular_progress) = self.goal.circular_progress.take() {
+            circular_progress.update_progress(&goal, Some(&calculation));
+            
+            ui.allocate_ui_at_rect(right_rect_with_margin, |ui| {
+                let header_style = SectionHeaderStyle::default();
+                
+                ui.vertical(|ui| {
+                    // Circular progress header with consistent styling - HORIZONTALLY CENTERED
+                    ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+                        ui.label(header_style.create_label("Days until..."));
+                    });
+                    
+                    ui.add_space(header_style.spacing_below);
+                    
+                    // Center just the circular progress component in remaining space
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(ui.available_height() / 2.0 - 60.0); // Center the circle
+                        circular_progress.render(ui);
+                    });
+                });
+            });
+            
+            self.goal.circular_progress = Some(circular_progress);
+        } else {
+            // Fallback state - show initialization message
+            ui.allocate_ui_at_rect(right_rect_with_margin, |ui| {
+                let header_style = SectionHeaderStyle::default();
+                
+                ui.vertical(|ui| {
+                    // Header even in fallback state for consistency - HORIZONTALLY CENTERED
+                    ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+                        ui.label(header_style.create_label("Days until..."));
+                    });
+                    ui.add_space(header_style.spacing_below);
+                    
+                    // Center the fallback message in remaining space
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(ui.available_height() / 3.0);
+                        ui.label(egui::RichText::new("⏳ Initializing circular progress...")
+                            .font(egui::FontId::new(12.0, egui::FontFamily::Proportional))
+                            .color(egui::Color32::from_rgb(120, 120, 120)));
+                    });
+                });
+            });
+        }
+    }
+    
+    /// Load goal component data if needed (handles borrowing conflicts)
+    fn load_goal_component_data_if_needed(&mut self, goal: &crate::backend::domain::models::goal::DomainGoal) {
+        let needs_data_loading = if let Some(ref progress_graph) = self.goal.progress_graph {
+            !progress_graph.has_data()
+        } else {
+            false
+        };
+        
+        if needs_data_loading {
+            let goal_clone = goal.clone();
+            if let Some(mut progress_graph) = self.goal.progress_graph.take() {
+                let backend = self.backend();
+                progress_graph.load_data(backend, &goal_clone);
+                self.goal.progress_graph = Some(progress_graph);
+            }
+        }
     }
     
     /// Draw goal loading state

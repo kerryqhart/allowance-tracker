@@ -13,6 +13,8 @@
 //! - `tab_manager` - Tab navigation and content routing
 //! - `table_renderer` - Table view rendering with responsive design
 //! - `calendar_renderer` - Calendar view rendering with transaction display
+//! - `goal_progress_graph` - Goal-specific balance progression graph component
+//! - `circular_days_progress` - Donut-style circular progress tracker for goal timeline
 //!
 //! ## Architecture:
 //! The components are organized to promote reusability and maintainability.
@@ -20,10 +22,12 @@
 
 pub mod calendar_renderer;
 pub mod chart_renderer;
+pub mod circular_days_progress;
 pub mod data_loading;
 pub mod dropdown_menu;
 pub mod goal_renderer;
 pub mod goal_progress_bar;
+pub mod goal_progress_graph;
 pub mod header;
 pub mod modals;
 pub mod styling;

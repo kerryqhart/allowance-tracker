@@ -211,6 +211,33 @@ impl<C: Connection> BalanceService<C> {
 
         Ok(errors)
     }
+
+    /// Get balance at or before a specific date
+    /// Returns the most recent transaction balance at/before the specified date
+    /// Used for goal progression tracking to find balance at goal creation date
+    pub fn get_balance_at_date(&self, child_id: &str, target_date: &str) -> Result<f64> {
+        info!("Getting balance at date {} for child {}", target_date, child_id);
+        
+        // Find the most recent transaction at or before the target date
+        match self.transaction_repository.get_latest_transaction_before_date(child_id, target_date)? {
+            Some(transaction) => {
+                // Check if this transaction is exactly on the target date or before
+                let tx_date_str = transaction.date.format("%Y-%m-%dT%H:%M:%S%.3f%z").to_string();
+                if tx_date_str.as_str() <= target_date {
+                    info!("Found transaction {} at {} with balance ${:.2}", 
+                          transaction.id, tx_date_str, transaction.balance);
+                    Ok(transaction.balance)
+                } else {
+                    info!("No transactions found at or before {}, balance is $0.00", target_date);
+                    Ok(0.0)
+                }
+            }
+            None => {
+                info!("No transactions found before {}, balance is $0.00", target_date);
+                Ok(0.0)
+            }
+        }
+    }
 }
 
 #[cfg(test)]

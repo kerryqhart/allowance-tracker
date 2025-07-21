@@ -22,7 +22,7 @@
 
 use anyhow::Result;
 use chrono::{Utc, Duration, Local, Datelike};
-use log::info;
+use log::{info, warn};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -336,6 +336,122 @@ impl GoalService {
         }
 
         Ok(None)
+    }
+
+    /// Get goal progression data: historical transactions since goal creation + future allowances until completion
+    pub fn get_goal_progression_data(&self, goal: &DomainGoal) -> Result<Vec<crate::backend::domain::models::transaction::Transaction>> {
+        info!("Getting goal progression data for goal: {}", goal.id);
+        
+        // Parse goal creation date
+        let goal_creation_date = match chrono::DateTime::parse_from_rfc3339(&goal.created_at) {
+            Ok(datetime) => datetime.date_naive(),
+            Err(e) => {
+                return Err(anyhow::anyhow!("Invalid goal creation date: {}", e));
+            }
+        };
+        
+        info!("Goal created on: {}", goal_creation_date);
+        
+        // Get all transactions since goal creation
+        let query = TransactionListQuery {
+            after: None,
+            limit: Some(1000), // Reasonable limit
+            start_date: Some(goal_creation_date.and_hms_opt(0, 0, 0).unwrap().and_utc().to_rfc3339()),
+            end_date: None, // Up to now
+        };
+        
+        let historical_result = self.transaction_service.list_transactions_domain(query)?;
+        info!("Found {} historical transactions since goal creation", historical_result.transactions.len());
+        
+        // Get current balance to check if goal is already achieved
+        let current_balance = self.get_current_balance(&goal.child_id)?;
+        
+        if current_balance >= goal.target_amount {
+            // Goal already achieved, no future projection needed
+            info!("Goal already achieved (${:.2} >= ${:.2})", current_balance, goal.target_amount);
+            return Ok(historical_result.transactions);
+        }
+        
+        // Calculate projected completion date using existing domain logic
+        let goal_calculation = self.calculate_goal_completion(&goal.child_id, goal.target_amount)?;
+        
+        if !goal_calculation.is_achievable {
+            // Goal not achievable, return just historical data
+            info!("Goal not achievable with current allowance settings");
+            return Ok(historical_result.transactions);
+        }
+        
+        // Generate future allowances until goal completion
+        let today = chrono::Local::now().date_naive();
+        let projected_completion_date = match goal_calculation.projected_completion_date {
+            Some(date_str) => {
+                match chrono::DateTime::parse_from_rfc3339(&date_str) {
+                    Ok(datetime) => datetime.date_naive(),
+                    Err(_) => today + Duration::days(365), // Fallback
+                }
+            }
+            None => today + Duration::days(365), // Fallback
+        };
+        
+        info!("Generating future allowances until: {}", projected_completion_date);
+        
+        // Generate future allowances using existing domain service
+        let mut future_allowances = self.allowance_service.generate_future_allowance_transactions(
+            &goal.child_id,
+            today.succ_opt().unwrap_or(today), // Start from tomorrow
+            projected_completion_date,
+        )?;
+        
+        // Calculate proper balances for future allowances using BalanceService
+        // (AllowanceService creates them with NaN balance to delegate balance calculation)
+        for allowance in &mut future_allowances {
+            if allowance.balance.is_nan() {
+                // Use BalanceService to calculate projected balance for this future transaction
+                match self.balance_service.calculate_projected_balance_for_transaction(
+                    &goal.child_id,
+                    &allowance.date.to_rfc3339(),
+                    allowance.amount
+                ) {
+                    Ok(projected_balance) => {
+                        allowance.balance = projected_balance;
+                        info!("🎯 Calculated projected balance for {}: ${:.2}", 
+                              allowance.date.format("%Y-%m-%d"), projected_balance);
+                    }
+                    Err(e) => {
+                        warn!("Failed to calculate projected balance for future allowance {}: {}", 
+                              allowance.id, e);
+                        // Keep NaN balance as fallback
+                    }
+                }
+            }
+        }
+        
+        info!("Generated {} future allowances", future_allowances.len());
+        
+        // Debug logging for future allowances
+        info!("🎯 DOMAIN DEBUG: Future allowances breakdown:");
+        for (i, allowance) in future_allowances.iter().enumerate() {
+            info!("  Future allowance {}: {} - ${:.2} (type: {:?})", 
+                   i, allowance.date.format("%Y-%m-%d"), allowance.balance, allowance.transaction_type);
+        }
+        
+        // Get counts before moving
+        let historical_count = historical_result.transactions.len();
+        let future_count = future_allowances.len();
+        
+        // Combine historical and future transactions
+        let mut all_transactions = historical_result.transactions;
+        all_transactions.extend(future_allowances);
+        
+        // Sort by date for proper chronological order
+        all_transactions.sort_by(|a, b| a.date.cmp(&b.date));
+        
+        info!("Total goal progression points: {} (historical) + {} (future) = {}", 
+              historical_count, 
+              future_count, 
+              all_transactions.len());
+        
+        Ok(all_transactions)
     }
 
     /// Calculate goal completion projection
