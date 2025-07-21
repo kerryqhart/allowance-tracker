@@ -23,6 +23,7 @@ pub mod chart_renderer;
 pub mod data_loading;
 pub mod dropdown_menu;
 pub mod goal_renderer;
+pub mod goal_progress_bar;
 pub mod header;
 pub mod modals;
 pub mod styling;

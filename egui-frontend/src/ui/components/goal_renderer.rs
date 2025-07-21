@@ -18,62 +18,33 @@
 use eframe::egui;
 use log::info;
 use crate::ui::app_state::AllowanceTrackerApp;
-use crate::ui::components::styling::{colors, draw_card_container};
+use crate::ui::components::styling::colors;
+
+use crate::ui::components::goal_progress_bar::{
+    draw_progress_bar_with_target, 
+    GoalLayout, 
+    GoalContentType
+};
 
 impl AllowanceTrackerApp {
-    /// Draw the main goal section
-    /// 
-    /// ## MARGIN STRUCTURE (DO NOT CHANGE WITHOUT USER APPROVAL):
-    /// 1. **EXTERNAL MARGINS**: 20px on all sides from window edge to card background
-    ///    - Creates `content_rect` with 40px total reduction (20px × 2 sides)
-    ///    - Card background drawn at `content_rect` (NOT `available_rect`)
-    ///    - This matches calendar/table visual consistency
-    /// 
-    /// 2. **INTERNAL MARGINS**: 30px left padding inside the card for content positioning
-    ///    - All content (text, progress bar, etc.) positioned 30px from card's left edge
-    ///    - Creates proper breathing room inside the white card background
-    /// 
-    /// 3. **VERTICAL PADDING**: 35px top/bottom inside the card for content spacing
-    ///    - Ensures content doesn't touch card edges vertically
+    /// Draw the main goal section using the centralized layout system
     pub fn draw_goal_section(&mut self, ui: &mut egui::Ui, available_rect: egui::Rect) {
-        // EXTERNAL MARGINS: 20px margins from window edge to card background
-        // This creates the white card size that matches other tabs' visual style
-        let content_rect = egui::Rect::from_min_size(
-            available_rect.min + egui::vec2(20.0, 20.0),
-            egui::vec2(available_rect.width() - 40.0, available_rect.height() - 40.0),
-        );
+        let layout = GoalLayout::new();
         
-        // Draw white card background at the content_rect (NOT available_rect)
-        draw_card_container(ui, content_rect, 10.0);
-        
-        // GOAL CONTENT AREA: Position all content inside the white card background
-        ui.allocate_ui_at_rect(content_rect, |ui| {
-            ui.vertical(|ui| {
-                // VERTICAL PADDING: 35px top spacing inside card
-                ui.add_space(35.0); 
-                
-                // INTERNAL MARGINS: Create 30px left padding for content positioning
-                // This moves all content (text, progress bar, etc.) away from card's left edge
-                ui.horizontal(|ui| {
-                    ui.add_space(30.0); // INTERNAL LEFT MARGIN: Content positioning inside card
-                    ui.vertical(|ui| {
-                
-                if self.goal.loading {
-                    self.draw_goal_loading_state(ui);
-                } else if let Some(error) = &self.goal.error_message.clone() {
-                    self.draw_goal_error_state(ui, error);
-                } else if self.goal.has_active_goal() {
-                    self.draw_current_goal_card(ui);
-                } else {
-                    self.draw_create_goal_card(ui);
-                }
-                
-                // VERTICAL PADDING: 35px bottom spacing inside card  
-                ui.add_space(35.0);
-                    }); // End: INTERNAL content vertical layout
-                }); // End: INTERNAL left margin horizontal layout  
-            }); // End: Card content vertical layout
-        }); // End: Goal content area
+        layout.card_container(ui, available_rect, |ui| {
+            if self.goal.loading {
+                layout.content_spacing(ui, GoalContentType::LoadingState);
+                self.draw_goal_loading_state(ui);
+            } else if let Some(error) = &self.goal.error_message.clone() {
+                layout.content_spacing(ui, GoalContentType::ErrorState);
+                self.draw_goal_error_state(ui, error);
+            } else if self.goal.has_active_goal() {
+                self.draw_current_goal_card_with_layout(ui, &layout);
+            } else {
+                layout.content_spacing(ui, GoalContentType::CreateGoal);
+                self.draw_create_goal_card(ui);
+            }
+        });
     }
     
     /// Draw goal loading state
@@ -103,87 +74,84 @@ impl AllowanceTrackerApp {
         });
     }
     
-    /// Draw current goal display card
-    fn draw_current_goal_card(&mut self, ui: &mut egui::Ui) {
+    /// Draw current goal display card with layout system
+    fn draw_current_goal_card_with_layout(&mut self, ui: &mut egui::Ui, layout: &GoalLayout) {
         // Clone the data to avoid borrowing conflicts
         let goal = if let Some(ref g) = self.goal.current_goal { g.clone() } else { return; };
         let calculation = if let Some(ref c) = self.goal.goal_calculation { c.clone() } else { return; };
         
-        ui.vertical(|ui| {
-                // Goal description with kid-friendly labeling
-                ui.label(egui::RichText::new(format!("🎯 You're saving for: {}", goal.description))
-                    .font(egui::FontId::new(20.0, egui::FontFamily::Proportional))
-                    .color(colors::TEXT_PRIMARY)
-                    .strong());
-                
-                ui.add_space(25.0); // Increased spacing between sections
-                
-                // Goal amount and progress
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new(format!("Target: ${:.2}", goal.target_amount))
-                        .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))
-                        .color(colors::TEXT_SECONDARY));
-                    
-                    ui.add_space(20.0);
-                    
-                    ui.label(egui::RichText::new(format!("Current: ${:.2}", calculation.current_balance))
-                        .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))
-                        .color(colors::TEXT_SECONDARY));
-                    
-                    ui.add_space(20.0);
-                    
-                    ui.label(egui::RichText::new(format!("Needed: ${:.2}", calculation.amount_needed))
-                        .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))
-                        .color(if calculation.amount_needed <= 0.0 { 
-                            egui::Color32::GREEN 
-                        } else { 
-                            colors::TEXT_SECONDARY 
-                        }));
-                });
-                
-                ui.add_space(20.0); // Better spacing before progress bar
-                
-                // Progress bar
-                self.draw_goal_progress_bar(ui, &calculation);
-                
-                ui.add_space(25.0); // Increased spacing after progress bar
-                
-                // Completion information
-                if calculation.amount_needed <= 0.0 {
-                    ui.label(egui::RichText::new("🎉 Goal Complete! Congratulations!")
-                        .font(egui::FontId::new(18.0, egui::FontFamily::Proportional))
-                        .color(egui::Color32::GREEN)
-                        .strong());
-                } else {
-                    self.draw_goal_completion_info(ui, &calculation);
-                }
-            });
+        // Goal title
+        layout.content_spacing(ui, GoalContentType::Title);
+        ui.label(egui::RichText::new(format!("🎯 You're saving for: {}", goal.description))
+            .font(egui::FontId::new(20.0, egui::FontFamily::Proportional))
+            .color(colors::TEXT_PRIMARY)
+            .strong());
+        
+        // Goal summary
+        layout.content_spacing(ui, GoalContentType::Summary);
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new(format!("Target: ${:.2}", goal.target_amount))
+                .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))
+                .color(colors::TEXT_SECONDARY));
+            
+            layout.element_spacing(ui);
+            
+            ui.label(egui::RichText::new(format!("Current: ${:.2}", calculation.current_balance))
+                .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))
+                .color(colors::TEXT_SECONDARY));
+            
+            layout.element_spacing(ui);
+            
+            ui.label(egui::RichText::new(format!("Needed: ${:.2}", calculation.amount_needed))
+                .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))
+                .color(if calculation.amount_needed <= 0.0 { 
+                    egui::Color32::GREEN 
+                } else { 
+                    colors::TEXT_SECONDARY 
+                }));
+        });
+        
+        // Progress bar
+        layout.content_spacing(ui, GoalContentType::ProgressBar);
+        self.draw_goal_progress_bar_with_layout(ui, &calculation, layout);
+        
+        // Completion information
+        layout.content_spacing(ui, GoalContentType::CompletionInfo);
+        if calculation.amount_needed <= 0.0 {
+            ui.label(egui::RichText::new("🎉 Goal Complete! Congratulations!")
+                .font(egui::FontId::new(18.0, egui::FontFamily::Proportional))
+                .color(egui::Color32::GREEN)
+                .strong());
+        } else {
+            self.draw_goal_completion_info(ui, &calculation);
+        }
     }
     
-    /// Draw goal progress bar
-    fn draw_goal_progress_bar(&self, ui: &mut egui::Ui, calculation: &shared::GoalCalculation) {
+
+    
+    /// Draw goal progress bar using the layout system
+    fn draw_goal_progress_bar_with_layout(
+        &self, 
+        ui: &mut egui::Ui, 
+        calculation: &shared::GoalCalculation,
+        layout: &GoalLayout
+    ) {
         let target_amount = if let Some(goal) = &self.goal.current_goal { 
             goal.target_amount 
         } else { 
             return; 
         };
         
-        let progress = if target_amount > 0.0 {
-            (calculation.current_balance / target_amount).clamp(0.0, 1.0)
-        } else {
-            0.0
-        };
-        
-        let progress_bar = egui::ProgressBar::new(progress as f32)
-            .desired_width(ui.available_width() - 40.0)
-            .text(format!("{:.1}%", progress * 100.0))
-            .fill(if progress >= 1.0 { 
-                egui::Color32::GREEN 
-            } else { 
-                egui::Color32::from_rgb(100, 150, 255) 
-            });
-        
-        ui.add(progress_bar);
+        layout.progress_bar_container(ui, |ui, available_width| {
+            let layout_config = layout.progress_bar_config();
+            draw_progress_bar_with_target(
+                ui,
+                calculation.current_balance,
+                target_amount,
+                available_width,
+                &layout_config,
+            );
+        });
     }
     
     /// Draw goal completion information
