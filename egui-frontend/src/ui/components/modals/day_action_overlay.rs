@@ -267,7 +267,7 @@ impl AllowanceTrackerApp {
                                                     log::info!("💰 Add money form submitted: '{}', ${}", 
                                                               self.form.add_money_description, self.form.add_money_amount);
                                                     
-                                                    self.ui.success_message = Some("Add Extra Money functionality coming in next phase!".to_string());
+                                                    // Add Extra Money functionality not implemented yet
                                                     self.calendar.active_overlay = None;
                                                     self.calendar.selected_day = None;
                                                     
@@ -376,7 +376,7 @@ impl AllowanceTrackerApp {
                                                     // TODO: Implement add money logic in next phase
                                                     log::info!("💰 Add Extra Money clicked - Description: '{}', Amount: '{}'", 
                                                               self.form.add_money_description, self.form.add_money_amount);
-                                                    self.ui.success_message = Some("Add Extra Money functionality coming in next phase!".to_string());
+                                                    // Add Extra Money functionality not implemented yet
                                                 },
                                                 _ => {
                                                     // Default behavior for other overlays

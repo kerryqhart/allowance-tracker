@@ -235,7 +235,7 @@ impl AllowanceTrackerApp {
                     
                     // Close modal after brief success display
                     self.modal.show_parental_control_modal = false;
-                    self.ui.success_message = Some("Access granted!".to_string());
+                    // Access granted feedback removed
                 } else {
                     log::info!("❌ Parental control validation failed");
                     self.modal.parental_control_error = Some(result.message);
@@ -276,7 +276,7 @@ impl AllowanceTrackerApp {
         // self.transaction_selection_mode = true;
         // self.selected_transaction_ids.clear();
         
-        self.ui.success_message = Some("Select transactions to delete by clicking checkboxes. Click trash button when ready.".to_string());
+        // Transaction selection mode feedback removed
     }
     
     /// Exit transaction selection mode without deleting
@@ -541,7 +541,7 @@ impl AllowanceTrackerApp {
         ) {
             Ok(response) => {
                 log::info!("✅ Income transaction successful: {}", response.success_message);
-                self.ui.success_message = Some(response.success_message);
+                // self.ui.success_message = Some(response.success_message); // Removed debug UI feature
                 self.core.current_balance = response.new_balance;
                 
                 // TEMPORARY: Sync compatibility field  
@@ -601,7 +601,7 @@ impl AllowanceTrackerApp {
         ) {
             Ok(response) => {
                 log::info!("✅ Expense transaction successful: {}", response.success_message);
-                self.ui.success_message = Some(response.success_message);
+                // self.ui.success_message = Some(response.success_message); // Removed debug UI feature
                 self.core.current_balance = response.new_balance;
                 
                 // TEMPORARY: Sync compatibility field  

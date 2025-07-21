@@ -261,17 +261,17 @@ impl AllowanceTrackerApp {
                 0 => {
                     // Profile - placeholder action
                     log::info!("📋 Profile menu item clicked");
-                    self.ui.success_message = Some("Profile clicked (not implemented yet)".to_string());
+                    // Profile functionality not implemented yet
                 }
                 1 => {
                     // Create child - placeholder action
                     log::info!("👶 Create child menu item clicked");
-                    self.ui.success_message = Some("Create child clicked (not implemented yet)".to_string());
+                    // Create child functionality not implemented yet
                 }
                 2 => {
                     // Configure allowance - placeholder action
                     log::info!("⚙️ Configure allowance menu item clicked");
-                    self.ui.success_message = Some("Configure allowance clicked (not implemented yet)".to_string());
+                    // Configure allowance functionality not implemented yet
                 }
                 3 => {
                     // Delete transactions - trigger parental control
@@ -281,12 +281,12 @@ impl AllowanceTrackerApp {
                 4 => {
                     // Export data - placeholder action
                     log::info!("📤 Export data menu item clicked");
-                    self.ui.success_message = Some("Export data clicked (not implemented yet)".to_string());
+                    // Export data functionality not implemented yet
                 }
                 5 => {
                     // Data directory - placeholder action
                     log::info!("📁 Data directory menu item clicked");
-                    self.ui.success_message = Some("Data directory clicked (not implemented yet)".to_string());
+                    // Data directory functionality not implemented yet
                 }
                 _ => {
                     log::warn!("🚨 Unknown settings menu item clicked: {}", index);
@@ -295,13 +295,10 @@ impl AllowanceTrackerApp {
         }
     }
 
-    /// Render error and success messages
+    /// Render error messages
     pub fn render_messages(&self, ui: &mut egui::Ui) {
         if let Some(error) = &self.ui.error_message {
             ui.colored_label(egui::Color32::RED, format!("❌ {}", error));
-        }
-        if let Some(success) = &self.ui.success_message {
-            ui.colored_label(egui::Color32::GREEN, format!("✅ {}", success));
         }
     }
     
@@ -411,7 +408,7 @@ impl AllowanceTrackerApp {
         match self.backend().transaction_service.delete_transactions_domain(command) {
             Ok(result) => {
                 log::info!("✅ Successfully deleted {} transactions", result.deleted_count);
-                self.ui.success_message = Some(format!("Deleted {} transactions", result.deleted_count));
+                // Transaction deletion feedback removed
                 
                 // Exit selection mode and reload data
                 self.exit_transaction_selection_mode();

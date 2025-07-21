@@ -46,7 +46,7 @@ impl eframe::App for AllowanceTrackerApp {
         }
         
         // Clear messages after a delay
-        if self.ui.error_message.is_some() || self.ui.success_message.is_some() {
+        if self.ui.error_message.is_some() {
             ctx.request_repaint_after(std::time::Duration::from_secs(5));
         }
         
