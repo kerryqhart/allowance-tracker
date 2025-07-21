@@ -540,6 +540,7 @@ impl AllowanceTrackerApp {
             request,
             &self.backend().child_service,
             &self.backend().transaction_service,
+            &self.backend().goal_service,
         ) {
             Ok(response) => {
                 log::info!("✅ Income transaction successful: {}", response.success_message);
@@ -602,6 +603,7 @@ impl AllowanceTrackerApp {
             request,
             &self.backend().child_service,
             &self.backend().transaction_service,
+            &self.backend().goal_service,
         ) {
             Ok(response) => {
                 log::info!("✅ Expense transaction successful: {}", response.success_message);
