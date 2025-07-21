@@ -699,21 +699,33 @@ impl MoneyManagementService {
     }
 
     /// Enhanced validation for add money form that includes date validation
-    pub fn validate_add_money_form_with_date(&self, description: &str, amount_input: &str, _date: Option<&chrono::DateTime<chrono::FixedOffset>>, _child_created_at: Option<&str>) -> MoneyFormValidation {
-        let validation = self.validate_add_money_form(description, amount_input);
+    pub fn validate_add_money_form_with_date(&self, description: &str, amount_input: &str, date: Option<&chrono::DateTime<chrono::FixedOffset>>, child_created_at: Option<&str>) -> MoneyFormValidation {
+        let mut validation = self.validate_add_money_form(description, amount_input);
 
-        // DateTime objects are already validated by construction, so no additional date validation needed
-        // The frontend is responsible for creating valid DateTime objects
+        // Add date validation if a date is provided
+        if let Some(date_obj) = date {
+            let date_str = date_obj.to_rfc3339();
+            if let Err(date_error) = self.validate_transaction_date(&date_str, child_created_at) {
+                validation.errors.push(MoneyValidationError::InvalidAmountFormat(date_error));
+                validation.is_valid = false;
+            }
+        }
         
         validation
     }
 
     /// Enhanced validation for spend money form that includes date validation
-    pub fn validate_spend_money_form_with_date(&self, description: &str, amount_input: &str, _date: Option<&chrono::DateTime<chrono::FixedOffset>>, _child_created_at: Option<&str>) -> MoneyFormValidation {
-        let validation = self.validate_spend_money_form(description, amount_input);
+    pub fn validate_spend_money_form_with_date(&self, description: &str, amount_input: &str, date: Option<&chrono::DateTime<chrono::FixedOffset>>, child_created_at: Option<&str>) -> MoneyFormValidation {
+        let mut validation = self.validate_spend_money_form(description, amount_input);
 
-        // DateTime objects are already validated by construction, so no additional date validation needed
-        // The frontend is responsible for creating valid DateTime objects
+        // Add date validation if a date is provided
+        if let Some(date_obj) = date {
+            let date_str = date_obj.to_rfc3339();
+            if let Err(date_error) = self.validate_transaction_date(&date_str, child_created_at) {
+                validation.errors.push(MoneyValidationError::InvalidAmountFormat(date_error));
+                validation.is_valid = false;
+            }
+        }
         
         validation
     }

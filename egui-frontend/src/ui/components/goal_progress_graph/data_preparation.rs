@@ -101,55 +101,7 @@ pub fn prepare_goal_progression_data(
     data_points
 }
 
-/// Estimate when the goal might be completed based on recent saving trends
-fn estimate_goal_completion_date(
-    transactions: &[&Transaction],
-    goal: &DomainGoal,
-    start_date: NaiveDate,
-    current_balance: f64,
-) -> NaiveDate {
-    let remaining_amount = goal.target_amount - current_balance;
-    
-    if remaining_amount <= 0.0 {
-        return start_date; // Goal already achieved
-    }
-    
-    // Look at recent transactions to estimate saving rate
-    let recent_cutoff = start_date - chrono::Duration::days(30); // Last 30 days
-    let recent_transactions: Vec<&Transaction> = transactions
-        .iter()
-        .filter(|tx| {
-            let tx_date = tx.date.date_naive();
-            tx_date >= recent_cutoff && tx_date <= start_date
-        })
-        .copied()
-        .collect();
-    
-    if recent_transactions.len() < 2 {
-        // Not enough data - default to 60 days
-        return start_date + chrono::Duration::days(60);
-    }
-    
-    // Calculate average daily saving rate from recent transactions
-    let first_recent = recent_transactions.first().unwrap();
-    let last_recent = recent_transactions.last().unwrap();
-    
-    let balance_change = last_recent.balance - first_recent.balance;
-    let days_elapsed = (last_recent.date.date_naive() - first_recent.date.date_naive()).num_days() as f64;
-    
-    if days_elapsed <= 0.0 || balance_change <= 0.0 {
-        // No positive saving trend - default to 90 days
-        return start_date + chrono::Duration::days(90);
-    }
-    
-    let daily_saving_rate = balance_change / days_elapsed;
-    let estimated_days_to_goal = (remaining_amount / daily_saving_rate).ceil() as i64;
-    
-    // Cap the estimate to reasonable bounds (30-365 days)
-    let estimated_days = estimated_days_to_goal.max(30).min(365);
-    
-    start_date + chrono::Duration::days(estimated_days)
-}
+
 
 /// Prepare goal-specific graph data from transactions (legacy function - kept for compatibility)
 pub fn prepare_goal_graph_data(

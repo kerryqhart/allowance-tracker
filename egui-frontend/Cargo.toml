@@ -54,9 +54,4 @@ dirs = "6.0.0"
 [dev-dependencies]
 tempfile = "3.0"
 
-[profile.dev]
-opt-level = 1  # Faster debug builds for better egui performance
-
-[profile.release]
-opt-level = 3
-lto = true     # Link-time optimization for smaller binaries 
+ 

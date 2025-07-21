@@ -7,15 +7,13 @@
 use eframe::egui;
 use crate::backend::domain::models::goal::DomainGoal;
 use shared::GoalCalculation;
-use super::data_preparation::{GoalGraphDataPoint, GoalGraphConfig};
+use super::data_preparation::GoalGraphDataPoint;
 
 use log::{info, warn};
 
 /// Goal Progress Graph component
 #[derive(Debug)]
 pub struct GoalProgressGraph {
-    /// Configuration for data preparation
-    config: GoalGraphConfig,
     /// Cached graph data points
     data_points: Vec<GoalGraphDataPoint>,
     /// Whether data is currently loading
@@ -28,17 +26,6 @@ impl GoalProgressGraph {
     /// Create a new goal progress graph component
     pub fn new() -> Self {
         Self {
-            config: GoalGraphConfig::default(),
-            data_points: Vec::new(),
-            is_loading: false,
-            error_message: None,
-        }
-    }
-    
-    /// Create with custom configuration
-    pub fn with_config(config: GoalGraphConfig) -> Self {
-        Self {
-            config,
             data_points: Vec::new(),
             is_loading: false,
             error_message: None,

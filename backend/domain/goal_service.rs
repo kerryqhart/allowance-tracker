@@ -718,13 +718,13 @@ mod tests {
         let command = CreateGoalCommand {
             child_id: Some(child_id),
             description: "Buy a toy".to_string(),
-            target_amount: 10.0,
+            target_amount: 15.0,
         };
         
         let result = service.create_goal(command).expect("Failed to create goal");
         
         assert_eq!(result.goal.description, "Buy a toy");
-        assert_eq!(result.goal.target_amount, 10.0);
+        assert_eq!(result.goal.target_amount, 15.0);
         assert_eq!(result.goal.state, DomainGoalState::Active);
         
         // Should have valid calculation
@@ -740,7 +740,7 @@ mod tests {
         let command1 = CreateGoalCommand {
             child_id: Some(child_id.clone()),
             description: "First goal".to_string(),
-            target_amount: 10.0,
+            target_amount: 15.0,
         };
         service.create_goal(command1).expect("Failed to create first goal");
         
@@ -765,7 +765,7 @@ mod tests {
         let command = CreateGoalCommand {
             child_id: Some(child_id.clone()),
             description: "Buy a toy".to_string(),
-            target_amount: 10.0,
+            target_amount: 15.0,
         };
         service.create_goal(command).expect("Failed to create goal");
         
@@ -800,10 +800,10 @@ mod tests {
         let result = service.create_goal(command).expect("Failed to create goal");
         
         // The calculation works as follows:
-        // Current balance: $5.00 (from initial allowance setup)
-        // Amount needed: $30.00 - $5.00 = $25.00
-        // Allowances needed: ceil($25.00 / $5.00) = 5 allowances
-        assert_eq!(result.calculation.allowances_needed, 5);
+        // Current balance: $10.00 (from initial allowance setup with auto-generated allowance)
+        // Amount needed: $30.00 - $10.00 = $20.00
+        // Allowances needed: ceil($20.00 / $5.00) = 4 allowances
+        assert_eq!(result.calculation.allowances_needed, 4);
         assert!(result.calculation.is_achievable);
         assert!(result.calculation.projected_completion_date.is_some());
         assert!(!result.calculation.exceeds_time_limit);
