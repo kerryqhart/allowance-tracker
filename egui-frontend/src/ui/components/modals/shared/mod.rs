@@ -26,5 +26,6 @@ impl AllowanceTrackerApp {
         self.render_day_action_overlay(ctx);
         self.render_parental_control_modal(ctx);
         self.render_goal_creation_modal(ctx);
+        self.render_profile_modal(ctx);
     }
 } 

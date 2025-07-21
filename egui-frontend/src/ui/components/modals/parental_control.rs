@@ -186,6 +186,9 @@ impl AllowanceTrackerApp {
                 input_response.request_focus();
             }
             
+            // Handle Enter key to submit
+            let enter_pressed = input_response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            
             ui.add_space(10.0);
             
             // Show error message if any
@@ -226,6 +229,11 @@ impl AllowanceTrackerApp {
                 .min_size(egui::vec2(120.0, 40.0));
                 
                 if ui.add(submit_button).clicked() && !self.modal.parental_control_loading {
+                    self.submit_parental_control_answer();
+                }
+                
+                // Also submit if Enter was pressed in the text input
+                if enter_pressed && !self.modal.parental_control_loading {
                     self.submit_parental_control_answer();
                 }
                 

@@ -121,7 +121,9 @@ impl AllowanceTrackerApp {
     }
 
     /// Start parental control challenge for a specific action
-    pub fn start_parental_control_challenge(&mut self, action: ProtectedAction) {
+    pub fn start_parental_control_challenge(&mut self, action: crate::ui::state::modal_state::ProtectedAction) {
+        use crate::ui::state::modal_state::ParentalControlStage;
+        
         log::info!("🔒 Starting parental control challenge for: {:?}", action);
         self.modal.pending_protected_action = Some(action);
         self.modal.parental_control_stage = ParentalControlStage::Question1;
@@ -251,15 +253,90 @@ impl AllowanceTrackerApp {
     }
     
     /// Execute the action after successful authentication
-    fn execute_protected_action(&mut self, action: ProtectedAction) {
+    fn execute_protected_action(&mut self, action: crate::ui::state::modal_state::ProtectedAction) {
+        use crate::ui::state::modal_state::ProtectedAction;
+        
         match action {
             ProtectedAction::DeleteTransactions => {
                 log::info!("🗑️ Executing delete transactions action");
                 self.enter_transaction_selection_mode();
             }
+            ProtectedAction::AccessSettings => {
+                log::info!("🔒 Executing settings access action");
+                if let Some(settings_action) = self.modal.pending_settings_action {
+                    self.execute_settings_action(settings_action);
+                } else {
+                    log::warn!("🚨 AccessSettings action triggered but no pending settings action found");
+                }
+            }
         }
         
         self.modal.pending_protected_action = None;
+        self.modal.pending_settings_action = None; // Clear both actions
+    }
+    
+    /// Execute specific settings menu action after parental control authentication
+    fn execute_settings_action(&mut self, action: crate::ui::state::modal_state::SettingsAction) {
+        use crate::ui::state::modal_state::SettingsAction;
+        
+        log::info!("⚙️ Executing settings action: {:?}", action);
+        
+        match action {
+            SettingsAction::ShowProfile => {
+                // Extract child data before mutations to avoid borrow conflicts
+                let child_data = if let Some(child) = self.current_child() {
+                    Some((
+                        child.id.clone(),
+                        child.name.clone(),
+                        child.birthdate,
+                        child.created_at,
+                        child.updated_at,
+                    ))
+                } else {
+                    None
+                };
+                
+                if let Some((id, name, birthdate, created_at, updated_at)) = child_data {
+                    let domain_child = crate::backend::domain::models::child::Child {
+                        id: id.clone(),
+                        name: name.clone(),
+                        birthdate,
+                        created_at,
+                        updated_at,
+                    };
+                    self.modal.profile_form.populate_from_child(&domain_child);
+                    self.modal.show_profile_modal = true;
+                    log::info!("👤 Profile modal opened for child: {}", name);
+                } else {
+                    log::warn!("🚨 No active child found for profile action");
+                    self.ui.error_message = Some("No child selected. Please select a child first.".to_string());
+                }
+            }
+            SettingsAction::CreateChild => {
+                log::info!("👶 Create child action - placeholder");
+                // TODO: Implement create child modal
+                self.ui.error_message = Some("Create child feature coming soon!".to_string());
+            }
+            SettingsAction::ConfigureAllowance => {
+                log::info!("⚙️ Configure allowance action - placeholder");
+                // TODO: Implement allowance configuration modal
+                self.ui.error_message = Some("Configure allowance feature coming soon!".to_string());
+            }
+            SettingsAction::DeleteTransactions => {
+                log::info!("🗑️ Delete transactions action - entering selection mode");
+                self.enter_transaction_selection_mode();
+            }
+            SettingsAction::ExportData => {
+                log::info!("📤 Export data action - placeholder");
+                // TODO: Implement data export functionality
+                self.ui.error_message = Some("Export data feature coming soon!".to_string());
+            }
+            SettingsAction::DataDirectory => {
+                log::info!("📁 Data directory action - placeholder");
+                // TODO: Implement data directory management
+                self.ui.error_message = Some("Data directory feature coming soon!".to_string());
+            }
+        }
     }
     
     // ====================

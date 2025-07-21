@@ -8,6 +8,8 @@
 //! - `parental_control` - Parental control authentication flow
 //! - `money_transaction` - Add/spend money modals  
 //! - `day_action_overlay` - Calendar day action overlays
+//! - `goal_creation` - Goal creation modal
+//! - `profile` - Child profile editing modal
 //! - `shared` - Common modal functionality and styling
 //!
 //! ## Architecture:
@@ -19,6 +21,7 @@ pub mod parental_control;
 pub mod money_transaction;
 pub mod day_action_overlay;
 pub mod goal_creation;
+pub mod profile;
 pub mod shared;
 
 // Re-export modal functions for easy access

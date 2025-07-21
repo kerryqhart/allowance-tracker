@@ -257,41 +257,27 @@ impl AllowanceTrackerApp {
         
         // Handle settings menu item selection
         if let Some(index) = selected_index {
-            match index {
-                0 => {
-                    // Profile - placeholder action
-                    log::info!("📋 Profile menu item clicked");
-                    // Profile functionality not implemented yet
-                }
-                1 => {
-                    // Create child - placeholder action
-                    log::info!("👶 Create child menu item clicked");
-                    // Create child functionality not implemented yet
-                }
-                2 => {
-                    // Configure allowance - placeholder action
-                    log::info!("⚙️ Configure allowance menu item clicked");
-                    // Configure allowance functionality not implemented yet
-                }
-                3 => {
-                    // Delete transactions - trigger parental control
-                    log::info!("🗑️ Delete transactions menu item clicked");
-                    self.start_parental_control_challenge(crate::ui::app_state::ProtectedAction::DeleteTransactions);
-                }
-                4 => {
-                    // Export data - placeholder action
-                    log::info!("📤 Export data menu item clicked");
-                    // Export data functionality not implemented yet
-                }
-                5 => {
-                    // Data directory - placeholder action
-                    log::info!("📁 Data directory menu item clicked");
-                    // Data directory functionality not implemented yet
-                }
+            // Map index to settings action
+            let settings_action = match index {
+                0 => crate::ui::state::modal_state::SettingsAction::ShowProfile,
+                1 => crate::ui::state::modal_state::SettingsAction::CreateChild,
+                2 => crate::ui::state::modal_state::SettingsAction::ConfigureAllowance,
+                3 => crate::ui::state::modal_state::SettingsAction::DeleteTransactions,
+                4 => crate::ui::state::modal_state::SettingsAction::ExportData,
+                5 => crate::ui::state::modal_state::SettingsAction::DataDirectory,
                 _ => {
                     log::warn!("🚨 Unknown settings menu item clicked: {}", index);
+                    return;
                 }
-            }
+            };
+            
+            log::info!("🔒 Settings menu item selected: {:?} - triggering parental control", settings_action);
+            
+            // Store the settings action for execution after parental control
+            self.modal.pending_settings_action = Some(settings_action);
+            
+            // Trigger universal settings parental control
+            self.start_parental_control_challenge(crate::ui::state::modal_state::ProtectedAction::AccessSettings);
         }
     }
 
