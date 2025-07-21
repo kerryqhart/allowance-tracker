@@ -35,6 +35,13 @@ pub struct GoalUiState {
     
     /// Whether the goal creation modal is visible
     pub show_creation_modal: bool,
+    
+    // NEW: Components for 3-section layout
+    /// Goal progress graph component (bottom-left section)
+    pub progress_graph: Option<crate::ui::components::goal_progress_graph::GoalProgressGraph>,
+    
+    /// Circular days progress component (bottom-right section)
+    pub circular_progress: Option<crate::ui::components::circular_days_progress::CircularDaysProgress>,
 }
 
 /// State for the goal creation form
@@ -70,6 +77,9 @@ impl GoalUiState {
             error_message: None,
             creation_form: GoalCreationFormState::new(),
             show_creation_modal: false,
+            // NEW: Initialize components for 3-section layout
+            progress_graph: None,
+            circular_progress: None,
         }
     }
     
@@ -113,6 +123,40 @@ impl GoalUiState {
     pub fn hide_creation_modal(&mut self) {
         self.show_creation_modal = false;
         self.reset_creation_form();
+    }
+    
+    // NEW: Methods for 3-section layout components
+    
+    /// Initialize components for 3-section layout
+    pub fn initialize_components(&mut self) {
+        if self.progress_graph.is_none() {
+            self.progress_graph = Some(crate::ui::components::goal_progress_graph::GoalProgressGraph::new());
+        }
+        if self.circular_progress.is_none() {
+            self.circular_progress = Some(crate::ui::components::circular_days_progress::CircularDaysProgress::new());
+        }
+    }
+    
+    /// Clear component data (useful when goal changes)
+    pub fn clear_components(&mut self) {
+        if let Some(ref mut graph) = self.progress_graph {
+            graph.clear_data();
+        }
+        if let Some(ref mut circular) = self.circular_progress {
+            circular.clear();
+        }
+    }
+    
+    /// Check if components are ready for 3-section layout
+    pub fn components_ready(&self) -> bool {
+        let has_graph = self.progress_graph.is_some();
+        let has_circular = self.circular_progress.is_some();
+        let result = has_graph && has_circular;
+        
+        log::info!("🔧 Components ready check: graph={}, circular={}, ready={}", 
+                   has_graph, has_circular, result);
+        
+        result
     }
 }
 
