@@ -1012,7 +1012,7 @@ mod tests {
         // Verify calendar structure
         assert_eq!(calendar.month, 7);
         assert_eq!(calendar.year, 2025);
-        assert_eq!(calendar.days.len(), 33);
+        assert_eq!(calendar.days.len(), 35);
         
         // Verify historical transactions maintain their stored balances
         let july_1_day = calendar.days.iter().find(|d| d.day == 1).unwrap();
@@ -1043,7 +1043,7 @@ mod tests {
         assert_eq!(month_days_count, 31, "Should have 31 actual month days");
         
         let padding_days_count = calendar.days.iter().filter(|d| d.day == 0).count();
-        assert_eq!(padding_days_count, 2, "Should have 2 padding days for July 2025 (starts on Tuesday)");
+        assert_eq!(padding_days_count, 4, "Should have 4 padding days for July 2025 (2 before + 2 after)");
     }
 
     #[test]
