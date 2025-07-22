@@ -147,28 +147,76 @@ impl AllowanceTrackerApp {
 
             // Custom path input (only show if custom is selected)
             if self.settings.export_form.export_type == ExportType::Custom {
-                let path_response = render_form_field_with_error(
-                    ui,
-                    "Custom Path",
-                    &mut self.settings.export_form.custom_path,
-                    "Enter directory path (e.g., /Users/user/Desktop/exports)",
-                    &None, // No error message for now - could add path validation later
-                    None, // No character limit
-                );
+                // File selection section
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Select File Location:")
+                        .font(egui::FontId::new(14.0, egui::FontFamily::Proportional))
+                        .strong());
+                    
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button(egui::RichText::new("📁 Browse...")
+                            .font(egui::FontId::new(14.0, egui::FontFamily::Proportional)))
+                            .clicked() 
+                        {
+                            self.open_file_browser();
+                        }
+                    });
+                });
 
-                // Update preview when path changes
-                if path_response.changed() {
-                    let child_name = self.current_child().as_ref().map(|c| c.name.clone());
-                    let child_name_ref = child_name.as_deref();
-                    self.settings.export_form.update_preview(child_name_ref);
+                ui.add_space(8.0);
+
+                // Show selected file or fallback to manual entry
+                if self.settings.export_form.selected_file_path.is_some() {
+                    ui.label(egui::RichText::new("Selected file:")
+                        .font(egui::FontId::new(13.0, egui::FontFamily::Proportional))
+                        .color(egui::Color32::from_rgb(100, 100, 100)));
+                    
+                    if let Some(ref path) = self.settings.export_form.selected_file_path {
+                        ui.label(egui::RichText::new(path)
+                            .font(egui::FontId::new(12.0, egui::FontFamily::Monospace))
+                            .color(egui::Color32::from_rgb(70, 130, 180)));
+                    }
+
+                    ui.add_space(5.0);
+
+                    // Option to clear selection and use manual entry
+                    if ui.small_button("Clear selection").clicked() {
+                        self.settings.export_form.selected_file_path = None;
+                        let child_name = self.current_child().as_ref().map(|c| c.name.clone());
+                        let child_name_ref = child_name.as_deref();
+                        self.settings.export_form.update_preview(child_name_ref);
+                    }
+                } else {
+                    // Manual path input when no file is selected
+                    ui.label(egui::RichText::new("Or enter a directory path manually:")
+                        .font(egui::FontId::new(13.0, egui::FontFamily::Proportional))
+                        .color(egui::Color32::from_rgb(100, 100, 100)));
+                    
+                    ui.add_space(5.0);
+                    
+                    let path_response = render_form_field_with_error(
+                        ui,
+                        "Directory Path",
+                        &mut self.settings.export_form.custom_path,
+                        "Enter directory path (e.g., /Users/user/Desktop/exports)",
+                        &None, // No error message for now - could add path validation later
+                        None, // No character limit
+                    );
+
+                    // Update preview when path changes
+                    if path_response.changed() {
+                        let child_name = self.current_child().as_ref().map(|c| c.name.clone());
+                        let child_name_ref = child_name.as_deref();
+                        self.settings.export_form.update_preview(child_name_ref);
+                    }
+
+                    ui.add_space(5.0);
+
+                    // Help text for custom path
+                    ui.label(egui::RichText::new("💡 Tip: Use the Browse button for easier file selection")
+                        .font(egui::FontId::new(12.0, egui::FontFamily::Proportional))
+                        .color(egui::Color32::from_rgb(120, 120, 120)));
                 }
-
-                ui.add_space(10.0);
-
-                // Help text for custom path
-                ui.label(egui::RichText::new("💡 Tip: Enter a directory path where the CSV file will be saved")
-                    .font(egui::FontId::new(13.0, egui::FontFamily::Proportional))
-                    .color(egui::Color32::from_rgb(120, 120, 120)));
 
                 ui.add_space(15.0);
             }
@@ -271,6 +319,55 @@ impl AllowanceTrackerApp {
         }
     }
 
+    /// Open native file browser to select export location
+    fn open_file_browser(&mut self) {
+        log::info!("📁 Opening native file browser for export location");
+
+        // Generate default filename based on current child
+        let child_name = self.current_child().as_ref().map(|c| c.name.clone());
+        let child_name_formatted = child_name
+            .as_deref()
+            .unwrap_or("child")
+            .replace(" ", "_")
+            .to_lowercase();
+        
+        let now = chrono::Utc::now();
+        let default_filename = format!(
+            "{}_transactions_{}.csv",
+            child_name_formatted,
+            now.format("%Y%m%d")
+        );
+
+        // Open save file dialog
+        let file_dialog = rfd::FileDialog::new()
+            .set_title("Export Data As...")
+            .set_file_name(&default_filename)
+            .add_filter("CSV Files", &["csv"])
+            .add_filter("All Files", &["*"]);
+
+        // Set initial directory to Documents if available
+        let dialog_with_dir = if let Some(docs_dir) = dirs::document_dir() {
+            file_dialog.set_directory(docs_dir)
+        } else {
+            file_dialog
+        };
+
+        // Execute the dialog
+        if let Some(path) = dialog_with_dir.save_file() {
+            log::info!("📁 User selected export path: {:?}", path);
+            self.settings.export_form.selected_file_path = Some(path.to_string_lossy().to_string());
+            
+            // Update preview with selected path
+            let child_name_ref = child_name.as_deref();
+            self.settings.export_form.update_preview(child_name_ref);
+            
+            // Clear any existing error messages
+            self.settings.export_form.clear_messages();
+        } else {
+            log::info!("📁 User cancelled file selection");
+        }
+    }
+
     /// Submit the export form
     fn submit_export_form(&mut self) {
         log::info!("📄 Submitting export form");
@@ -284,18 +381,8 @@ impl AllowanceTrackerApp {
         self.settings.export_form.is_exporting = true;
         self.settings.export_form.clear_messages();
 
-        // Prepare request
-        let custom_path = match self.settings.export_form.export_type {
-            ExportType::Default => None,
-            ExportType::Custom => {
-                let path = self.settings.export_form.custom_path.trim();
-                if path.is_empty() {
-                    None
-                } else {
-                    Some(path.to_string())
-                }
-            }
-        };
+        // Prepare request - use the effective custom path which prioritizes file dialog selection
+        let custom_path = self.settings.export_form.get_effective_custom_path();
 
         let request = ExportToPathRequest {
             child_id: self.current_child().as_ref().map(|c| c.id.clone()),

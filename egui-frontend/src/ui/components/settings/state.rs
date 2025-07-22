@@ -33,6 +33,7 @@ impl Default for ExportType {
 pub struct ExportFormState {
     pub export_type: ExportType,
     pub custom_path: String,
+    pub selected_file_path: Option<String>, // Path selected via native file dialog
     pub is_exporting: bool,
     pub success_message: Option<String>,
     pub error_message: Option<String>,
@@ -46,6 +47,7 @@ impl ExportFormState {
         Self {
             export_type: ExportType::Default,
             custom_path: String::new(),
+            selected_file_path: None,
             is_exporting: false,
             success_message: None,
             error_message: None,
@@ -58,6 +60,7 @@ impl ExportFormState {
     pub fn clear(&mut self) {
         self.export_type = ExportType::Default;
         self.custom_path.clear();
+        self.selected_file_path = None;
         self.is_exporting = false;
         self.success_message = None;
         self.error_message = None;
@@ -67,35 +70,62 @@ impl ExportFormState {
 
     /// Update preview based on current settings
     pub fn update_preview(&mut self, child_name: Option<&str>) {
-        // Generate filename preview
-        let child_name_formatted = child_name
-            .unwrap_or("child")
-            .replace(" ", "_")
-            .to_lowercase();
-        
-        let now = chrono::Utc::now();
-        self.preview_filename = format!(
-            "{}_transactions_{}.csv",
-            child_name_formatted,
-            now.format("%Y%m%d")
-        );
-
-        // Generate location preview
-        self.preview_location = match self.export_type {
+        // Generate location preview and filename
+        match self.export_type {
             ExportType::Default => {
-                if let Some(docs_dir) = dirs::document_dir() {
+                // Generate filename preview for default location
+                let child_name_formatted = child_name
+                    .unwrap_or("child")
+                    .replace(" ", "_")
+                    .to_lowercase();
+                
+                let now = chrono::Utc::now();
+                self.preview_filename = format!(
+                    "{}_transactions_{}.csv",
+                    child_name_formatted,
+                    now.format("%Y%m%d")
+                );
+
+                self.preview_location = if let Some(docs_dir) = dirs::document_dir() {
                     docs_dir.to_string_lossy().to_string()
                 } else if let Some(home_dir) = dirs::home_dir() {
                     home_dir.to_string_lossy().to_string()
                 } else {
                     "Default location".to_string()
-                }
+                };
             }
             ExportType::Custom => {
-                if self.custom_path.trim().is_empty() {
-                    "Please enter a custom path".to_string()
+                if let Some(ref selected_path) = self.selected_file_path {
+                    // Extract filename and directory from selected path
+                    let path = std::path::Path::new(selected_path);
+                    if let Some(filename) = path.file_name() {
+                        self.preview_filename = filename.to_string_lossy().to_string();
+                    } else {
+                        self.preview_filename = "export.csv".to_string();
+                    }
+                    
+                    if let Some(parent) = path.parent() {
+                        self.preview_location = parent.to_string_lossy().to_string();
+                    } else {
+                        self.preview_location = selected_path.clone();
+                    }
+                } else if !self.custom_path.trim().is_empty() {
+                    // Fallback to manual custom path entry
+                    let child_name_formatted = child_name
+                        .unwrap_or("child")
+                        .replace(" ", "_")
+                        .to_lowercase();
+                    
+                    let now = chrono::Utc::now();
+                    self.preview_filename = format!(
+                        "{}_transactions_{}.csv",
+                        child_name_formatted,
+                        now.format("%Y%m%d")
+                    );
+                    self.preview_location = self.custom_path.clone();
                 } else {
-                    self.custom_path.clone()
+                    self.preview_filename = "Please select a file location".to_string();
+                    self.preview_location = "No location selected".to_string();
                 }
             }
         };
@@ -123,7 +153,27 @@ impl ExportFormState {
     pub fn is_ready_for_export(&self) -> bool {
         !self.is_exporting && match self.export_type {
             ExportType::Default => true,
-            ExportType::Custom => !self.custom_path.trim().is_empty(),
+            ExportType::Custom => {
+                // Valid if we have a selected file path from dialog, or manual custom path
+                self.selected_file_path.is_some() || !self.custom_path.trim().is_empty()
+            }
+        }
+    }
+
+    /// Get the effective custom path for export
+    /// This prioritizes the selected file path from the dialog over the manual custom path
+    pub fn get_effective_custom_path(&self) -> Option<String> {
+        match self.export_type {
+            ExportType::Default => None,
+            ExportType::Custom => {
+                if let Some(ref selected_path) = self.selected_file_path {
+                    Some(selected_path.clone())
+                } else if !self.custom_path.trim().is_empty() {
+                    Some(self.custom_path.trim().to_string())
+                } else {
+                    None
+                }
+            }
         }
     }
 }
