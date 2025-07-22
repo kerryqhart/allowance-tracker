@@ -30,22 +30,23 @@ impl AllowanceTrackerApp {
         );
         painter.rect_filled(
             shadow_rect, 
-            egui::Rounding::same(10.0),
+            egui::CornerRadius::same(10),
             egui::Color32::from_rgba_premultiplied(0, 0, 0, 20)
         );
         
         // Draw white background
         painter.rect_filled(
             rect, 
-            egui::Rounding::same(10.0),
+            egui::CornerRadius::same(10),
             egui::Color32::WHITE
         );
         
         // Draw border
         painter.rect_stroke(
             rect,
-            egui::Rounding::same(10.0),
-            egui::Stroke::new(1.0, egui::Color32::from_rgb(220, 220, 220))
+            egui::CornerRadius::same(10),
+            egui::Stroke::new(1.0, egui::Color32::from_rgb(220, 220, 220)),
+            egui::StrokeKind::Outside
         );
     }
     
@@ -69,7 +70,7 @@ impl AllowanceTrackerApp {
                 egui::Color32::from_rgb(240, 240, 240) // Light gray background for inactive
             })
             .stroke(egui::Stroke::new(1.5, egui::Color32::from_rgb(200, 200, 200)))
-            .rounding(egui::Rounding::same(8.0))
+            .rounding(egui::CornerRadius::same(8))
             .min_size(egui::vec2(85.0, 35.0));
         
         if ui.add(goal_button).clicked() {
@@ -93,7 +94,7 @@ impl AllowanceTrackerApp {
                 egui::Color32::from_rgb(240, 240, 240) // Light gray background for inactive
             })
             .stroke(egui::Stroke::new(1.5, egui::Color32::from_rgb(200, 200, 200)))
-            .rounding(egui::Rounding::same(8.0))
+            .rounding(egui::CornerRadius::same(8))
             .min_size(egui::vec2(100.0, 35.0));
         
         if ui.add(chart_button).clicked() {
@@ -117,7 +118,7 @@ impl AllowanceTrackerApp {
                 egui::Color32::from_rgb(240, 240, 240) // Light gray background for inactive
             })
             .stroke(egui::Stroke::new(1.5, egui::Color32::from_rgb(200, 200, 200)))
-            .rounding(egui::Rounding::same(8.0))
+            .rounding(egui::CornerRadius::same(8))
             .min_size(egui::vec2(90.0, 35.0));
         
         if ui.add(table_button).clicked() {
@@ -141,7 +142,7 @@ impl AllowanceTrackerApp {
                 egui::Color32::from_rgb(240, 240, 240) // Light gray background for inactive
             })
             .stroke(egui::Stroke::new(1.5, egui::Color32::from_rgb(200, 200, 200)))
-            .rounding(egui::Rounding::same(8.0))
+            .rounding(egui::CornerRadius::same(8))
             .min_size(egui::vec2(110.0, 35.0));
         
         if ui.add(calendar_button).clicked() {
@@ -196,7 +197,7 @@ impl AllowanceTrackerApp {
                     })
             )
             .min_size(egui::vec2(80.0, 30.0))
-            .rounding(egui::Rounding::same(6.0))
+            .rounding(egui::CornerRadius::same(6))
             .fill(if self.current_tab() == MainTab::Calendar {
                 egui::Color32::from_rgb(100, 150, 255) // Active blue
             } else {
@@ -222,7 +223,7 @@ impl AllowanceTrackerApp {
                     })
             )
             .min_size(egui::vec2(80.0, 30.0))
-            .rounding(egui::Rounding::same(6.0))
+            .rounding(egui::CornerRadius::same(6))
             .fill(if self.current_tab() == MainTab::Table {
                 egui::Color32::from_rgb(100, 150, 255) // Active blue
             } else {
@@ -250,14 +251,14 @@ impl AllowanceTrackerApp {
         );
         painter.rect_filled(
             shadow_rect, 
-            egui::Rounding { nw: 8.0, ne: 8.0, sw: 10.0, se: 10.0 }, // Rounded top corners, rounded bottom
+            egui::CornerRadius { nw: 8, ne: 8, sw: 10, se: 10 }, // Rounded top corners, rounded bottom
             egui::Color32::from_rgba_premultiplied(0, 0, 0, 20)
         );
         
         // Draw white background with rounded top corners (tabs will overlap the flat sections)
         painter.rect_filled(
             rect, 
-            egui::Rounding { nw: 8.0, ne: 8.0, sw: 10.0, se: 10.0 }, // Rounded top corners, rounded bottom
+            egui::CornerRadius { nw: 8, ne: 8, sw: 10, se: 10 }, // Rounded top corners, rounded bottom
             egui::Color32::WHITE
         );
     }
@@ -288,9 +289,9 @@ impl AllowanceTrackerApp {
                 };
                 
                 let calendar_rounding = if calendar_selected {
-                    egui::Rounding { nw: 8.0, ne: 8.0, sw: 0.0, se: 0.0 } // Rounded top, flat bottom for connection
+                    egui::CornerRadius { nw: 8, ne: 8, sw: 0, se: 0 } // Rounded top, flat bottom for connection
                 } else {
-                    egui::Rounding { nw: 8.0, ne: 8.0, sw: 8.0, se: 0.0 } // Rounded top, rounded bottom-left only
+                    egui::CornerRadius { nw: 8, ne: 8, sw: 8, se: 0 } // Rounded top, rounded bottom-left only
                 };
                 
                 let calendar_button = if calendar_selected {
@@ -324,9 +325,9 @@ impl AllowanceTrackerApp {
                 };
                 
                 let table_rounding = if table_selected {
-                    egui::Rounding { nw: 8.0, ne: 8.0, sw: 0.0, se: 0.0 } // Rounded top, flat bottom for connection
+                    egui::CornerRadius { nw: 8, ne: 8, sw: 0, se: 0 } // Rounded top, flat bottom for connection
                 } else {
-                    egui::Rounding { nw: 8.0, ne: 8.0, sw: 0.0, se: 8.0 } // Rounded top, rounded bottom-right only
+                    egui::CornerRadius { nw: 8, ne: 8, sw: 0, se: 8 } // Rounded top, rounded bottom-right only
                 };
                 
                 let table_button = if table_selected {

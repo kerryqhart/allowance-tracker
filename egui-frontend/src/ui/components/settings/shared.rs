@@ -41,7 +41,7 @@ impl SettingsModalStyle {
         egui::Frame::window(&egui::Style::default())
             .fill(self.background_color)
             .stroke(egui::Stroke::new(3.0, self.border_color))
-            .rounding(egui::Rounding::same(self.rounding))
+            .rounding(egui::CornerRadius::same(self.rounding))
             .inner_margin(egui::Margin::same(self.margin))
             .shadow(egui::Shadow {
                 offset: egui::vec2(6.0, 6.0),
@@ -158,7 +158,7 @@ pub fn render_modal_backdrop(
             let backdrop_response = ui.allocate_rect(screen_rect, egui::Sense::click());
             ui.painter().rect_filled(
                 screen_rect,
-                egui::Rounding::ZERO,
+                egui::CornerRadius::ZERO,
                 egui::Color32::from_rgba_unmultiplied(0, 0, 0, 128),
             );
 

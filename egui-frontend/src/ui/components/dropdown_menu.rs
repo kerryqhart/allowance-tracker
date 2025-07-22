@@ -100,15 +100,16 @@ impl DropdownMenu {
             // Draw semi-transparent background
             ui.painter().rect_filled(
                 expanded_rect,
-                egui::Rounding::same(6.0),
+                egui::CornerRadius::same(6),
                 egui::Color32::from_rgba_unmultiplied(255, 255, 255, alpha)
             );
             
             // Draw border
             ui.painter().rect_stroke(
                 expanded_rect,
-                egui::Rounding::same(6.0),
-                egui::Stroke::new(1.5, config.hover_border_color)
+                egui::CornerRadius::same(6),
+                egui::Stroke::new(1.5, config.hover_border_color),
+                egui::StrokeKind::Outside
             );
         }
 
@@ -177,7 +178,7 @@ impl DropdownMenu {
                 let frame = egui::Frame::popup(&ui.style())
                     .fill(egui::Color32::WHITE)  // Pure white background
                     .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(200, 200, 200)))  // Normal border
-                    .rounding(egui::Rounding::same(6.0))
+                    .rounding(egui::CornerRadius::same(6))
                     .inner_margin(egui::Margin::same(8.0));
                 
                 frame.show(ui, |ui| {
@@ -246,7 +247,7 @@ impl DropdownMenu {
                                     // Paint hover background BEHIND by using a lower z-order
                                     ui.painter().rect_filled(
                                         button_response.rect,
-                                        egui::Rounding::same(4.0),
+                                        egui::CornerRadius::same(4),
                                         egui::Color32::from_rgba_unmultiplied(230, 230, 230, 255)
                                     );
                                     

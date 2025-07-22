@@ -85,7 +85,7 @@ pub fn draw_progress_bar_with_target_completion(
         
         // Progress bar takes remaining space after target text and spacing
         let bar_width = available_width - target_text_size.x - layout_config.internal_spacing;
-        let rounding = egui::Rounding::same(layout_config.rounding);
+        let rounding = egui::CornerRadius::same(layout_config.rounding);
         
         // Colors from configuration
         let fill_color = if progress >= 1.0 { 

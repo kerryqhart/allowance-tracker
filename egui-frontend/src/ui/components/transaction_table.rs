@@ -116,7 +116,7 @@ pub fn render_responsive_transaction_table(ui: &mut egui::Ui, available_rect: eg
                                             egui::Button::new("")
                                                 .fill(egui::Color32::TRANSPARENT) // Invisible until hovered
                                                 .stroke(egui::Stroke::NONE) // No border
-                                                .rounding(egui::Rounding::same(2.0)) // Slight rounding like calendar
+                                                .rounding(egui::CornerRadius::same(2)) // Slight rounding like calendar
                                         );
                                         
                                         // Check if button is hovered for styling
@@ -161,15 +161,16 @@ pub fn render_responsive_transaction_table(ui: &mut egui::Ui, available_rect: eg
                                                                     // Draw calendar-style cell background
                                                                     ui.painter().rect_filled(
                                                                         cell_rect,
-                                                                        egui::Rounding::same(0.0), // No rounding
+                                                                        egui::CornerRadius::same(0), // No rounding
                                                                         cell_bg_color
                                                                     );
                                                                     
                                                                     // Draw cell border (minimal)
                                                                     ui.painter().rect_stroke(
                                                                         cell_rect,
-                                                                        egui::Rounding::same(0.0), // No rounding
-                                                                        egui::Stroke::new(0.0, cell_border_color) // No border
+                                                                        egui::CornerRadius::same(0), // No rounding
+                                                                        egui::Stroke::new(0.0, cell_border_color), // No border
+                                                                        egui::StrokeKind::Outside
                                                                     );
                                                                     
                                                                     let date_display = transaction.date.format("%b %d, %Y").to_string();
@@ -192,15 +193,16 @@ pub fn render_responsive_transaction_table(ui: &mut egui::Ui, available_rect: eg
                                                                     // Draw calendar-style cell background
                                                                     ui.painter().rect_filled(
                                                                         cell_rect,
-                                                                        egui::Rounding::same(0.0), // No rounding
+                                                                        egui::CornerRadius::same(0), // No rounding
                                                                         cell_bg_color
                                                                     );
                                                                     
                                                                     // Draw cell border (minimal)
                                                                     ui.painter().rect_stroke(
                                                                         cell_rect,
-                                                                        egui::Rounding::same(0.0), // No rounding
-                                                                        egui::Stroke::new(0.0, cell_border_color) // No border
+                                                                        egui::CornerRadius::same(0), // No rounding
+                                                                        egui::Stroke::new(0.0, cell_border_color), // No border
+                                                                        egui::StrokeKind::Outside
                                                                     );
                                                                     
                                                                     ui.add(egui::Label::new(egui::RichText::new(&transaction.description)
@@ -221,15 +223,16 @@ pub fn render_responsive_transaction_table(ui: &mut egui::Ui, available_rect: eg
                                                                     // Draw calendar-style cell background
                                                                     ui.painter().rect_filled(
                                                                         cell_rect,
-                                                                        egui::Rounding::same(0.0), // No rounding
+                                                                        egui::CornerRadius::same(0), // No rounding
                                                                         cell_bg_color
                                                                     );
                                                                     
                                                                     // Draw cell border (minimal)  
                                                                     ui.painter().rect_stroke(
                                                                         cell_rect,
-                                                                        egui::Rounding::same(0.0), // No rounding
-                                                                        egui::Stroke::new(0.0, cell_border_color) // No border
+                                                                        egui::CornerRadius::same(0), // No rounding
+                                                                        egui::Stroke::new(0.0, cell_border_color), // No border
+                                                                         egui::StrokeKind::Outside
                                                                     );
                                                                     
                                                                     // Color-code based on amount (keeping existing logic)
@@ -258,15 +261,16 @@ pub fn render_responsive_transaction_table(ui: &mut egui::Ui, available_rect: eg
                                                                     // Draw calendar-style cell background
                                                                     ui.painter().rect_filled(
                                                                         cell_rect,
-                                                                        egui::Rounding::same(0.0), // No rounding
+                                                                        egui::CornerRadius::same(0), // No rounding
                                                                         cell_bg_color
                                                                     );
                                                                     
                                                                     // Draw cell border (minimal)
                                                                     ui.painter().rect_stroke(
                                                                         cell_rect,
-                                                                        egui::Rounding::same(0.0), // No rounding
-                                                                        egui::Stroke::new(0.0, cell_border_color) // No border
+                                                                        egui::CornerRadius::same(0), // No rounding
+                                                                        egui::Stroke::new(0.0, cell_border_color), // No border
+                                                                         egui::StrokeKind::Outside
                                                                     );
                                                                     
                                                                     ui.add(egui::Label::new(egui::RichText::new(format!("${:.2}", transaction.balance))

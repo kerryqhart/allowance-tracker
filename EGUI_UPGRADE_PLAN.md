@@ -19,6 +19,65 @@
 - Files: `button.rs` and `popup.rs`
 
 **Error Type**: Upstream dependency issue, not our code
+**Status**: ✅ FIXED by removing datepicker feature
+
+### Phase 2: Our Code API Compatibility Issues ❌
+
+**Error Count**: 160 compilation errors in our Rust code
+**Error Pattern**: egui API breaking changes between 0.28 and 0.32
+
+#### Category 2.1: Type Changes (Major - ~80+ errors)
+```rust
+// OLD (0.28): egui::Rounding::same() accepted f32
+egui::Rounding::same(10.0)
+
+// NEW (0.32): egui::Rounding::same() expects u8
+egui::Rounding::same(10_u8)
+```
+
+**Files Affected**: Almost all UI files
+**Impact**: Widespread - every rounding value needs conversion
+
+#### Category 2.2: Method Renames (Warnings - ~20+ deprecations)
+```rust
+// OLD → NEW
+.rounding() → .corner_radius()
+.allocate_ui_at_rect() → .allocate_new_ui()
+.child_ui() → .new_child()
+```
+
+**Impact**: Mostly warnings, but should fix for future compatibility
+
+#### Category 2.3: Method Signature Changes (Breaking - ~10+ errors)
+```rust
+// OLD (0.28): rect_stroke took 3 arguments
+painter.rect_stroke(rect, rounding, stroke);
+
+// NEW (0.32): rect_stroke takes 4 arguments
+painter.rect_stroke(rect, rounding, stroke, stroke_kind);
+```
+
+#### Category 2.4: Field vs Method Changes (Breaking - ~5+ errors)
+```rust
+// OLD: rounding was an assignable field
+style.visuals.widgets.inactive.rounding = egui::Rounding::same(8.0);
+
+// NEW: rounding is now a method, not a field
+// Need to find new API
+```
+
+#### Category 2.5: Shadow/Effects Changes (Breaking - ~5+ errors)
+```rust
+// OLD: shadow properties were f32
+offset: egui::vec2(6.0, 6.0),
+blur: 20.0,
+spread: 0.0,
+
+// NEW: shadow properties expect different types
+offset: [i8; 2], // was Vec2
+blur: u8,       // was f32  
+spread: u8,     // was f32
+```
 
 ### Detailed Error Categorization
 
@@ -60,16 +119,19 @@ egui_extras = { version = "0.32", features = ["all_loaders", "datepicker", "imag
 
 ## Implementation Plan
 
-### Phase 1: Immediate Unblock ✅ **NEXT STEP**
-- [ ] Remove `datepicker` from egui_extras features
-- [ ] Test compilation
-- [ ] Search codebase for datepicker usage
-- [ ] Document any datepicker functionality that needs alternative implementation
+### Phase 1: Immediate Unblock ✅ **COMPLETED**
+- [x] Remove `datepicker` from egui_extras features
+- [x] Test compilation
+- [x] Search codebase for datepicker usage (not used anywhere)
+- [x] Document any datepicker functionality (none needed)
 
-### Phase 2: Our Code Compilation Issues
-- [ ] Fix any API changes in our egui usage
-- [ ] Update immediate mode patterns if needed
-- [ ] Fix any breaking changes in egui 0.29-0.32
+### Phase 2: Our Code Compilation Issues ⭐ **CURRENT PHASE**
+- [ ] **2.1**: Fix type changes - Convert f32 rounding to u8 (80+ errors)
+- [ ] **2.2**: Fix method renames - Update deprecated method calls (20+ warnings)
+- [ ] **2.3**: Fix method signatures - Add missing parameters (10+ errors)
+- [ ] **2.4**: Fix field/method changes - Update style assignment patterns (5+ errors)  
+- [ ] **2.5**: Fix shadow/effects - Update shadow property types (5+ errors)
+- [ ] Test compilation after each category
 
 ### Phase 3: Runtime Testing
 - [ ] Test basic app functionality
@@ -145,9 +207,10 @@ cargo run --bin allowance-tracker-egui
 - [x] Baseline commit (working 0.28 state)
 - [x] Version bump to 0.32
 - [x] Error identification and categorization
+- [x] Fixed egui_extras datepicker dependency issue (removed unused feature)
 
 ### In Progress 🔄
-- [ ] **CURRENT**: Fix egui_extras datepicker issue
+- [ ] **CURRENT**: Fix our code API compatibility issues
 
 ### Planned 📋
 - [ ] Fix our code compilation issues  
@@ -164,11 +227,13 @@ cargo run --bin allowance-tracker-egui
 4. **Our core functionality likely unaffected** - we use calendar components, not datepicker widgets
 
 ### Questions for Investigation
-- [ ] Do we actually use egui_extras datepicker anywhere?
-- [ ] Is this a known issue in egui 0.32?
+- [x] Do we actually use egui_extras datepicker anywhere? → **NO, safely removed**
+- [x] Is this a known issue in egui 0.32? → **YES, datepicker persistence bug**
 - [ ] Are there newer patch versions that fix this?
-- [ ] What are the alternative datepicker solutions?
+- [ ] What is the new API for style.visuals.widgets.*.rounding assignment?
+- [ ] What is the 4th parameter for rect_stroke (StrokeKind)?
+- [ ] What are the new shadow property types and API?
 
 ---
 
-**Next Action**: Remove datepicker feature and test compilation 
+**Next Action**: Start Phase 2.1 - Fix type changes (f32 → u8 rounding) 

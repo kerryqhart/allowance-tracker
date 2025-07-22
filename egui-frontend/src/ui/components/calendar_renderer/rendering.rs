@@ -85,7 +85,7 @@ impl CalendarDay {
             );
             ui.painter().rect_filled(
                 shadow_rect,
-                egui::Rounding::same(2.0),
+                egui::CornerRadius::same(2),
                 egui::Color32::from_rgba_unmultiplied(0, 0, 0, 30) // Subtle shadow
             );
         }
@@ -118,7 +118,7 @@ impl CalendarDay {
         
         ui.painter().rect_filled(
             cell_rect,
-            egui::Rounding::same(2.0),
+            egui::CornerRadius::same(2),
             bg_color
         );
         
@@ -127,16 +127,18 @@ impl CalendarDay {
             // Selected day gets a purple-pink border matching the Create Goal button
             ui.painter().rect_stroke(
                 cell_rect,
-                egui::Rounding::same(2.0),
-                egui::Stroke::new(2.0, egui::Color32::from_rgb(199, 112, 221)) // Purple-pink border for selection
+                egui::CornerRadius::same(2),
+                egui::Stroke::new(2.0, egui::Color32::from_rgb(199, 112, 221)), // Purple-pink border for selection
+                egui::StrokeKind::Outside
             );
         } else if self.is_today {
             // Double outline for today: white inner + dark outer for high visibility
             // Draw white inner outline first
             ui.painter().rect_stroke(
                 cell_rect,
-                egui::Rounding::same(2.0),
-                egui::Stroke::new(2.0, egui::Color32::WHITE)
+                egui::CornerRadius::same(2),
+                egui::Stroke::new(2.0, egui::Color32::WHITE),
+                egui::StrokeKind::Outside
             );
             
             // Draw dark outer outline
@@ -146,16 +148,18 @@ impl CalendarDay {
             );
             ui.painter().rect_stroke(
                 outer_rect,
-                egui::Rounding::same(2.0),
-                egui::Stroke::new(2.0, self.day_type.border_color(self.is_today))
+                egui::CornerRadius::same(2),
+                egui::Stroke::new(2.0, self.day_type.border_color(self.is_today)),
+                egui::StrokeKind::Outside
             );
         } else {
             // Normal single outline for other days
             let border_color = self.day_type.border_color(self.is_today);
             ui.painter().rect_stroke(
                 cell_rect,
-                egui::Rounding::same(2.0),
-                egui::Stroke::new(0.5, border_color)
+                egui::CornerRadius::same(2),
+                egui::Stroke::new(0.5, border_color),
+                egui::StrokeKind::Outside
             );
         }
         
@@ -298,7 +302,7 @@ impl CalendarDay {
             // Draw collapse button background - no rounding for perfect border alignment
             ui.painter().rect_filled(
                 collapse_rect,
-                egui::Rounding::ZERO, // No rounding for perfect border alignment
+                egui::CornerRadius::ZERO, // No rounding for perfect border alignment
                 collapse_bg_color
             );
             
@@ -401,7 +405,7 @@ impl CalendarDay {
                     // Draw background
                     ui.painter().rect_filled(
                         rect,
-                        egui::Rounding::same(4.0),
+                        egui::CornerRadius::same(4),
                         background_color
                     );
                     
@@ -412,8 +416,9 @@ impl CalendarDay {
                         // Draw solid border
                         ui.painter().rect_stroke(
                             rect,
-                            egui::Rounding::same(4.0),
-                            egui::Stroke::new(1.0, chip_color)
+                            egui::CornerRadius::same(4),
+                            egui::Stroke::new(1.0, chip_color),
+                            egui::StrokeKind::Outside
                         );
                     }
                     
@@ -458,7 +463,7 @@ impl CalendarDay {
                 // Draw background
                 ui.painter().rect_filled(
                     rect,
-                    egui::Rounding::same(4.0),
+                    egui::CornerRadius::same(4),
                     background_color
                 );
                 
@@ -469,8 +474,9 @@ impl CalendarDay {
                     // Draw solid border
                     ui.painter().rect_stroke(
                         rect,
-                        egui::Rounding::same(4.0),
-                        egui::Stroke::new(1.0, chip_color)
+                        egui::CornerRadius::same(4),
+                        egui::Stroke::new(1.0, chip_color),
+                        egui::StrokeKind::Outside
                     );
                 }
                 
@@ -557,22 +563,23 @@ impl CalendarDay {
                 let shadow_rect = tooltip_rect.translate(egui::vec2(1.0, 1.0));
                 ui.painter().rect_filled(
                     shadow_rect,
-                    egui::Rounding::same(6.0),
+                    egui::CornerRadius::same(6),
                     tooltip::shadow_color()
                 );
                 
                 // Draw main tooltip background
                 ui.painter().rect_filled(
                     tooltip_rect,
-                    egui::Rounding::same(6.0),
+                    egui::CornerRadius::same(6),
                     tooltip_bg_color
                 );
                 
                 // Draw border
                 ui.painter().rect_stroke(
                     tooltip_rect,
-                    egui::Rounding::same(6.0),
-                    egui::Stroke::new(1.0, tooltip_border_color)
+                    egui::CornerRadius::same(6),
+                    egui::Stroke::new(1.0, tooltip_border_color),
+                    egui::StrokeKind::Outside
                 );
                 
                 // Add padding and render text
@@ -805,7 +812,7 @@ impl AllowanceTrackerApp {
                                                 let bg_color = header::background_color();
                                                 ui.painter().rect_filled(
                                                     header_rect,
-                                                    egui::Rounding::same(2.0),
+                                                    egui::CornerRadius::same(2),
                                                     bg_color
                                                 );
                                                 
@@ -813,8 +820,9 @@ impl AllowanceTrackerApp {
                                                 let border_color = header::border_color();
                                                 ui.painter().rect_stroke(
                                                     header_rect,
-                                                    egui::Rounding::same(2.0),
-                                                    egui::Stroke::new(1.0, border_color)
+                                                    egui::CornerRadius::same(2),
+                                                    egui::Stroke::new(1.0, border_color),
+                                                    egui::StrokeKind::Outside
                                                 );
                                                 
                                                 // Draw text - disable selection to prevent dropdown interference

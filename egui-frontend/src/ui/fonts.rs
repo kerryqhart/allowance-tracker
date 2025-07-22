@@ -66,7 +66,7 @@ pub fn setup_custom_fonts(ctx: &egui::Context) {
     if let Some(font_data) = load_system_font("Chalkboard") {
         fonts.font_data.insert(
             "Chalkboard".to_owned(),
-            egui::FontData::from_owned(font_data),
+            egui::FontData::from_owned(font_data).into(),
         );
         
         // Create a new font family for Chalkboard
@@ -84,7 +84,7 @@ pub fn setup_custom_fonts(ctx: &egui::Context) {
     if let Some(emoji_data) = load_emoji_font() {
         fonts.font_data.insert(
             "AppleColorEmoji".to_owned(),
-            egui::FontData::from_owned(emoji_data),
+            egui::FontData::from_owned(emoji_data).into(),
         );
         
         // Add emoji font as fallback to default system fonts only

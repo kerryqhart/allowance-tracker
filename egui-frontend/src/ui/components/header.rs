@@ -297,7 +297,7 @@ impl AllowanceTrackerApp {
             .fill(egui::Color32::from_rgba_unmultiplied(255, 248, 220, 200)) // Light yellow background
             .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(255, 215, 0))) // Gold border
             .inner_margin(egui::Margin::symmetric(15.0, 8.0))
-            .rounding(egui::Rounding::same(8.0));
+            .rounding(egui::CornerRadius::same(8));
         
         frame.show(ui, |ui| {
             ui.horizontal(|ui| {
@@ -331,7 +331,7 @@ impl AllowanceTrackerApp {
                         )
                         .fill(egui::Color32::from_rgb(128, 128, 128)) // Gray background
                         .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(100, 100, 100)))
-                        .rounding(egui::Rounding::same(4.0))
+                        .rounding(egui::CornerRadius::same(4))
                     );
                     
                     if exit_button.clicked() {
@@ -358,7 +358,7 @@ impl AllowanceTrackerApp {
                         )
                         .fill(delete_color)
                         .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(200, 50, 60)))
-                        .rounding(egui::Rounding::same(4.0))
+                        .rounding(egui::CornerRadius::same(4))
                     );
                     
                     if delete_button.clicked() && delete_enabled {

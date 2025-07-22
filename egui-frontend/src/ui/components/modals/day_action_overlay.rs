@@ -107,7 +107,7 @@ impl AllowanceTrackerApp {
                 let screen_rect = ctx.screen_rect();
                 ui.painter().rect_filled(
                     screen_rect,
-                    egui::Rounding::ZERO,
+                    egui::CornerRadius::ZERO,
                     egui::Color32::from_rgba_unmultiplied(0, 0, 0, 80) // Subtle dark background
                 );
                 
@@ -118,7 +118,7 @@ impl AllowanceTrackerApp {
                         egui::Frame::window(&ui.style())
                             .fill(egui::Color32::WHITE)
                             .stroke(egui::Stroke::new(3.0, overlay_color))
-                            .rounding(egui::Rounding::same(16.0))
+                            .rounding(egui::CornerRadius::same(16))
                             .inner_margin(egui::Margin::same(25.0))
                             .shadow(egui::Shadow {
                                 offset: egui::vec2(6.0, 6.0),
@@ -258,7 +258,7 @@ impl AllowanceTrackerApp {
                                                     .color(egui::Color32::WHITE))
                                                     .fill(button_color)
                                                     .stroke(egui::Stroke::new(2.0, button_color))
-                                                    .rounding(egui::Rounding::same(10.0))
+                                                    .rounding(egui::CornerRadius::same(10))
                                                     .min_size(egui::vec2(150.0, 40.0));
                                                 
                                                 let add_button_response = ui.add(add_button);
@@ -289,7 +289,7 @@ impl AllowanceTrackerApp {
                                                     .color(egui::Color32::from_rgb(100, 100, 100)))
                                                     .fill(egui::Color32::from_rgb(245, 245, 245))
                                                     .stroke(egui::Stroke::new(1.5, egui::Color32::from_rgb(200, 200, 200)))
-                                                    .rounding(egui::Rounding::same(10.0))
+                                                    .rounding(egui::CornerRadius::same(10))
                                                     .min_size(egui::vec2(90.0, 40.0));
                                                 
                                                 if ui.add(cancel_button).clicked() {
@@ -364,7 +364,7 @@ impl AllowanceTrackerApp {
                                             .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))
                                             .color(text_color))
                                             .fill(button_color)
-                                            .rounding(egui::Rounding::same(10.0))
+                                            .rounding(egui::CornerRadius::same(10))
                                             .min_size(egui::vec2(120.0, 40.0));
                                         
                                         let ok_response = ui.add(ok_button);
@@ -399,7 +399,7 @@ impl AllowanceTrackerApp {
                                             .color(egui::Color32::from_rgb(100, 100, 100)))
                                             .fill(egui::Color32::from_rgb(245, 245, 245))
                                             .stroke(egui::Stroke::new(1.5, egui::Color32::from_rgb(200, 200, 200)))
-                                            .rounding(egui::Rounding::same(10.0))
+                                            .rounding(egui::CornerRadius::same(10))
                                             .min_size(egui::vec2(90.0, 40.0));
                                         
                                         if ui.add(cancel_button).clicked() {

@@ -76,7 +76,7 @@ impl AllowanceTrackerApp {
                                     // Draw background FIRST (like chips do)
                                     ui.painter().rect_filled(
                                         button_rect,
-                                        egui::Rounding::same(4.0),
+                                        egui::CornerRadius::same(4),
                                         background_color
                                     );
                                     
@@ -84,7 +84,7 @@ impl AllowanceTrackerApp {
                                     if response.hovered() {
                                         ui.painter().rect_filled(
                                             egui::Rect::from_min_size(button_rect.min, egui::vec2(10.0, 10.0)),
-                                            egui::Rounding::ZERO,
+                                            egui::CornerRadius::ZERO,
                                             egui::Color32::RED // Red debug square
                                         );
                                     }

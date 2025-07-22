@@ -59,9 +59,9 @@ pub fn setup_kid_friendly_style(ctx: &egui::Context) {
         // Rounded corners and padding
         style.spacing.button_padding = egui::vec2(12.0, 8.0);
         style.spacing.item_spacing = egui::vec2(8.0, 8.0);
-        style.visuals.widgets.inactive.rounding = egui::Rounding::same(8.0);
-        style.visuals.widgets.active.rounding = egui::Rounding::same(8.0);
-        style.visuals.widgets.hovered.rounding = egui::Rounding::same(8.0);
+        style.visuals.widgets.inactive.rounding = egui::CornerRadius::same(8);
+        style.visuals.widgets.active.rounding = egui::CornerRadius::same(8);
+        style.visuals.widgets.hovered.rounding = egui::CornerRadius::same(8);
         
         style
     });
@@ -76,7 +76,7 @@ pub fn draw_solid_purple_background(ui: &mut egui::Ui, rect: egui::Rect) {
     let purple_color = CURRENT_THEME.calendar.header_mid;
     
     // Draw solid purple background for this column
-    ui.painter().rect_filled(rect, egui::Rounding::ZERO, purple_color);
+    ui.painter().rect_filled(rect, egui::CornerRadius::ZERO, purple_color);
 }
 
 /// Draw image background with blue overlay (replacing gradient)
@@ -101,7 +101,7 @@ pub fn draw_image_background(ui: &mut egui::Ui, rect: egui::Rect) {
         Err(_e) => {
             // Fallback to a solid color if image fails to load
             let fallback_color = CURRENT_THEME.layout.gradient_bottom; // Light blue
-            painter.rect_filled(rect, egui::Rounding::ZERO, fallback_color);
+            painter.rect_filled(rect, egui::CornerRadius::ZERO, fallback_color);
         }
     }
 }
@@ -118,10 +118,10 @@ pub fn draw_card_container(ui: &mut egui::Ui, rect: egui::Rect, rounding: f32) {
         rect.min + egui::vec2(2.0, 2.0),
         rect.size(),
     );
-    painter.rect_filled(shadow_rect, egui::Rounding::same(rounding), colors::CARD_SHADOW);
+    painter.rect_filled(shadow_rect, egui::CornerRadius::same(rounding), colors::CARD_SHADOW);
     
     // Draw white background
-    painter.rect_filled(rect, egui::Rounding::same(rounding), colors::CARD_BACKGROUND);
+    painter.rect_filled(rect, egui::CornerRadius::same(rounding), colors::CARD_BACKGROUND);
 }
 
 /// Draw gradient day headers for calendar
@@ -141,7 +141,7 @@ pub fn draw_day_header_gradient(ui: &mut egui::Ui, rect: egui::Rect, day_index: 
         (colors::CALENDAR_HEADER_START.b() as f32 * (1.0 - t) + colors::CALENDAR_HEADER_MID.b() as f32 * t) as u8,
     );
     
-    painter.rect_filled(rect, egui::Rounding::same(5.0), color);
+    painter.rect_filled(rect, egui::CornerRadius::same(5), color);
 }
 
 /// Get table header color that matches calendar day header style

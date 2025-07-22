@@ -32,7 +32,7 @@ impl AllowanceTrackerApp {
                 let screen_rect = ctx.screen_rect();
                 ui.painter().rect_filled(
                     screen_rect,
-                    egui::Rounding::ZERO,
+                    egui::CornerRadius::ZERO,
                     egui::Color32::from_rgba_unmultiplied(0, 0, 0, 128)
                 );
                 
@@ -42,7 +42,7 @@ impl AllowanceTrackerApp {
                         egui::Frame::window(&ui.style())
                             .fill(egui::Color32::WHITE)
                             .stroke(egui::Stroke::new(3.0, egui::Color32::from_rgb(100, 150, 255)))
-                            .rounding(egui::Rounding::same(15.0))
+                            .rounding(egui::CornerRadius::same(15))
                             .inner_margin(egui::Margin::same(20.0))
                             .show(ui, |ui| {
                                 // Set modal size
@@ -133,7 +133,7 @@ impl AllowanceTrackerApp {
                         let cancel_button = egui::Button::new("Cancel")
                             .fill(egui::Color32::from_rgb(240, 240, 240))
                             .stroke(egui::Stroke::new(1.5, egui::Color32::from_rgb(200, 200, 200)))
-                            .rounding(egui::Rounding::same(6.0))
+                            .rounding(egui::CornerRadius::same(6))
                             .min_size(egui::vec2(80.0, 35.0));
                         
                         if ui.add(cancel_button).clicked() {
@@ -157,7 +157,7 @@ impl AllowanceTrackerApp {
                                 egui::Color32::from_rgb(200, 200, 200) 
                             })
                             .stroke(egui::Stroke::new(1.5, egui::Color32::from_rgb(80, 130, 235)))
-                            .rounding(egui::Rounding::same(6.0))
+                            .rounding(egui::CornerRadius::same(6))
                             .min_size(egui::vec2(100.0, 35.0));
                         
                         let create_response = ui.add_enabled(create_enabled && !self.goal.creation_form.submitting, create_button);

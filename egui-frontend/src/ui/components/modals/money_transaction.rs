@@ -41,7 +41,7 @@ impl AllowanceTrackerApp {
                 let screen_rect = ctx.screen_rect();
                 ui.painter().rect_filled(
                     screen_rect,
-                    egui::Rounding::ZERO,
+                    egui::CornerRadius::ZERO,
                     egui::Color32::from_rgba_unmultiplied(0, 0, 0, 128)
                 );
                 
@@ -51,7 +51,7 @@ impl AllowanceTrackerApp {
                         egui::Frame::window(&ui.style())
                             .fill(egui::Color32::WHITE)
                             .stroke(egui::Stroke::new(3.0, config.color))
-                            .rounding(egui::Rounding::same(15.0))
+                            .rounding(egui::CornerRadius::same(15))
                             .inner_margin(egui::Margin::same(20.0))
                             .show(ui, |ui| {
                                 // Set modal size
@@ -179,7 +179,7 @@ impl AllowanceTrackerApp {
                                             .color(egui::Color32::WHITE))
                                             .fill(button_color)
                                             .stroke(egui::Stroke::new(2.0, button_color))
-                                            .rounding(egui::Rounding::same(10.0))
+                                            .rounding(egui::CornerRadius::same(10))
                                             .min_size(egui::vec2(150.0, 40.0));
                                         
                                         let submit_response = ui.add(submit_button);
@@ -201,7 +201,7 @@ impl AllowanceTrackerApp {
                                             .color(egui::Color32::WHITE))
                                             .fill(egui::Color32::from_rgb(120, 120, 120))
                                             .stroke(egui::Stroke::new(2.0, egui::Color32::from_rgb(120, 120, 120)))
-                                            .rounding(egui::Rounding::same(10.0))
+                                            .rounding(egui::CornerRadius::same(10))
                                             .min_size(egui::vec2(100.0, 40.0));
                                         
                                         if ui.add(cancel_button).clicked() {

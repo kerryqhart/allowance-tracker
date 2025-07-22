@@ -520,7 +520,7 @@ impl AllowanceTrackerApp {
                     .color(egui::Color32::WHITE))
                 .fill(egui::Color32::from_rgb(100, 150, 255))
                 .stroke(egui::Stroke::new(1.5, egui::Color32::from_rgb(80, 130, 235)))
-                .rounding(egui::Rounding::same(8.0))
+                .rounding(egui::CornerRadius::same(8))
                 .min_size(egui::vec2(120.0, 40.0));
             
             if ui.add(create_button).clicked() {

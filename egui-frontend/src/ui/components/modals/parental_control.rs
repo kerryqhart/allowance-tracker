@@ -33,7 +33,7 @@ impl AllowanceTrackerApp {
                 let screen_rect = ctx.screen_rect();
                 ui.painter().rect_filled(
                     screen_rect,
-                    egui::Rounding::ZERO,
+                    egui::CornerRadius::ZERO,
                     egui::Color32::from_rgba_unmultiplied(0, 0, 0, 128)
                 );
                 
@@ -45,7 +45,7 @@ impl AllowanceTrackerApp {
                             egui::Frame::window(&ui.style())
                                 .fill(egui::Color32::WHITE)
                                 .stroke(egui::Stroke::new(3.0, egui::Color32::from_rgb(220, 50, 50)))
-                                .rounding(egui::Rounding::same(15.0))
+                                .rounding(egui::CornerRadius::same(15))
                                 .inner_margin(egui::Margin::same(20.0))
                                 .show(ui, |ui| {
                                     // Set modal size
@@ -119,7 +119,7 @@ impl AllowanceTrackerApp {
                         .color(egui::Color32::BLACK)
                 )
                 .min_size(egui::vec2(70.0, 32.0))
-                .rounding(egui::Rounding::same(6.0))
+                .rounding(egui::CornerRadius::same(6))
                 .fill(egui::Color32::WHITE)
                 .stroke(egui::Stroke::new(1.5, egui::Color32::from_rgb(147, 51, 234))); // Purple outline
                 
@@ -136,7 +136,7 @@ impl AllowanceTrackerApp {
                         .color(egui::Color32::BLACK)
                 )
                 .min_size(egui::vec2(70.0, 32.0))
-                .rounding(egui::Rounding::same(6.0))
+                .rounding(egui::CornerRadius::same(6))
                 .fill(egui::Color32::WHITE)
                 .stroke(egui::Stroke::new(1.5, egui::Color32::from_rgb(147, 51, 234))); // Purple outline
                 
@@ -225,7 +225,7 @@ impl AllowanceTrackerApp {
                 } else {
                     egui::Color32::from_rgb(220, 50, 50)
                 }))
-                .rounding(egui::Rounding::same(10.0))
+                .rounding(egui::CornerRadius::same(10))
                 .min_size(egui::vec2(120.0, 40.0));
                 
                 if ui.add(submit_button).clicked() && !self.modal.parental_control_loading {
@@ -246,7 +246,7 @@ impl AllowanceTrackerApp {
                         .color(egui::Color32::BLACK)
                 )
                 .min_size(egui::vec2(70.0, 32.0))
-                .rounding(egui::Rounding::same(6.0))
+                .rounding(egui::CornerRadius::same(6))
                 .fill(egui::Color32::WHITE)
                 .stroke(egui::Stroke::new(1.5, egui::Color32::from_rgb(147, 51, 234))); // Purple outline
                 

@@ -36,7 +36,7 @@ impl AllowanceTrackerApp {
                 let screen_rect = ctx.screen_rect();
                 ui.painter().rect_filled(
                     screen_rect,
-                    egui::Rounding::ZERO,
+                    egui::CornerRadius::ZERO,
                     egui::Color32::from_rgba_unmultiplied(0, 0, 0, 128)
                 );
                 
@@ -46,7 +46,7 @@ impl AllowanceTrackerApp {
                         egui::Frame::window(&ui.style())
                             .fill(egui::Color32::WHITE)
                             .stroke(egui::Stroke::new(3.0, egui::Color32::from_rgb(70, 130, 180))) // Steel blue for profile
-                            .rounding(egui::Rounding::same(15.0))
+                            .rounding(egui::CornerRadius::same(15))
                             .inner_margin(egui::Margin::same(25.0))
                             .shadow(egui::Shadow {
                                 offset: egui::vec2(6.0, 6.0),
@@ -238,7 +238,7 @@ impl AllowanceTrackerApp {
                 } else {
                     egui::Color32::from_rgb(180, 180, 180)
                 }))
-                .rounding(egui::Rounding::same(10.0))
+                .rounding(egui::CornerRadius::same(10))
                 .min_size(egui::vec2(button_width, 40.0));
             
             if ui.add(save_button).clicked() && save_enabled {
@@ -253,7 +253,7 @@ impl AllowanceTrackerApp {
                     .color(egui::Color32::from_rgb(100, 100, 100)))
                 .fill(egui::Color32::from_rgb(245, 245, 245))
                 .stroke(egui::Stroke::new(1.5, egui::Color32::from_rgb(200, 200, 200)))
-                .rounding(egui::Rounding::same(10.0))
+                .rounding(egui::CornerRadius::same(10))
                 .min_size(egui::vec2(button_width, 40.0));
             
             if ui.add(cancel_button).clicked() {
