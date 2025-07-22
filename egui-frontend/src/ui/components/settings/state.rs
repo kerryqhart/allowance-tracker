@@ -321,6 +321,12 @@ pub struct SettingsState {
     /// Export data form state
     pub export_form: ExportFormState,
 
+    /// Whether the data directory modal is visible
+    pub show_data_directory_modal: bool,
+
+    /// Data directory form state
+    pub data_directory_form: DataDirectoryFormState,
+
     // TODO: Future settings modal states
     // pub show_allowance_config_modal: bool,
     // pub allowance_config_form: AllowanceConfigFormState,
@@ -336,6 +342,8 @@ impl SettingsState {
             profile_form: ProfileFormState::new(),
             show_export_modal: false,
             export_form: ExportFormState::new(),
+            show_data_directory_modal: false,
+            data_directory_form: DataDirectoryFormState::new(),
         }
     }
 
@@ -344,6 +352,7 @@ impl SettingsState {
         self.show_create_child_modal = false;
         self.show_profile_modal = false;
         self.show_export_modal = false;
+        self.show_data_directory_modal = false;
         // TODO: Hide other settings modals when implemented
     }
 
@@ -352,6 +361,7 @@ impl SettingsState {
         self.create_child_form.clear();
         self.profile_form.clear();
         self.export_form.clear();
+        self.data_directory_form.clear();
         // TODO: Reset other form states when implemented
     }
 }
@@ -375,6 +385,99 @@ impl Default for SettingsState {
 } 
 
 impl Default for ExportFormState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Form state for data directory management
+#[derive(Debug, Clone)]
+pub struct DataDirectoryFormState {
+    pub current_path: String,
+    pub new_path: String,
+    pub is_loading: bool,
+    pub has_conflict: bool,
+    pub conflict_details: Option<String>,
+    pub user_decision: Option<shared::ConflictResolution>,
+    pub success_message: Option<String>,
+    pub error_message: Option<String>,
+    pub is_redirected: bool, // True if current location is a redirect
+}
+
+impl DataDirectoryFormState {
+    /// Create new data directory form state
+    pub fn new() -> Self {
+        Self {
+            current_path: String::new(),
+            new_path: String::new(),
+            is_loading: false,
+            has_conflict: false,
+            conflict_details: None,
+            user_decision: None,
+            success_message: None,
+            error_message: None,
+            is_redirected: false,
+        }
+    }
+
+    /// Clear form fields and messages
+    pub fn clear(&mut self) {
+        self.current_path.clear();
+        self.new_path.clear();
+        self.is_loading = false;
+        self.has_conflict = false;
+        self.conflict_details = None;
+        self.user_decision = None;
+        self.success_message = None;
+        self.error_message = None;
+        self.is_redirected = false;
+    }
+
+    /// Set loading state
+    pub fn set_loading(&mut self, loading: bool) {
+        self.is_loading = loading;
+        if loading {
+            self.clear_messages();
+        }
+    }
+
+    /// Set conflict state
+    pub fn set_conflict(&mut self, has_conflict: bool, details: Option<String>) {
+        self.has_conflict = has_conflict;
+        self.conflict_details = details;
+        self.user_decision = None;
+    }
+
+    /// Clear any previous messages
+    pub fn clear_messages(&mut self) {
+        self.success_message = None;
+        self.error_message = None;
+    }
+
+    /// Set success message
+    pub fn set_success(&mut self, message: String) {
+        self.success_message = Some(message);
+        self.error_message = None;
+    }
+
+    /// Set error message
+    pub fn set_error(&mut self, message: String) {
+        self.error_message = Some(message);
+        self.success_message = None;
+    }
+
+    /// Check if form is ready for conflict resolution
+    pub fn is_ready_for_resolution(&self) -> bool {
+        !self.is_loading && self.has_conflict && self.user_decision.is_some()
+    }
+
+    /// Check if form is ready for initial path change
+    pub fn is_ready_for_change(&self) -> bool {
+        !self.is_loading && !self.new_path.trim().is_empty()
+    }
+}
+
+impl Default for DataDirectoryFormState {
     fn default() -> Self {
         Self::new()
     }

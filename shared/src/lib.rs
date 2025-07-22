@@ -352,6 +352,7 @@ pub struct ActiveChildResponse {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct GetDataDirectoryResponse {
     pub current_path: String,
+    pub is_redirected: bool, // True if current location is via redirect file
 }
 
 /// Request to relocate data directory
@@ -381,6 +382,63 @@ pub struct RevertDataDirectoryResponse {
     pub success: bool,
     pub message: String,
     pub was_redirected: bool, // Whether there was actually a redirect to revert
+}
+
+/// Request to check if a directory has conflicts
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CheckDataDirectoryConflictRequest {
+    pub child_id: Option<String>, // If None, uses active child
+    pub new_path: String,
+}
+
+/// Response with conflict detection results
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CheckDataDirectoryConflictResponse {
+    pub has_conflict: bool,
+    pub conflict_details: Option<String>, // Description of what conflicts were found
+    pub can_proceed_safely: bool, // Whether relocation can proceed without user decision
+}
+
+/// User decision for resolving data directory conflicts
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum ConflictResolution {
+    /// Overwrite target location with current child data
+    OverwriteTarget,
+    /// Use target location's data and archive current data
+    UseTargetData,
+    /// Cancel the operation
+    Cancel,
+}
+
+/// Request to relocate with conflict resolution
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RelocateWithConflictResolutionRequest {
+    pub child_id: Option<String>, // If None, uses active child
+    pub new_path: String,
+    pub resolution: ConflictResolution,
+}
+
+/// Response after relocating with conflict resolution
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RelocateWithConflictResolutionResponse {
+    pub success: bool,
+    pub message: String,
+    pub new_path: String,
+    pub archived_to: Option<String>, // Path where original data was archived, if applicable
+}
+
+/// Request to return data to default location
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ReturnToDefaultLocationRequest {
+    pub child_id: Option<String>, // If None, uses active child
+}
+
+/// Response after returning to default location
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ReturnToDefaultLocationResponse {
+    pub success: bool,
+    pub message: String,
+    pub default_path: String,
 }
 
 /// Configuration for money management forms

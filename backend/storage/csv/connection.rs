@@ -365,7 +365,7 @@ impl CsvConnection {
     }
 
     /// Commit the removal of redirect file to git
-    fn commit_redirect_removal(&self, child_dir: &Path, child_name: &str) -> Result<()> {
+    pub fn commit_redirect_removal(&self, child_dir: &Path, child_name: &str) -> Result<()> {
         use std::process::Command;
         
         // Add all changes (removal of redirect file, addition of reverted files)

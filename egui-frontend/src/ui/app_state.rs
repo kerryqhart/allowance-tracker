@@ -340,9 +340,11 @@ impl AllowanceTrackerApp {
                 self.settings.export_form.update_preview(child_name_ref);
             }
             SettingsAction::DataDirectory => {
-                log::info!("📁 Data directory action - placeholder");
-                // TODO: Implement data directory management
-                self.ui.error_message = Some("Data directory feature coming soon!".to_string());
+                log::info!("📁 Data directory action - opening modal");
+                self.settings.show_data_directory_modal = true;
+                
+                // Clear form state when opening modal
+                self.settings.data_directory_form.clear();
             }
         }
     }
