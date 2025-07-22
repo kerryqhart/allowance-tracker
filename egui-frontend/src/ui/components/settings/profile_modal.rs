@@ -1,6 +1,7 @@
-//! # Profile Modal
+//! # Profile Modal (Settings)
 //!
-//! This module contains the child profile modal functionality.
+//! This module contains the child profile modal functionality, moved from modals/profile.rs
+//! to the settings submodule for better organization.
 //!
 //! ## Responsibilities:
 //! - Display and edit child profile information
@@ -11,6 +12,7 @@
 //! ## Purpose:
 //! This modal provides a kid-friendly interface for viewing and editing
 //! child profile details with proper validation and parental control protection.
+//! It's now part of the centralized settings system.
 
 use eframe::egui;
 use chrono::{NaiveDate, Datelike, Local};
@@ -19,7 +21,7 @@ use crate::ui::app_state::AllowanceTrackerApp;
 impl AllowanceTrackerApp {
     /// Render the profile modal
     pub fn render_profile_modal(&mut self, ctx: &egui::Context) {
-        if !self.modal.show_profile_modal {
+        if !self.settings.show_profile_modal {
             return;
         }
         
@@ -112,7 +114,7 @@ impl AllowanceTrackerApp {
             ui.add_space(5.0);
             
             let name_response = ui.add(
-                egui::TextEdit::singleline(&mut self.modal.profile_form.name)
+                egui::TextEdit::singleline(&mut self.settings.profile_form.name)
                     .hint_text("Enter child's name")
                     .desired_width(ui.available_width())
                     .font(egui::FontId::new(14.0, egui::FontFamily::Proportional))
@@ -123,7 +125,7 @@ impl AllowanceTrackerApp {
                 self.validate_profile_name();
             }
             
-            if let Some(error) = &self.modal.profile_form.name_error {
+            if let Some(error) = &self.settings.profile_form.name_error {
                 ui.label(egui::RichText::new(format!("❌ {}", error))
                     .font(egui::FontId::new(12.0, egui::FontFamily::Proportional))
                     .color(egui::Color32::RED));
@@ -140,7 +142,7 @@ impl AllowanceTrackerApp {
             ui.add_space(5.0);
             
             let birthdate_response = ui.add(
-                egui::TextEdit::singleline(&mut self.modal.profile_form.birthdate)
+                egui::TextEdit::singleline(&mut self.settings.profile_form.birthdate)
                     .hint_text("YYYY-MM-DD (e.g., 2015-03-15)")
                     .desired_width(ui.available_width())
                     .font(egui::FontId::new(14.0, egui::FontFamily::Proportional))
@@ -151,15 +153,15 @@ impl AllowanceTrackerApp {
                 self.validate_profile_birthdate();
             }
             
-            if let Some(error) = &self.modal.profile_form.birthdate_error {
+            if let Some(error) = &self.settings.profile_form.birthdate_error {
                 ui.label(egui::RichText::new(format!("❌ {}", error))
                     .font(egui::FontId::new(12.0, egui::FontFamily::Proportional))
                     .color(egui::Color32::RED));
             }
             
             // Show calculated age if birthdate is valid
-            if self.modal.profile_form.birthdate_error.is_none() && !self.modal.profile_form.birthdate.trim().is_empty() {
-                if let Ok(birthdate) = NaiveDate::parse_from_str(&self.modal.profile_form.birthdate, "%Y-%m-%d") {
+            if self.settings.profile_form.birthdate_error.is_none() && !self.settings.profile_form.birthdate.trim().is_empty() {
+                if let Ok(birthdate) = NaiveDate::parse_from_str(&self.settings.profile_form.birthdate, "%Y-%m-%d") {
                     let age = self.calculate_age(birthdate);
                     ui.add_space(10.0);
                     ui.label(egui::RichText::new(format!("Age: {} years old", age))
@@ -212,8 +214,8 @@ impl AllowanceTrackerApp {
             }
             
             // Save button
-            let save_enabled = self.profile_form_is_valid() && self.profile_form_has_changes() && !self.modal.profile_form.is_saving;
-            let save_text = if self.modal.profile_form.is_saving {
+            let save_enabled = self.profile_form_is_valid() && self.profile_form_has_changes() && !self.settings.profile_form.is_saving;
+            let save_text = if self.settings.profile_form.is_saving {
                 "Saving..."
             } else {
                 "Save"
@@ -262,14 +264,14 @@ impl AllowanceTrackerApp {
     
     /// Validate the profile name field
     fn validate_profile_name(&mut self) {
-        let name = self.modal.profile_form.name.trim();
+        let name = self.settings.profile_form.name.trim();
         
         if name.is_empty() {
-            self.modal.profile_form.name_error = Some("Name cannot be empty".to_string());
+            self.settings.profile_form.name_error = Some("Name cannot be empty".to_string());
         } else if name.len() > 100 {
-            self.modal.profile_form.name_error = Some("Name cannot exceed 100 characters".to_string());
+            self.settings.profile_form.name_error = Some("Name cannot exceed 100 characters".to_string());
         } else {
-            self.modal.profile_form.name_error = None;
+            self.settings.profile_form.name_error = None;
         }
         
         self.update_profile_form_validity();
@@ -277,25 +279,25 @@ impl AllowanceTrackerApp {
     
     /// Validate the profile birthdate field
     fn validate_profile_birthdate(&mut self) {
-        let birthdate = self.modal.profile_form.birthdate.trim();
+        let birthdate = self.settings.profile_form.birthdate.trim();
         
         if birthdate.is_empty() {
-            self.modal.profile_form.birthdate_error = Some("Birthdate cannot be empty".to_string());
+            self.settings.profile_form.birthdate_error = Some("Birthdate cannot be empty".to_string());
         } else {
             match NaiveDate::parse_from_str(birthdate, "%Y-%m-%d") {
                 Ok(date) => {
                     // Check if date is reasonable (between 1900 and current year + 10)
                     let current_year = Local::now().year();
                     if date.year() < 1900 || date.year() > current_year + 10 {
-                        self.modal.profile_form.birthdate_error = Some("Please enter a valid birth year".to_string());
+                        self.settings.profile_form.birthdate_error = Some("Please enter a valid birth year".to_string());
                     } else if date > Local::now().date_naive() {
-                        self.modal.profile_form.birthdate_error = Some("Birthdate cannot be in the future".to_string());
+                        self.settings.profile_form.birthdate_error = Some("Birthdate cannot be in the future".to_string());
                     } else {
-                        self.modal.profile_form.birthdate_error = None;
+                        self.settings.profile_form.birthdate_error = None;
                     }
                 }
                 Err(_) => {
-                    self.modal.profile_form.birthdate_error = Some("Please use YYYY-MM-DD format".to_string());
+                    self.settings.profile_form.birthdate_error = Some("Please use YYYY-MM-DD format".to_string());
                 }
             }
         }
@@ -305,25 +307,25 @@ impl AllowanceTrackerApp {
     
     /// Update the overall form validity status
     fn update_profile_form_validity(&mut self) {
-        self.modal.profile_form.is_valid = 
-            self.modal.profile_form.name_error.is_none() &&
-            self.modal.profile_form.birthdate_error.is_none() &&
-            !self.modal.profile_form.name.trim().is_empty() &&
-            !self.modal.profile_form.birthdate.trim().is_empty();
+        self.settings.profile_form.is_valid = 
+            self.settings.profile_form.name_error.is_none() &&
+            self.settings.profile_form.birthdate_error.is_none() &&
+            !self.settings.profile_form.name.trim().is_empty() &&
+            !self.settings.profile_form.birthdate.trim().is_empty();
     }
     
     /// Check if the profile form is valid
     fn profile_form_is_valid(&self) -> bool {
-        self.modal.profile_form.is_valid
+        self.settings.profile_form.is_valid
     }
     
     /// Check if the profile form has changes compared to current child data
     fn profile_form_has_changes(&self) -> bool {
         if let Some(child) = self.current_child() {
-            let name_changed = self.modal.profile_form.name.trim() != child.name;
+            let name_changed = self.settings.profile_form.name.trim() != child.name;
             
             // Parse form birthdate to compare with child's NaiveDate
-            let birthdate_changed = match NaiveDate::parse_from_str(&self.modal.profile_form.birthdate, "%Y-%m-%d") {
+            let birthdate_changed = match NaiveDate::parse_from_str(&self.settings.profile_form.birthdate, "%Y-%m-%d") {
                 Ok(form_date) => form_date != child.birthdate,
                 Err(_) => true, // If form date is invalid, consider it changed
             };
@@ -381,13 +383,13 @@ impl AllowanceTrackerApp {
         
         log::info!("💾 Saving profile changes for child: {}", child_id);
         
-        self.modal.profile_form.is_saving = true;
+        self.settings.profile_form.is_saving = true;
         
         // Create update command
         let command = crate::backend::domain::commands::child::UpdateChildCommand {
             child_id,
-            name: Some(self.modal.profile_form.name.trim().to_string()),
-            birthdate: Some(self.modal.profile_form.birthdate.clone()),
+            name: Some(self.settings.profile_form.name.trim().to_string()),
+            birthdate: Some(self.settings.profile_form.birthdate.clone()),
         };
         
         // Call backend service
@@ -405,7 +407,7 @@ impl AllowanceTrackerApp {
             }
             Err(error) => {
                 log::error!("❌ Failed to update profile: {}", error);
-                self.modal.profile_form.is_saving = false;
+                self.settings.profile_form.is_saving = false;
                 self.ui.error_message = Some(format!("Failed to update profile: {}", error));
             }
         }
@@ -414,7 +416,7 @@ impl AllowanceTrackerApp {
     /// Close the profile modal and reset form
     fn close_profile_modal(&mut self) {
         log::info!("❌ Closing profile modal");
-        self.modal.show_profile_modal = false;
-        self.modal.profile_form.clear();
+        self.settings.show_profile_modal = false;
+        self.settings.profile_form.clear();
     }
 } 

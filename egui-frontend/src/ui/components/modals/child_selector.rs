@@ -119,11 +119,7 @@ impl AllowanceTrackerApp {
                                         match self.backend().child_service.set_active_child(command) {
                                             Ok(_) => {
                                                 self.core.current_child = Some(to_dto(child.clone()));
-                                                self.load_balance();
-                                                self.load_calendar_data();
-                                                self.reset_table_for_new_child(); // Reset table state for new child
-                                                self.load_chart_data(); // Refresh chart for new child
-                                                self.load_goal_data(); // Load goal data for new child
+                                                self.refresh_all_data_for_current_child();
                                                 self.modal.show_child_selector = false;
                                                 // Child selection feedback removed
                                             }

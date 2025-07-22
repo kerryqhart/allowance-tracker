@@ -34,6 +34,20 @@ use crate::backend::domain::commands::transactions::TransactionListQuery;
 use shared::{Transaction, TransactionType};
 
 impl AllowanceTrackerApp {
+    /// Refresh all data for current child - common method used when switching children
+    /// This ensures all views (calendar, table, chart, goals) are updated consistently
+    pub fn refresh_all_data_for_current_child(&mut self) {
+        info!("🔄 Refreshing all data for current child");
+        
+        self.load_balance();
+        self.load_calendar_data();
+        self.reset_table_for_new_child();
+        self.load_chart_data();
+        self.load_goal_data();
+        
+        info!("✅ All data refreshed for current child");
+    }
+
     /// Load initial data
     pub fn load_initial_data(&mut self) {
         info!("📊 Loading initial data");

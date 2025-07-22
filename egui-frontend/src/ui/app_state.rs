@@ -50,6 +50,7 @@ pub struct AllowanceTrackerApp {
     pub table: TableState,            // Transaction table pagination
     pub chart: ChartState,            // Chart visualization and time periods
     pub goal: GoalUiState,            // Goal management and progress tracking
+    pub settings: crate::ui::components::settings::SettingsState, // Settings modals and forms
 }
 
 impl AllowanceTrackerApp {
@@ -79,6 +80,7 @@ impl AllowanceTrackerApp {
         let table = TableState::new();
         let chart = ChartState::new();
         let goal = GoalUiState::new();
+        let settings = crate::ui::components::settings::SettingsState::new();
         
         Ok(Self {
             // Modular state
@@ -91,6 +93,7 @@ impl AllowanceTrackerApp {
             table,
             chart,
             goal,
+            settings,
         })
     }
 
@@ -304,8 +307,8 @@ impl AllowanceTrackerApp {
                         created_at,
                         updated_at,
                     };
-                    self.modal.profile_form.populate_from_child(&domain_child);
-                    self.modal.show_profile_modal = true;
+                    self.settings.profile_form.populate_from_child(&domain_child);
+                    self.settings.show_profile_modal = true;
                     log::info!("👤 Profile modal opened for child: {}", name);
                 } else {
                     log::warn!("🚨 No active child found for profile action");
@@ -313,9 +316,9 @@ impl AllowanceTrackerApp {
                 }
             }
             SettingsAction::CreateChild => {
-                log::info!("👶 Create child action - placeholder");
-                // TODO: Implement create child modal
-                self.ui.error_message = Some("Create child feature coming soon!".to_string());
+                log::info!("👶 Create child action - opening modal");
+                self.settings.show_create_child_modal = true;
+                self.settings.create_child_form.clear(); // Reset form state
             }
             SettingsAction::ConfigureAllowance => {
                 log::info!("⚙️ Configure allowance action - placeholder");

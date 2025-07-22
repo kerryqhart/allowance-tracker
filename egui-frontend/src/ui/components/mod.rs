@@ -8,6 +8,7 @@
 //! - `styling` - Unified styling system (theme, colors, functions)
 //! - `transaction_table` - Transaction table rendering and formatting
 //! - `modals` - Modal dialogs and popup interfaces
+//! - `settings` - Settings-related modals and forms (create child, profile, etc.)
 //! - `header` - Application header with navigation and balance display
 //! - `ui_components` - Reusable UI helper functions and drawing utilities
 //! - `tab_manager` - Tab navigation and content routing
@@ -30,6 +31,7 @@ pub mod goal_progress_bar;
 pub mod goal_progress_graph;
 pub mod header;
 pub mod modals;
+pub mod settings;
 pub mod styling;
 pub mod tab_manager;
 pub mod table_renderer;
