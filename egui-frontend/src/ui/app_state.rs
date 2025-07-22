@@ -330,9 +330,14 @@ impl AllowanceTrackerApp {
                 self.enter_transaction_selection_mode();
             }
             SettingsAction::ExportData => {
-                log::info!("📤 Export data action - placeholder");
-                // TODO: Implement data export functionality
-                self.ui.error_message = Some("Export data feature coming soon!".to_string());
+                log::info!("📤 Export data action - opening modal");
+                self.settings.show_export_modal = true;
+                self.settings.export_form.clear(); // Reset form state
+                
+                // Update preview immediately
+                let child_name = self.current_child().as_ref().map(|c| c.name.clone());
+                let child_name_ref = child_name.as_deref();
+                self.settings.export_form.update_preview(child_name_ref);
             }
             SettingsAction::DataDirectory => {
                 log::info!("📁 Data directory action - placeholder");

@@ -1,39 +1,66 @@
-feat: Implement complete settings system with create child flow
+feat: Implement export data functionality in settings system
 
-## Major Features Added:
-- **Settings submodule**: Created organized ui/components/settings/ structure
-- **Create child modal**: Full implementation with form validation and backend integration
-- **Settings state management**: Centralized SettingsState for all settings forms
-- **Common data refresh**: Single method for refreshing all views when switching children
+## Overview
+Adds comprehensive export data modal to the settings system, allowing users to export transaction data to CSV files with flexible location options.
 
-## Settings System Structure:
-- `settings/mod.rs` - Module organization and documentation
-- `settings/state.rs` - Centralized state (CreateChildFormState, ProfileFormState)
-- `settings/shared.rs` - Common utilities and consistent modal styling
-- `settings/create_child_modal.rs` - Complete create child implementation
-- `settings/profile_modal.rs` - Moved from modals/ for better organization
+## New Features
+- **Export Data Modal**: Complete modal interface with form validation and backend integration
+- **Location Options**: Choice between default Documents folder or custom directory path
+- **Real-time Preview**: Dynamic filename and path preview updates as user makes selections
+- **Backend Integration**: Full integration with ExportService::export_to_path() API
+- **Form Validation**: Proper error handling and user feedback throughout the flow
 
-## Create Child Flow:
-- Real-time form validation for name and birthdate fields
-- Backend integration using CreateChildCommand API
-- Automatically sets new child as active and refreshes all data
-- Consistent styling using shared settings utilities
-- Protected by parental control system
+## Technical Implementation
 
-## Code Organization Improvements:
-- Moved ProfileFormState from ModalState to SettingsState
-- Updated all references to use settings.profile_form instead of modal.profile_form
-- Created refresh_all_data_for_current_child() method in data_loading.rs
-- Refactored child selector, header dropdown, and create child to use common refresh method
+### Settings State Extension (state.rs)
+- Added `ExportType` enum for Default/Custom location selection
+- Created `ExportFormState` with comprehensive form management:
+  - Export type selection (default vs custom)
+  - Custom path input and validation
+  - Real-time filename and preview generation
+  - Loading states and success/error messaging
+  - Form reset and clear functionality
+- Integrated export state into main `SettingsState` structure
 
-## Bug Fixes:
-- Fixed create child modal backdrop click handling (was closing on any click)
-- Removed unwanted success message that appeared as red error text
-- Ensured all views (calendar, table, chart, goals) refresh when creating/switching children
+### Export Modal Implementation (export_modal.rs)
+- Built complete export modal UI following established patterns:
+  - Radio button selection for export location type
+  - Conditional custom path input field
+  - Real-time preview showing complete export path and filename
+  - Action buttons with proper loading states
+- Backend integration with `ExportToPathRequest`/`ExportToPathResponse`
+- Proper error handling and user feedback
+- Modal backdrop handling and form reset on close
 
-## Technical Details:
-- All settings modals now use consistent SettingsModalStyle
-- Form validation with real-time error display
-- Proper error handling and loading states
-- Clean separation between UI and business logic
-- Maintained backward compatibility for existing functionality 
+### Module Integration
+- Updated settings module structure (`settings/mod.rs`)
+- Added export modal to modal coordinator (`modals/shared/mod.rs`)
+- Updated settings action handler in `app_state.rs` to open export modal
+
+### UI/UX Improvements
+- Clean, consistent styling matching other settings modals
+- Professional appearance using text labels instead of emoji
+- Intuitive workflow with immediate visual feedback
+- Proper form validation and error messaging
+
+## File Changes
+- **New**: `egui-frontend/src/ui/components/settings/export_modal.rs`
+- **Modified**: `egui-frontend/src/ui/components/settings/state.rs`
+- **Modified**: `egui-frontend/src/ui/components/settings/mod.rs`
+- **Modified**: `egui-frontend/src/ui/components/modals/shared/mod.rs`
+- **Modified**: `egui-frontend/src/ui/app_state.rs`
+
+## Testing Notes
+- ✅ Compiles successfully with no warnings
+- ✅ Export modal opens from settings menu
+- ✅ Form validation and preview work correctly
+- ✅ Backend integration functional
+- ✅ Modal behavior consistent with other modals
+
+## Future Enhancements
+- Native file dialog support (rfd) for folder selection
+- Path validation and directory existence checking
+- Progress indicators for large exports
+- Export format options beyond CSV
+
+This implementation follows established patterns from the create child and profile modals, ensuring consistency and maintainability across the settings system. 

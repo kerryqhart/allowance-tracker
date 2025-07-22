@@ -4,12 +4,129 @@
 //!
 //! ## Responsibilities:
 //! - Create child form state and validation
-//! - Future settings form states (allowance config, export, etc.)
+//! - Profile editing form state and validation
+//! - Export data form state and validation
+//! - Future settings form states (allowance config, etc.)
 //! - Settings modal visibility flags
 //!
 //! ## Purpose:
 //! This centralizes all settings-related state management, making it easier to
 //! maintain consistent form behavior and validation across settings features.
+
+/// Export type selection for export modal
+#[derive(Debug, Clone, PartialEq)]
+pub enum ExportType {
+    /// Export to default Documents folder
+    Default,
+    /// Export to custom user-specified path
+    Custom,
+}
+
+impl Default for ExportType {
+    fn default() -> Self {
+        Self::Default
+    }
+}
+
+/// Form state for exporting transaction data
+#[derive(Debug, Clone)]
+pub struct ExportFormState {
+    pub export_type: ExportType,
+    pub custom_path: String,
+    pub is_exporting: bool,
+    pub success_message: Option<String>,
+    pub error_message: Option<String>,
+    pub preview_filename: String,
+    pub preview_location: String,
+}
+
+impl ExportFormState {
+    /// Create new export form state
+    pub fn new() -> Self {
+        Self {
+            export_type: ExportType::Default,
+            custom_path: String::new(),
+            is_exporting: false,
+            success_message: None,
+            error_message: None,
+            preview_filename: String::new(),
+            preview_location: String::new(),
+        }
+    }
+
+    /// Clear form fields and messages
+    pub fn clear(&mut self) {
+        self.export_type = ExportType::Default;
+        self.custom_path.clear();
+        self.is_exporting = false;
+        self.success_message = None;
+        self.error_message = None;
+        self.preview_filename.clear();
+        self.preview_location.clear();
+    }
+
+    /// Update preview based on current settings
+    pub fn update_preview(&mut self, child_name: Option<&str>) {
+        // Generate filename preview
+        let child_name_formatted = child_name
+            .unwrap_or("child")
+            .replace(" ", "_")
+            .to_lowercase();
+        
+        let now = chrono::Utc::now();
+        self.preview_filename = format!(
+            "{}_transactions_{}.csv",
+            child_name_formatted,
+            now.format("%Y%m%d")
+        );
+
+        // Generate location preview
+        self.preview_location = match self.export_type {
+            ExportType::Default => {
+                if let Some(docs_dir) = dirs::document_dir() {
+                    docs_dir.to_string_lossy().to_string()
+                } else if let Some(home_dir) = dirs::home_dir() {
+                    home_dir.to_string_lossy().to_string()
+                } else {
+                    "Default location".to_string()
+                }
+            }
+            ExportType::Custom => {
+                if self.custom_path.trim().is_empty() {
+                    "Please enter a custom path".to_string()
+                } else {
+                    self.custom_path.clone()
+                }
+            }
+        };
+    }
+
+    /// Clear any previous messages
+    pub fn clear_messages(&mut self) {
+        self.success_message = None;
+        self.error_message = None;
+    }
+
+    /// Set success message
+    pub fn set_success(&mut self, message: String) {
+        self.success_message = Some(message);
+        self.error_message = None;
+    }
+
+    /// Set error message
+    pub fn set_error(&mut self, message: String) {
+        self.error_message = Some(message);
+        self.success_message = None;
+    }
+
+    /// Check if form is ready for export
+    pub fn is_ready_for_export(&self) -> bool {
+        !self.is_exporting && match self.export_type {
+            ExportType::Default => true,
+            ExportType::Custom => !self.custom_path.trim().is_empty(),
+        }
+    }
+}
 
 /// Form state for creating a new child
 #[derive(Debug, Clone)]
@@ -148,11 +265,15 @@ pub struct SettingsState {
     /// Profile editing form state (moved from ModalState)
     pub profile_form: ProfileFormState,
 
+    /// Whether the export data modal is visible
+    pub show_export_modal: bool,
+
+    /// Export data form state
+    pub export_form: ExportFormState,
+
     // TODO: Future settings modal states
     // pub show_allowance_config_modal: bool,
     // pub allowance_config_form: AllowanceConfigFormState,
-    // pub show_export_modal: bool,
-    // pub export_form: ExportFormState,
 }
 
 impl SettingsState {
@@ -163,6 +284,8 @@ impl SettingsState {
             create_child_form: CreateChildFormState::new(),
             show_profile_modal: false,
             profile_form: ProfileFormState::new(),
+            show_export_modal: false,
+            export_form: ExportFormState::new(),
         }
     }
 
@@ -170,6 +293,7 @@ impl SettingsState {
     pub fn hide_all_modals(&mut self) {
         self.show_create_child_modal = false;
         self.show_profile_modal = false;
+        self.show_export_modal = false;
         // TODO: Hide other settings modals when implemented
     }
 
@@ -177,6 +301,7 @@ impl SettingsState {
     pub fn reset_all_forms(&mut self) {
         self.create_child_form.clear();
         self.profile_form.clear();
+        self.export_form.clear();
         // TODO: Reset other form states when implemented
     }
 }
@@ -194,6 +319,12 @@ impl Default for ProfileFormState {
 }
 
 impl Default for SettingsState {
+    fn default() -> Self {
+        Self::new()
+    }
+} 
+
+impl Default for ExportFormState {
     fn default() -> Self {
         Self::new()
     }

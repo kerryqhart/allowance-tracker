@@ -1,35 +1,34 @@
 //! # Settings Module
-//!
 //! This module organizes all settings-related UI components for the allowance tracker app.
 //! It consolidates settings functionality that was previously scattered across different modules.
 //!
-//! ## Module Organization:
-//! - `state` - Settings-specific state management
-//! - `create_child_modal` - Create new child modal
-//! - `profile_modal` - Child profile editing modal (moved from modals/)
-//! - `allowance_config_modal` - Configure allowance settings (future)
-//! - `export_modal` - Data export functionality (future)
-//! - `data_directory_modal` - Data directory management (future)
-//! - `shared` - Settings-specific shared utilities
+//! ## Responsibilities:
+//! - **Create Child Modal**: New child creation with validation and backend integration
+//! - **Profile Modal**: Child profile editing with form validation
+//! - **Export Modal**: Data export functionality with location selection
+//! - **Settings State**: Centralized state management for all settings forms
+//! - **Shared Utilities**: Common styling and UI helpers for consistent experience
 //!
 //! ## Architecture:
-//! Each settings modal is self-contained with consistent patterns:
-//! - Form validation and error handling
-//! - Parental control integration
-//! - Backend service integration
-//! - Consistent styling and UX
+//! - `state.rs` - All settings-related state management (forms, validation, modal visibility)
+//! - `create_child_modal.rs` - Complete create child flow with backend integration
+//! - `profile_modal.rs` - Profile editing functionality (moved from modals/)
+//! - `export_modal.rs` - Data export functionality with default/custom location options
+//! - `shared.rs` - Common styling, validation helpers, and modal utilities
 //!
-//! ## Purpose:
-//! This centralizes all settings functionality for better maintainability
-//! and provides a consistent user experience across all settings features.
+//! ## Design Principles:
+//! - **Consistent UX**: All settings modals follow the same visual and interaction patterns
+//! - **Form Validation**: Real-time validation with clear error messaging
+//! - **Backend Integration**: Proper error handling and loading states
+//! - **State Isolation**: Each modal has its own dedicated state management
+//! - **Reusable Components**: Shared utilities reduce code duplication
 
 pub mod state;
 pub mod create_child_modal;
-pub mod profile_modal;
+pub mod profile_modal; // Added in Phase 3
+pub mod export_modal; // Added in Phase 2 - Export data functionality
 pub mod shared;
 
-// Re-export state for easy access
 pub use state::*;
-// pub mod allowance_config_modal;
-// pub mod export_modal;
-// pub mod data_directory_modal; 
+
+// TODO: Future modules to implement (allowance_config_modal, data_directory_modal) 

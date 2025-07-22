@@ -28,5 +28,6 @@ impl AllowanceTrackerApp {
         self.render_goal_creation_modal(ctx);
         self.render_profile_modal(ctx);
         self.render_create_child_modal(ctx);
+        self.render_export_modal(ctx); // Export data modal from settings
     }
 } 
