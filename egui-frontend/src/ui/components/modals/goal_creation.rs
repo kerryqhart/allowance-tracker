@@ -17,7 +17,7 @@ use crate::ui::app_state::AllowanceTrackerApp;
 use crate::ui::components::styling::colors;
 
 impl AllowanceTrackerApp {
-    /// Render the goal creation modal
+    /// Render the goal creation modal with simple opacity effects
     pub fn render_goal_creation_modal(&mut self, ctx: &egui::Context) {
         if !self.goal.show_creation_modal {
             return;
@@ -28,23 +28,31 @@ impl AllowanceTrackerApp {
             .order(egui::Order::Foreground)
             .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
             .show(ctx, |ui| {
-                // Dark semi-transparent background
+                // EFFECT 1: Simple frosted glass background
                 let screen_rect = ctx.screen_rect();
+                
+                // Darker overlay with slight blue tint for better frosted glass feel
                 ui.painter().rect_filled(
                     screen_rect,
                     egui::CornerRadius::ZERO,
-                    egui::Color32::from_rgba_unmultiplied(0, 0, 0, 128)
+                    egui::Color32::from_rgba_unmultiplied(10, 20, 40, 150)
                 );
                 
                 // Center the modal content
-                ui.allocate_ui_at_rect(screen_rect, |ui| {
+                ui.allocate_new_ui(egui::UiBuilder::new().max_rect(screen_rect), |ui| {
                     ui.centered_and_justified(|ui| {
+                        // Simple frosted glass effect - just set opacity for the modal frame
+                        ui.set_opacity(0.95); // Slight transparency for frosted effect
+                        
                         egui::Frame::window(&ui.style())
-                            .fill(egui::Color32::WHITE)
-                            .stroke(egui::Stroke::new(3.0, egui::Color32::from_rgb(100, 150, 255)))
-                            .rounding(egui::CornerRadius::same(15))
+                            .fill(egui::Color32::from_rgba_unmultiplied(255, 255, 255, 230)) // Slightly transparent white
+                            .stroke(egui::Stroke::new(2.0, egui::Color32::from_rgba_unmultiplied(100, 150, 255, 180)))
+                            .corner_radius(egui::CornerRadius::same(15))
                             .inner_margin(egui::Margin::same(20))
                             .show(ui, |ui| {
+                                // Reset opacity for content
+                                ui.set_opacity(1.0);
+                                
                                 // Set modal size
                                 ui.set_min_size(egui::vec2(450.0, 350.0));
                                 ui.set_max_size(egui::vec2(450.0, 350.0));
@@ -127,13 +135,14 @@ impl AllowanceTrackerApp {
                     
                     ui.add_space(20.0);
                     
-                    // Modal buttons
+                    // EFFECT 2: Simple opacity effect on buttons
                     ui.horizontal(|ui| {
-                        // Cancel button
+                        // Cancel button with subtle opacity
+                        ui.set_opacity(0.85); // Subtle transparency to de-emphasize cancel
                         let cancel_button = egui::Button::new("Cancel")
                             .fill(egui::Color32::from_rgb(240, 240, 240))
                             .stroke(egui::Stroke::new(1.5, egui::Color32::from_rgb(200, 200, 200)))
-                            .rounding(egui::CornerRadius::same(6))
+                            .corner_radius(egui::CornerRadius::same(6))
                             .min_size(egui::vec2(80.0, 35.0));
                         
                         if ui.add(cancel_button).clicked() {
@@ -142,7 +151,8 @@ impl AllowanceTrackerApp {
                         
                         ui.add_space(10.0);
                         
-                        // Create button
+                        // Create button with full opacity for emphasis
+                        ui.set_opacity(1.0);
                         let create_enabled = self.goal.creation_form.can_submit();
                         let create_button = egui::Button::new(
                                 if self.goal.creation_form.submitting { 
@@ -157,7 +167,7 @@ impl AllowanceTrackerApp {
                                 egui::Color32::from_rgb(200, 200, 200) 
                             })
                             .stroke(egui::Stroke::new(1.5, egui::Color32::from_rgb(80, 130, 235)))
-                            .rounding(egui::CornerRadius::same(6))
+                            .corner_radius(egui::CornerRadius::same(6))
                             .min_size(egui::vec2(100.0, 35.0));
                         
                         let create_response = ui.add_enabled(create_enabled && !self.goal.creation_form.submitting, create_button);

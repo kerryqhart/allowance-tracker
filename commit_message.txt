@@ -1,0 +1,37 @@
+feat: Add frosted glass effects and enhanced visual polish using egui 0.31
+
+## Visual Enhancements Using egui 0.31 Features
+
+### ✨ Frosted Glass Goal Page Background
+- Implemented transparent frosted glass effect for goal page using `ui.set_opacity(0.92)`
+- Added `draw_card_container_frosted()` function with multi-layer depth effects
+- Enhanced shadows with multiple layers for realistic glass appearance
+- Semi-transparent white background (150/255 alpha) with subtle white border
+- Inner highlight for authentic glass light reflection
+
+### 🎯 Enhanced Circular Progress Visibility  
+- Updated "days until" circular progress background from light gray (240,240,240) to darker gray (160,160,160)
+- Improved contrast against frosted glass background for better readability
+- Maintains pink progress arc color consistency with overall theme
+
+### 🪟 Goal Creation Modal Improvements
+- Added simple frosted glass background with dark blue tint (10,20,40) 
+- Applied 95% opacity to modal frame for subtle glass effect
+- Enhanced button opacity differentiation (Cancel: 85%, Create: 100%)
+- Clean, modern appearance with maintained functionality
+
+### 🔧 New Styling Infrastructure
+- Created `draw_card_container_frosted()` and `draw_card_container_with_options()` functions
+- Leveraged egui 0.31's `ui.set_opacity()` feature for enhanced transparency effects
+- Established foundation for future frosted glass implementations
+- Maintains backward compatibility with existing solid card containers
+
+### 📱 Cross-Component Visual Consistency
+- All transparency effects use coordinated alpha values
+- Consistent shadow depth and positioning across components  
+- Maintains readability and accessibility standards
+- Enhanced visual hierarchy with improved contrast ratios
+
+These improvements showcase the new capabilities from the egui 0.28 → 0.31.1 migration while 
+maintaining the app's kid-friendly design aesthetic and ensuring all UI elements remain 
+clearly visible and accessible. 

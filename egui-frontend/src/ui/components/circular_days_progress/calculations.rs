@@ -114,7 +114,7 @@ impl DaysProgress {
     
     /// Get background color for the unfilled portion
     pub fn background_color(&self) -> egui::Color32 {
-        egui::Color32::from_rgb(240, 240, 240)
+        egui::Color32::from_rgb(160, 160, 160) // Darker gray for better contrast against frosted glass
     }
 }
 

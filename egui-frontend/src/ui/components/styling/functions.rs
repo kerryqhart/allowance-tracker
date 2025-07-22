@@ -111,18 +111,90 @@ pub fn draw_image_background(ui: &mut egui::Ui, rect: egui::Rect) {
 /// 
 /// This function creates the standard card appearance used throughout the app,
 /// with a white background, subtle shadow, and rounded corners.
+/// Optionally adds a frosted glass effect using egui 0.31's opacity features.
 pub fn draw_card_container(ui: &mut egui::Ui, rect: egui::Rect, rounding: u8) {
+    draw_card_container_with_options(ui, rect, rounding, false);
+}
+
+/// Draw a card container with frosted glass effect
+/// 
+/// This creates a modern frosted glass appearance with transparency and enhanced visual depth.
+pub fn draw_card_container_frosted(ui: &mut egui::Ui, rect: egui::Rect, rounding: u8) {
+    draw_card_container_with_options(ui, rect, rounding, true);
+}
+
+/// Draw a card container with configurable frosted glass effect
+/// 
+/// This function creates the standard card appearance with an optional frosted glass effect
+/// using egui 0.31's new opacity features for enhanced visual appeal.
+fn draw_card_container_with_options(ui: &mut egui::Ui, rect: egui::Rect, rounding: u8, frosted: bool) {
     let painter = ui.painter();
     
-    // Draw subtle shadow first (offset slightly)
-    let shadow_rect = egui::Rect::from_min_size(
-        rect.min + egui::vec2(2.0, 2.0),
-        rect.size(),
-    );
-    painter.rect_filled(shadow_rect, egui::CornerRadius::same(rounding), colors::CARD_SHADOW);
-    
-    // Draw white background
-    painter.rect_filled(rect, egui::CornerRadius::same(rounding), colors::CARD_BACKGROUND);
+    if frosted {
+        // FROSTED GLASS EFFECT
+        
+        // Draw enhanced shadow with multiple layers for depth
+        let shadow_offset = 3.0;
+        let shadow_rect = egui::Rect::from_min_size(
+            rect.min + egui::vec2(shadow_offset, shadow_offset),
+            rect.size(),
+        );
+        
+        // Multiple shadow layers for depth
+        painter.rect_filled(
+            egui::Rect::from_min_size(
+                shadow_rect.min + egui::vec2(1.0, 1.0),
+                shadow_rect.size()
+            ), 
+            egui::CornerRadius::same(rounding), 
+            egui::Color32::from_rgba_unmultiplied(0, 0, 0, 15)
+        );
+        painter.rect_filled(
+            shadow_rect, 
+            egui::CornerRadius::same(rounding), 
+            egui::Color32::from_rgba_unmultiplied(0, 0, 0, 25)
+        );
+        
+        // Frosted glass background - semi-transparent white with subtle tint
+        painter.rect_filled(
+            rect, 
+            egui::CornerRadius::same(rounding), 
+            egui::Color32::from_rgba_unmultiplied(255, 255, 255, 150) // Much more transparent for noticeable effect
+        );
+        
+        // Add a subtle border for the glass effect
+        painter.rect_stroke(
+            rect,
+            egui::CornerRadius::same(rounding),
+            egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 120)),
+            egui::StrokeKind::Outside
+        );
+        
+        // Optional: Add a very subtle inner highlight for glass effect
+        let inner_rect = egui::Rect::from_min_size(
+            rect.min + egui::vec2(1.0, 1.0),
+            rect.size() - egui::vec2(2.0, 2.0)
+        );
+        painter.rect_stroke(
+            inner_rect,
+            egui::CornerRadius::same(rounding - 1),
+            egui::Stroke::new(0.5, egui::Color32::from_rgba_unmultiplied(255, 255, 255, 60)),
+            egui::StrokeKind::Outside
+        );
+        
+    } else {
+        // STANDARD SOLID CARD
+        
+        // Draw subtle shadow first (offset slightly)
+        let shadow_rect = egui::Rect::from_min_size(
+            rect.min + egui::vec2(2.0, 2.0),
+            rect.size(),
+        );
+        painter.rect_filled(shadow_rect, egui::CornerRadius::same(rounding), colors::CARD_SHADOW);
+        
+        // Draw solid white background
+        painter.rect_filled(rect, egui::CornerRadius::same(rounding), colors::CARD_BACKGROUND);
+    }
 }
 
 /// Draw gradient day headers for calendar

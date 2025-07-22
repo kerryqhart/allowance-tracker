@@ -122,8 +122,11 @@ impl AllowanceTrackerApp {
             ),
         );
         
-        // Draw single unified background
-        crate::ui::components::styling::draw_card_container(ui, unified_card_rect, 10);
+        // Draw single unified background with frosted glass effect
+        crate::ui::components::styling::draw_card_container_frosted(ui, unified_card_rect, 10);
+        
+        // Apply subtle opacity for enhanced frosted glass effect
+        ui.set_opacity(0.92); // More noticeable transparency to enhance the glass feel
         
         // Calculate internal content area
         let content_rect = egui::Rect::from_min_size(
