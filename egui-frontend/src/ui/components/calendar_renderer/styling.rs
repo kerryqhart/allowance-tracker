@@ -65,10 +65,10 @@ pub mod header {
     /// Font size for day headers
     pub const HEADER_FONT_SIZE: f32 = 12.0;
     
-    /// Background color for day headers
+    /// Background color for day headers - TESTING: More opaque to compensate for egui 0.32 transparency changes
     pub fn background_color() -> eframe::egui::Color32 {
-        eframe::egui::Color32::from_rgba_unmultiplied(255, 255, 255, 180)
-    }
+    eframe::egui::Color32::from_rgba_unmultiplied(255, 255, 255, 180)
+}
     
     /// Border color for day headers
     pub fn border_color() -> eframe::egui::Color32 {

@@ -68,12 +68,12 @@ impl CalendarDayType {
     /// Get the background color for this day type
     pub fn background_color(&self, is_today: bool) -> egui::Color32 {
         if is_today {
-            // Light yellow tint for today (10% more opacity)
+            // Light yellow tint for today - original value  
             egui::Color32::from_rgba_unmultiplied(255, 248, 220, 110)
         } else {
             match self {
                 CalendarDayType::CurrentMonth => {
-                    // Semi-transparent white background (10% more opacity)
+                    // Semi-transparent white background - original value
                     egui::Color32::from_rgba_unmultiplied(255, 255, 255, 55)
                 }
                 CalendarDayType::FillerDay => {

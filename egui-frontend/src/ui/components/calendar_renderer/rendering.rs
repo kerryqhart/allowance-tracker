@@ -419,7 +419,7 @@ impl CalendarDay {
                             egui::CornerRadius::same(4),
                             egui::Stroke::new(1.0, chip_color),
                             egui::StrokeKind::Outside
-                        );
+            );
                     }
                     
                     // Draw text
@@ -477,7 +477,7 @@ impl CalendarDay {
                         egui::CornerRadius::same(4),
                         egui::Stroke::new(1.0, chip_color),
                         egui::StrokeKind::Outside
-                    );
+            );
                 }
                 
                 // Draw text
@@ -563,24 +563,24 @@ impl CalendarDay {
                 let shadow_rect = tooltip_rect.translate(egui::vec2(1.0, 1.0));
                 ui.painter().rect_filled(
                     shadow_rect,
-                    egui::CornerRadius::same(6),
+                    egui::CornerRadius::same(4),
                     tooltip::shadow_color()
                 );
                 
                 // Draw main tooltip background
                 ui.painter().rect_filled(
                     tooltip_rect,
-                    egui::CornerRadius::same(6),
+                    egui::CornerRadius::same(4),
                     tooltip_bg_color
                 );
                 
                 // Draw border
                 ui.painter().rect_stroke(
                     tooltip_rect,
-                    egui::CornerRadius::same(6),
+                    egui::CornerRadius::same(4),
                     egui::Stroke::new(1.0, tooltip_border_color),
                     egui::StrokeKind::Outside
-                );
+            );
                 
                 // Add padding and render text
                 ui.allocate_ui_with_layout(
@@ -616,7 +616,7 @@ impl CalendarDay {
             let end_x = (x + dash_length).min(rect.right() - rounding);
             painter.line_segment(
                 [egui::pos2(x, y), egui::pos2(end_x, y)],
-                egui::Stroke::new(stroke_width, color)
+                egui::Stroke::new(stroke_width, color),
             );
             x = end_x + gap_length;
         }
@@ -628,7 +628,7 @@ impl CalendarDay {
             let end_y = (y + dash_length).min(rect.bottom() - rounding);
             painter.line_segment(
                 [egui::pos2(x, y), egui::pos2(x, end_y)],
-                egui::Stroke::new(stroke_width, color)
+                egui::Stroke::new(stroke_width, color),
             );
             y = end_y + gap_length;
         }
@@ -640,7 +640,7 @@ impl CalendarDay {
             let end_x = (x - dash_length).max(rect.left() + rounding);
             painter.line_segment(
                 [egui::pos2(x, y), egui::pos2(end_x, y)],
-                egui::Stroke::new(stroke_width, color)
+                egui::Stroke::new(stroke_width, color),
             );
             x = end_x - gap_length;
         }
@@ -652,7 +652,7 @@ impl CalendarDay {
             let end_y = (y - dash_length).max(rect.top() + rounding);
             painter.line_segment(
                 [egui::pos2(x, y), egui::pos2(x, end_y)],
-                egui::Stroke::new(stroke_width, color)
+                egui::Stroke::new(stroke_width, color),
             );
             y = end_y - gap_length;
         }
@@ -664,48 +664,48 @@ impl CalendarDay {
         painter.line_segment(
             [egui::pos2(rect.left() + rounding - corner_dash, rect.top()), 
              egui::pos2(rect.left() + rounding, rect.top())],
-            egui::Stroke::new(stroke_width, color)
+            egui::Stroke::new(stroke_width, color),
         );
         painter.line_segment(
             [egui::pos2(rect.left(), rect.top() + rounding - corner_dash), 
              egui::pos2(rect.left(), rect.top() + rounding)],
-            egui::Stroke::new(stroke_width, color)
+            egui::Stroke::new(stroke_width, color),
         );
         
         // Top-right corner
         painter.line_segment(
             [egui::pos2(rect.right() - rounding, rect.top()), 
              egui::pos2(rect.right() - rounding + corner_dash, rect.top())],
-            egui::Stroke::new(stroke_width, color)
+            egui::Stroke::new(stroke_width, color),
         );
         painter.line_segment(
             [egui::pos2(rect.right(), rect.top() + rounding - corner_dash), 
              egui::pos2(rect.right(), rect.top() + rounding)],
-            egui::Stroke::new(stroke_width, color)
+            egui::Stroke::new(stroke_width, color),
         );
         
         // Bottom-right corner
         painter.line_segment(
             [egui::pos2(rect.right() - rounding + corner_dash, rect.bottom()), 
              egui::pos2(rect.right() - rounding, rect.bottom())],
-            egui::Stroke::new(stroke_width, color)
+            egui::Stroke::new(stroke_width, color),
         );
         painter.line_segment(
             [egui::pos2(rect.right(), rect.bottom() - rounding), 
              egui::pos2(rect.right(), rect.bottom() - rounding + corner_dash)],
-            egui::Stroke::new(stroke_width, color)
+            egui::Stroke::new(stroke_width, color),
         );
         
         // Bottom-left corner
         painter.line_segment(
             [egui::pos2(rect.left() + rounding, rect.bottom()), 
              egui::pos2(rect.left() + rounding - corner_dash, rect.bottom())],
-            egui::Stroke::new(stroke_width, color)
+            egui::Stroke::new(stroke_width, color),
         );
         painter.line_segment(
             [egui::pos2(rect.left(), rect.bottom() - rounding + corner_dash), 
              egui::pos2(rect.left(), rect.bottom() - rounding)],
-            egui::Stroke::new(stroke_width, color)
+            egui::Stroke::new(stroke_width, color),
         );
     }
     
@@ -823,7 +823,7 @@ impl AllowanceTrackerApp {
                                                     egui::CornerRadius::same(2),
                                                     egui::Stroke::new(1.0, border_color),
                                                     egui::StrokeKind::Outside
-                                                );
+            );
                                                 
                                                 // Draw text - disable selection to prevent dropdown interference
                                                 ui.add(egui::Label::new(egui::RichText::new(*day_name)

@@ -208,6 +208,7 @@ impl AllowanceTrackerApp {
                                             // Clear form and close modal
                                             form_state.clear();
                                             self.calendar.selected_day = None;
+                                            self.calendar.active_overlay = None; // Fix: Actually close the overlay!
                                             
                                             // TEMPORARY: Sync compatibility field
                                             // self.selected_day = None; // Removed
