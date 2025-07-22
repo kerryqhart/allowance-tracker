@@ -10,7 +10,7 @@ description = "A fun and engaging allowance tracker for kids - egui frontend"
 # egui framework and platform integration
 eframe = { version = "0.32", features = ["wgpu", "persistence"] }
 egui = "0.32"
-egui_extras = { version = "0.32", features = ["all_loaders", "datepicker", "image", "file"] }
+egui_extras = { version = "0.32", features = ["all_loaders", "image", "file"] }
 egui_plot = "0.32"
 
 # Image format support for egui_extras
