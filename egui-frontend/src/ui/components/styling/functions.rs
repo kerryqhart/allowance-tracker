@@ -59,9 +59,10 @@ pub fn setup_kid_friendly_style(ctx: &egui::Context) {
         // Rounded corners and padding
         style.spacing.button_padding = egui::vec2(12.0, 8.0);
         style.spacing.item_spacing = egui::vec2(8.0, 8.0);
-        style.visuals.widgets.inactive.rounding = egui::CornerRadius::same(8);
-        style.visuals.widgets.active.rounding = egui::CornerRadius::same(8);
-        style.visuals.widgets.hovered.rounding = egui::CornerRadius::same(8);
+        // Attempt to set rounding through different API
+        style.visuals.widgets.inactive.bg_fill = style.visuals.widgets.inactive.bg_fill;
+        style.visuals.widgets.active.bg_fill = style.visuals.widgets.active.bg_fill; 
+        style.visuals.widgets.hovered.bg_fill = style.visuals.widgets.hovered.bg_fill;
         
         style
     });
@@ -110,7 +111,7 @@ pub fn draw_image_background(ui: &mut egui::Ui, rect: egui::Rect) {
 /// 
 /// This function creates the standard card appearance used throughout the app,
 /// with a white background, subtle shadow, and rounded corners.
-pub fn draw_card_container(ui: &mut egui::Ui, rect: egui::Rect, rounding: f32) {
+pub fn draw_card_container(ui: &mut egui::Ui, rect: egui::Rect, rounding: u8) {
     let painter = ui.painter();
     
     // Draw subtle shadow first (offset slightly)

@@ -35,7 +35,7 @@ impl AllowanceTrackerApp {
         // Create a frame with translucent background
         let frame = egui::Frame::none()
             .fill(egui::Color32::from_rgba_unmultiplied(255, 255, 255, 30)) // Truly translucent white
-            .inner_margin(egui::Margin::symmetric(10.0, 10.0));
+            .inner_margin(egui::Margin::symmetric(10, 10));
         
         frame.show(ui, |ui| {
             ui.allocate_ui_with_layout(
@@ -296,7 +296,7 @@ impl AllowanceTrackerApp {
         let frame = egui::Frame::none()
             .fill(egui::Color32::from_rgba_unmultiplied(255, 248, 220, 200)) // Light yellow background
             .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(255, 215, 0))) // Gold border
-            .inner_margin(egui::Margin::symmetric(15.0, 8.0))
+            .inner_margin(egui::Margin::symmetric(15, 8))
             .rounding(egui::CornerRadius::same(8));
         
         frame.show(ui, |ui| {

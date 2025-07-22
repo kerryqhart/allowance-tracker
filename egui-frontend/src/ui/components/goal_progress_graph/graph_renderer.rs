@@ -175,8 +175,8 @@ impl GoalProgressGraph {
             .collect();
         
         // Create lines for different segments
-        let pink_color = Color32::from_rgb(200, 120, 200); // Match progress bar color
-        let projection_color = Color32::from_rgb(160, 160, 160); // Gray for projection
+        let pink_color = egui::Color32::from_rgb(200, 120, 200); // Match progress bar color
+        let projection_color = egui::Color32::from_rgb(160, 160, 160); // Gray for projection
         
         // Find data range for proper scaling
         let min_balance = self.data_points
@@ -213,7 +213,7 @@ impl GoalProgressGraph {
             .allow_scroll(false)
             .show_x(true) // Show x coordinate on hover (same as balance chart)
             .show_y(true) // Show y coordinate on hover (same as balance chart)
-            .auto_bounds(egui::Vec2b::TRUE)
+            .auto_bounds([true, true])
             .show_background(false)
             .x_axis_formatter(|mark, _range| {
                 // Format x-axis with human readable dates (same as balance chart)
@@ -306,7 +306,7 @@ impl GoalProgressGraph {
                 // Draw solid line connecting all real data points
                 if real_points.len() >= 2 {
                     let real_line = Line::new("Progress", PlotPoints::new(real_points.clone()))
-                        .color(pink_color)
+                        .color(egui::Color32::from_rgb(200, 120, 200))
                         .width(2.0);
                     plot_ui.line(real_line);
                 }
@@ -317,7 +317,7 @@ impl GoalProgressGraph {
                     let projection_connection: Vec<[f64; 2]> = vec![*last_real_point, projection_points[0]];
                     
                     let projection_line = Line::new("Projection", PlotPoints::new(projection_connection))
-                        .color(projection_color)
+                        .color(egui::Color32::from_rgb(160, 160, 160))
                         .width(2.0)
                         .style(egui_plot::LineStyle::Dashed { length: 10.0 });
                     plot_ui.line(projection_line);
@@ -326,7 +326,7 @@ impl GoalProgressGraph {
                 // Draw interactive data points for tooltips (same as balance chart)
                 if !real_points.is_empty() {
                     let data_points = Points::new("Balance", PlotPoints::new(real_points))
-                        .color(pink_color)
+                        .color(egui::Color32::from_rgb(200, 120, 200))
                         .filled(true)
                         .radius(6.0) // Increased radius for easier hover detection
                         .shape(MarkerShape::Circle); // Name enables tooltips

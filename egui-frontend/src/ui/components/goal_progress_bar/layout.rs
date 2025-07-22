@@ -11,7 +11,7 @@ use eframe::egui;
 pub struct GoalLayoutConfig {
     // Card layout
     pub card_margin: f32,           // Space from window edge to card
-    pub card_rounding: f32,         // Card corner rounding
+    pub card_rounding: u8,         // Card corner rounding
     pub card_internal_margin: f32,  // Space from card edge to content
     pub card_vertical_padding: f32, // Top/bottom padding inside card
     
@@ -22,7 +22,7 @@ pub struct GoalLayoutConfig {
     
     // Progress bar layout
     pub progress_bar_height: f32,
-    pub progress_bar_rounding: f32,
+    pub progress_bar_rounding: u8,
     pub progress_bar_internal_spacing: f32, // Space between bar and target amount
     
     // NEW: 3-Section Layout Configuration
@@ -39,7 +39,7 @@ impl Default for GoalLayoutConfig {
     fn default() -> Self {
         Self {
             card_margin: 20.0,
-            card_rounding: 10.0,
+            card_rounding: 10,
             card_internal_margin: 35.0,
             card_vertical_padding: 35.0,
             
@@ -48,7 +48,7 @@ impl Default for GoalLayoutConfig {
             progress_bar_spacing: 20.0,
             
             progress_bar_height: 70.0,
-            progress_bar_rounding: 3.0,
+            progress_bar_rounding: 3,
             progress_bar_internal_spacing: 20.0,
             
             // NEW: 3-Section Layout defaults
@@ -171,7 +171,7 @@ impl GoalLayout {
 #[derive(Debug, Clone)]
 pub struct ProgressBarLayoutConfig {
     pub height: f32,
-    pub rounding: f32,
+    pub rounding: u8,
     pub internal_spacing: f32,
 }
 

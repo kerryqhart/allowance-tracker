@@ -179,7 +179,7 @@ impl DropdownMenu {
                     .fill(egui::Color32::WHITE)  // Pure white background
                     .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(200, 200, 200)))  // Normal border
                     .rounding(egui::CornerRadius::same(6))
-                    .inner_margin(egui::Margin::same(8.0));
+                    .inner_margin(egui::Margin::same(8));
                 
                 frame.show(ui, |ui| {
                     ui.vertical(|ui| {

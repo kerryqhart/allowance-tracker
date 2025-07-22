@@ -47,11 +47,11 @@ impl AllowanceTrackerApp {
                             .fill(egui::Color32::WHITE)
                             .stroke(egui::Stroke::new(3.0, egui::Color32::from_rgb(70, 130, 180))) // Steel blue for profile
                             .rounding(egui::CornerRadius::same(15))
-                            .inner_margin(egui::Margin::same(25.0))
+                            .inner_margin(egui::Margin::same(25))
                             .shadow(egui::Shadow {
-                                offset: egui::vec2(6.0, 6.0),
-                                blur: 20.0,
-                                spread: 0.0,
+                                offset: [6, 6],
+                                blur: 20,
+                                spread: 0,
                                 color: egui::Color32::from_rgba_unmultiplied(0, 0, 0, 100),
                             })
                             .show(ui, |ui| {

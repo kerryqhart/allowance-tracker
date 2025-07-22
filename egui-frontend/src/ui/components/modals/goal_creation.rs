@@ -43,7 +43,7 @@ impl AllowanceTrackerApp {
                             .fill(egui::Color32::WHITE)
                             .stroke(egui::Stroke::new(3.0, egui::Color32::from_rgb(100, 150, 255)))
                             .rounding(egui::CornerRadius::same(15))
-                            .inner_margin(egui::Margin::same(20.0))
+                            .inner_margin(egui::Margin::same(20))
                             .show(ui, |ui| {
                                 // Set modal size
                                 ui.set_min_size(egui::vec2(450.0, 350.0));

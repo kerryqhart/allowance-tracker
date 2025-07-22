@@ -123,7 +123,7 @@ impl AllowanceTrackerApp {
         );
         
         // Draw single unified background
-        crate::ui::components::styling::draw_card_container(ui, unified_card_rect, 10.0);
+        crate::ui::components::styling::draw_card_container(ui, unified_card_rect, 10);
         
         // Calculate internal content area
         let content_rect = egui::Rect::from_min_size(
@@ -180,7 +180,7 @@ impl AllowanceTrackerApp {
                 // Progress bar using existing component (taller to fill 30% section)
                 let layout_config = crate::ui::components::goal_progress_bar::ProgressBarLayoutConfig {
                     height: 90.0,  // Increased from 70.0 to better fill the 30% top section
-                    rounding: 3.0,
+                    rounding: 3,
                     internal_spacing: 20.0,
                 };
                 

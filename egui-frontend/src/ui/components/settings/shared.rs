@@ -18,8 +18,8 @@ pub struct SettingsModalStyle {
     pub title_color: egui::Color32,
     pub border_color: egui::Color32,
     pub background_color: egui::Color32,
-    pub rounding: f32,
-    pub margin: f32,
+    pub rounding: u8,
+    pub margin: i8,
 }
 
 impl SettingsModalStyle {
@@ -31,8 +31,8 @@ impl SettingsModalStyle {
             title_color: egui::Color32::from_rgb(70, 130, 180), // Steel blue
             border_color: egui::Color32::from_rgb(70, 130, 180),
             background_color: egui::Color32::WHITE,
-            rounding: 15.0,
-            margin: 25.0,
+            rounding: 15,
+            margin: 25,
         }
     }
 
@@ -44,9 +44,9 @@ impl SettingsModalStyle {
             .rounding(egui::CornerRadius::same(self.rounding))
             .inner_margin(egui::Margin::same(self.margin))
             .shadow(egui::Shadow {
-                offset: egui::vec2(6.0, 6.0),
-                blur: 20.0,
-                spread: 0.0,
+                offset: [6, 6],
+                blur: 20,
+                spread: 0,
                 color: egui::Color32::from_rgba_unmultiplied(0, 0, 0, 100),
             })
     }

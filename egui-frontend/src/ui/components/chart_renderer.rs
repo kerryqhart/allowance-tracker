@@ -122,7 +122,7 @@ impl AllowanceTrackerApp {
         let line_points: PlotPoints = raw_points.iter().copied().collect();
         let line = Line::new("", line_points)
             .color(egui::Color32::from_rgb(100, 150, 255))
-            .stroke(egui::Stroke::new(2.0, egui::Color32::from_rgb(100, 150, 255)));
+            .stroke((2.0, egui::Color32::from_rgb(100, 150, 255)));
         
         // Create individual data point markers (with name for tooltips)
         let marker_points: PlotPoints = raw_points.iter().copied().collect();
@@ -152,7 +152,7 @@ impl AllowanceTrackerApp {
             .allow_scroll(false)
             .show_x(true) // Show x coordinate on hover  
             .show_y(true) // Show y coordinate on hover
-            .auto_bounds(egui::Vec2b::TRUE)
+            .auto_bounds([true, true])
             .show_background(false)
             .coordinates_formatter(egui_plot::Corner::LeftBottom, egui_plot::CoordinatesFormatter::new(|point, _bounds| {
                 // Convert timestamp to readable date and format balance
