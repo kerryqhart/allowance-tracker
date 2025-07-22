@@ -175,8 +175,8 @@ impl GoalProgressGraph {
             .collect();
         
         // Create lines for different segments
-        let pink_color = egui::Color32::from_rgb(200, 120, 200); // Match progress bar color
-        let projection_color = egui::Color32::from_rgb(160, 160, 160); // Gray for projection
+        let pink_color = Color32::from_rgb(200, 120, 200); // Match progress bar color
+        let projection_color = Color32::from_rgb(160, 160, 160); // Gray for projection
         
         // Find data range for proper scaling
         let min_balance = self.data_points
@@ -305,7 +305,7 @@ impl GoalProgressGraph {
                 
                 // Draw solid line connecting all real data points
                 if real_points.len() >= 2 {
-                    let real_line = Line::new(PlotPoints::new(real_points.clone()))
+                    let real_line = Line::new("Progress", PlotPoints::new(real_points.clone()))
                         .color(pink_color)
                         .width(2.0);
                     plot_ui.line(real_line);
@@ -316,7 +316,7 @@ impl GoalProgressGraph {
                     let last_real_point = real_points.last().unwrap();
                     let projection_connection: Vec<[f64; 2]> = vec![*last_real_point, projection_points[0]];
                     
-                    let projection_line = Line::new(PlotPoints::new(projection_connection))
+                    let projection_line = Line::new("Projection", PlotPoints::new(projection_connection))
                         .color(projection_color)
                         .width(2.0)
                         .style(egui_plot::LineStyle::Dashed { length: 10.0 });
@@ -325,22 +325,20 @@ impl GoalProgressGraph {
                 
                 // Draw interactive data points for tooltips (same as balance chart)
                 if !real_points.is_empty() {
-                    let data_points = Points::new(PlotPoints::new(real_points))
+                    let data_points = Points::new("Balance", PlotPoints::new(real_points))
                         .color(pink_color)
                         .filled(true)
                         .radius(6.0) // Increased radius for easier hover detection
-                        .shape(MarkerShape::Circle)
-                        .name("Balance"); // Name enables tooltips
+                        .shape(MarkerShape::Circle); // Name enables tooltips
                     plot_ui.points(data_points);
                 }
                 
                 // Draw goal target marker (gold diamond with tooltip)
                 if let Some(target_point) = goal_target_point {
-                    let target_points = Points::new(PlotPoints::new(vec![target_point]))
+                    let target_points = Points::new("Goal", PlotPoints::new(vec![target_point]))
                         .color(egui::Color32::GOLD)
                         .radius(8.0)
-                        .shape(MarkerShape::Diamond)
-                        .name("Goal"); // Name enables tooltips
+                        .shape(MarkerShape::Diamond); // Name enables tooltips
                     plot_ui.points(target_points);
                 }
             });

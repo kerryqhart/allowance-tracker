@@ -120,18 +120,17 @@ impl AllowanceTrackerApp {
         
         // Create the line connecting all points (no name = no tooltip)
         let line_points: PlotPoints = raw_points.iter().copied().collect();
-        let line = Line::new(line_points)
+        let line = Line::new("", line_points)
             .color(egui::Color32::from_rgb(100, 150, 255))
             .stroke(egui::Stroke::new(2.0, egui::Color32::from_rgb(100, 150, 255)));
         
         // Create individual data point markers (with name for tooltips)
         let marker_points: PlotPoints = raw_points.iter().copied().collect();
-        let data_points = Points::new(marker_points)
+        let data_points = Points::new("Balance", marker_points)
             .color(egui::Color32::from_rgb(100, 150, 255))
             .filled(true)
             .radius(6.0) // Increased radius for easier hover detection
-            .shape(MarkerShape::Circle)
-            .name("Balance");
+            .shape(MarkerShape::Circle);
         
         // Find the maximum balance for setting upper bound
         let max_balance = self.chart.chart_data
