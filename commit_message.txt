@@ -1,21 +1,37 @@
-refactor: Remove generic Connection types from domain services
+refactor: Eliminate UI cache for current child and improve allowance config
 
-Simplify domain layer by removing generic Connection type parameters
-and using concrete CsvConnection throughout. This eliminates unnecessary
-complexity since we only use CSV storage.
+MAJOR ARCHITECTURAL CHANGES:
+• Remove dual sources of truth for current child selection
+• Eliminate UI cache (self.core.current_child) that could get stale
+• Use backend ChildService.get_active_child() as single source of truth
+• Update all child references to use get_current_child_from_backend()
 
-Changes:
-- Remove <C: Connection> generics from BalanceService and TransactionService
-- Update GoalService to use non-generic service dependencies  
-- Simplify function signatures in export, calendar, and money management modules
-- Remove unused Connection trait imports
-- Update Backend struct to use concrete types
-- Update all tests to use concrete types
+ALLOWANCE CONFIGURATION FIXES:
+• Fix allowance modal updating wrong child due to cache inconsistency
+• Add surgical debugging to trace child ID flow through modal
+• Fix floating-point precision bug in amount change detection
+• Change amount comparison from diff >= 0.01 to current_amount != orig
+• Add missing load_allowance_config_for_modal() implementation
 
-Benefits:
-- Cleaner, more readable code
-- Reduced complexity and cognitive overhead
-- Easier maintenance and debugging
-- Single storage responsibility (CSV only)
+DEBUGGING & LOG IMPROVEMENTS:
+• Add targeted child ID debugging for modal load and submit operations
+• Reduce verbose frame-by-frame logs that cluttered console output
+• Comment out repetitive APP UPDATE and FRONTEND CONVERT DEBUG logs
+• Add strategic info logs for child switching and modal interactions
 
-All tests pass and compilation successful. 
+FILES MODIFIED:
+• egui-frontend/src/ui/app_state.rs - Add get_current_child_from_backend()
+• egui-frontend/src/ui/components/header.rs - Remove UI cache updates
+• egui-frontend/src/ui/components/settings/allowance_config_modal.rs - Fix child ID flow
+• egui-frontend/src/ui/components/settings/state.rs - Fix amount change detection
+• egui-frontend/src/ui/app_coordinator.rs - Reduce log noise
+• egui-frontend/src/ui/components/calendar_renderer/navigation.rs - Reduce log noise
+
+BENEFITS:
+• Single source of truth prevents child selection bugs
+• Cleaner, more maintainable architecture
+• Better debugging visibility for remaining issues
+• Reduced console noise for faster development
+
+This addresses the core issue where allowance config was updating
+the wrong child due to UI cache being out of sync with backend state. 

@@ -22,13 +22,14 @@
 //! - Visual feedback for user actions
 
 use eframe::egui;
+use log::info;
 use crate::ui::app_state::AllowanceTrackerApp;
 use crate::ui::components::dropdown_menu::{DropdownMenuItem, DropdownButtonConfig, DropdownMenuConfig};
 
 impl AllowanceTrackerApp {
     /// Render the header
     pub fn render_header(&mut self, ui: &mut egui::Ui) {
-        log::info!("🏠 RENDER_HEADER called");
+        // info!("🏠 RENDER_HEADER called"); // Too verbose
         // Use Frame with translucent fill for proper transparency
         let header_height = 60.0;
         
@@ -57,7 +58,8 @@ impl AllowanceTrackerApp {
                             
                             // Add spacing between settings and child selector
                             ui.add_space(15.0);
-                            if let Some(child) = &self.current_child() {
+                            // 🎯 FIXED: Use backend as source of truth for header display
+                            if let Some(child) = &self.get_current_child_from_backend() {
                                 // Balance with clean styling (no color coding) - disable text selection
                                 ui.add(egui::Label::new(egui::RichText::new(format!("${:.2}", self.current_balance()))
                                     .font(egui::FontId::new(24.0, egui::FontFamily::Proportional))
@@ -124,7 +126,8 @@ impl AllowanceTrackerApp {
             }]
         } else {
             children_list.iter().map(|child| {
-                let is_current = self.current_child().as_ref()
+                // 🎯 FIXED: Use backend as source of truth for dropdown display
+                let is_current = self.get_current_child_from_backend().as_ref()
                     .map(|c| c.id == child.id)
                     .unwrap_or(false);
                 
@@ -154,7 +157,8 @@ impl AllowanceTrackerApp {
         if let Some(index) = selected_index {
             if index < children_list.len() {
                 let selected_child = &children_list[index];
-                let is_current = self.current_child().as_ref()
+                // 🎯 FIXED: Use backend as source of truth, not UI cache
+                let is_current = self.get_current_child_from_backend().as_ref()
                     .map(|c| c.id == selected_child.id)
                     .unwrap_or(false);
                 
@@ -165,10 +169,12 @@ impl AllowanceTrackerApp {
                     };
                     match self.backend().child_service.set_active_child(command) {
                         Ok(_) => {
-                            self.core.current_child = Some(crate::ui::mappers::to_dto(selected_child.clone()));
+                            // 🎯 FIXED: No more UI cache - backend is the single source of truth
+                            log::info!("🔄 CHILD_SWITCH: Successfully set active child to: {}", selected_child.name);
                             self.refresh_all_data_for_current_child();
                         }
                         Err(e) => {
+                            log::error!("❌ CHILD_SWITCH: Failed to set active child: {}", e);
                             self.ui.error_message = Some(format!("Failed to select child: {}", e));
                         }
                     }
@@ -247,9 +253,15 @@ impl AllowanceTrackerApp {
         // Track which item was clicked
         let mut selected_index: Option<usize> = None;
         
+        info!("🔧 SETTINGS_DROPDOWN: About to render settings menu");
         let _clicked_item = self.interaction.settings_dropdown.render_menu(ui, button_rect, &menu_items, &menu_config, |index| {
+            info!("🔧 SETTINGS_DROPDOWN: Item {} clicked!", index);
             selected_index = Some(index);
         });
+        
+        if selected_index.is_some() {
+            info!("🔧 SETTINGS_DROPDOWN: selected_index = {:?}", selected_index);
+        }
         
         // Handle settings menu item selection
         if let Some(index) = selected_index {
@@ -267,7 +279,7 @@ impl AllowanceTrackerApp {
                 }
             };
             
-            log::info!("🔒 Settings menu item selected: {:?} - triggering parental control", settings_action);
+            info!("🔒 Settings menu item selected: {:?} - triggering parental control", settings_action);
             
             // Store the settings action for execution after parental control
             self.modal.pending_settings_action = Some(settings_action);
@@ -290,7 +302,7 @@ impl AllowanceTrackerApp {
             return; // Only show when in selection mode
         }
         
-        log::info!("🎯 RENDER_SELECTION_CONTROLS_BAR called");
+        info!("🎯 RENDER_SELECTION_CONTROLS_BAR called");
         
         // Selection controls bar with distinct styling
         let frame = egui::Frame::none()
@@ -335,7 +347,7 @@ impl AllowanceTrackerApp {
                     );
                     
                     if exit_button.clicked() {
-                        log::info!("❌ Exit selection mode button clicked");
+                        info!("❌ Exit selection mode button clicked");
                         self.exit_transaction_selection_mode();
                     }
                     
@@ -362,7 +374,7 @@ impl AllowanceTrackerApp {
                     );
                     
                     if delete_button.clicked() && delete_enabled {
-                        log::info!("🗑️ Delete selected transactions button clicked");
+                        info!("🗑️ Delete selected transactions button clicked");
                         self.delete_selected_transactions();
                     }
                 });
@@ -380,7 +392,7 @@ impl AllowanceTrackerApp {
         }
         
         let transaction_ids: Vec<String> = self.interaction.selected_transaction_ids.iter().cloned().collect();
-        log::info!("🗑️ Attempting to delete {} transactions: {:?}", transaction_ids.len(), transaction_ids);
+        info!("🗑️ Attempting to delete {} transactions: {:?}", transaction_ids.len(), transaction_ids);
         
         // Call the backend delete service
         let command = crate::backend::domain::commands::transactions::DeleteTransactionsCommand {
@@ -389,7 +401,7 @@ impl AllowanceTrackerApp {
         
         match self.backend().transaction_service.delete_transactions_domain(command) {
             Ok(result) => {
-                log::info!("✅ Successfully deleted {} transactions", result.deleted_count);
+                info!("✅ Successfully deleted {} transactions", result.deleted_count);
                 // Transaction deletion feedback removed
                 
                 // Exit selection mode and reload data

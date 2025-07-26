@@ -48,10 +48,6 @@ pub struct ModalState {
     /// Whether the child selector modal is visible
     pub show_child_selector: bool,
     
-    /// Whether the allowance config modal is visible
-    #[allow(dead_code)]
-    pub show_allowance_config_modal: bool,
-    
     /// Whether the parental control modal is visible
     pub show_parental_control_modal: bool,
     
@@ -84,7 +80,6 @@ impl ModalState {
         Self {
             show_add_money_modal: false,
             show_child_selector: false,
-            show_allowance_config_modal: false,
             show_parental_control_modal: false,
             parental_control_stage: ParentalControlStage::Question1,
             pending_protected_action: None,
@@ -99,7 +94,6 @@ impl ModalState {
     pub fn hide_all_modals(&mut self) {
         self.show_add_money_modal = false;
         self.show_child_selector = false;
-        self.show_allowance_config_modal = false;
         self.show_parental_control_modal = false;
     }
     

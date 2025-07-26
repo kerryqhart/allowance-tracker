@@ -138,11 +138,11 @@ impl AllowanceTrackerApp {
             }
         }
         
-        // DEBUG: Log July 21st conversion specifically
-        if date.month() == 7 && date.year() == 2025 && backend_day.day == 21 {
-            log::info!("🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: ${:.2}, frontend balance: ${:.2}, transactions: {}", 
-                      backend_day.balance, backend_day.balance, all_transactions.len());
-        }
+        // DEBUG: Log July 21st conversion specifically (commented out - too verbose)
+        // if date.month() == 7 && date.year() == 2025 && backend_day.day == 21 {
+        //     log::info!("🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: ${:.2}, frontend balance: ${:.2}, transactions: {}", 
+        //               backend_day.balance, backend_day.balance, all_transactions.len());
+        // }
         
         CalendarDay {
             day_number: backend_day.day,

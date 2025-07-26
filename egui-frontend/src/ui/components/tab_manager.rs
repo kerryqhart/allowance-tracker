@@ -22,7 +22,7 @@ use crate::ui::app_state::{AllowanceTrackerApp, MainTab};
 impl AllowanceTrackerApp {
     /// Render the main content area
     pub fn render_main_content(&mut self, ui: &mut egui::Ui) {
-        info!("📄 RENDER_MAIN_CONTENT called");
+        // info!("📄 RENDER_MAIN_CONTENT called"); // Too verbose
         ui.vertical(|ui| {
             // Render content based on selected tab with toggle header
             match self.current_tab() {
@@ -31,7 +31,7 @@ impl AllowanceTrackerApp {
                     let available_rect = ui.available_rect_before_wrap();
                     
                     // DEBUG: Log tab manager space allocation
-                    info!("📋 TAB_MANAGER: available_rect.height={:.0}, passing to calendar", available_rect.height());
+                    // info!("📋 TAB_MANAGER: available_rect.height={:.0}, passing to calendar", available_rect.height()); // Too verbose
                     
                     self.draw_calendar_section_with_toggle(ui, available_rect, &self.calendar.calendar_transactions.clone());
                     

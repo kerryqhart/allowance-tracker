@@ -102,6 +102,23 @@ impl AllowanceTrackerApp {
         &self.core.backend
     }
     
+    /// Get current child directly from backend service (the source of truth)
+    /// This replaces the cached current_child() method to avoid inconsistencies
+    pub fn get_current_child_from_backend(&self) -> Option<shared::Child> {
+        match self.backend().child_service.get_active_child() {
+            Ok(result) => result.active_child.child.map(|domain_child| {
+                crate::ui::mappers::to_dto(domain_child)
+            }),
+            Err(e) => {
+                log::warn!("Failed to get current child from backend: {}", e);
+                None
+            }
+        }
+    }
+    
+    /// DEPRECATED: Get current child from cached state 
+    /// Use get_current_child_from_backend() instead to ensure consistency
+    #[deprecated(note = "Use get_current_child_from_backend() instead")]
     pub fn current_child(&self) -> &Option<Child> {
         &self.core.current_child
     }
@@ -127,7 +144,7 @@ impl AllowanceTrackerApp {
     pub fn start_parental_control_challenge(&mut self, action: crate::ui::state::modal_state::ProtectedAction) {
         use crate::ui::state::modal_state::ParentalControlStage;
         
-        log::info!("🔒 Starting parental control challenge for: {:?}", action);
+        info!("🔒 Starting parental control challenge for: {:?}", action);
         self.modal.pending_protected_action = Some(action);
         self.modal.parental_control_stage = ParentalControlStage::Question1;
         self.modal.parental_control_input.clear();
@@ -138,7 +155,7 @@ impl AllowanceTrackerApp {
 
     /// Cancel parental control challenge
     pub fn cancel_parental_control_challenge(&mut self) {
-        log::info!("🔒 Cancelling parental control challenge");
+        info!("🔒 Cancelling parental control challenge");
         self.modal.show_parental_control_modal = false;
         self.modal.pending_protected_action = None;
         self.modal.parental_control_stage = ParentalControlStage::Question1;
@@ -176,7 +193,7 @@ impl AllowanceTrackerApp {
         
         // Reload calendar data for the new month
         self.load_calendar_data();
-        log::info!("📅 Navigated to previous month: {}/{}", self.calendar.selected_month, self.calendar.selected_year);
+        info!("📅 Navigated to previous month: {}/{}", self.calendar.selected_month, self.calendar.selected_year);
     }
 
     /// Navigate to the next month
@@ -190,7 +207,7 @@ impl AllowanceTrackerApp {
         
         // Reload calendar data for the new month
         self.load_calendar_data();
-        log::info!("📅 Navigated to next month: {}/{}", self.calendar.selected_month, self.calendar.selected_year);
+        info!("📅 Navigated to next month: {}/{}", self.calendar.selected_month, self.calendar.selected_year);
     }
 
     /// Get the current month name as a string
@@ -230,19 +247,26 @@ impl AllowanceTrackerApp {
                 self.modal.parental_control_loading = false;
                 
                 if result.success {
-                    log::info!("✅ Parental control authentication successful");
+                    info!("✅ Parental control authentication successful");
                     self.modal.parental_control_stage = ParentalControlStage::Authenticated;
                     
                     // Execute the pending action
+                    info!("🔒 PARENTAL_CONTROL_SUCCESS: Checking for pending actions...");
+                    info!("🔒 pending_protected_action = {:?}", self.modal.pending_protected_action);
+                    info!("🔒 pending_settings_action = {:?}", self.modal.pending_settings_action);
+                    
                     if let Some(action) = self.modal.pending_protected_action {
+                        info!("🔒 EXECUTING protected action: {:?}", action);
                         self.execute_protected_action(action);
+                    } else {
+                        log::warn!("🔒 WARNING: No pending protected action found after successful parental control!");
                     }
                     
                     // Close modal after brief success display
                     self.modal.show_parental_control_modal = false;
                     // Access granted feedback removed
                 } else {
-                    log::info!("❌ Parental control validation failed");
+                    info!("❌ Parental control validation failed");
                     self.modal.parental_control_error = Some(result.message);
                     self.modal.parental_control_input.clear();
                 }
@@ -259,14 +283,19 @@ impl AllowanceTrackerApp {
     fn execute_protected_action(&mut self, action: crate::ui::state::modal_state::ProtectedAction) {
         use crate::ui::state::modal_state::ProtectedAction;
         
+        info!("🔒 EXECUTE_PROTECTED_ACTION called with: {:?}", action);
+        
         match action {
             ProtectedAction::DeleteTransactions => {
-                log::info!("🗑️ Executing delete transactions action");
+                info!("🗑️ Executing delete transactions action");
                 self.enter_transaction_selection_mode();
             }
             ProtectedAction::AccessSettings => {
-                log::info!("🔒 Executing settings access action");
+                info!("🔒 EXECUTING SETTINGS ACCESS ACTION!");
+                info!("🔒 Checking for pending_settings_action...");
                 if let Some(settings_action) = self.modal.pending_settings_action {
+                    info!("🔒 Found pending settings action: {:?}", settings_action);
+                    info!("🔒 CALLING execute_settings_action...");
                     self.execute_settings_action(settings_action);
                 } else {
                     log::warn!("🚨 AccessSettings action triggered but no pending settings action found");
@@ -282,7 +311,9 @@ impl AllowanceTrackerApp {
     fn execute_settings_action(&mut self, action: crate::ui::state::modal_state::SettingsAction) {
         use crate::ui::state::modal_state::SettingsAction;
         
-        log::info!("⚙️ Executing settings action: {:?}", action);
+        info!("⚙️ EXECUTE_SETTINGS_ACTION CALLED!");
+        info!("⚙️ Settings action received: {:?}", action);
+        info!("⚙️ About to enter match statement...");
         
         match action {
             SettingsAction::ShowProfile => {
@@ -309,28 +340,36 @@ impl AllowanceTrackerApp {
                     };
                     self.settings.profile_form.populate_from_child(&domain_child);
                     self.settings.show_profile_modal = true;
-                    log::info!("👤 Profile modal opened for child: {}", name);
+                    info!("👤 Profile modal opened for child: {}", name);
                 } else {
                     log::warn!("🚨 No active child found for profile action");
                     self.ui.error_message = Some("No child selected. Please select a child first.".to_string());
                 }
             }
             SettingsAction::CreateChild => {
-                log::info!("👶 Create child action - opening modal");
+                info!("👶 Create child action - opening modal");
                 self.settings.show_create_child_modal = true;
                 self.settings.create_child_form.clear(); // Reset form state
             }
             SettingsAction::ConfigureAllowance => {
-                log::info!("⚙️ Configure allowance action - placeholder");
-                // TODO: Implement allowance configuration modal
-                self.ui.error_message = Some("Configure allowance feature coming soon!".to_string());
+                info!("🚨 CONFIGURE_ALLOWANCE_ACTION_TRIGGERED! Opening modal...");
+                if self.current_child().is_some() {
+                    info!("🚨 Setting show_allowance_config_modal = true");
+                    self.settings.show_allowance_config_modal = true;
+                    info!("🚨 Modal flag set, now loading config...");
+                    self.load_allowance_config_for_modal(); // Load existing config
+                    info!("🚨 Config loaded, modal should be visible");
+                } else {
+                    info!("🚨 ERROR: No child selected for allowance config");
+                    self.ui.error_message = Some("No child selected. Please select a child first.".to_string());
+                }
             }
             SettingsAction::DeleteTransactions => {
-                log::info!("🗑️ Delete transactions action - entering selection mode");
+                info!("🗑️ Delete transactions action - entering selection mode");
                 self.enter_transaction_selection_mode();
             }
             SettingsAction::ExportData => {
-                log::info!("📤 Export data action - opening modal");
+                info!("📤 Export data action - opening modal");
                 self.settings.show_export_modal = true;
                 self.settings.export_form.clear(); // Reset form state
                 
@@ -340,7 +379,7 @@ impl AllowanceTrackerApp {
                 self.settings.export_form.update_preview(child_name_ref);
             }
             SettingsAction::DataDirectory => {
-                log::info!("📁 Data directory action - opening modal");
+                info!("📁 Data directory action - opening modal");
                 self.settings.show_data_directory_modal = true;
                 
                 // Clear form state when opening modal
@@ -355,7 +394,7 @@ impl AllowanceTrackerApp {
     
     /// Enter transaction selection mode for deletion
     pub fn enter_transaction_selection_mode(&mut self) {
-        log::info!("🎯 Entering transaction selection mode");
+        info!("🎯 Entering transaction selection mode");
         self.interaction.transaction_selection_mode = true;
         self.interaction.selected_transaction_ids.clear();
         
@@ -368,7 +407,7 @@ impl AllowanceTrackerApp {
     
     /// Exit transaction selection mode without deleting
     pub fn exit_transaction_selection_mode(&mut self) {
-        log::info!("🚫 Exiting transaction selection mode");
+        info!("🚫 Exiting transaction selection mode");
         self.interaction.transaction_selection_mode = false;
         self.interaction.selected_transaction_ids.clear();
         
@@ -382,11 +421,11 @@ impl AllowanceTrackerApp {
     /// Toggle selection of a transaction
     pub fn toggle_transaction_selection(&mut self, transaction_id: &str) {
         if self.interaction.selected_transaction_ids.contains(transaction_id) {
-            log::info!("➖ Deselecting transaction: {}", transaction_id);
+            info!("➖ Deselecting transaction: {}", transaction_id);
             self.interaction.selected_transaction_ids.remove(transaction_id);
             // self.selected_transaction_ids.remove(transaction_id); // Sync compatibility field
         } else {
-            log::info!("✅ Selecting transaction: {}", transaction_id);
+            info!("✅ Selecting transaction: {}", transaction_id);
             self.interaction.selected_transaction_ids.insert(transaction_id.to_string());
             // self.selected_transaction_ids.insert(transaction_id.to_string()); // Sync compatibility field
         }
@@ -404,7 +443,7 @@ impl AllowanceTrackerApp {
     
     /// Clear all selected transactions
     pub fn clear_transaction_selection(&mut self) {
-        log::info!("🧹 Clearing all transaction selections");
+        info!("🧹 Clearing all transaction selections");
         self.interaction.selected_transaction_ids.clear();
         // self.selected_transaction_ids.clear(); // Sync compatibility field
     }
@@ -592,7 +631,7 @@ impl AllowanceTrackerApp {
         use crate::backend::domain::money_management::MoneyManagementService;
         use chrono::Timelike; // Import for hour(), minute(), second() methods
         
-        log::info!("💰 Submitting income transaction - Description: '{}', Amount: '{}'", 
+        info!("💰 Submitting income transaction - Description: '{}', Amount: '{}'", 
                   self.form.income_form_state.description, self.form.income_form_state.amount);
         
         // Parse amount from form
@@ -630,7 +669,7 @@ impl AllowanceTrackerApp {
             &self.backend().goal_service,
         ) {
             Ok(response) => {
-                log::info!("✅ Income transaction successful: {}", response.success_message);
+                info!("✅ Income transaction successful: {}", response.success_message);
                 // self.ui.success_message = Some(response.success_message); // Removed debug UI feature
                 self.core.current_balance = response.new_balance;
                 
@@ -655,7 +694,7 @@ impl AllowanceTrackerApp {
         use crate::backend::domain::money_management::MoneyManagementService;
         use chrono::Timelike; // Import for hour(), minute(), second() methods
         
-        log::info!("💸 Submitting expense transaction - Description: '{}', Amount: '{}'", 
+        info!("💸 Submitting expense transaction - Description: '{}', Amount: '{}'", 
                   self.form.expense_form_state.description, self.form.expense_form_state.amount);
         
         // Parse amount from form
@@ -693,7 +732,7 @@ impl AllowanceTrackerApp {
             &self.backend().goal_service,
         ) {
             Ok(response) => {
-                log::info!("✅ Expense transaction successful: {}", response.success_message);
+                info!("✅ Expense transaction successful: {}", response.success_message);
                 // self.ui.success_message = Some(response.success_message); // Removed debug UI feature
                 self.core.current_balance = response.new_balance;
                 

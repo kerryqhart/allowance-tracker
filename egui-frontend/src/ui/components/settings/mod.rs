@@ -28,6 +28,7 @@ pub mod create_child_modal;
 pub mod profile_modal; // Added in Phase 3
 pub mod export_modal; // Added in Phase 2 - Export data functionality
 pub mod data_directory_modal; // Data directory management functionality
+pub mod allowance_config_modal; // Allowance configuration functionality
 pub mod shared;
 
 pub use state::*;

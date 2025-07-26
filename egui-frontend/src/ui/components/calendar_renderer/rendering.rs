@@ -724,7 +724,7 @@ impl AllowanceTrackerApp {
     /// Draw calendar section with toggle header integrated
     pub fn draw_calendar_section_with_toggle(&mut self, ui: &mut egui::Ui, available_rect: egui::Rect, transactions: &[Transaction]) {
         // DEBUG: Log calendar entry point for comparison with goal
-        log::info!("📅 CALENDAR DEBUG: available_rect = {:?}", available_rect);
+        // log::info!("📅 CALENDAR DEBUG: available_rect = {:?}", available_rect); // Too verbose
         
         // Calendar rendering with responsive layout
         

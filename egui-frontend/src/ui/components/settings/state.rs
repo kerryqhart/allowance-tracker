@@ -300,6 +300,130 @@ impl ProfileFormState {
     }
 }
 
+/// Form state for configuring allowance settings
+#[derive(Debug, Clone)]
+pub struct AllowanceConfigFormState {
+    pub amount: String,
+    pub day_of_week: u8, // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+    pub amount_error: Option<String>,
+    pub is_valid: bool,
+    pub is_saving: bool,
+    pub success_message: Option<String>,
+    pub error_message: Option<String>,
+    
+    // Original values for change detection
+    pub original_amount: Option<f64>,
+    pub original_day_of_week: Option<u8>,
+    pub has_existing_config: bool,
+}
+
+impl AllowanceConfigFormState {
+    /// Create new allowance config form state with defaults
+    pub fn new() -> Self {
+        Self {
+            amount: "5.00".to_string(), // Default $5
+            day_of_week: 5, // Default Friday
+            amount_error: None,
+            is_valid: true,
+            is_saving: false,
+            success_message: None,
+            error_message: None,
+            original_amount: None,
+            original_day_of_week: None,
+            has_existing_config: false,
+        }
+    }
+    
+    /// Clear all form fields and reset to defaults
+    pub fn clear(&mut self) {
+        self.amount = "5.00".to_string();
+        self.day_of_week = 5;
+        self.amount_error = None;
+        self.is_valid = true;
+        self.is_saving = false;
+        self.success_message = None;
+        self.error_message = None;
+        self.original_amount = None;
+        self.original_day_of_week = None;
+        self.has_existing_config = false;
+    }
+    
+    /// Load existing allowance config into form
+    pub fn load_from_config(&mut self, config: &crate::backend::domain::models::allowance::AllowanceConfig) {
+        self.amount = format!("{:.2}", config.amount);
+        self.day_of_week = config.day_of_week;
+        self.original_amount = Some(config.amount);
+        self.original_day_of_week = Some(config.day_of_week);
+        self.has_existing_config = true;
+        self.amount_error = None;
+        self.is_valid = true;
+        self.success_message = None;
+        self.error_message = None;
+        
+        log::info!("⚙️ LOADED_CONFIG: amount='{}' (original={:.2}), day={} (original={}), has_existing={}", 
+            self.amount, config.amount, self.day_of_week, config.day_of_week, self.has_existing_config);
+    }
+    
+    /// Check if form values have changed from original
+    pub fn has_changes(&self) -> bool {
+        if !self.has_existing_config {
+            log::info!("⚙️ CHANGE_DETECTION: No existing config, allowing changes");
+            return true; // Always allow saving for new configs
+        }
+        
+        // Parse current amount
+        let current_amount = self.amount.trim().parse::<f64>().unwrap_or(0.0);
+        
+        // Check if amount or day changed (only log when there are actual changes)
+        let amount_changed = self.original_amount.map(|orig| {
+            let changed = current_amount != orig;
+            if changed {
+                log::info!("⚙️ AMOUNT_CHANGE: current={:.2}, original={:.2}, changed={}", 
+                    current_amount, orig, changed);
+            }
+            changed
+        }).unwrap_or(true);
+        
+        let day_changed = self.original_day_of_week.map(|orig| {
+            let changed = orig != self.day_of_week;
+            if changed {
+                log::info!("⚙️ DAY_CHANGE: current={}, original={}, changed={}", 
+                    self.day_of_week, orig, changed);
+            }
+            changed
+        }).unwrap_or(true);
+        
+        let has_changes = amount_changed || day_changed;
+        if has_changes {
+            log::info!("⚙️ HAS_CHANGES: amount_changed={}, day_changed={}, result={}", 
+                amount_changed, day_changed, has_changes);
+        }
+        
+        has_changes
+    }
+    
+    /// Get day name for current day_of_week
+    pub fn day_name(&self) -> &'static str {
+        match self.day_of_week {
+            0 => "Sunday",
+            1 => "Monday", 
+            2 => "Tuesday",
+            3 => "Wednesday",
+            4 => "Thursday",
+            5 => "Friday",
+            6 => "Saturday",
+            _ => "Invalid",
+        }
+    }
+    
+    /// Get success message based on form state
+    pub fn get_success_message(&self) -> String {
+        format!("New allowance: ${:.2} every {}", 
+            self.amount.parse::<f64>().unwrap_or(0.0), 
+            self.day_name())
+    }
+}
+
 /// All settings-related state for the application
 #[derive(Debug)]
 pub struct SettingsState {
@@ -327,9 +451,11 @@ pub struct SettingsState {
     /// Data directory form state
     pub data_directory_form: DataDirectoryFormState,
 
-    // TODO: Future settings modal states
-    // pub show_allowance_config_modal: bool,
-    // pub allowance_config_form: AllowanceConfigFormState,
+    /// Whether the allowance config modal is visible
+    pub show_allowance_config_modal: bool,
+
+    /// Allowance config form state
+    pub allowance_config_form: AllowanceConfigFormState,
 }
 
 impl SettingsState {
@@ -344,6 +470,8 @@ impl SettingsState {
             export_form: ExportFormState::new(),
             show_data_directory_modal: false,
             data_directory_form: DataDirectoryFormState::new(),
+            show_allowance_config_modal: false,
+            allowance_config_form: AllowanceConfigFormState::new(),
         }
     }
 
@@ -353,7 +481,7 @@ impl SettingsState {
         self.show_profile_modal = false;
         self.show_export_modal = false;
         self.show_data_directory_modal = false;
-        // TODO: Hide other settings modals when implemented
+        self.show_allowance_config_modal = false;
     }
 
     /// Reset all form states
@@ -362,7 +490,7 @@ impl SettingsState {
         self.profile_form.clear();
         self.export_form.clear();
         self.data_directory_form.clear();
-        // TODO: Reset other form states when implemented
+        self.allowance_config_form.clear();
     }
 }
 

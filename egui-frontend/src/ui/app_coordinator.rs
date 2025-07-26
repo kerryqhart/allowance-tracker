@@ -31,7 +31,7 @@ use crate::ui::components::styling::{setup_kid_friendly_style, draw_image_backgr
 
 impl eframe::App for AllowanceTrackerApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        log::info!("🔄 APP UPDATE called - main render loop");
+        // log::info!("🔄 APP UPDATE called - main render loop"); // Commented out - too verbose
         // Set up kid-friendly styling
         setup_kid_friendly_style(ctx);
         
@@ -91,10 +91,10 @@ impl eframe::App for AllowanceTrackerApp {
                 egui::vec2(full_rect.width(), content_height)
             );
             
-            // DEBUG: Log parent space allocation
-            log::info!("🏢 WINDOW SPACE: full_rect.height={:.0}, content_height={:.0}, reserved={:.0}px", 
-                      full_rect.height(), content_height, 
-                      header_height + selection_bar_height + subheader_height);
+            // DEBUG: Log parent space allocation (commented out - too verbose)
+            // log::info!("🏢 WINDOW SPACE: full_rect.height={:.0}, content_height={:.0}, reserved={:.0}px", 
+            //           full_rect.height(), content_height, 
+            //           header_height + selection_bar_height + subheader_height);
             
             // Layer 1: Header (existing function, positioned in header area)
             ui.allocate_ui_at_rect(header_rect, |ui| {
