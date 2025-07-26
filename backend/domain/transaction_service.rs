@@ -55,9 +55,7 @@ impl TransactionService {
         }
 
         let active_child = self.get_active_child()?;
-        let now_millis = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64;
-        let transaction_id = DomainTransaction::generate_id(command.amount, now_millis);
-
+        
         // ✅ FIXED: Use DateTime object directly from command (no parsing needed)
         let transaction_date = command.date.unwrap_or_else(|| {
             // Create current time in Eastern timezone if no date provided
@@ -65,22 +63,41 @@ impl TransactionService {
             chrono::Utc::now().with_timezone(&eastern_offset)
         });
 
+        self.create_transaction_internal(
+            &active_child.id,
+            transaction_date,
+            command.description,
+            command.amount,
+        )
+    }
+
+    /// Private unified function for creating any transaction
+    fn create_transaction_internal(
+        &self,
+        child_id: &str,
+        date: chrono::DateTime<chrono::FixedOffset>,
+        description: String,
+        amount: f64,
+    ) -> Result<DomainTransaction> {
+        let now_millis = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64;
+        let transaction_id = DomainTransaction::generate_id(amount, now_millis);
+
         let transaction_balance = self
             .balance_service
             .calculate_balance_for_new_transaction(
-                &active_child.id,
-                &transaction_date.to_rfc3339(),  // ✅ Convert to string for balance service
-                command.amount,
+                child_id,
+                &date.to_rfc3339(),
+                amount,
             )?;
 
         let domain_transaction = DomainTransaction {
             id: transaction_id,
-            child_id: active_child.id.clone(),
-            date: transaction_date,  // ✅ Now uses DateTime object
-            description: command.description,
-            amount: command.amount,
+            child_id: child_id.to_string(),
+            date,
+            description,
+            amount,
             balance: transaction_balance,
-            transaction_type: if command.amount >= 0.0 {
+            transaction_type: if amount >= 0.0 {
                 DomainTransactionType::Income
             } else {
                 DomainTransactionType::Expense
@@ -92,10 +109,10 @@ impl TransactionService {
 
         if self
             .balance_service
-            .requires_balance_recalculation(&active_child.id, &transaction_date.to_rfc3339())?
+            .requires_balance_recalculation(child_id, &date.to_rfc3339())?
         {
             self.balance_service
-                .recalculate_balances_from_date(&active_child.id, &transaction_date.to_rfc3339())?;
+                .recalculate_balances_from_date(child_id, &date.to_rfc3339())?;
         }
 
         Ok(domain_transaction)
@@ -354,10 +371,8 @@ impl TransactionService {
         amount: f64,
     ) -> Result<DomainTransaction> {
         info!("🎯 ALLOWANCE DEBUG: create_allowance_transaction() called for child {}, date {}, amount ${:.2}", child_id, date, amount);
-        let now_millis = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64;
-        let transaction_id = DomainTransaction::generate_id(amount, now_millis);
-        info!("🎯 ALLOWANCE DEBUG: Generated transaction ID: {}", transaction_id);
         
+        // Convert NaiveDate to DateTime at noon Eastern time
         let allowance_datetime = date.and_hms_opt(12, 0, 0).unwrap();
         let utc_datetime = chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(
             allowance_datetime,
@@ -367,37 +382,18 @@ impl TransactionService {
         let eastern_datetime = utc_datetime.with_timezone(&eastern_offset);
         info!("🎯 ALLOWANCE DEBUG: Transaction date: {}", eastern_datetime.to_rfc3339());
 
-        let transaction_balance = self
-            .balance_service
-            .calculate_balance_for_new_transaction(child_id, &eastern_datetime.to_rfc3339(), amount)?;
-        info!("🎯 ALLOWANCE DEBUG: Calculated balance: {}", transaction_balance);
-
-        let domain_transaction = DomainTransaction {
-            id: transaction_id.clone(),
-            child_id: child_id.to_string(),
-            date: eastern_datetime,  // ✅ FIXED: Use DateTime object directly
-            description: "Weekly allowance".to_string(),
+        let result = self.create_transaction_internal(
+            child_id,
+            eastern_datetime,
+            "Weekly allowance".to_string(),
             amount,
-            balance: transaction_balance,
-            transaction_type: DomainTransactionType::Income,
-        };
+        );
 
-        info!("🎯 ALLOWANCE DEBUG: About to store transaction: {}", transaction_id);
-        self.transaction_repository
-            .store_transaction(&domain_transaction)?;
-        info!("🎯 ALLOWANCE DEBUG: Transaction stored successfully: {}", transaction_id);
-
-        if self
-            .balance_service
-            .requires_balance_recalculation(child_id, &eastern_datetime.to_rfc3339())?
-        {
-            info!("🎯 ALLOWANCE DEBUG: Recalculating balances from date: {}", eastern_datetime.to_rfc3339());
-            self.balance_service
-                .recalculate_balances_from_date(child_id, &eastern_datetime.to_rfc3339())?;
+        if let Ok(ref transaction) = result {
+            info!("🎯 ALLOWANCE DEBUG: create_allowance_transaction() completed for {}", transaction.id);
         }
 
-        info!("🎯 ALLOWANCE DEBUG: create_allowance_transaction() completed for {}", transaction_id);
-        Ok(domain_transaction)
+        result
     }
 
     pub fn get_active_child(&self) -> Result<DomainChild> {
