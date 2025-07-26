@@ -116,7 +116,7 @@ pub fn render_responsive_transaction_table(ui: &mut egui::Ui, available_rect: eg
                                             egui::Button::new("")
                                                 .fill(egui::Color32::TRANSPARENT) // Invisible until hovered
                                                 .stroke(egui::Stroke::NONE) // No border
-                                                .rounding(egui::CornerRadius::same(2)) // Slight rounding like calendar
+                                                .corner_radius(egui::CornerRadius::same(2)) // Slight rounding like calendar
                                         );
                                         
                                         // Check if button is hovered for styling

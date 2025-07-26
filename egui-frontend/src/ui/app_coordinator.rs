@@ -40,8 +40,9 @@ impl eframe::App for AllowanceTrackerApp {
             self.interaction.child_dropdown.is_open = false;
         }
         
-        // Load initial data on first run
-        if self.ui.loading && self.current_child().is_none() {
+        // Load initial data on first run  
+        // Note: Use cached current_child here to avoid infinite backend calls during loading
+        if self.ui.loading && self.core.current_child.is_none() {
             self.load_initial_data();
         }
         
@@ -198,7 +199,7 @@ impl AllowanceTrackerApp {
                             })
                     )
                     .min_size(egui::vec2(60.0, 28.0))
-                    .rounding(egui::CornerRadius::same(6))
+                    .corner_radius(egui::CornerRadius::same(6))
                     .fill(if self.chart.selected_period == ChartPeriod::Days30 {
                         egui::Color32::from_rgb(100, 150, 255) // Active blue
                     } else {
@@ -225,7 +226,7 @@ impl AllowanceTrackerApp {
                             })
                     )
                     .min_size(egui::vec2(60.0, 28.0))
-                    .rounding(egui::CornerRadius::same(6))
+                    .corner_radius(egui::CornerRadius::same(6))
                     .fill(if self.chart.selected_period == ChartPeriod::Days90 {
                         egui::Color32::from_rgb(100, 150, 255) // Active blue
                     } else {
@@ -252,7 +253,7 @@ impl AllowanceTrackerApp {
                             })
                     )
                     .min_size(egui::vec2(70.0, 28.0))
-                    .rounding(egui::CornerRadius::same(6))
+                    .corner_radius(egui::CornerRadius::same(6))
                     .fill(if self.chart.selected_period == ChartPeriod::AllTime {
                         egui::Color32::from_rgb(100, 150, 255) // Active blue
                     } else {
@@ -293,7 +294,7 @@ impl AllowanceTrackerApp {
                                 .color(egui::Color32::from_rgb(100, 100, 100))) // Same gray text as inactive buttons
                             .fill(egui::Color32::from_rgb(240, 240, 240)) // Same light gray background as inactive buttons
                             .stroke(egui::Stroke::new(1.5, egui::Color32::from_rgb(200, 200, 200))) // Same light gray border as inactive buttons
-                            .rounding(egui::CornerRadius::same(8)) // Same rounding as toggle buttons
+                            .corner_radius(egui::CornerRadius::same(8)) // Same rounding as toggle buttons
                             .min_size(egui::vec2(110.0, 35.0)); // Same height as toggle buttons
                         
                         if ui.add(cancel_button).clicked() {
@@ -314,7 +315,7 @@ impl AllowanceTrackerApp {
             let prev_button = egui::Button::new("<")
                 .fill(egui::Color32::from_rgba_unmultiplied(255, 255, 255, 100))
                 .stroke(egui::Stroke::new(1.5, colors::HOVER_BORDER)) // Purple outline
-                .rounding(egui::CornerRadius::same(6))
+                .corner_radius(egui::CornerRadius::same(6))
                 .min_size(egui::vec2(35.0, 35.0));
             
             if ui.add(prev_button).clicked() {
@@ -367,7 +368,7 @@ impl AllowanceTrackerApp {
             let next_button = egui::Button::new(">")
                 .fill(egui::Color32::from_rgba_unmultiplied(255, 255, 255, 100))
                 .stroke(egui::Stroke::new(1.5, colors::HOVER_BORDER)) // Purple outline
-                .rounding(egui::CornerRadius::same(6))
+                .corner_radius(egui::CornerRadius::same(6))
                 .min_size(egui::vec2(35.0, 35.0));
             
             if ui.add(next_button).clicked() {

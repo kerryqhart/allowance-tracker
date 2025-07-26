@@ -324,7 +324,7 @@ impl AllowanceTrackerApp {
         match action {
             SettingsAction::ShowProfile => {
                 // Extract child data before mutations to avoid borrow conflicts
-                let child_data = if let Some(child) = self.current_child() {
+                let child_data = if let Some(child) = self.get_current_child_from_backend() {
                     Some((
                         child.id.clone(),
                         child.name.clone(),
@@ -359,7 +359,7 @@ impl AllowanceTrackerApp {
             }
             SettingsAction::ConfigureAllowance => {
                 info!("🚨 CONFIGURE_ALLOWANCE_ACTION_TRIGGERED! Opening modal...");
-                if self.current_child().is_some() {
+                if self.get_current_child_from_backend().is_some() {
                     info!("🚨 Setting show_allowance_config_modal = true");
                     self.settings.show_allowance_config_modal = true;
                     info!("🚨 Modal flag set, now loading config...");
@@ -380,7 +380,7 @@ impl AllowanceTrackerApp {
                 self.settings.export_form.clear(); // Reset form state
                 
                 // Update preview immediately
-                let child_name = self.current_child().as_ref().map(|c| c.name.clone());
+                let child_name = self.get_current_child_from_backend().as_ref().map(|c| c.name.clone());
                 let child_name_ref = child_name.as_deref();
                 self.settings.export_form.update_preview(child_name_ref);
             }

@@ -70,7 +70,7 @@ impl AllowanceTrackerApp {
                 egui::Color32::from_rgb(240, 240, 240) // Light gray background for inactive
             })
             .stroke(egui::Stroke::new(1.5, egui::Color32::from_rgb(200, 200, 200)))
-            .rounding(egui::CornerRadius::same(8))
+            .corner_radius(egui::CornerRadius::same(8))
             .min_size(egui::vec2(85.0, 35.0));
         
         if ui.add(goal_button).clicked() {
@@ -94,7 +94,7 @@ impl AllowanceTrackerApp {
                 egui::Color32::from_rgb(240, 240, 240) // Light gray background for inactive
             })
             .stroke(egui::Stroke::new(1.5, egui::Color32::from_rgb(200, 200, 200)))
-            .rounding(egui::CornerRadius::same(8))
+            .corner_radius(egui::CornerRadius::same(8))
             .min_size(egui::vec2(100.0, 35.0));
         
         if ui.add(chart_button).clicked() {
@@ -118,7 +118,7 @@ impl AllowanceTrackerApp {
                 egui::Color32::from_rgb(240, 240, 240) // Light gray background for inactive
             })
             .stroke(egui::Stroke::new(1.5, egui::Color32::from_rgb(200, 200, 200)))
-            .rounding(egui::CornerRadius::same(8))
+            .corner_radius(egui::CornerRadius::same(8))
             .min_size(egui::vec2(90.0, 35.0));
         
         if ui.add(table_button).clicked() {
@@ -142,7 +142,7 @@ impl AllowanceTrackerApp {
                 egui::Color32::from_rgb(240, 240, 240) // Light gray background for inactive
             })
             .stroke(egui::Stroke::new(1.5, egui::Color32::from_rgb(200, 200, 200)))
-            .rounding(egui::CornerRadius::same(8))
+            .corner_radius(egui::CornerRadius::same(8))
             .min_size(egui::vec2(110.0, 35.0));
         
         if ui.add(calendar_button).clicked() {
@@ -159,7 +159,7 @@ impl AllowanceTrackerApp {
         );
         
         // Set up UI for header
-        let mut header_ui = ui.child_ui(header_rect, egui::Layout::left_to_right(egui::Align::Center), None);
+        let mut header_ui = ui.new_child(egui::UiBuilder::new().max_rect(header_rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
         
         // Just the title now - toggle buttons moved to subheader
         header_ui.label(egui::RichText::new(title)
@@ -176,7 +176,7 @@ impl AllowanceTrackerApp {
         );
         
         // Set up UI for header
-        let mut header_ui = ui.child_ui(header_rect, egui::Layout::left_to_right(egui::Align::Center), None);
+        let mut header_ui = ui.new_child(egui::UiBuilder::new().max_rect(header_rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
         
         // Title on the left
         header_ui.label(egui::RichText::new("Recent Transactions")
@@ -197,7 +197,7 @@ impl AllowanceTrackerApp {
                     })
             )
             .min_size(egui::vec2(80.0, 30.0))
-            .rounding(egui::CornerRadius::same(6))
+            .corner_radius(egui::CornerRadius::same(6))
             .fill(if self.current_tab() == MainTab::Calendar {
                 egui::Color32::from_rgb(100, 150, 255) // Active blue
             } else {
@@ -223,7 +223,7 @@ impl AllowanceTrackerApp {
                     })
             )
             .min_size(egui::vec2(80.0, 30.0))
-            .rounding(egui::CornerRadius::same(6))
+            .corner_radius(egui::CornerRadius::same(6))
             .fill(if self.current_tab() == MainTab::Table {
                 egui::Color32::from_rgb(100, 150, 255) // Active blue
             } else {
@@ -299,14 +299,14 @@ impl AllowanceTrackerApp {
                         .font(egui::FontId::new(18.0, egui::FontFamily::Proportional))
                         .color(egui::Color32::WHITE))
                         .fill(egui::Color32::WHITE) // Same white as calendar card
-                        .rounding(calendar_rounding)
+                        .corner_radius(calendar_rounding)
                         .stroke(egui::Stroke::new(1.5, egui::Color32::from_rgb(100, 150, 255))) // Purple border
                 } else {
                     egui::Button::new(egui::RichText::new("📅 Calendar")
                         .font(egui::FontId::new(18.0, egui::FontFamily::Proportional))
                         .color(egui::Color32::from_rgb(100, 100, 100)))
                         .fill(egui::Color32::from_rgb(240, 240, 240)) // Theme inactive color
-                        .rounding(calendar_rounding)
+                        .corner_radius(calendar_rounding)
                         .stroke(egui::Stroke::new(1.5, egui::Color32::from_rgb(100, 150, 255))) // Purple border
                 };
                 
@@ -335,14 +335,14 @@ impl AllowanceTrackerApp {
                         .font(egui::FontId::new(18.0, egui::FontFamily::Proportional))
                         .color(egui::Color32::WHITE))
                         .fill(egui::Color32::WHITE) // Same white as calendar card
-                        .rounding(table_rounding)
+                        .corner_radius(table_rounding)
                         .stroke(egui::Stroke::new(1.5, egui::Color32::from_rgb(100, 150, 255))) // Purple border
                 } else {
                     egui::Button::new(egui::RichText::new("📋 Table")
                         .font(egui::FontId::new(18.0, egui::FontFamily::Proportional))
                         .color(egui::Color32::from_rgb(100, 100, 100)))
                         .fill(egui::Color32::from_rgb(240, 240, 240)) // Theme inactive color
-                        .rounding(table_rounding)
+                        .corner_radius(table_rounding)
                         .stroke(egui::Stroke::new(1.5, egui::Color32::from_rgb(100, 150, 255))) // Purple border
                 };
                 

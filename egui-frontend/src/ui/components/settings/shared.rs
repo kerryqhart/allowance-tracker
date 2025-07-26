@@ -41,7 +41,7 @@ impl SettingsModalStyle {
         egui::Frame::window(&egui::Style::default())
             .fill(self.background_color)
             .stroke(egui::Stroke::new(3.0, self.border_color))
-            .rounding(egui::CornerRadius::same(self.rounding))
+            .corner_radius(egui::CornerRadius::same(self.rounding))
             .inner_margin(egui::Margin::same(self.margin))
             .shadow(egui::Shadow {
                 offset: [6, 6],

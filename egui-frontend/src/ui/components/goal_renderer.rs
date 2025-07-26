@@ -523,7 +523,7 @@ impl AllowanceTrackerApp {
                     .color(egui::Color32::WHITE))
                 .fill(egui::Color32::from_rgb(100, 150, 255))
                 .stroke(egui::Stroke::new(1.5, egui::Color32::from_rgb(80, 130, 235)))
-                .rounding(egui::CornerRadius::same(8))
+                .corner_radius(egui::CornerRadius::same(8))
                 .min_size(egui::vec2(120.0, 40.0));
             
             if ui.add(create_button).clicked() {
@@ -541,7 +541,7 @@ impl AllowanceTrackerApp {
         
         // Create command for getting current goal
         let command = crate::backend::domain::commands::goal::GetCurrentGoalCommand {
-            child_id: self.current_child().as_ref().map(|c| c.id.clone()),
+            child_id: self.get_current_child_from_backend().as_ref().map(|c| c.id.clone()),
         };
         
         // Call backend service
@@ -562,7 +562,7 @@ impl AllowanceTrackerApp {
         info!("🎯 Cancelling current goal");
         
         let command = crate::backend::domain::commands::goal::CancelGoalCommand {
-            child_id: self.current_child().as_ref().map(|c| c.id.clone()),
+            child_id: self.get_current_child_from_backend().as_ref().map(|c| c.id.clone()),
         };
         
         match self.backend().goal_service.cancel_goal(command) {
@@ -584,7 +584,7 @@ impl AllowanceTrackerApp {
         info!("🎯 Creating new goal: {} - ${:.2}", description, target_amount);
         
         let command = crate::backend::domain::commands::goal::CreateGoalCommand {
-            child_id: self.current_child().as_ref().map(|c| c.id.clone()),
+            child_id: self.get_current_child_from_backend().as_ref().map(|c| c.id.clone()),
             description,
             target_amount,
         };

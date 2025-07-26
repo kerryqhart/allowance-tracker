@@ -55,7 +55,7 @@ impl AllowanceTrackerApp {
     
     /// Draw infinite scroll table content with loading detection
     pub fn draw_infinite_scroll_table_content(&mut self, ui: &mut egui::Ui, content_rect: egui::Rect, transactions: &[Transaction]) {
-        let mut content_ui = ui.child_ui(content_rect, egui::Layout::top_down(egui::Align::Min), None);
+        let mut content_ui = ui.new_child(egui::UiBuilder::new().max_rect(content_rect).layout(egui::Layout::top_down(egui::Align::Min)));
         
         // Calculate actual content height to determine if we need scrolling
         let row_height = 25.0; // Match the transaction table row height

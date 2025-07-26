@@ -76,7 +76,7 @@ impl AllowanceTrackerApp {
         );
         
         ui.allocate_ui_at_rect(chart_rect, |ui| {
-            if let Some(ref _child) = self.current_child() {
+            if let Some(ref _child) = self.get_current_child_from_backend() {
                 if self.chart.chart_data.is_empty() {
                     // Show loading state
                     ui.vertical_centered(|ui| {
@@ -252,7 +252,7 @@ impl AllowanceTrackerApp {
     
     /// Load chart data for the selected period and child
     pub fn load_chart_data(&mut self) {
-        let Some(ref child) = self.current_child() else {
+        let Some(ref child) = self.get_current_child_from_backend() else {
             warn!("📊 No child selected for chart data loading");
             return;
         };

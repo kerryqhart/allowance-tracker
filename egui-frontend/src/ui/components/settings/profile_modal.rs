@@ -46,7 +46,7 @@ impl AllowanceTrackerApp {
                         egui::Frame::window(&ui.style())
                             .fill(egui::Color32::WHITE)
                             .stroke(egui::Stroke::new(3.0, egui::Color32::from_rgb(70, 130, 180))) // Steel blue for profile
-                            .rounding(egui::CornerRadius::same(15))
+                                                            .corner_radius(egui::CornerRadius::same(15))
                             .inner_margin(egui::Margin::same(25))
                             .shadow(egui::Shadow {
                                 offset: [6, 6],
@@ -173,7 +173,7 @@ impl AllowanceTrackerApp {
             ui.add_space(20.0);
             
             // Account information (read-only)
-            if let Some(child) = self.current_child() {
+            if let Some(child) = self.get_current_child_from_backend() {
                 ui.separator();
                 ui.add_space(15.0);
                 
@@ -238,7 +238,7 @@ impl AllowanceTrackerApp {
                 } else {
                     egui::Color32::from_rgb(180, 180, 180)
                 }))
-                .rounding(egui::CornerRadius::same(10))
+                .corner_radius(egui::CornerRadius::same(10))
                 .min_size(egui::vec2(button_width, 40.0));
             
             if ui.add(save_button).clicked() && save_enabled {
@@ -253,7 +253,7 @@ impl AllowanceTrackerApp {
                     .color(egui::Color32::from_rgb(100, 100, 100)))
                 .fill(egui::Color32::from_rgb(245, 245, 245))
                 .stroke(egui::Stroke::new(1.5, egui::Color32::from_rgb(200, 200, 200)))
-                .rounding(egui::CornerRadius::same(10))
+                .corner_radius(egui::CornerRadius::same(10))
                 .min_size(egui::vec2(button_width, 40.0));
             
             if ui.add(cancel_button).clicked() {
@@ -321,7 +321,7 @@ impl AllowanceTrackerApp {
     
     /// Check if the profile form has changes compared to current child data
     fn profile_form_has_changes(&self) -> bool {
-        if let Some(child) = self.current_child() {
+        if let Some(child) = self.get_current_child_from_backend() {
             let name_changed = self.settings.profile_form.name.trim() != child.name;
             
             // Parse form birthdate to compare with child's NaiveDate
@@ -373,7 +373,7 @@ impl AllowanceTrackerApp {
     /// Save profile changes to backend
     fn save_profile_changes(&mut self) {
         // Extract child ID before borrowing self mutably
-        let child_id = if let Some(child) = self.current_child() {
+        let child_id = if let Some(child) = self.get_current_child_from_backend() {
             child.id.clone()
         } else {
             log::warn!("🚨 No active child found for profile save");

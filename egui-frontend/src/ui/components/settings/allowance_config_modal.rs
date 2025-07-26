@@ -28,7 +28,7 @@ impl AllowanceTrackerApp {
             return;
         }
 
-        let current_has_changes = self.settings.allowance_config_form.has_changes();
+        let _current_has_changes = self.settings.allowance_config_form.has_changes();
         // Only log modal render when has_changes state changes to reduce noise
         // log::info!("⚙️ MODAL_RENDER: amount='{}', day={} ({}), has_changes={}", 
         //     self.settings.allowance_config_form.amount,
@@ -293,7 +293,7 @@ impl AllowanceTrackerApp {
     /// Load allowance configuration when modal opens
     pub fn load_allowance_config_for_modal(&mut self) {
         let child_from_backend = self.get_current_child_from_backend();
-        let child_from_cache = self.current_child();
+        let child_from_cache = self.get_current_child_from_backend();
         
         // 🔍 SURGICAL DEBUG: Compare UI cache vs backend for current child
         log::info!("🔍 MODAL_LOAD_DEBUG: Backend child: {:?}", 
@@ -388,7 +388,7 @@ impl AllowanceTrackerApp {
         self.settings.allowance_config_form.error_message = None;
 
         let child_from_backend = self.get_current_child_from_backend();
-        let child_from_cache = self.current_child();
+        let child_from_cache = self.get_current_child_from_backend();
         
         // 🔍 SURGICAL DEBUG: Compare child IDs at submit time
         log::info!("🔍 SUBMIT_DEBUG: Backend child: {:?}", 

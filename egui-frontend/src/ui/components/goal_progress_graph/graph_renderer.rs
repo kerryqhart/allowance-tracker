@@ -175,8 +175,8 @@ impl GoalProgressGraph {
             .collect();
         
         // Create lines for different segments
-        let pink_color = egui::Color32::from_rgb(200, 120, 200); // Match progress bar color
-        let projection_color = egui::Color32::from_rgb(160, 160, 160); // Gray for projection
+        let _pink_color = egui::Color32::from_rgb(200, 120, 200); // Match progress bar color
+        let _projection_color = egui::Color32::from_rgb(160, 160, 160); // Gray for projection
         
         // Find data range for proper scaling
         let min_balance = self.data_points

@@ -31,7 +31,7 @@ impl AllowanceTrackerApp {
         log::info!("📄 Rendering export data modal");
 
         // Update preview on render to ensure it's current
-        let child_name = self.current_child().as_ref().map(|c| c.name.clone());
+        let child_name = self.get_current_child_from_backend().as_ref().map(|c| c.name.clone());
         let child_name_ref = child_name.as_deref();
         self.settings.export_form.update_preview(child_name_ref);
 
@@ -124,7 +124,7 @@ impl AllowanceTrackerApp {
                 self.settings.export_form.clear_messages();
                 
                 // Update preview
-                let child_name = self.current_child().as_ref().map(|c| c.name.clone());
+                let child_name = self.get_current_child_from_backend().as_ref().map(|c| c.name.clone());
                 let child_name_ref = child_name.as_deref();
                 self.settings.export_form.update_preview(child_name_ref);
             }
@@ -138,7 +138,7 @@ impl AllowanceTrackerApp {
                 self.settings.export_form.clear_messages();
                 
                 // Update preview
-                let child_name = self.current_child().as_ref().map(|c| c.name.clone());
+                let child_name = self.get_current_child_from_backend().as_ref().map(|c| c.name.clone());
                 let child_name_ref = child_name.as_deref();
                 self.settings.export_form.update_preview(child_name_ref);
             }
@@ -182,7 +182,7 @@ impl AllowanceTrackerApp {
                     // Option to clear selection and use manual entry
                     if ui.small_button("Clear selection").clicked() {
                         self.settings.export_form.selected_file_path = None;
-                        let child_name = self.current_child().as_ref().map(|c| c.name.clone());
+                        let child_name = self.get_current_child_from_backend().as_ref().map(|c| c.name.clone());
                         let child_name_ref = child_name.as_deref();
                         self.settings.export_form.update_preview(child_name_ref);
                     }
@@ -205,7 +205,7 @@ impl AllowanceTrackerApp {
 
                     // Update preview when path changes
                     if path_response.changed() {
-                        let child_name = self.current_child().as_ref().map(|c| c.name.clone());
+                        let child_name = self.get_current_child_from_backend().as_ref().map(|c| c.name.clone());
                         let child_name_ref = child_name.as_deref();
                         self.settings.export_form.update_preview(child_name_ref);
                     }
@@ -324,7 +324,7 @@ impl AllowanceTrackerApp {
         log::info!("📁 Opening native file browser for export location");
 
         // Generate default filename based on current child
-        let child_name = self.current_child().as_ref().map(|c| c.name.clone());
+        let child_name = self.get_current_child_from_backend().as_ref().map(|c| c.name.clone());
         let child_name_formatted = child_name
             .as_deref()
             .unwrap_or("child")
@@ -385,7 +385,7 @@ impl AllowanceTrackerApp {
         let custom_path = self.settings.export_form.get_effective_custom_path();
 
         let request = ExportToPathRequest {
-            child_id: self.current_child().as_ref().map(|c| c.id.clone()),
+            child_id: self.get_current_child_from_backend().as_ref().map(|c| c.id.clone()),
             custom_path,
         };
 

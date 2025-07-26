@@ -355,7 +355,7 @@ impl AllowanceTrackerApp {
         log::info!("📁 Loading current data directory");
         self.settings.data_directory_form.set_loading(true);
 
-        let child_id = self.current_child().as_ref().map(|c| c.id.clone());
+        let child_id = self.get_current_child_from_backend().as_ref().map(|c| c.id.clone());
         
         match self.backend().data_directory_service.get_current_directory(child_id) {
             Ok(response) => {
@@ -407,7 +407,7 @@ impl AllowanceTrackerApp {
         log::info!("📁 Moving data directory");
         self.settings.data_directory_form.set_loading(true);
 
-        let child_id = self.current_child().as_ref().map(|c| c.id.clone());
+        let child_id = self.get_current_child_from_backend().as_ref().map(|c| c.id.clone());
         let request = CheckDataDirectoryConflictRequest {
             child_id,
             new_path: self.settings.data_directory_form.new_path.clone(),
@@ -439,7 +439,7 @@ impl AllowanceTrackerApp {
         log::info!("📁 Proceeding with simple relocation");
         self.settings.data_directory_form.set_loading(true);
 
-        let child_id = self.current_child().as_ref().map(|c| c.id.clone());
+        let child_id = self.get_current_child_from_backend().as_ref().map(|c| c.id.clone());
         let request = RelocateWithConflictResolutionRequest {
             child_id,
             new_path: self.settings.data_directory_form.new_path.clone(),
@@ -488,7 +488,7 @@ impl AllowanceTrackerApp {
 
         self.settings.data_directory_form.set_loading(true);
 
-        let child_id = self.current_child().as_ref().map(|c| c.id.clone());
+        let child_id = self.get_current_child_from_backend().as_ref().map(|c| c.id.clone());
         let request = RelocateWithConflictResolutionRequest {
             child_id,
             new_path: self.settings.data_directory_form.new_path.clone(),
@@ -529,7 +529,7 @@ impl AllowanceTrackerApp {
         log::info!("📁 Returning data to default location");
         self.settings.data_directory_form.set_loading(true);
 
-        let child_id = self.current_child().as_ref().map(|c| c.id.clone());
+        let child_id = self.get_current_child_from_backend().as_ref().map(|c| c.id.clone());
         let request = ReturnToDefaultLocationRequest { child_id };
 
         match self.backend().data_directory_service.return_to_default_location(request) {

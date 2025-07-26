@@ -69,7 +69,7 @@ impl AllowanceTrackerApp {
                     let button = egui::Button::new(egui::RichText::new(glyph_text).color(text_color))
                         .fill(background_color)
                         .stroke(egui::Stroke::new(2.0, outline_color))
-                        .rounding(egui::CornerRadius::same(4));
+                        .corner_radius(egui::CornerRadius::same(4));
                     
                     if ui.add_sized(glyph_size, button).clicked() {
                         self.calendar.active_overlay = Some(glyph.overlay_type());

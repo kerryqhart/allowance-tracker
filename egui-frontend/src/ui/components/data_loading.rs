@@ -85,7 +85,7 @@ impl AllowanceTrackerApp {
     
     /// Load current balance
     pub fn load_balance(&mut self) {
-        let current_child = self.current_child().clone();
+        let current_child = self.get_current_child_from_backend().clone();
         if let Some(child) = &current_child {
             info!("💰 Loading balance for child: {} (ID: {})", child.name, child.id);
             
@@ -238,7 +238,7 @@ impl AllowanceTrackerApp {
     
     /// Load more transactions for infinite scroll
     pub fn load_more_table_transactions(&mut self) {
-        let current_child = self.current_child().clone();
+        let current_child = self.get_current_child_from_backend().clone();
         if let Some(child) = &current_child {
             // Check if we can load more
             if !self.table.can_load_more() {

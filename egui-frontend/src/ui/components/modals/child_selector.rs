@@ -44,7 +44,7 @@ impl AllowanceTrackerApp {
                             for child in children_result.children {
                                 ui.horizontal(|ui| {
                                     // Show if this is the current active child
-                                    let is_active = self.current_child().as_ref()
+                                    let is_active = self.get_current_child_from_backend().as_ref()
                                         .map(|c| c.id == child.id)
                                         .unwrap_or(false);
                                     
