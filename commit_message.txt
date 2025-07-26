@@ -1,34 +1,21 @@
-feat: Enhanced data directory management with git repository support
+refactor: Remove generic Connection types from domain services
 
-## Major Features Added:
-- **Return to Default Location**: One-click feature to copy redirected data back to default location
-- **Git Repository Support**: Full git repository handling with proper permission management
-- **Smart Conflict Detection**: Automatically detects if redirect locations contain existing data
+Simplify domain layer by removing generic Connection type parameters
+and using concrete CsvConnection throughout. This eliminates unnecessary
+complexity since we only use CSV storage.
 
-## UI/UX Improvements:
-- **Simplified Button Flow**: "Move Directory" button with clear action expectations
-- **Clean Success States**: "Close" button only after successful operations
-- **Emoji-Free Messages**: Removed emoji rendering issues on all platforms
-- **Redirect Indicators**: Visual indication when data is redirected with return option
+Changes:
+- Remove <C: Connection> generics from BalanceService and TransactionService
+- Update GoalService to use non-generic service dependencies  
+- Simplify function signatures in export, calendar, and money management modules
+- Remove unused Connection trait imports
+- Update Backend struct to use concrete types
+- Update all tests to use concrete types
 
-## Technical Enhancements:
-- **Comprehensive Permissions**: Proper Unix file permission handling for git objects
-- **Enhanced Error Handling**: Detailed error messages with specific path information
-- **Recursive Permission Fixing**: Handles read-only git objects during copy/removal operations
-- **File Operation Safety**: Pre-checks and permission adjustments before file operations
+Benefits:
+- Cleaner, more readable code
+- Reduced complexity and cognitive overhead
+- Easier maintenance and debugging
+- Single storage responsibility (CSV only)
 
-## Backend Services:
-- Added `ReturnToDefaultLocationRequest/Response` types
-- Enhanced `DataDirectoryService` with git-aware copy operations
-- Improved `copy_directory_recursive` with permission management
-- Added redirect status tracking in `GetDataDirectoryResponse`
-
-## Files Modified:
-- `shared/src/lib.rs`: New request/response types
-- `backend/domain/data_directory_service.rs`: Enhanced with git support
-- `backend/storage/csv/connection.rs`: Public git commit methods
-- `egui-frontend/src/ui/components/settings/*`: UI improvements
-- `egui-frontend/Cargo.toml`: Added rfd dependency for file dialogs
-
-The data directory feature now provides complete control over git repositories
-while maintaining data safety and user-friendly operation flows. 
+All tests pass and compilation successful. 

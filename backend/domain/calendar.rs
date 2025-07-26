@@ -14,7 +14,6 @@ use log::{self, info};
 // Add imports for the new orchestration method
 use crate::backend::domain::transaction_service::TransactionService;
 use crate::backend::domain::commands::transactions::CalendarTransactionsQuery;
-use crate::backend::storage::Connection;
 use anyhow::Result;
 
 // We need to create a TransactionMapper module - for now let's create a simple placeholder
@@ -56,11 +55,11 @@ impl CalendarService {
 
     /// Get calendar month with transactions - orchestrates transaction retrieval and calendar generation
     /// This method moves the orchestration logic from the REST API layer into the domain layer
-    pub fn get_calendar_month_with_transactions<C: Connection>(
+    pub fn get_calendar_month_with_transactions(
         &self,
         month: u32,
         year: u32,
-        transaction_service: &TransactionService<C>,
+        transaction_service: &TransactionService,
     ) -> Result<CalendarMonth> {
         info!("🗓️ CALENDAR: Getting calendar month with transactions for {}/{}", month, year);
 
@@ -177,13 +176,13 @@ impl CalendarService {
 
     /// Enhanced calculate_daily_balances that can delegate NaN balance calculations to BalanceService
     /// This method detects transactions with NaN balance and calculates projected balances using BalanceService
-    pub fn calculate_daily_balances_with_projection<C: Connection>(
+    pub fn calculate_daily_balances_with_projection(
         &self,
         month: u32,
         year: u32,
         transactions: &[Transaction],
         days_in_month: u32,
-        _balance_service: &crate::backend::domain::balance_service::BalanceService<C>,
+        _balance_service: &crate::backend::domain::balance_service::BalanceService,
         _child_id: &str,
     ) -> HashMap<u32, f64> {
         let mut daily_balances: HashMap<u32, f64> = HashMap::new();
@@ -262,12 +261,12 @@ impl CalendarService {
     }
 
     /// Enhanced generate_calendar_month that supports projected balances for future allowances
-    pub fn generate_calendar_month_with_projected_balances<C: Connection>(
+    pub fn generate_calendar_month_with_projected_balances(
         &self,
         month: u32,
         year: u32,
         transactions: Vec<Transaction>,
-        balance_service: &crate::backend::domain::balance_service::BalanceService<C>,
+        balance_service: &crate::backend::domain::balance_service::BalanceService,
         child_id: &str,
     ) -> CalendarMonth {
         let days_in_month = self.days_in_month(month, year);

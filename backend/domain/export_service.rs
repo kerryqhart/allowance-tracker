@@ -16,8 +16,6 @@ use crate::backend::domain::transaction_service::TransactionService;
 use crate::backend::domain::commands::transactions::TransactionListQuery;
 use crate::backend::domain::commands::child::GetChildCommand;
 
-use crate::backend::storage::Connection;
-
 // Create TransactionMapper placeholder
 struct TransactionMapper;
 
@@ -53,11 +51,11 @@ impl ExportService {
 
     /// Export transactions as CSV data with complete orchestration
     /// This method moves the orchestration logic from the REST API layer into the domain layer
-    pub fn export_transactions_csv<C: Connection>(
+    pub fn export_transactions_csv(
         &self,
         request: ExportDataRequest,
         child_service: &ChildService,
-        transaction_service: &TransactionService<C>,
+        transaction_service: &TransactionService,
     ) -> Result<ExportDataResponse> {
         info!("📄 EXPORT: Exporting transactions as CSV for child_id: {:?}", request.child_id);
 
@@ -155,11 +153,11 @@ impl ExportService {
 
     /// Export data directly to a specified path (or default location) with complete orchestration
     /// This method moves the orchestration logic from the REST API layer into the domain layer
-    pub fn export_to_path<C: Connection>(
+    pub fn export_to_path(
         &self,
         request: ExportToPathRequest,
         child_service: &ChildService,
-        transaction_service: &TransactionService<C>,
+        transaction_service: &TransactionService,
     ) -> Result<ExportToPathResponse> {
         info!("📁 EXPORT: Exporting to path - custom_path: {:?}", request.custom_path);
 

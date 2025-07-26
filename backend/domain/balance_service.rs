@@ -7,17 +7,18 @@
 use anyhow::Result;
 use log::{info, warn};
 use std::sync::Arc;
-use crate::backend::storage::{Connection, TransactionStorage};
+use crate::backend::storage::csv::{CsvConnection, TransactionRepository};
+use crate::backend::storage::traits::TransactionStorage;
 
 /// Service responsible for balance calculations and recalculations
 #[derive(Clone)]
-pub struct BalanceService<C: Connection> {
-    transaction_repository: C::TransactionRepository,
+pub struct BalanceService {
+    transaction_repository: TransactionRepository,
 }
 
-impl<C: Connection> BalanceService<C> {
-    pub fn new(connection: Arc<C>) -> Self {
-        let transaction_repository = connection.create_transaction_repository();
+impl BalanceService {
+    pub fn new(connection: Arc<CsvConnection>) -> Self {
+        let transaction_repository = TransactionRepository::new((*connection).clone());
         Self { transaction_repository }
     }
 
@@ -248,13 +249,13 @@ mod tests {
     use crate::backend::domain::models::transaction::{Transaction, TransactionType};
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    fn create_test_service() -> BalanceService<CsvConnection> {
+    fn create_test_service() -> BalanceService {
         let temp_dir = tempfile::tempdir().unwrap();
         let db = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
         BalanceService::new(db)
     }
 
-    fn create_test_transaction(service: &BalanceService<CsvConnection>, child_id: &str, date: &str, description: &str, amount: f64, balance: f64) -> Transaction {
+    fn create_test_transaction(service: &BalanceService, child_id: &str, date: &str, description: &str, amount: f64, balance: f64) -> Transaction {
         let now_millis = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()

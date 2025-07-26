@@ -21,8 +21,6 @@ use crate::backend::domain::child_service::ChildService;
 use crate::backend::domain::transaction_service::TransactionService;
 use crate::backend::domain::goal_service::GoalService;
 
-use crate::backend::storage::Connection;
-
 // Create TransactionMapper placeholder
 struct TransactionMapper;
 
@@ -59,11 +57,11 @@ impl MoneyManagementService {
 
     /// Add money with complete orchestration - handles all business logic for adding money
     /// This method moves the orchestration logic from the REST API layer into the domain layer
-    pub fn add_money_complete<C: Connection>(
+    pub fn add_money_complete(
         &self,
         request: AddMoneyRequest,
         child_service: &ChildService,
-        transaction_service: &TransactionService<C>,
+        transaction_service: &TransactionService,
         goal_service: &GoalService,
     ) -> Result<AddMoneyResponse> {
 
@@ -168,11 +166,11 @@ impl MoneyManagementService {
 
     /// Spend money with complete orchestration - handles all business logic for spending money
     /// This method moves the orchestration logic from the REST API layer into the domain layer
-    pub fn spend_money_complete<C: Connection>(
+    pub fn spend_money_complete(
         &self,
         request: SpendMoneyRequest,
         child_service: &ChildService,
-        transaction_service: &TransactionService<C>,
+        transaction_service: &TransactionService,
         goal_service: &GoalService,
     ) -> Result<SpendMoneyResponse> {
         info!("💸 MONEY MANAGEMENT: Spending money - description: {}, amount: {}", request.description, request.amount);

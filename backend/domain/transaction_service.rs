@@ -9,8 +9,8 @@ use crate::backend::{
             transaction::{Transaction as DomainTransaction, TransactionType as DomainTransactionType},
         },
     },
-
-    storage::{Connection, TransactionStorage},
+    storage::csv::{CsvConnection, TransactionRepository},
+    storage::traits::TransactionStorage,
 };
 use crate::backend::domain::commands::transactions::{CreateTransactionCommand, TransactionListQuery, TransactionListResult, DeleteTransactionsCommand, DeleteTransactionsResult, PaginationInfo as DomainPagination, CalendarTransactionsQuery, CalendarTransactionsResult};
 use anyhow::{anyhow, Result};
@@ -22,21 +22,21 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Clone)]
-pub struct TransactionService<C: Connection> {
-    transaction_repository: C::TransactionRepository,
+pub struct TransactionService {
+    transaction_repository: TransactionRepository,
     child_service: ChildService,
     allowance_service: AllowanceService,
-    balance_service: BalanceService<C>,
+    balance_service: BalanceService,
 }
 
-impl<C: Connection> TransactionService<C> {
+impl TransactionService {
     pub fn new(
-        connection: Arc<C>,
+        connection: Arc<CsvConnection>,
         child_service: ChildService,
         allowance_service: AllowanceService,
-        balance_service: BalanceService<C>,
+        balance_service: BalanceService,
     ) -> Self {
-        let transaction_repository = connection.create_transaction_repository();
+        let transaction_repository = TransactionRepository::new((*connection).clone());
         Self {
             transaction_repository,
             child_service,
@@ -408,7 +408,7 @@ impl<C: Connection> TransactionService<C> {
     }
 
     /// Create a balance service for projected balance calculations
-    pub fn create_balance_service(&self) -> &BalanceService<C> {
+    pub fn create_balance_service(&self) -> &BalanceService {
         &self.balance_service
     }
 }
@@ -427,7 +427,7 @@ mod tests {
     };
     // Tests now use domain models instead of shared types
 
-    fn create_test_service() -> (TransactionService<CsvConnection>, Arc<CsvConnection>, tempfile::TempDir) {
+    fn create_test_service() -> (TransactionService, Arc<CsvConnection>, tempfile::TempDir) {
         let temp_dir = tempfile::TempDir::new().unwrap();
         let connection = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
         let child_service = ChildService::new(connection.clone());

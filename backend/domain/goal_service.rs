@@ -44,9 +44,9 @@ pub struct GoalService {
     goal_repository: CsvGoalRepository,
     child_service: ChildService,
     allowance_service: AllowanceService,
-    transaction_service: TransactionService<CsvConnection>,
+    transaction_service: TransactionService,
     #[allow(dead_code)]
-    balance_service: BalanceService<CsvConnection>,
+    balance_service: BalanceService,
 }
 
 impl GoalService {
@@ -55,8 +55,8 @@ impl GoalService {
         csv_conn: Arc<CsvConnection>,
         child_service: ChildService,
         allowance_service: AllowanceService,
-        transaction_service: TransactionService<CsvConnection>,
-        balance_service: BalanceService<CsvConnection>,
+        transaction_service: TransactionService,
+        balance_service: BalanceService,
     ) -> Self {
         let goal_repository = CsvGoalRepository::new((*csv_conn).clone());
         Self {

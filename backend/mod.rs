@@ -20,12 +20,12 @@ pub use storage::csv::CsvConnection;
 /// Main backend struct that orchestrates all services
 pub struct Backend {
     pub child_service: domain::child_service::ChildService,
-    pub transaction_service: domain::TransactionService<CsvConnection>,
+    pub transaction_service: domain::TransactionService,
     pub calendar_service: domain::CalendarService,
     pub allowance_service: domain::AllowanceService,
     pub goal_service: domain::GoalService,
     pub parental_control_service: domain::ParentalControlService,
-    pub balance_service: domain::BalanceService<CsvConnection>,
+    pub balance_service: domain::BalanceService,
     pub data_directory_service: domain::DataDirectoryService,
     pub export_service: domain::ExportService,
 }
