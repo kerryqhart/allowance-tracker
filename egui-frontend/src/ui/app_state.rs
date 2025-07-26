@@ -106,11 +106,17 @@ impl AllowanceTrackerApp {
     /// This replaces the cached current_child() method to avoid inconsistencies
     pub fn get_current_child_from_backend(&self) -> Option<shared::Child> {
         match self.backend().child_service.get_active_child() {
-            Ok(result) => result.active_child.child.map(|domain_child| {
-                crate::ui::mappers::to_dto(domain_child)
-            }),
+            Ok(result) => {
+                // Only log once per actual change, not every frame (commented out to reduce noise)
+                // log::info!("🔍 GET_CURRENT_CHILD_BACKEND: Raw result: {:?}", 
+                //     result.active_child.child.as_ref().map(|c| (&c.id, &c.name)));
+                
+                result.active_child.child.map(|domain_child| {
+                    crate::ui::mappers::to_dto(domain_child)
+                })
+            },
             Err(e) => {
-                log::warn!("Failed to get current child from backend: {}", e);
+                log::warn!("❌ GET_CURRENT_CHILD_BACKEND: Failed to get current child from backend: {}", e);
                 None
             }
         }

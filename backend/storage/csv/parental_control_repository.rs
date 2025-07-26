@@ -99,46 +99,7 @@ impl ParentalControlRepository {
         }
     }
     
-    /// Find the child directory that contains a child with the given child_id
-    #[allow(dead_code)]
-    fn find_child_directory_by_id(&self, child_id: &str) -> Result<Option<String>> {
-        let base_dir = self.connection.base_directory();
-        
-        if !base_dir.exists() {
-            return Ok(None);
-        }
-        
-        // Search through all child directories
-        for entry in std::fs::read_dir(base_dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            
-            if !path.is_dir() {
-                continue;
-            }
-            
-            let dir_name = match path.file_name().and_then(|n| n.to_str()) {
-                Some(name) => name,
-                None => continue,
-            };
-            
-            // Check if this directory has a child.yaml with the matching child_id
-            let child_yaml_path = path.join("child.yaml");
-            if child_yaml_path.exists() {
-                if let Ok(yaml_content) = std::fs::read_to_string(&child_yaml_path) {
-                    if let Ok(child) = serde_yaml::from_str::<shared::Child>(&yaml_content) {
-                        if child.id == child_id {
-                            debug!("Found child directory '{}' for child ID '{}'", dir_name, child_id);
-                            return Ok(Some(dir_name.to_string()));
-                        }
-                    }
-                }
-            }
-        }
-        
-        debug!("No child directory found for child ID '{}'", child_id);
-        Ok(None)
-    }
+    // NOTE: find_child_directory_by_id method removed - now using centralized version in CsvConnection
     
     /// Get all child directories that exist
     #[allow(dead_code)]
@@ -302,8 +263,8 @@ impl crate::backend::storage::ParentalControlStorage for ParentalControlReposito
             // For global attempts, use the root directory directly
             "global".to_string()
         } else {
-            // Find the child directory for specific child IDs
-            match self.find_child_directory_by_id(child_id)? {
+            // Find the child directory for specific child IDs using centralized logic
+            match self.connection.find_child_directory_by_id(child_id)? {
                 Some(dir) => dir,
                 None => return Err(anyhow::anyhow!("Child not found: {}", child_id)),
             }
@@ -333,8 +294,8 @@ impl crate::backend::storage::ParentalControlStorage for ParentalControlReposito
             // For global attempts, use the root directory directly
             "global".to_string()
         } else {
-            // Find the child directory for specific child IDs
-            match self.find_child_directory_by_id(child_id)? {
+            // Find the child directory for specific child IDs using centralized logic
+            match self.connection.find_child_directory_by_id(child_id)? {
                 Some(dir) => dir,
                 None => return Ok(Vec::new()), // Return empty vector if child not found
             }

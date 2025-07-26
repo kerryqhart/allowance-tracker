@@ -501,7 +501,7 @@ impl Default for CalendarService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::storage::traits::TransactionStorage;
+    use crate::backend::storage::traits::{TransactionStorage, Connection};
 
     fn create_test_transaction(date: &str, amount: f64, balance: f64, description: &str) -> Transaction {
         let parsed_date = chrono::DateTime::parse_from_rfc3339(date)

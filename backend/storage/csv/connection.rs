@@ -623,6 +623,101 @@ impl CsvConnection {
         info!("Child '{}' data directory successfully reverted to default location", child_name);
         Ok(format!("Child '{}' data directory successfully reverted to default location: {}", child_name, default_child_dir.display()))
     }
+    
+    // ========================================================================
+    // CENTRALIZED CHILD DIRECTORY MANAGEMENT
+    // ========================================================================
+    // These methods provide the single source of truth for child ID → directory mapping
+    // All repositories should use these methods instead of implementing their own logic
+    
+    /// Generate a safe directory name from a child's name
+    /// This is the authoritative method for creating directory names from child names
+    pub fn generate_safe_directory_name(child_name: &str) -> String {
+        child_name
+            .to_lowercase()
+            .trim()
+            .chars()
+            .map(|c| {
+                if c.is_alphanumeric() {
+                    c
+                } else if c.is_whitespace() || c == '-' || c == '_' {
+                    '_'
+                } else {
+                    // Convert accented characters to their base equivalents
+                    match c {
+                        'á' | 'à' | 'ä' | 'â' | 'Á' | 'À' | 'Ä' | 'Â' => 'a',
+                        'é' | 'è' | 'ë' | 'ê' | 'É' | 'È' | 'Ë' | 'Ê' => 'e',
+                        'í' | 'ì' | 'ï' | 'î' | 'Í' | 'Ì' | 'Ï' | 'Î' => 'i',
+                        'ó' | 'ò' | 'ö' | 'ô' | 'Ó' | 'Ò' | 'Ö' | 'Ô' => 'o',
+                        'ú' | 'ù' | 'ü' | 'û' | 'Ú' | 'Ù' | 'Ü' | 'Û' => 'u',
+                        'ñ' | 'Ñ' => 'n',
+                        'ç' | 'Ç' => 'c',
+                        'ß' => 's',
+                        _ => ' ' // Skip other special characters
+                    }
+                }
+            })
+            .collect::<String>()
+            .split_whitespace()
+            .collect::<Vec<&str>>()
+            .join("_")
+            .trim_matches('_')
+            .to_string()
+    }
+    
+    /// Find the child directory name that contains a child with the given child_id
+    /// This is the authoritative method for mapping child IDs to directory names
+    /// Returns the directory name (not full path) that can be used with get_child_directory()
+    pub fn find_child_directory_by_id(&self, child_id: &str) -> Result<Option<String>> {
+        let base_dir = self.base_directory();
+        
+        if !base_dir.exists() {
+            return Ok(None);
+        }
+        
+        // Search through all potential child directories
+        for entry in fs::read_dir(base_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            
+            if !path.is_dir() {
+                continue;
+            }
+            
+            let dir_name = match path.file_name().and_then(|n| n.to_str()) {
+                Some(name) => name,
+                None => continue,
+            };
+            
+            // Use our own get_child_directory method to handle redirect files properly
+            let actual_child_dir = self.get_child_directory(dir_name);
+            let child_yaml_path = actual_child_dir.join("child.yaml");
+            
+            if child_yaml_path.exists() {
+                if let Ok(yaml_content) = fs::read_to_string(&child_yaml_path) {
+                    // Try parsing as shared::Child first
+                    if let Ok(child) = serde_yaml::from_str::<shared::Child>(&yaml_content) {
+                        if child.id == child_id {
+                            debug!("✅ Found child directory '{}' for child ID '{}'", dir_name, child_id);
+                            return Ok(Some(dir_name.to_string()));
+                        }
+                    }
+                }
+            }
+        }
+        
+        debug!("❌ No child directory found for child ID '{}'", child_id);
+        Ok(None)
+    }
+    
+    /// Get the full path to a child's directory by their child_id
+    /// This combines find_child_directory_by_id with get_child_directory for convenience
+    pub fn get_child_directory_by_id(&self, child_id: &str) -> Result<Option<PathBuf>> {
+        match self.find_child_directory_by_id(child_id)? {
+            Some(dir_name) => Ok(Some(self.get_child_directory(&dir_name))),
+            None => Ok(None),
+        }
+    }
 }
 
 #[cfg(test)]

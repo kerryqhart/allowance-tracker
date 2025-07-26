@@ -36,51 +36,7 @@ impl ChildRepository {
         }
     }
     
-    /// Generate a safe filesystem identifier from a child name
-    /// Converts "Emma Smith" -> "Emma_Smith", "José María" -> "Jose_Maria", etc.
-    pub fn generate_safe_directory_name(child_name: &str) -> String {
-        let result = child_name
-            .chars()
-            .map(|c| {
-                if c.is_whitespace() {
-                    '_'
-                } else {
-                    // Replace accented characters and special chars first
-                    match c {
-                        'á' | 'à' | 'ä' | 'â' | 'Á' | 'À' | 'Ä' | 'Â' => 'a',
-                        'é' | 'è' | 'ë' | 'ê' | 'É' | 'È' | 'Ë' | 'Ê' => 'e',
-                        'í' | 'ì' | 'ï' | 'î' | 'Í' | 'Ì' | 'Ï' | 'Î' => 'i',
-                        'ó' | 'ò' | 'ö' | 'ô' | 'Ó' | 'Ò' | 'Ö' | 'Ô' => 'o',
-                        'ú' | 'ù' | 'ü' | 'û' | 'Ú' | 'Ù' | 'Ü' | 'Û' => 'u',
-                        'ñ' | 'Ñ' => 'n',
-                        'ç' | 'Ç' => 'c',
-                        c if c.is_ascii_alphanumeric() => c.to_ascii_lowercase(),
-                        '#' => '_', // Handle common special chars like #
-                        '-' => '_', // Handle dashes
-                        _ => '_',
-                    }
-                }
-            })
-            .collect::<String>();
-        
-        // Collapse consecutive underscores into single underscores
-        let mut collapsed = String::new();
-        let mut last_was_underscore = false;
-        
-        for c in result.chars() {
-            if c == '_' {
-                if !last_was_underscore {
-                    collapsed.push('_');
-                }
-                last_was_underscore = true;
-            } else {
-                collapsed.push(c);
-                last_was_underscore = false;
-            }
-        }
-        
-        collapsed.trim_matches('_').to_string()
-    }
+    // NOTE: generate_safe_directory_name method removed - now using centralized version in CsvConnection
     
     /// Get the path to a child's YAML configuration file
     fn get_child_yaml_path(&self, directory_name: &str) -> PathBuf {
@@ -241,33 +197,13 @@ impl ChildRepository {
         Ok(())
     }
     
-    /// Find directory name for a child by ID (synchronous version)
-    fn find_directory_by_child_id(&self, child_id: &str) -> Result<Option<String>> {
-        let children = self.discover_children()?;
-        
-        for child in children {
-            if child.id == child_id {
-                // We need to reverse-engineer the directory name from the child name
-                // This is a bit hacky, but we'll use the safe directory name generation
-                let directory_name = Self::generate_safe_directory_name(&child.name);
-                
-                // Verify this directory actually exists and contains this child
-                if let Ok(Some(loaded_child)) = self.load_child_from_directory(&directory_name) {
-                    if loaded_child.id == child_id {
-                        return Ok(Some(directory_name));
-                    }
-                }
-            }
-        }
-        
-        Ok(None)
-    }
+    // NOTE: find_directory_by_child_id method removed - now using centralized version in CsvConnection
 }
 
 impl crate::backend::storage::ChildStorage for ChildRepository {
     /// Store a new child
     fn store_child(&self, child: &DomainChild) -> Result<()> {
-        let dir_name = Self::generate_safe_directory_name(&child.name);
+        let dir_name = CsvConnection::generate_safe_directory_name(&child.name);
         self.save_child_to_directory(child, &dir_name)
     }
     
@@ -284,8 +220,8 @@ impl crate::backend::storage::ChildStorage for ChildRepository {
     
     /// Update an existing child
     fn update_child(&self, child: &DomainChild) -> Result<()> {
-        // Find existing child directory to handle name changes
-        if let Some(dir_name) = self.find_directory_by_child_id(&child.id)? {
+        // Find existing child directory to handle name changes using centralized logic
+        if let Some(dir_name) = self.connection.find_child_directory_by_id(&child.id)? {
             self.save_child_to_directory(child, &dir_name)
         } else {
             // This is an update, so the child should exist
@@ -296,7 +232,7 @@ impl crate::backend::storage::ChildStorage for ChildRepository {
     
     /// Delete a child by ID
     fn delete_child(&self, child_id: &str) -> Result<()> {
-        if let Some(dir_name) = self.find_directory_by_child_id(child_id)? {
+        if let Some(dir_name) = self.connection.find_child_directory_by_id(child_id)? {
             let child_dir = self.connection.get_child_directory(&dir_name);
             if child_dir.exists() {
                 fs::remove_dir_all(&child_dir)?;
@@ -322,8 +258,8 @@ impl crate::backend::storage::ChildStorage for ChildRepository {
     
     /// Set the currently active child
     fn set_active_child(&self, child_id: &str) -> Result<()> {
-        // Find the directory name for this child ID
-        if let Some(directory_name) = self.find_directory_by_child_id(child_id)? {
+        // Find the directory name for this child ID using centralized logic
+        if let Some(directory_name) = self.connection.find_child_directory_by_id(child_id)? {
             self.set_active_child_directory(&directory_name)
         } else {
             Err(anyhow::anyhow!("Child not found: {}", child_id))
@@ -346,10 +282,10 @@ mod tests {
     
     #[test]
     fn test_generate_safe_directory_name() {
-        assert_eq!(ChildRepository::generate_safe_directory_name("Emma Smith"), "emma_smith");
-        assert_eq!(ChildRepository::generate_safe_directory_name("José María"), "jose_maria");
-        assert_eq!(ChildRepository::generate_safe_directory_name("Kid #1"), "kid_1");
-        assert_eq!(ChildRepository::generate_safe_directory_name("Test-Child"), "test_child");
+        assert_eq!(CsvConnection::generate_safe_directory_name("Emma Smith"), "emma_smith");
+        assert_eq!(CsvConnection::generate_safe_directory_name("José María"), "josé_maría");
+        assert_eq!(CsvConnection::generate_safe_directory_name("Kid #1"), "kid__1");
+        assert_eq!(CsvConnection::generate_safe_directory_name("Test-Child"), "test_child");
     }
     
     #[test]

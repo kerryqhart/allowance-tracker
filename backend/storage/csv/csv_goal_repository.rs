@@ -1,7 +1,4 @@
-use crate::backend::{
-    domain::models::goal::{DomainGoal, DomainGoalState},
-    storage::GoalStorage,
-};
+use crate::backend::domain::models::goal::{DomainGoal, DomainGoalState};
 use anyhow::Result;
 use log::warn;
 use serde::{Deserialize, Serialize};
@@ -107,14 +104,16 @@ impl CsvGoalRepository {
     }
 }
 
-impl GoalStorage for CsvGoalRepository {
-    fn store_goal(&self, goal: &DomainGoal) -> Result<()> {
+impl CsvGoalRepository {
+    /// Store a new goal (append-only - creates new record)
+    pub fn store_goal(&self, goal: &DomainGoal) -> Result<()> {
         let mut goals = self.read_goals(&goal.child_id)?;
         goals.push(goal.clone());
         self.write_goals(&goal.child_id, &goals)
     }
 
-    fn get_current_goal(&self, child_id: &str) -> Result<Option<DomainGoal>> {
+    /// Get the current active goal for a specific child
+    pub fn get_current_goal(&self, child_id: &str) -> Result<Option<DomainGoal>> {
         let goals = self.read_goals(child_id)?;
         Ok(goals
             .into_iter()
@@ -122,7 +121,9 @@ impl GoalStorage for CsvGoalRepository {
             .max_by_key(|g| g.updated_at.clone()))
     }
 
-    fn list_goals(&self, child_id: &str, limit: Option<u32>) -> Result<Vec<DomainGoal>> {
+    /// List all goals for a specific child (with optional limit)
+    /// Returns goals ordered by created_at descending (most recent first)
+    pub fn list_goals(&self, child_id: &str, limit: Option<u32>) -> Result<Vec<DomainGoal>> {
         let mut goals = self.read_goals(child_id)?;
         // Sort by created_at descending (most recent first)
         goals.sort_by(|a, b| b.created_at.cmp(&a.created_at));
@@ -134,7 +135,9 @@ impl GoalStorage for CsvGoalRepository {
         Ok(goals)
     }
 
-    fn update_goal(&self, goal: &DomainGoal) -> Result<()> {
+    /// Update an existing goal by creating a new record with updated fields
+    /// This maintains the append-only history while updating the current state
+    pub fn update_goal(&self, goal: &DomainGoal) -> Result<()> {
         let mut goals = self.read_goals(&goal.child_id)?;
         if let Some(g) = goals.iter_mut().find(|g| g.id == goal.id) {
             *g = goal.clone();
@@ -142,7 +145,8 @@ impl GoalStorage for CsvGoalRepository {
         self.write_goals(&goal.child_id, &goals)
     }
 
-    fn cancel_current_goal(&self, child_id: &str) -> Result<Option<DomainGoal>> {
+    /// Cancel the current active goal by setting its state to Cancelled
+    pub fn cancel_current_goal(&self, child_id: &str) -> Result<Option<DomainGoal>> {
         let mut goals = self.read_goals(child_id)?;
         if let Some(goal) = goals.iter_mut().find(|g| g.state == DomainGoalState::Active) {
             goal.state = DomainGoalState::Cancelled;
@@ -154,7 +158,8 @@ impl GoalStorage for CsvGoalRepository {
         }
     }
 
-    fn complete_current_goal(&self, child_id: &str) -> Result<Option<DomainGoal>> {
+    /// Mark the current active goal as completed
+    pub fn complete_current_goal(&self, child_id: &str) -> Result<Option<DomainGoal>> {
         let mut goals = self.read_goals(child_id)?;
         if let Some(goal) = goals.iter_mut().find(|g| g.state == DomainGoalState::Active) {
             goal.state = DomainGoalState::Completed;
@@ -166,7 +171,8 @@ impl GoalStorage for CsvGoalRepository {
         }
     }
 
-    fn has_active_goal(&self, child_id: &str) -> Result<bool> {
+    /// Check if a child has an active goal
+    pub fn has_active_goal(&self, child_id: &str) -> Result<bool> {
         let goals = self.read_goals(child_id)?;
         Ok(goals.iter().any(|g| g.state == DomainGoalState::Active))
     }

@@ -9,7 +9,6 @@ use crate::backend::domain::models::child::Child as DomainChild;
 use crate::backend::domain::models::transaction::Transaction as DomainTransaction;
 use crate::backend::domain::models::allowance::AllowanceConfig as DomainAllowanceConfig;
 use crate::backend::domain::models::parental_control_attempt::ParentalControlAttempt as DomainParentalControlAttempt;
-use crate::backend::domain::models::goal::DomainGoal;
 
 /// Trait defining the interface for transaction storage operations
 /// 
@@ -121,35 +120,7 @@ pub trait ParentalControlStorage: Send + Sync {
     fn get_all_parental_control_attempts(&self, limit: Option<u32>) -> Result<Vec<DomainParentalControlAttempt>>;
 }
 
-/// Trait defining the interface for goal storage operations
-/// 
-/// This trait abstracts away the specific storage implementation details,
-/// allowing the domain layer to work with different storage backends
-/// (SQL databases, CSV files, etc.) without modification.
-pub trait GoalStorage: Send + Sync {
-    /// Store a new goal (append-only - creates new record)
-    fn store_goal(&self, goal: &DomainGoal) -> Result<()>;
-    
-    /// Get the current active goal for a specific child
-    fn get_current_goal(&self, child_id: &str) -> Result<Option<DomainGoal>>;
-    
-    /// List all goals for a specific child (with optional limit)
-    /// Returns goals ordered by created_at descending (most recent first)
-    fn list_goals(&self, child_id: &str, limit: Option<u32>) -> Result<Vec<DomainGoal>>;
-    
-    /// Update an existing goal by creating a new record with updated fields
-    /// This maintains the append-only history while updating the current state
-    fn update_goal(&self, goal: &DomainGoal) -> Result<()>;
-    
-    /// Cancel the current active goal by setting its state to Cancelled
-    fn cancel_current_goal(&self, child_id: &str) -> Result<Option<DomainGoal>>;
-    
-    /// Mark the current active goal as completed
-    fn complete_current_goal(&self, child_id: &str) -> Result<Option<DomainGoal>>;
-    
-    /// Check if a child has an active goal
-    fn has_active_goal(&self, child_id: &str) -> Result<bool>;
-}
+
 
 /// Trait defining the interface for storage connections
 /// 

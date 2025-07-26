@@ -96,47 +96,7 @@ impl AllowanceRepository {
         Ok(Some(config))
     }
     
-    /// Find the child directory that contains a child with the given child_id
-    fn find_child_directory_by_id(&self, child_id: &str) -> Result<Option<String>> {
-        let base_dir = self.connection.base_directory();
-        
-        if !base_dir.exists() {
-            return Ok(None);
-        }
-        
-        // Search through all child directories
-        for entry in std::fs::read_dir(base_dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            
-            if !path.is_dir() {
-                continue;
-            }
-            
-            let dir_name = match path.file_name().and_then(|n| n.to_str()) {
-                Some(name) => name,
-                None => continue,
-            };
-            
-            // Use the connection's get_child_directory method to handle redirect files
-            let actual_child_dir = self.connection.get_child_directory(dir_name);
-            let child_yaml_path = actual_child_dir.join("child.yaml");
-            
-            if child_yaml_path.exists() {
-                if let Ok(yaml_content) = std::fs::read_to_string(&child_yaml_path) {
-                    if let Ok(child) = serde_yaml::from_str::<shared::Child>(&yaml_content) {
-                        if child.id == child_id {
-                            debug!("Found child directory '{}' for child ID '{}'", dir_name, child_id);
-                            return Ok(Some(dir_name.to_string()));
-                        }
-                    }
-                }
-            }
-        }
-        
-        debug!("No child directory found for child ID '{}'", child_id);
-        Ok(None)
-    }
+    // NOTE: find_child_directory_by_id method removed - now using centralized version in CsvConnection
     
     /// Get all child directories that have allowance configs
     fn get_all_child_directories_with_allowance_configs(&self) -> Result<Vec<String>> {
@@ -174,8 +134,8 @@ impl AllowanceRepository {
 
 impl crate::backend::storage::AllowanceStorage for AllowanceRepository {
     fn store_allowance_config(&self, config: &DomainAllowanceConfig) -> Result<()> {
-        // Find the child directory for this child_id
-        let child_directory = match self.find_child_directory_by_id(&config.child_id)? {
+        // Find the child directory for this child_id using centralized logic
+        let child_directory = match self.connection.find_child_directory_by_id(&config.child_id)? {
             Some(dir) => dir,
             None => {
                 return Err(anyhow::anyhow!(
@@ -191,8 +151,8 @@ impl crate::backend::storage::AllowanceStorage for AllowanceRepository {
     }
     
     fn get_allowance_config(&self, child_id: &str) -> Result<Option<DomainAllowanceConfig>> {
-        // Find the child directory for this child_id
-        let child_directory = match self.find_child_directory_by_id(child_id)? {
+        // Find the child directory for this child_id using centralized logic
+        let child_directory = match self.connection.find_child_directory_by_id(child_id)? {
             Some(dir) => dir,
             None => {
                 debug!("Child with ID '{}' not found when getting allowance config", child_id);
@@ -209,8 +169,8 @@ impl crate::backend::storage::AllowanceStorage for AllowanceRepository {
     }
     
     fn delete_allowance_config(&self, child_id: &str) -> Result<bool> {
-        // Find the child directory for this child_id
-        let child_directory = match self.find_child_directory_by_id(child_id)? {
+        // Find the child directory for this child_id using centralized logic
+        let child_directory = match self.connection.find_child_directory_by_id(child_id)? {
             Some(dir) => dir,
             None => {
                 debug!("Child with ID '{}' not found when deleting allowance config", child_id);

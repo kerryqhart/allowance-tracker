@@ -59,7 +59,13 @@ impl AllowanceTrackerApp {
                             // Add spacing between settings and child selector
                             ui.add_space(15.0);
                             // 🎯 FIXED: Use backend as source of truth for header display
-                            if let Some(child) = &self.get_current_child_from_backend() {
+                            let current_child_from_backend = self.get_current_child_from_backend();
+                            
+                            // Header display debug (commented out to reduce noise)
+                            // log::info!("🏠 HEADER_DISPLAY: Current child from backend: {:?}", 
+                            //     current_child_from_backend.as_ref().map(|c| (&c.id, &c.name)));
+                            
+                            if let Some(child) = &current_child_from_backend {
                                 // Balance with clean styling (no color coding) - disable text selection
                                 ui.add(egui::Label::new(egui::RichText::new(format!("${:.2}", self.current_balance()))
                                     .font(egui::FontId::new(24.0, egui::FontFamily::Proportional))
@@ -117,6 +123,13 @@ impl AllowanceTrackerApp {
             Err(_) => vec![],
         };
         
+        // 🔍 SURGICAL DEBUG: Available children and current selection
+        let current_child_from_backend = self.get_current_child_from_backend();
+        log::info!("🎯 DROPDOWN_DEBUG: Available children: {:?}", 
+            children_list.iter().map(|c| (&c.id, &c.name)).collect::<Vec<_>>());
+        log::info!("🎯 DROPDOWN_DEBUG: Backend says current child: {:?}", 
+            current_child_from_backend.as_ref().map(|c| (&c.id, &c.name)));
+
         let menu_items: Vec<DropdownMenuItem> = if children_list.is_empty() {
             vec![DropdownMenuItem {
                 label: "No children available".to_string(),
@@ -127,9 +140,13 @@ impl AllowanceTrackerApp {
         } else {
             children_list.iter().map(|child| {
                 // 🎯 FIXED: Use backend as source of truth for dropdown display
-                let is_current = self.get_current_child_from_backend().as_ref()
+                let is_current = current_child_from_backend.as_ref()
                     .map(|c| c.id == child.id)
                     .unwrap_or(false);
+                
+                // 🔍 SURGICAL DEBUG: Log each dropdown item
+                log::info!("🎯 DROPDOWN_ITEM: {} ({}), is_current: {}", 
+                    child.name, child.id, is_current);
                 
                 DropdownMenuItem {
                     label: child.name.clone(),
@@ -157,24 +174,51 @@ impl AllowanceTrackerApp {
         if let Some(index) = selected_index {
             if index < children_list.len() {
                 let selected_child = &children_list[index];
+                
+                // 🔍 SURGICAL DEBUG: Child selection process - CRITICAL PATH
+                log::info!("🎯🎯🎯 DROPDOWN_CLICKED: User clicked child {} ({})", 
+                    selected_child.name, selected_child.id);
+                
+                let current_before_switch = self.get_current_child_from_backend();
+                log::info!("🔍 BEFORE_SWITCH: Backend thinks current child is: {:?}", 
+                    current_before_switch.as_ref().map(|c| (&c.id, &c.name)));
+                
                 // 🎯 FIXED: Use backend as source of truth, not UI cache
-                let is_current = self.get_current_child_from_backend().as_ref()
+                let is_current = current_before_switch.as_ref()
                     .map(|c| c.id == selected_child.id)
                     .unwrap_or(false);
+                
+                log::info!("🎯 IS_CURRENT_CHECK: Selected child {} is_current={}", selected_child.name, is_current);
                 
                 if !is_current {
                     // Set this child as active
                     let command = crate::backend::domain::commands::child::SetActiveChildCommand {
                         child_id: selected_child.id.clone(),
                     };
+                    
+                    log::info!("🚀🚀🚀 EXECUTING_COMMAND: SetActiveChildCommand {{ child_id: {} }}", selected_child.id);
+                    
                     match self.backend().child_service.set_active_child(command) {
-                        Ok(_) => {
-                            // 🎯 FIXED: No more UI cache - backend is the single source of truth
-                            log::info!("🔄 CHILD_SWITCH: Successfully set active child to: {}", selected_child.name);
+                        Ok(result) => {
+                            log::info!("✅✅✅ BACKEND_SUCCESS: Child service says switch to {} worked!", selected_child.name);
+                            log::info!("🔄 SWITCH_RESULT: Backend result details: {:?}", result);
+                            
+                            // Critical verification: Check if the switch actually worked
+                            let current_after_switch = self.get_current_child_from_backend();
+                            log::info!("🔍 AFTER_SWITCH_VERIFY: Backend now thinks current child is: {:?}", 
+                                current_after_switch.as_ref().map(|c| (&c.id, &c.name)));
+                            
+                            // Double-check: Did the switch actually work?
+                            let switch_worked = current_after_switch.as_ref()
+                                .map(|c| c.id == selected_child.id)
+                                .unwrap_or(false);
+                            log::info!("🎯 VERIFICATION: Did switch to {} actually work? {}", 
+                                selected_child.name, switch_worked);
+                            
                             self.refresh_all_data_for_current_child();
                         }
                         Err(e) => {
-                            log::error!("❌ CHILD_SWITCH: Failed to set active child: {}", e);
+                            log::error!("❌❌❌ BACKEND_ERROR: Child service failed to switch to {}: {}", selected_child.name, e);
                             self.ui.error_message = Some(format!("Failed to select child: {}", e));
                         }
                     }

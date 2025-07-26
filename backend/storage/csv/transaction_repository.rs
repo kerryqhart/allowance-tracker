@@ -132,8 +132,8 @@ impl TransactionRepository {
         // Look up the child by ID to get their actual name
         match self.child_repository.get_child(child_id)? {
             Some(child) => {
-                // Use the same safe directory name generation as the child repository
-                Ok(ChildRepository::generate_safe_directory_name(&child.name))
+                // Use the centralized safe directory name generation
+                Ok(CsvConnection::generate_safe_directory_name(&child.name))
             }
             None => {
                 // Child not found - this shouldn't happen in normal operation
