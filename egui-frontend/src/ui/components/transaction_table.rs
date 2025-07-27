@@ -86,10 +86,28 @@ pub fn render_responsive_transaction_table(ui: &mut egui::Ui, available_rect: eg
                                         egui::vec2(width, header_height),
                                         egui::Layout::centered_and_justified(egui::Direction::TopDown),
                                         |ui| {
+                                            let header_rect = ui.available_rect_before_wrap();
+                                            
+                                            // Draw opaque header background using single color (Amount column color)
+                                            let header_bg_color = crate::ui::components::styling::theme::CURRENT_THEME.table_header_color(2); // Use Amount column color (index 2)
+                                            ui.painter().rect_filled(
+                                                header_rect,
+                                                egui::CornerRadius::same(0), // No rounding
+                                                header_bg_color
+                                            );
+                                            
+                                            // Draw header border
+                                            ui.painter().rect_stroke(
+                                                header_rect,
+                                                egui::CornerRadius::same(0), // No rounding
+                                                egui::Stroke::new(0.5, egui::Color32::from_rgba_unmultiplied(200, 200, 200, 100)),
+                                                egui::StrokeKind::Outside
+                                            );
+                                            
                                             ui.add(egui::Label::new(egui::RichText::new(*name)
                                                 .font(egui::FontId::new(header_font_size, font_family.clone()))
                                                 .strong()
-                                                .color(egui::Color32::DARK_GRAY))
+                                                .color(egui::Color32::WHITE)) // White text on colored background
                                                 .selectable(false));
                                         },
                                     );
@@ -141,9 +159,9 @@ pub fn render_responsive_transaction_table(ui: &mut egui::Ui, available_rect: eg
                                                 ];
                                                 
                                                 let cell_bg_color = if is_hovered {
-                                                    egui::Color32::from_rgba_unmultiplied(255, 255, 255, 120) // More opaque when hovered
+                                                    egui::Color32::from_rgba_unmultiplied(255, 255, 255, 132) // More opaque when hovered (increased by 10%)
                                                 } else {
-                                                    egui::Color32::from_rgba_unmultiplied(255, 255, 255, 55) // Normal transparency
+                                                    egui::Color32::from_rgba_unmultiplied(255, 255, 255, 72) // Normal transparency (increased to 72)
                                                 };
                                                 let cell_border_color = egui::Color32::from_rgba_unmultiplied(200, 200, 200, 100);
                                                 
