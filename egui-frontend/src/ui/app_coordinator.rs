@@ -403,7 +403,7 @@ impl AllowanceTrackerApp {
             log::info!("🔄 Performing periodic allowance refresh check");
             
             // Use the existing backend method to check and issue pending allowances
-            match self.core.backend.transaction_service.check_and_issue_pending_allowances() {
+            match self.core.backend.transaction_service.as_ref().check_and_issue_pending_allowances() {
                 Ok(count) => {
                     if count > 0 {
                         log::info!("🎯 Periodic refresh: Issued {} pending allowances", count);

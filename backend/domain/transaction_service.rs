@@ -4,6 +4,7 @@ use crate::backend::{
         allowance_service::AllowanceService,
         balance_service::BalanceService,
         child_service::ChildService,
+        email_service::{EmailServiceWrapper, EmailConfig},
         models::{
             child::Child as DomainChild,
             transaction::{Transaction as DomainTransaction, TransactionType as DomainTransactionType},
@@ -21,12 +22,12 @@ use std::sync::Arc;
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-#[derive(Clone)]
 pub struct TransactionService {
     transaction_repository: TransactionRepository,
     child_service: ChildService,
     allowance_service: AllowanceService,
     balance_service: BalanceService,
+    email_service: Option<EmailServiceWrapper>,
 }
 
 impl TransactionService {
@@ -42,7 +43,26 @@ impl TransactionService {
             child_service,
             allowance_service,
             balance_service,
+            email_service: None,
         }
+    }
+
+    pub fn with_email_service(
+        connection: Arc<CsvConnection>,
+        child_service: ChildService,
+        allowance_service: AllowanceService,
+        balance_service: BalanceService,
+        email_config: EmailConfig,
+    ) -> Result<Self> {
+        let transaction_repository = TransactionRepository::new((*connection).clone());
+        let email_service = EmailServiceWrapper::new(email_config)?;
+        Ok(Self {
+            transaction_repository,
+            child_service,
+            allowance_service,
+            balance_service,
+            email_service: Some(email_service),
+        })
     }
 
     pub fn create_transaction_domain(
@@ -63,12 +83,29 @@ impl TransactionService {
             chrono::Utc::now().with_timezone(&eastern_offset)
         });
 
-        self.create_transaction_internal(
+        let transaction = self.create_transaction_internal(
             &active_child.id,
             transaction_date,
             command.description,
             command.amount,
-        )
+        )?;
+
+        // Send email notification if email service is configured
+        if let Some(email_service) = &self.email_service {
+            log::info!("📧 Email service is configured, sending notification for transaction: {}", transaction.id);
+            let action = if transaction.amount >= 0.0 { "earned" } else { "spent" };
+            let current_balance = self.balance_service.get_current_balance(&active_child.id)?;
+            log::info!("📧 Sending email notification: {} ${:.2} for {}", action, transaction.amount.abs(), active_child.name);
+            if let Err(e) = email_service.send_transaction_notification(&transaction, &active_child, action, current_balance) {
+                error!("Failed to send transaction notification email: {}", e);
+            } else {
+                log::info!("📧 Email notification sent successfully!");
+            }
+        } else {
+            log::info!("📧 No email service configured, skipping notification");
+        }
+
+        Ok(transaction)
     }
 
     /// Private unified function for creating any transaction
@@ -284,6 +321,14 @@ impl TransactionService {
             .cloned()
             .collect();
 
+        // Fetch transactions before deleting them for email notifications
+        let transactions_to_delete = if !existing_ids.is_empty() {
+            self.transaction_repository
+                .list_transactions_by_ids(&active_child.id, &existing_ids)?
+        } else {
+            Vec::new()
+        };
+
         let deleted_count = if !existing_ids.is_empty() {
             self.transaction_repository
                 .delete_transactions(&active_child.id, &existing_ids)?
@@ -294,6 +339,16 @@ impl TransactionService {
         if deleted_count > 0 {
             self.balance_service
                 .recalculate_balances_from_date(&active_child.id, "1970-01-01T00:00:00Z")?;
+        }
+
+        // Send email notifications for deleted transactions
+        if let Some(email_service) = &self.email_service {
+            let current_balance = self.balance_service.get_current_balance(&active_child.id)?;
+            for transaction in &transactions_to_delete {
+                if let Err(e) = email_service.send_transaction_deleted_notification(transaction, &active_child, current_balance) {
+                    error!("Failed to send transaction deletion notification email: {}", e);
+                }
+            }
         }
 
         let success_message = match deleted_count {

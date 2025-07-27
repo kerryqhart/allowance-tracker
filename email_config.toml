@@ -1,0 +1,9 @@
+smtp_server = "smtp.gmail.com"
+smtp_port = 587
+username = "kerry.allowance.tracker@gmail.com"
+password = "fxhhkqejbidwfmde"
+from_email = "kerry.allowance.tracker@gmail.com"
+to_emails = [
+    "kerry.q.hart@pm.me",
+    "noelle.m.hart@gmail.com"
+] 

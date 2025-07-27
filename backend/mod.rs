@@ -20,7 +20,7 @@ pub use storage::csv::CsvConnection;
 /// Main backend struct that orchestrates all services
 pub struct Backend {
     pub child_service: domain::child_service::ChildService,
-    pub transaction_service: domain::TransactionService,
+    pub transaction_service: Arc<domain::TransactionService>,
     pub calendar_service: domain::CalendarService,
     pub allowance_service: domain::AllowanceService,
     pub goal_service: domain::GoalService,
@@ -46,12 +46,18 @@ impl Backend {
         let allowance_service = domain::AllowanceService::new(csv_connection.clone());
         let balance_service = domain::BalanceService::new(csv_connection.clone());
         
-        let transaction_service = domain::TransactionService::new(
+        // Load email config and create TransactionService with email support
+        let email_config_path = std::path::Path::new("email_config.toml");
+        let email_config = domain::EmailConfigService::load_config_or_default(email_config_path);
+        log::info!("📧 Email config loaded: SMTP server = {}", email_config.smtp_server);
+        
+        let transaction_service = Arc::new(domain::TransactionService::with_email_service(
             csv_connection.clone(),
             child_service.clone(),
             allowance_service.clone(),
             balance_service.clone(),
-        );
+            email_config,
+        )?);
         
         let calendar_service = domain::CalendarService::new();
         
@@ -59,7 +65,7 @@ impl Backend {
             csv_connection.clone(),
             child_service.clone(),
             allowance_service.clone(),
-            transaction_service.clone(),
+            transaction_service.clone(), // Pass Arc
             balance_service.clone(),
         );
         

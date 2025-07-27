@@ -11,8 +11,6 @@ use crate::backend::domain::models::transaction::{
 use super::connection::CsvConnection;
 use super::child_repository::ChildRepository;
 use crate::backend::storage::ChildStorage;
-use crate::backend::storage::traits::TransactionStorage;
-use serde::{Deserialize, Serialize};
 
 /// CSV-based transaction repository
 #[derive(Clone)]
@@ -441,15 +439,26 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
         child_id: &str,
         transaction_ids: &[String],
     ) -> Result<Vec<String>> {
-        let transactions = self.read_transactions_by_id(child_id)?;
-        let existing_ids: std::collections::HashSet<String> =
-            transactions.into_iter().map(|t| t.id).collect();
-        let found_ids = transaction_ids
-            .iter()
-            .filter(|id| existing_ids.contains(*id))
-            .cloned()
+        let all_transactions = self.read_transactions_by_id(child_id)?;
+        let found_ids: Vec<String> = all_transactions
+            .into_iter()
+            .filter(|t| transaction_ids.contains(&t.id))
+            .map(|t| t.id)
             .collect();
         Ok(found_ids)
+    }
+
+    fn list_transactions_by_ids(
+        &self,
+        child_id: &str,
+        transaction_ids: &[String],
+    ) -> Result<Vec<DomainTransaction>> {
+        let all_transactions = self.read_transactions_by_id(child_id)?;
+        let transactions: Vec<DomainTransaction> = all_transactions
+            .into_iter()
+            .filter(|t| transaction_ids.contains(&t.id))
+            .collect();
+        Ok(transactions)
     }
 }
 

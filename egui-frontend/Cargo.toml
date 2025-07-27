@@ -48,6 +48,11 @@ rfd = "0.15"
 # Git integration - temporarily removed to avoid OpenSSL build issues
 # git2 = "0.19"
 
+# Email functionality
+lettre = { version = "0.11", default-features = false, features = ["tokio1", "tokio1-rustls-tls", "smtp-transport", "builder"] }
+lettre_email = "0.9"
+toml = "0.8"
+
 [dev-dependencies]
 tempfile = "3.0"
 

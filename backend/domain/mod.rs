@@ -65,6 +65,8 @@ pub mod data_directory_service;
 pub mod export_service;
 pub mod commands;
 pub mod models;
+pub mod email_service;
+pub mod email_config_service;
 
 pub use transaction_service::*;
 pub use transaction_table::*;
@@ -76,4 +78,6 @@ pub use balance_service::*;
 pub use goal_service::*;
 pub use data_directory_service::*;
 pub use export_service::*;
-pub use commands::*; 
+pub use commands::*;
+pub use email_service::*;
+pub use email_config_service::*; 

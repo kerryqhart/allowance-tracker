@@ -67,7 +67,7 @@ impl AllowanceTrackerApp {
         let backend = crate::backend::Backend::new()?;
         
         // Check for pending allowances on app startup
-        match backend.transaction_service.check_and_issue_pending_allowances() {
+        match backend.transaction_service.as_ref().check_and_issue_pending_allowances() {
             Ok(count) => {
                 if count > 0 {
                     info!("🎯 Issued {} pending allowances on app startup", count);
@@ -646,15 +646,11 @@ impl AllowanceTrackerApp {
     // BACKEND INTEGRATION METHODS
     // ====================
     
-    /// Submit income transaction to backend
     pub fn submit_income_transaction(&mut self) -> bool {
         use crate::backend::domain::money_management::MoneyManagementService;
-        use chrono::Timelike; // Import for hour(), minute(), second() methods
-        
+        use chrono::Timelike;
         info!("💰 Submitting income transaction - Description: '{}', Amount: '{}'", 
                   self.form.income_form_state.description, self.form.income_form_state.amount);
-        
-        // Parse amount from form
         let amount = match self.clean_and_parse_amount(&self.form.income_form_state.amount) {
             Ok(amount) => amount,
             Err(error) => {
@@ -663,13 +659,10 @@ impl AllowanceTrackerApp {
                 return false;
             }
         };
-        
-        // Create AddMoneyRequest with selected date from calendar as proper DateTime object
         let date_time = self.calendar.selected_day.map(|date| {
-            // TDD FIX: Use current time instead of hardcoded noon to avoid timestamp conflicts
             let now = chrono::Local::now();
             let naive_datetime = date.and_hms_opt(now.hour(), now.minute(), now.second()).unwrap();
-            let eastern_offset = chrono::FixedOffset::west_opt(5 * 3600).unwrap(); // EST (UTC-5)
+            let eastern_offset = chrono::FixedOffset::west_opt(5 * 3600).unwrap();
             eastern_offset.from_local_datetime(&naive_datetime).single().unwrap()
         });
         let request = shared::AddMoneyRequest {
@@ -677,11 +670,7 @@ impl AllowanceTrackerApp {
             amount,
             date: date_time,
         };
-        
-        // Create MoneyManagementService instance
         let money_service = MoneyManagementService::new();
-        
-        // Call backend with references to other services
         match money_service.add_money_complete(
             request,
             &self.backend().child_service,
@@ -690,15 +679,8 @@ impl AllowanceTrackerApp {
         ) {
             Ok(response) => {
                 info!("✅ Income transaction successful: {}", response.success_message);
-                // self.ui.success_message = Some(response.success_message); // Removed debug UI feature
                 self.core.current_balance = response.new_balance;
-                
-                // TEMPORARY: Sync compatibility field  
-                // self.current_balance = response.new_balance;
-                
-                // Refresh calendar data to show the new transaction
                 self.load_calendar_data();
-                
                 true
             }
             Err(error) => {
@@ -709,15 +691,11 @@ impl AllowanceTrackerApp {
         }
     }
 
-    /// Submit expense transaction to backend using spend_money_complete
     pub fn submit_expense_transaction(&mut self) -> bool {
         use crate::backend::domain::money_management::MoneyManagementService;
-        use chrono::Timelike; // Import for hour(), minute(), second() methods
-        
+        use chrono::Timelike;
         info!("💸 Submitting expense transaction - Description: '{}', Amount: '{}'", 
                   self.form.expense_form_state.description, self.form.expense_form_state.amount);
-        
-        // Parse amount from form
         let amount = match self.clean_and_parse_amount(&self.form.expense_form_state.amount) {
             Ok(amount) => amount,
             Err(error) => {
@@ -726,25 +704,18 @@ impl AllowanceTrackerApp {
                 return false;
             }
         };
-        
-        // Create SpendMoneyRequest with selected date from calendar as proper DateTime object
         let date_time = self.calendar.selected_day.map(|date| {
-            // TDD FIX: Use current time instead of hardcoded noon to avoid timestamp conflicts
             let now = chrono::Local::now();
             let naive_datetime = date.and_hms_opt(now.hour(), now.minute(), now.second()).unwrap();
-            let eastern_offset = chrono::FixedOffset::west_opt(5 * 3600).unwrap(); // EST (UTC-5)
+            let eastern_offset = chrono::FixedOffset::west_opt(5 * 3600).unwrap();
             eastern_offset.from_local_datetime(&naive_datetime).single().unwrap()
         });
         let request = shared::SpendMoneyRequest {
             description: self.form.expense_form_state.description.trim().to_string(),
-            amount, // User enters positive amount, backend converts to negative
+            amount,
             date: date_time,
         };
-        
-        // Create MoneyManagementService instance
         let money_service = MoneyManagementService::new();
-        
-        // Call backend with references to other services
         match money_service.spend_money_complete(
             request,
             &self.backend().child_service,
@@ -753,15 +724,8 @@ impl AllowanceTrackerApp {
         ) {
             Ok(response) => {
                 info!("✅ Expense transaction successful: {}", response.success_message);
-                // self.ui.success_message = Some(response.success_message); // Removed debug UI feature
                 self.core.current_balance = response.new_balance;
-                
-                // TEMPORARY: Sync compatibility field  
-                // self.current_balance = response.new_balance;
-                
-                // Refresh calendar data to show the new transaction
                 self.load_calendar_data();
-                
                 true
             }
             Err(error) => {

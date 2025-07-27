@@ -38,12 +38,11 @@ use crate::backend::domain::commands::transactions::{TransactionListQuery};
 use shared::GoalCalculation;
 
 /// Service for managing goals and goal-related calculations
-#[derive(Clone)]
 pub struct GoalService {
     goal_repository: GoalRepository,
     child_service: ChildService,
     allowance_service: AllowanceService,
-    transaction_service: TransactionService,
+    transaction_service: Arc<TransactionService>, // Use Arc for shared ownership
     #[allow(dead_code)]
     balance_service: BalanceService,
 }
@@ -54,7 +53,7 @@ impl GoalService {
         csv_conn: Arc<CsvConnection>,
         child_service: ChildService,
         allowance_service: AllowanceService,
-        transaction_service: TransactionService,
+        transaction_service: Arc<TransactionService>, // Accept Arc
         balance_service: BalanceService,
     ) -> Self {
         let goal_repository = GoalRepository::new((*csv_conn).clone());
@@ -62,7 +61,7 @@ impl GoalService {
             goal_repository,
             child_service,
             allowance_service,
-            transaction_service,
+            transaction_service, // Store Arc
             balance_service,
         }
     }
@@ -359,7 +358,7 @@ impl GoalService {
             end_date: None, // Up to now
         };
         
-        let historical_result = self.transaction_service.list_transactions_domain(query)?;
+        let historical_result = self.transaction_service.as_ref().list_transactions_domain(query)?;
         info!("Found {} historical transactions since goal creation", historical_result.transactions.len());
         
         // Get current balance to check if goal is already achieved
@@ -558,7 +557,7 @@ impl GoalService {
             end_date: None,
         };
 
-        let result = self.transaction_service.list_transactions(query)?;
+        let result = self.transaction_service.as_ref().list_transactions(query)?;
 
         match result.transactions.first() {
             Some(tx) => Ok(tx.balance),
@@ -592,7 +591,7 @@ mod tests {
         let child_service = ChildService::new(db.clone());
         let allowance_service = AllowanceService::new(db.clone());
         let balance_service = BalanceService::new(db.clone());
-        let transaction_service = TransactionService::new(db.clone(), child_service.clone(), allowance_service.clone(), balance_service.clone());
+        let transaction_service = Arc::new(TransactionService::new(db.clone(), child_service.clone(), allowance_service.clone(), balance_service.clone()));
         
         GoalService::new(db, child_service, allowance_service, transaction_service, balance_service)
     }
@@ -618,7 +617,7 @@ mod tests {
             amount: 5.0,
             date: None,
         };
-        service.transaction_service.create_transaction_domain(initial_money_cmd)
+        service.transaction_service.as_ref().create_transaction_domain(initial_money_cmd)
             .expect("Failed to create initial transaction");
 
         // Create an allowance configuration for the child  

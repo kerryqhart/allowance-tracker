@@ -33,7 +33,6 @@ use super::connection::CsvConnection;
 use crate::backend::storage::GitManager;
 use serde_yaml;
 use serde::{Serialize, Deserialize};
-use crate::backend::storage::traits::AllowanceStorage;
 
 /// YAML representation of an allowance config that omits the redundant child_id.
 /// The child_id is implicit from the directory name, so storing it in the file

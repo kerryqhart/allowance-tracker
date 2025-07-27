@@ -239,6 +239,21 @@ impl BalanceService {
             }
         }
     }
+
+    /// Get the current balance for a child
+    /// This returns the balance from the most recent transaction
+    pub fn get_current_balance(&self, child_id: &str) -> Result<f64> {
+        match self.transaction_repository.get_latest_transaction(child_id)? {
+            Some(transaction) => {
+                info!("Current balance for child {}: ${:.2}", child_id, transaction.balance);
+                Ok(transaction.balance)
+            }
+            None => {
+                info!("No transactions found for child {}, balance is $0.00", child_id);
+                Ok(0.0)
+            }
+        }
+    }
 }
 
 #[cfg(test)]

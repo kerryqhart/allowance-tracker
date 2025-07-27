@@ -278,7 +278,7 @@ impl AllowanceTrackerApp {
         
         info!("📊 Fetching transactions from backend with query: start_date={}, end_date={}, limit=10000", start_date_str, end_date_str);
         
-        match self.backend().transaction_service.list_transactions_domain(query) {
+        match self.backend().transaction_service.as_ref().list_transactions_domain(query) {
             Ok(result) => {
                 info!("📊 Successfully loaded {} transactions from backend for chart", result.transactions.len());
                 
@@ -465,7 +465,7 @@ impl AllowanceTrackerApp {
             end_date: None,   // No end date filter
         };
         
-        match self.backend().transaction_service.list_transactions_domain(query) {
+        match self.backend().transaction_service.as_ref().list_transactions_domain(query) {
             Ok(result) => {
                 if result.transactions.is_empty() {
                     return None;

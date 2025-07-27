@@ -99,7 +99,7 @@ impl AllowanceTrackerApp {
             
             info!("💰 DEBUG: About to call list_transactions_domain with query: {:?}", query);
             
-            match self.backend().transaction_service.list_transactions_domain(query) {
+            match self.backend().transaction_service.as_ref().list_transactions_domain(query) {
                 Ok(result) => {
                     info!("💰 DEBUG: list_transactions_domain returned {} transactions", result.transactions.len());
                     
@@ -261,7 +261,7 @@ impl AllowanceTrackerApp {
             
             log::info!("📋 Making pagination request with query: {:?}", query);
             
-            match self.backend().transaction_service.list_transactions_domain(query) {
+            match self.backend().transaction_service.as_ref().list_transactions_domain(query) {
                 Ok(result) => {
                     log::info!("📋 Successfully loaded {} more transactions (has_more: {})", 
                               result.transactions.len(), result.pagination.has_more);

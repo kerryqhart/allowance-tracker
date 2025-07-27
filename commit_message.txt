@@ -1,26 +1,25 @@
-feat: Add automatic periodic allowance refresh capability
+feat: Add Gmail SMTP email notifications for transactions
 
-- Add refresh timing state to UIState with Instant/Duration for throttling
-- Implement refresh_allowances() method that checks for pending allowances
-- Integrate refresh call into main egui update loop (every 1 minute)
-- Automatically reload calendar data when allowances are issued
-- Add comprehensive tests for timing logic
-- Include detailed documentation explaining the approach
+- Add email service with Gmail SMTP integration
+- Support multi-recipient BCC notifications (efficient single SMTP call)
+- Send notifications for transaction creation (add/spend money)
+- Send notifications for transaction deletion
+- Add email configuration with TOML file support
+- Include transaction details and current balance in notifications
+- Add debug logging for email service initialization and sending
+- Fix all build warnings for clean compilation
+- Use synchronous architecture (no async/tokio) for egui compatibility
+- Add list_transactions_by_ids method for deletion notifications
 
-The refresh feature allows the app to automatically issue pending allowances
-without requiring a restart, using a throttled timing approach to prevent
-excessive CPU usage. The calendar view updates immediately when new
-allowances are issued.
+Email notifications include:
+- Transaction amount and description
+- Child name and action (earned/spent/deleted)
+- Current balance after transaction
+- Formatted date and time
 
-Timing Strategy:
-- Use Instant::now() to track when last check was performed
-- Use Duration to define refresh interval (1 minute for testing)
-- Only check allowances when enough time has passed
-- Prevents checking every frame while keeping app responsive
+Configuration via email_config.toml:
+- SMTP server settings (Gmail)
+- Multiple recipient support
+- App password authentication
 
-Benefits:
-- Automatic operation - no user intervention required
-- Efficient - only checks when needed, not every frame
-- Configurable - easy to adjust refresh interval
-- Non-blocking - doesn't freeze UI during checks
-- Reliable - uses system time, not frame-dependent 
+Resolves: Email notifications for allowance tracking 

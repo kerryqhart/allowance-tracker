@@ -64,6 +64,9 @@ pub trait TransactionStorage: Send + Sync {
     
     /// Check if transactions exist by their IDs for a specific child
     fn check_transactions_exist(&self, child_id: &str, transaction_ids: &[String]) -> Result<Vec<String>>;
+    
+    /// List transactions by their IDs for a specific child
+    fn list_transactions_by_ids(&self, child_id: &str, transaction_ids: &[String]) -> Result<Vec<DomainTransaction>>;
 }
 
 /// Trait defining the interface for child storage operations

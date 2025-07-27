@@ -434,21 +434,14 @@ impl AllowanceTrackerApp {
             log::warn!("⚠️ No transactions selected for deletion");
             return;
         }
-        
         let transaction_ids: Vec<String> = self.interaction.selected_transaction_ids.iter().cloned().collect();
         info!("🗑️ Attempting to delete {} transactions: {:?}", transaction_ids.len(), transaction_ids);
-        
-        // Call the backend delete service
         let command = crate::backend::domain::commands::transactions::DeleteTransactionsCommand {
             transaction_ids: transaction_ids.clone(),
         };
-        
-        match self.backend().transaction_service.delete_transactions_domain(command) {
+        match self.backend().transaction_service.as_ref().delete_transactions_domain(command) {
             Ok(result) => {
                 info!("✅ Successfully deleted {} transactions", result.deleted_count);
-                // Transaction deletion feedback removed
-                
-                // Exit selection mode and reload data
                 self.exit_transaction_selection_mode();
                 self.load_calendar_data();
                 self.load_balance();
