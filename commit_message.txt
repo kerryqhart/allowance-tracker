@@ -1,1 +1,26 @@
- 
+feat: Add automatic periodic allowance refresh capability
+
+- Add refresh timing state to UIState with Instant/Duration for throttling
+- Implement refresh_allowances() method that checks for pending allowances
+- Integrate refresh call into main egui update loop (every 1 minute)
+- Automatically reload calendar data when allowances are issued
+- Add comprehensive tests for timing logic
+- Include detailed documentation explaining the approach
+
+The refresh feature allows the app to automatically issue pending allowances
+without requiring a restart, using a throttled timing approach to prevent
+excessive CPU usage. The calendar view updates immediately when new
+allowances are issued.
+
+Timing Strategy:
+- Use Instant::now() to track when last check was performed
+- Use Duration to define refresh interval (1 minute for testing)
+- Only check allowances when enough time has passed
+- Prevents checking every frame while keeping app responsive
+
+Benefits:
+- Automatic operation - no user intervention required
+- Efficient - only checks when needed, not every frame
+- Configurable - easy to adjust refresh interval
+- Non-blocking - doesn't freeze UI during checks
+- Reliable - uses system time, not frame-dependent 

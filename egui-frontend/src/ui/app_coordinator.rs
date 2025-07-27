@@ -46,6 +46,11 @@ impl eframe::App for AllowanceTrackerApp {
             self.load_initial_data();
         }
         
+        // Check for pending allowances periodically (throttled to avoid excessive calls)
+        // This allows the app to issue allowances without requiring a restart
+        // The refresh is throttled using Instant/Duration timing to prevent checking every frame
+        self.refresh_allowances();
+        
         // Clear messages after a delay
         if self.ui.error_message.is_some() {
             ctx.request_repaint_after(std::time::Duration::from_secs(5));
@@ -375,5 +380,53 @@ impl AllowanceTrackerApp {
                 self.navigate_to_next_month();
             }
         });
+    }
+    
+    /// Refresh pending allowances if enough time has passed since last check
+    /// 
+    /// This method implements periodic allowance checking without overwhelming the system.
+    /// Since egui's update() loop runs 60+ times per second, we need to throttle
+    /// allowance checks to avoid excessive CPU usage and database calls.
+    /// 
+    /// Timing Strategy:
+    /// - Use Instant::now() to track when we last checked allowances
+    /// - Use Duration to define the interval (default: 5 minutes)
+    /// - Only check allowances when enough time has passed
+    /// - This prevents checking allowances every frame while keeping the app responsive
+    /// 
+    /// Why not frame counting? Frame rates vary, so timing would be inconsistent.
+    /// Why not external timers? Overkill for this simple use case.
+    /// Why Instant/Duration? Designed for this exact purpose - measuring time intervals.
+    pub fn refresh_allowances(&mut self) {
+        // Check if it's time to refresh allowances (throttled to avoid excessive calls)
+        if self.ui.should_refresh_allowances() {
+            log::info!("🔄 Performing periodic allowance refresh check");
+            
+            // Use the existing backend method to check and issue pending allowances
+            match self.core.backend.transaction_service.check_and_issue_pending_allowances() {
+                Ok(count) => {
+                    if count > 0 {
+                        log::info!("🎯 Periodic refresh: Issued {} pending allowances", count);
+                        
+                        // Reload calendar data to show the new allowance transactions immediately
+                        // This ensures the calendar view updates without requiring manual navigation
+                        log::info!("🔄 Reloading calendar data to show new allowances");
+                        self.load_calendar_data();
+                        
+                        // Optionally show a success message to the user
+                        // self.ui.set_success_message(format!("Issued {} allowances!", count));
+                    } else {
+                        log::debug!("🎯 Periodic refresh: No pending allowances found");
+                    }
+                }
+                Err(e) => {
+                    log::warn!("🎯 Periodic refresh failed: {}", e);
+                    // Don't show error to user for background refresh - just log it
+                }
+            }
+            
+            // Mark that we just performed a refresh (updates the timestamp)
+            self.ui.mark_allowance_refresh();
+        }
     }
 } 
