@@ -24,7 +24,7 @@
 //! - FormState: Form inputs and validation
 //! - InteractionState: User selections, dropdowns
 
-use log::info;
+use log::{info, warn};
 use chrono::{Datelike, TimeZone};
 use shared::*;
 use crate::backend::Backend;
@@ -65,6 +65,20 @@ impl AllowanceTrackerApp {
         egui_extras::install_image_loaders(&cc.egui_ctx);
         
         let backend = crate::backend::Backend::new()?;
+        
+        // Check for pending allowances on app startup
+        match backend.transaction_service.check_and_issue_pending_allowances() {
+            Ok(count) => {
+                if count > 0 {
+                    info!("🎯 Issued {} pending allowances on app startup", count);
+                } else {
+                    info!("🎯 No pending allowances found on app startup");
+                }
+            }
+            Err(e) => {
+                warn!("🎯 Failed to check pending allowances on startup: {}", e);
+            }
+        }
         
         let now = chrono::Local::now();
         let _current_month = now.month();

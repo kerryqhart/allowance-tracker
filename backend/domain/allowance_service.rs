@@ -937,4 +937,261 @@ mod tests {
             assert_eq!(allowance.transaction_type, DomainTransactionType::FutureAllowance, "Future allowance type should be FutureAllowance");
         }
     }
+
+    #[test]
+    fn test_duplicate_allowance_prevention() {
+        let service = setup_test();
+        let child = create_test_child(&service);
+
+        // Create active allowance config for today's day of week
+        let today = Local::now().date_naive();
+        let day_of_week = today.weekday().num_days_from_sunday() as u8;
+        
+        let command = UpdateAllowanceConfigCommand {
+            child_id: Some(child.id.clone()),
+            amount: 10.0,
+            day_of_week,
+            is_active: true,
+        };
+
+        service
+            .update_allowance_config(command)
+            .expect("Failed to create allowance config");
+
+        // First call to get_pending_allowance_dates should find one pending allowance
+        let pending_dates = service
+            .get_pending_allowance_dates(&child.id, today, today)
+            .expect("Failed to get pending allowance dates");
+
+        assert_eq!(pending_dates.len(), 1, "Should find one pending allowance for today");
+        assert_eq!(pending_dates[0].0, today, "Pending allowance should be for today");
+        assert_eq!(pending_dates[0].1, 10.0, "Pending allowance should be for $10");
+
+        // Simulate creating the allowance transaction
+        let allowance_transaction = DomainTransaction {
+            id: "test_allowance_1".to_string(),
+            child_id: child.id.clone(),
+            date: chrono::DateTime::parse_from_str(&format!("{}T12:00:00-05:00", today.format("%Y-%m-%d")), "%Y-%m-%dT%H:%M:%S%z").expect("Failed to parse date"),
+            description: "Weekly allowance".to_string(),
+            amount: 10.0,
+            balance: 10.0,
+            transaction_type: DomainTransactionType::Income,
+        };
+
+        service
+            .transaction_repository
+            .store_transaction(&allowance_transaction)
+            .expect("Failed to store allowance transaction");
+
+        // Second call to get_pending_allowance_dates should find NO pending allowances
+        let pending_dates_after = service
+            .get_pending_allowance_dates(&child.id, today, today)
+            .expect("Failed to get pending allowance dates after creating allowance");
+
+        assert_eq!(pending_dates_after.len(), 0, "Should find no pending allowances after creating one");
+
+        // Verify has_allowance_for_date correctly detects the existing allowance
+        let has_allowance = service
+            .has_allowance_for_date(&child.id, today)
+            .expect("Failed to check allowance for date");
+
+        assert!(has_allowance, "Should detect existing allowance for today");
+    }
+
+    #[test]
+    fn test_multiple_allowances_same_day_prevention() {
+        let service = setup_test();
+        let child = create_test_child(&service);
+
+        let test_date = Local::now().date_naive();
+        
+        // Create first allowance transaction
+        let allowance1 = DomainTransaction {
+            id: "test_allowance_1".to_string(),
+            child_id: child.id.clone(),
+            date: chrono::DateTime::parse_from_str(&format!("{}T12:00:00-05:00", test_date.format("%Y-%m-%d")), "%Y-%m-%dT%H:%M:%S%z").expect("Failed to parse date"),
+            description: "Weekly allowance".to_string(),
+            amount: 10.0,
+            balance: 10.0,
+            transaction_type: DomainTransactionType::Income,
+        };
+
+        service
+            .transaction_repository
+            .store_transaction(&allowance1)
+            .expect("Failed to store first allowance");
+
+        // Create second allowance transaction (simulating the bug)
+        let allowance2 = DomainTransaction {
+            id: "test_allowance_2".to_string(),
+            child_id: child.id.clone(),
+            date: chrono::DateTime::parse_from_str(&format!("{}T14:00:00-05:00", test_date.format("%Y-%m-%d")), "%Y-%m-%dT%H:%M:%S%z").expect("Failed to parse date"),
+            description: "Weekly allowance".to_string(),
+            amount: 10.0,
+            balance: 20.0,
+            transaction_type: DomainTransactionType::Income,
+        };
+
+        service
+            .transaction_repository
+            .store_transaction(&allowance2)
+            .expect("Failed to store second allowance");
+
+        // The has_allowance_for_date should detect that an allowance already exists
+        let has_allowance = service
+            .has_allowance_for_date(&child.id, test_date)
+            .expect("Failed to check allowance for date");
+
+        assert!(has_allowance, "Should detect existing allowance even with multiple transactions");
+
+        // get_pending_allowance_dates should return empty list
+        let pending_dates = service
+            .get_pending_allowance_dates(&child.id, test_date, test_date)
+            .expect("Failed to get pending allowance dates");
+
+        assert_eq!(pending_dates.len(), 0, "Should not find pending allowances when allowance already exists");
+    }
+
+    #[test]
+    fn test_race_condition_duplicate_allowances() {
+        let service = setup_test();
+        let child = create_test_child(&service);
+
+        let test_date = Local::now().date_naive();
+        
+        // Create active allowance config for today's day of week
+        let day_of_week = test_date.weekday().num_days_from_sunday() as u8;
+        
+        let command = UpdateAllowanceConfigCommand {
+            child_id: Some(child.id.clone()),
+            amount: 10.0,
+            day_of_week,
+            is_active: true,
+        };
+
+        service
+            .update_allowance_config(command)
+            .expect("Failed to create allowance config");
+
+        // Simulate multiple rapid calls to get_pending_allowance_dates
+        // This could happen if the UI refreshes multiple times quickly
+        
+        // First call - should find pending allowance
+        let pending_dates_1 = service
+            .get_pending_allowance_dates(&child.id, test_date, test_date)
+            .expect("Failed to get pending allowance dates (call 1)");
+
+        assert_eq!(pending_dates_1.len(), 1, "First call should find one pending allowance");
+
+        // Second call immediately after - should still find the same pending allowance
+        let pending_dates_2 = service
+            .get_pending_allowance_dates(&child.id, test_date, test_date)
+            .expect("Failed to get pending allowance dates (call 2)");
+
+        assert_eq!(pending_dates_2.len(), 1, "Second call should still find one pending allowance");
+
+        // Simulate creating the allowance transaction
+        let allowance_transaction = DomainTransaction {
+            id: "test_allowance_race_1".to_string(),
+            child_id: child.id.clone(),
+            date: chrono::DateTime::parse_from_str(&format!("{}T12:00:00-05:00", test_date.format("%Y-%m-%d")), "%Y-%m-%dT%H:%M:%S%z").expect("Failed to parse date"),
+            description: "Weekly allowance".to_string(),
+            amount: 10.0,
+            balance: 10.0,
+            transaction_type: DomainTransactionType::Income,
+        };
+
+        service
+            .transaction_repository
+            .store_transaction(&allowance_transaction)
+            .expect("Failed to store allowance transaction");
+
+        // Third call after creating the transaction - should find NO pending allowances
+        let pending_dates_3 = service
+            .get_pending_allowance_dates(&child.id, test_date, test_date)
+            .expect("Failed to get pending allowance dates (call 3)");
+
+        assert_eq!(pending_dates_3.len(), 0, "Third call should find no pending allowances after creating one");
+
+        // Verify has_allowance_for_date correctly detects the existing allowance
+        let has_allowance = service
+            .has_allowance_for_date(&child.id, test_date)
+            .expect("Failed to check allowance for date");
+
+        assert!(has_allowance, "Should detect existing allowance for today");
+    }
+
+    #[test]
+    fn test_allowance_detection_edge_cases() {
+        let service = setup_test();
+        let child = create_test_child(&service);
+
+        let test_date = Local::now().date_naive();
+        
+        // Test 1: Allowance with different description variations
+        let allowance1 = DomainTransaction {
+            id: "test_allowance_1".to_string(),
+            child_id: child.id.clone(),
+            date: chrono::DateTime::parse_from_str(&format!("{}T12:00:00-05:00", test_date.format("%Y-%m-%d")), "%Y-%m-%dT%H:%M:%S%z").expect("Failed to parse date"),
+            description: "Weekly allowance".to_string(),
+            amount: 10.0,
+            balance: 10.0,
+            transaction_type: DomainTransactionType::Income,
+        };
+
+        service
+            .transaction_repository
+            .store_transaction(&allowance1)
+            .expect("Failed to store allowance transaction");
+
+        let has_allowance = service
+            .has_allowance_for_date(&child.id, test_date)
+            .expect("Failed to check allowance for date");
+
+        assert!(has_allowance, "Should detect 'Weekly allowance'");
+
+        // Test 2: Allowance with "allowance" in description
+        let allowance2 = DomainTransaction {
+            id: "test_allowance_2".to_string(),
+            child_id: child.id.clone(),
+            date: chrono::DateTime::parse_from_str(&format!("{}T14:00:00-05:00", test_date.format("%Y-%m-%d")), "%Y-%m-%dT%H:%M:%S%z").expect("Failed to parse date"),
+            description: "Monthly allowance".to_string(),
+            amount: 20.0,
+            balance: 30.0,
+            transaction_type: DomainTransactionType::Income,
+        };
+
+        service
+            .transaction_repository
+            .store_transaction(&allowance2)
+            .expect("Failed to store second allowance transaction");
+
+        let has_allowance_after = service
+            .has_allowance_for_date(&child.id, test_date)
+            .expect("Failed to check allowance for date");
+
+        assert!(has_allowance_after, "Should detect allowance with 'allowance' in description");
+
+        // Test 3: Non-allowance positive transaction should not interfere
+        let non_allowance = DomainTransaction {
+            id: "test_income_1".to_string(),
+            child_id: child.id.clone(),
+            date: chrono::DateTime::parse_from_str(&format!("{}T16:00:00-05:00", test_date.format("%Y-%m-%d")), "%Y-%m-%dT%H:%M:%S%z").expect("Failed to parse date"),
+            description: "Birthday gift from grandma".to_string(),
+            amount: 50.0,
+            balance: 80.0,
+            transaction_type: DomainTransactionType::Income,
+        };
+
+        service
+            .transaction_repository
+            .store_transaction(&non_allowance)
+            .expect("Failed to store non-allowance transaction");
+
+        let has_allowance_with_other_income = service
+            .has_allowance_for_date(&child.id, test_date)
+            .expect("Failed to check allowance for date");
+
+        assert!(has_allowance_with_other_income, "Should still detect allowance even with other income on same day");
+    }
 } 

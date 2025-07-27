@@ -16,9 +16,9 @@ use crate::backend::domain::commands::transactions::{CreateTransactionCommand, T
 use anyhow::{anyhow, Result};
 use chrono::{Local, NaiveDate};
 use log::{error, info};
-
-
 use std::sync::Arc;
+
+
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Clone)]
@@ -129,8 +129,6 @@ impl TransactionService {
         &self,
         query: TransactionListQuery,
     ) -> Result<TransactionListResult> {
-        info!("🎯 ALLOWANCE DEBUG: list_transactions_domain() called - this will trigger allowance check");
-        self.check_and_issue_pending_allowances()?;
         let active_child = self.get_active_child()?;
 
         let limit = query.limit.unwrap_or(20);
@@ -318,7 +316,9 @@ impl TransactionService {
         self.delete_transactions_domain(cmd)
     }
 
-    fn check_and_issue_pending_allowances(&self) -> Result<u32> {
+    /// Check for and issue any pending allowances
+    /// This should be called on app startup or on a scheduled basis
+    pub fn check_and_issue_pending_allowances(&self) -> Result<u32> {
         info!("🎯 ALLOWANCE DEBUG: check_and_issue_pending_allowances() called");
         if let Ok(active_child) = self.get_active_child() {
             info!("🎯 ALLOWANCE DEBUG: Found active child: {}", active_child.id);
@@ -473,5 +473,127 @@ mod tests {
         assert_eq!(transaction.description, "Test transaction");
         assert_eq!(transaction.balance, 10.0);
         assert_eq!(transaction.transaction_type, DomainTransactionType::Income);
+    }
+
+    #[test]
+    fn test_multiple_list_calls_create_duplicate_allowances() {
+        use chrono::Datelike;
+        
+        let (service, _conn, _temp_dir) = create_test_service();
+        let child = create_test_child(&service.child_service, "Test Child").expect("Failed to create test child");
+
+        // Set as active child
+        let set_active_cmd = crate::backend::domain::commands::child::SetActiveChildCommand {
+            child_id: child.id.clone(),
+        };
+        service.child_service.set_active_child(set_active_cmd).expect("Failed to set active child");
+
+        // Create allowance config for today
+        let today = chrono::Local::now().date_naive();
+        let day_of_week = today.weekday().num_days_from_sunday() as u8;
+        
+        let allowance_cmd = crate::backend::domain::commands::allowance::UpdateAllowanceConfigCommand {
+            child_id: Some(child.id.clone()),
+            amount: 10.0,
+            day_of_week,
+            is_active: true,
+        };
+        service.allowance_service.update_allowance_config(allowance_cmd).expect("Failed to create allowance config");
+
+        // First call to list_transactions_domain - should create one allowance
+        let query1 = TransactionListQuery {
+            after: None,
+            limit: Some(10),
+            start_date: None,
+            end_date: None,
+        };
+        
+        let result1 = service.list_transactions_domain(query1).expect("Failed to list transactions (call 1)");
+        println!("First call returned {} transactions", result1.transactions.len());
+
+        // Second call immediately after - should NOT create another allowance
+        let query2 = TransactionListQuery {
+            after: None,
+            limit: Some(10),
+            start_date: None,
+            end_date: None,
+        };
+        
+        let result2 = service.list_transactions_domain(query2).expect("Failed to list transactions (call 2)");
+        println!("Second call returned {} transactions", result2.transactions.len());
+
+        // Count how many allowance transactions were created
+        let allowance_transactions: Vec<_> = result2.transactions
+            .iter()
+            .filter(|tx| tx.description.to_lowercase().contains("allowance"))
+            .collect();
+
+        println!("Found {} allowance transactions", allowance_transactions.len());
+        
+        // Should have NO allowance transactions since we removed automatic allowance creation
+        assert_eq!(allowance_transactions.len(), 0, "Should have no allowance transactions since automatic creation was removed");
+    }
+
+    #[test]
+    fn test_explicit_allowance_check_creates_allowance() {
+        use chrono::Datelike;
+        
+        let (service, _conn, _temp_dir) = create_test_service();
+        let child = create_test_child(&service.child_service, "Test Child").expect("Failed to create test child");
+
+        // Set as active child
+        let set_active_cmd = crate::backend::domain::commands::child::SetActiveChildCommand {
+            child_id: child.id.clone(),
+        };
+        service.child_service.set_active_child(set_active_cmd).expect("Failed to set active child");
+
+        // Create allowance config for today
+        let today = chrono::Local::now().date_naive();
+        let day_of_week = today.weekday().num_days_from_sunday() as u8;
+        
+        let allowance_cmd = crate::backend::domain::commands::allowance::UpdateAllowanceConfigCommand {
+            child_id: Some(child.id.clone()),
+            amount: 10.0,
+            day_of_week,
+            is_active: true,
+        };
+        service.allowance_service.update_allowance_config(allowance_cmd).expect("Failed to create allowance config");
+
+        // First, verify no allowance transactions exist
+        let query = TransactionListQuery {
+            after: None,
+            limit: Some(10),
+            start_date: None,
+            end_date: None,
+        };
+        
+        let result_before = service.list_transactions_domain(query.clone()).expect("Failed to list transactions before allowance check");
+        let allowance_count_before: Vec<_> = result_before.transactions
+            .iter()
+            .filter(|tx| tx.description.to_lowercase().contains("allowance"))
+            .collect();
+        
+        assert_eq!(allowance_count_before.len(), 0, "Should have no allowance transactions before explicit check");
+
+        // Now explicitly check for pending allowances
+        let issued_count = service.check_and_issue_pending_allowances().expect("Failed to check pending allowances");
+        
+        // The method checks the last 7 days, so it might issue multiple allowances if there were missed days
+        assert!(issued_count >= 1, "Should have issued at least one allowance");
+
+        // Verify the allowance was created
+        let result_after = service.list_transactions_domain(query).expect("Failed to list transactions after allowance check");
+        let allowance_count_after: Vec<_> = result_after.transactions
+            .iter()
+            .filter(|tx| tx.description.to_lowercase().contains("allowance"))
+            .collect();
+        
+        assert!(allowance_count_after.len() >= 1, "Should have at least one allowance transaction after explicit check");
+        
+        // Verify the allowance details
+        if let Some(allowance) = allowance_count_after.first() {
+            assert_eq!(allowance.amount, 10.0, "Allowance amount should be $10");
+            assert!(allowance.description.to_lowercase().contains("allowance"), "Should be an allowance transaction");
+        }
     }
 }
