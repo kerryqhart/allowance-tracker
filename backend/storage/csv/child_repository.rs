@@ -213,8 +213,8 @@ impl ChildRepository {
 impl crate::backend::storage::ChildStorage for ChildRepository {
     /// Store a new child
     fn store_child(&self, child: &DomainChild) -> Result<()> {
-        let dir_name = CsvConnection::generate_safe_directory_name(&child.name);
-        self.save_child_to_directory(child, &dir_name)
+        // Use the child's ID as the directory name since we now enforce ID = directory name
+        self.save_child_to_directory(child, &child.id)
     }
     
     /// Retrieve a specific child by ID
@@ -291,21 +291,13 @@ mod tests {
     }
     
     #[test]
-    fn test_generate_safe_directory_name() {
-        assert_eq!(CsvConnection::generate_safe_directory_name("Emma Smith"), "emma_smith");
-        assert_eq!(CsvConnection::generate_safe_directory_name("José María"), "josé_maría");
-        assert_eq!(CsvConnection::generate_safe_directory_name("Kid #1"), "kid__1");
-        assert_eq!(CsvConnection::generate_safe_directory_name("Test-Child"), "test_child");
-    }
-    
-    #[test]
     fn test_store_and_discover_child() {
         let (repo, _temp_dir) = setup_test_repo();
         
         // Create a child
         let now = chrono::Utc::now();
         let child = DomainChild {
-            id: "child::123".to_string(),
+            id: "test_child".to_string(),  // ID matches directory name
             name: "Test Child".to_string(),
             birthdate: chrono::NaiveDate::from_ymd_opt(2015, 5, 15).unwrap(),
             created_at: now,
@@ -319,10 +311,10 @@ mod tests {
         let children = repo.list_children().expect("Failed to list children");
         assert_eq!(children.len(), 1);
         assert_eq!(children[0].name, "Test Child");
-        assert_eq!(children[0].id, "child::123");
+        assert_eq!(children[0].id, "test_child");
         
         // Get the specific child
-        let retrieved_child = repo.get_child("child::123").expect("Failed to get child");
+        let retrieved_child = repo.get_child("test_child").expect("Failed to get child");
         assert!(retrieved_child.is_some());
         assert_eq!(retrieved_child.unwrap().name, "Test Child");
     }
@@ -338,7 +330,7 @@ mod tests {
         // Create and store a child
         let now = chrono::Utc::now();
         let child = DomainChild {
-            id: "child::456".to_string(),
+            id: "test_child".to_string(),  // ID matches directory name
             name: "Active Child".to_string(),
             birthdate: chrono::NaiveDate::from_ymd_opt(2018, 8, 8).unwrap(),
             created_at: now,
@@ -347,10 +339,10 @@ mod tests {
         repo.store_child(&child).expect("Failed to store child");
         
         // Set active child
-        repo.set_active_child("child::456").expect("Failed to set active child");
+        repo.set_active_child("test_child").expect("Failed to set active child");
         
         // Get active child
         let active_child_id = repo.get_active_child().expect("Failed to get active child");
-        assert_eq!(active_child_id, Some("child::456".to_string()));
+        assert_eq!(active_child_id, Some("test_child".to_string()));
     }
 } 

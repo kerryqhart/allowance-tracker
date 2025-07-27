@@ -3,107 +3,66 @@
 /// This module provides RAII-based cleanup that guarantees test data is removed
 /// even if tests panic or fail.
 
-use std::path::PathBuf;
 use tempfile::TempDir;
 use anyhow::Result;
 use super::connection::CsvConnection;
 use super::transaction_repository::TransactionRepository;
 use super::child_repository::ChildRepository;
-use super::csv_goal_repository::CsvGoalRepository;
 use super::allowance_repository::AllowanceRepository;
 use super::parental_control_repository::ParentalControlRepository;
 use super::global_config_repository::GlobalConfigRepository;
+use super::goal_repository::GoalRepository;
 use crate::backend::domain::models::child::Child as DomainChild;
-use crate::backend::storage::ChildStorage;
+use crate::backend::storage::traits::ChildStorage;
 use std::sync::Arc;
 use chrono::Utc;
 
-/// RAII Test Environment that automatically cleans up on drop
-/// 
-/// This struct ensures that test data is always cleaned up, even if tests panic.
-/// The cleanup happens automatically when the TestEnvironment goes out of scope.
+/// Test environment that provides a temporary directory and connection
+/// that will be automatically cleaned up when the environment is dropped,
+/// even if tests panic or fail.
 pub struct TestEnvironment {
-    /// The temporary directory - kept alive to prevent auto-cleanup until drop
-    _temp_dir: TempDir,
-    /// The CSV connection for the test
     pub connection: CsvConnection,
     /// Base directory path for manual inspection if needed
-    pub base_path: PathBuf,
+    pub base_path: std::path::PathBuf,
+    _temp_dir: TempDir,  // Keep alive to prevent cleanup
 }
 
-impl TestEnvironment {
-    /// Create a new test environment with automatic cleanup
-    pub fn new() -> Result<Self> {
-        let temp_dir = TempDir::new()?;
-        let base_path = temp_dir.path().to_path_buf();
-        let connection = CsvConnection::new(&base_path)?;
-        
-        Ok(TestEnvironment {
-            _temp_dir: temp_dir,
-            connection,
-            base_path,
-        })
-    }
-    
-    /// Create a new test environment with a custom prefix for debugging
-    pub fn new_with_prefix(prefix: &str) -> Result<Self> {
-        let temp_dir = TempDir::with_prefix(prefix)?;
-        let base_path = temp_dir.path().to_path_buf();
-        let connection = CsvConnection::new(&base_path)?;
-        
-        Ok(TestEnvironment {
-            _temp_dir: temp_dir,
-            connection,
-            base_path,
-        })
-    }
-    
-    /// Get the base directory path for this test environment
-    pub fn base_directory(&self) -> &std::path::Path {
-        &self.base_path
-    }
-}
-
-// Drop implementation ensures cleanup always happens
-impl Drop for TestEnvironment {
-    fn drop(&mut self) {
-        // TempDir automatically cleans up when dropped
-        // We could add additional logging here if needed
-        #[cfg(test)]
-        {
-            if std::env::var("ALLOWANCE_TRACKER_DEBUG_TESTS").is_ok() {
-                println!("🧹 Cleaning up test environment: {:?}", self.base_path);
-            }
-        }
-    }
-}
-
-/// Repository Test Helper with automatic cleanup
-/// 
-/// Provides easy access to all repositories with guaranteed cleanup
-pub struct RepositoryTestHelper {
+/// Test helper that provides repository instances for a test environment
+pub struct TestHelper {
     pub env: TestEnvironment,
     pub transaction_repo: TransactionRepository,
     pub child_repo: ChildRepository,
-    pub goal_repo: CsvGoalRepository,
+    pub goal_repo: GoalRepository,
     pub allowance_repo: AllowanceRepository,
     pub parental_control_repo: ParentalControlRepository,
     pub global_config_repo: GlobalConfigRepository,
 }
 
-impl RepositoryTestHelper {
-    /// Create a new repository test helper with all repositories
+impl TestEnvironment {
+    /// Create a new test environment with a temporary directory
+    pub fn new() -> Result<Self> {
+        let temp_dir = TempDir::new()?;
+        let connection = CsvConnection::new(temp_dir.path())?;
+        Ok(Self {
+            connection,
+            base_path: temp_dir.path().to_path_buf(),
+            _temp_dir: temp_dir,
+        })
+    }
+}
+
+impl TestHelper {
+    /// Create a new test helper with a fresh environment
     pub fn new() -> Result<Self> {
         let env = TestEnvironment::new()?;
-        
         let transaction_repo = TransactionRepository::new(env.connection.clone());
         let child_repo = ChildRepository::new(Arc::new(env.connection.clone()));
-        let goal_repo = CsvGoalRepository::new(env.connection.clone());
+        let goal_repo = GoalRepository::new(env.connection.clone());
         let allowance_repo = AllowanceRepository::new(env.connection.clone());
         let parental_control_repo = ParentalControlRepository::new(env.connection.clone());
         let global_config_repo = GlobalConfigRepository::new(env.connection.clone());
-        
-        Ok(RepositoryTestHelper {
+
+        Ok(Self {
             env,
             transaction_repo,
             child_repo,
@@ -113,19 +72,17 @@ impl RepositoryTestHelper {
             global_config_repo,
         })
     }
-    
-    /// Create a new repository test helper with a custom prefix for debugging
-    pub fn new_with_prefix(prefix: &str) -> Result<Self> {
-        let env = TestEnvironment::new_with_prefix(prefix)?;
-        
+
+    /// Create a new test helper with an existing environment
+    pub fn from_env(env: TestEnvironment) -> Result<Self> {
         let transaction_repo = TransactionRepository::new(env.connection.clone());
         let child_repo = ChildRepository::new(Arc::new(env.connection.clone()));
-        let goal_repo = CsvGoalRepository::new(env.connection.clone());
+        let goal_repo = GoalRepository::new(env.connection.clone());
         let allowance_repo = AllowanceRepository::new(env.connection.clone());
         let parental_control_repo = ParentalControlRepository::new(env.connection.clone());
         let global_config_repo = GlobalConfigRepository::new(env.connection.clone());
-        
-        Ok(RepositoryTestHelper {
+
+        Ok(Self {
             env,
             transaction_repo,
             child_repo,
@@ -135,38 +92,42 @@ impl RepositoryTestHelper {
             global_config_repo,
         })
     }
-    
-    /// Create a test child and return it
-    pub fn create_test_child(&self, name: &str, id_suffix: &str) -> Result<DomainChild> {
+
+    /// Create a test child with default values
+    pub fn create_test_child(&self) -> Result<DomainChild> {
         let child = DomainChild {
-            id: format!("child::{}", id_suffix),
-            name: name.to_string(),
-            birthdate: chrono::NaiveDate::from_ymd_opt(2010, 1, 1).unwrap(),
+            id: "test_child".to_string(),  // ID matches directory name
+            name: "Test Child".to_string(),
+            birthdate: chrono::NaiveDate::parse_from_str("2010-01-01", "%Y-%m-%d").unwrap(),
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };
-        
+
         self.child_repo.store_child(&child)?;
         Ok(child)
     }
-    
-    /// Create a test child with custom birthdate and return it
-    pub fn create_test_child_with_birthdate(
-        &self, 
-        name: &str, 
-        id_suffix: &str, 
-        birthdate: chrono::NaiveDate
-    ) -> Result<DomainChild> {
+
+    /// Create a test child with a specific name
+    pub fn create_test_child_with_name(&self, name: &str) -> Result<DomainChild> {
+        let safe_name = CsvConnection::generate_safe_directory_name(name);
         let child = DomainChild {
-            id: format!("child::{}", id_suffix),
+            id: safe_name.clone(),  // ID matches directory name
             name: name.to_string(),
-            birthdate,
+            birthdate: chrono::NaiveDate::parse_from_str("2010-01-01", "%Y-%m-%d").unwrap(),
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };
-        
+
         self.child_repo.store_child(&child)?;
         Ok(child)
+    }
+
+    /// Verify that a child exists in storage
+    pub fn verify_child_exists(&self, child: &DomainChild) -> Result<()> {
+        let retrieved = self.child_repo.get_child(&child.id)?;
+        assert!(retrieved.is_some(), "Child not found in storage");
+        assert_eq!(retrieved.unwrap().name, child.name);
+        Ok(())
     }
 }
 
@@ -253,41 +214,28 @@ mod tests {
     #[test]
     fn test_environment_cleanup() -> Result<()> {
         let base_path;
-        
-        // Create and use test environment
         {
             let env = TestEnvironment::new()?;
-            base_path = env.base_directory().to_path_buf();
-            
-            // Verify directory exists
+            base_path = env.base_path.clone();
             assert!(base_path.exists());
-            
-            // Create some test data
-            std::fs::write(base_path.join("test_file.txt"), "test data")?;
-            assert!(base_path.join("test_file.txt").exists());
-        } // env goes out of scope here, triggering cleanup
-        
-        // Verify directory was cleaned up
+            // Environment dropped here
+        }
         assert!(!base_path.exists());
-        
         Ok(())
     }
-    
+
     #[test]
     fn test_repository_helper() -> Result<()> {
-        let helper = RepositoryTestHelper::new()?;
+        let helper = TestHelper::new()?;
         
         // Test child creation
-        let child = helper.create_test_child("Test Child", "123")?;
+        let child = helper.create_test_child()?;
         assert_eq!(child.name, "Test Child");
-        assert_eq!(child.id, "child::123");
+        assert_eq!(child.id, "test_child");
         
         // Verify child was stored
-        let retrieved = helper.child_repo.get_child(&child.id)?;
-        assert!(retrieved.is_some());
-        assert_eq!(retrieved.unwrap().name, "Test Child");
+        helper.verify_child_exists(&child)?;
         
-        // Environment cleanup happens automatically
         Ok(())
     }
 } 

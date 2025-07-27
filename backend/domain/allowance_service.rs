@@ -141,9 +141,7 @@ impl AllowanceService {
             }
             None => {
                 // Create new config
-                let timestamp_millis = now.timestamp_millis() as u64;
                 AllowanceConfig {
-                    id: AllowanceConfig::generate_id(&child_id, timestamp_millis),
                     child_id: child_id.clone(),
                     amount: command.amount,
                     day_of_week: command.day_of_week,
@@ -509,12 +507,9 @@ mod tests {
             is_active: true,
         };
 
-        let initial_response = service
+        let _initial_response = service
             .update_allowance_config(initial_command)
-            
             .expect("Failed to create initial allowance config");
-
-        let initial_id = initial_response.allowance_config.id.clone();
 
         // Update the config
         let update_command = UpdateAllowanceConfigCommand {
@@ -529,8 +524,7 @@ mod tests {
             
             .expect("Failed to update allowance config");
 
-        // Should have same ID but updated values
-        assert_eq!(update_response.allowance_config.id, initial_id);
+        // Verify values updated correctly (ID field removed)
         assert_eq!(update_response.allowance_config.amount, 15.0);
         assert_eq!(update_response.allowance_config.day_of_week, 6);
         assert_eq!(update_response.allowance_config.is_active, false);
@@ -673,7 +667,6 @@ mod tests {
     #[test]
     fn test_allowance_config_day_names() {
         let config = AllowanceConfig {
-            id: "test".to_string(),
             child_id: "test".to_string(),
             amount: 10.0,
             day_of_week: 0,
@@ -707,14 +700,6 @@ mod tests {
         assert!(AllowanceConfig::is_valid_day_of_week(6));
         assert!(!AllowanceConfig::is_valid_day_of_week(7));
         assert!(!AllowanceConfig::is_valid_day_of_week(255));
-    }
-
-    #[test]
-    fn test_generate_id() {
-        let child_id = "child123";
-        let timestamp = 1234567890u64;
-        let id = AllowanceConfig::generate_id(child_id, timestamp);
-        assert_eq!(id, "allowance::child123::1234567890");
     }
 
     #[test]

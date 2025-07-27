@@ -33,6 +33,7 @@ use super::connection::CsvConnection;
 use crate::backend::storage::GitManager;
 use serde_yaml;
 use serde::{Serialize, Deserialize};
+use crate::backend::storage::traits::AllowanceStorage;
 
 /// YAML representation of an allowance config that omits the redundant child_id.
 /// The child_id is implicit from the directory name, so storing it in the file
@@ -40,7 +41,6 @@ use serde::{Serialize, Deserialize};
 /// trimmed struct on disk and inject the child_id in memory.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct YamlAllowanceConfig {
-    id: String,
     amount: f64,
     day_of_week: u8,
     is_active: bool,
@@ -86,7 +86,6 @@ impl AllowanceRepository {
 
         // Convert to YAML struct without child_id before serialising
         let yaml_model = YamlAllowanceConfig {
-            id: config.id.clone(),
             amount: config.amount,
             day_of_week: config.day_of_week,
             is_active: config.is_active,
@@ -120,7 +119,6 @@ impl AllowanceRepository {
 
         // Inject child_id from directory
         let config = DomainAllowanceConfig {
-            id: yaml_model.id,
             child_id: child_directory.to_string(),
             amount: yaml_model.amount,
             day_of_week: yaml_model.day_of_week,
@@ -253,7 +251,7 @@ mod tests {
     use tempfile::TempDir;
     use chrono::Utc;
     use crate::backend::domain::models::child::Child as DomainChild;
-    use crate::backend::storage::{ChildStorage, AllowanceStorage};
+    use crate::backend::storage::ChildStorage;
     use crate::backend::storage::csv::ChildRepository;
     use std::sync::Arc;
 
@@ -265,7 +263,7 @@ mod tests {
         
         // Create a test child first
         let child = DomainChild {
-            id: "child::1234567890".to_string(),
+            id: "test_child".to_string(),  // ID matches directory name
             name: "Test Child".to_string(),
             birthdate: chrono::NaiveDate::parse_from_str("2010-01-01", "%Y-%m-%d").unwrap(),
             created_at: Utc::now(),
@@ -282,7 +280,6 @@ mod tests {
         let (repo, _child_repo, _temp_dir, child) = setup_test_repo_with_child();
         
         let config = DomainAllowanceConfig {
-            id: "allowance::1234567890::98765".to_string(),
             child_id: child.id.clone(),
             amount: 10.0,
             day_of_week: 1, // Monday
@@ -299,7 +296,6 @@ mod tests {
         assert!(retrieved.is_some());
         
         let retrieved_config = retrieved.unwrap();
-        assert_eq!(retrieved_config.id, config.id);
         assert_eq!(retrieved_config.child_id, config.child_id);
         assert_eq!(retrieved_config.amount, config.amount);
         assert_eq!(retrieved_config.day_of_week, config.day_of_week);
@@ -311,7 +307,6 @@ mod tests {
         let (repo, _child_repo, _temp_dir, child) = setup_test_repo_with_child();
         
         let mut config = DomainAllowanceConfig {
-            id: "allowance::1234567890::98765".to_string(),
             child_id: child.id.clone(),
             amount: 10.0,
             day_of_week: 1, // Monday
@@ -341,7 +336,6 @@ mod tests {
         let (repo, _child_repo, _temp_dir, child) = setup_test_repo_with_child();
         
         let config = DomainAllowanceConfig {
-            id: "allowance::1234567890::98765".to_string(),
             child_id: child.id.clone(),
             amount: 10.0,
             day_of_week: 1, // Monday
@@ -374,7 +368,7 @@ mod tests {
         
         // Create a second child
         let child2 = DomainChild {
-            id: "child::2345678901".to_string(),
+            id: "test_child_2".to_string(),  // ID matches directory name
             name: "Second Child".to_string(),
             birthdate: chrono::NaiveDate::parse_from_str("2012-01-01", "%Y-%m-%d").unwrap(),
             created_at: Utc::now(),
@@ -384,7 +378,6 @@ mod tests {
         
         // Create configs for both children
         let config1 = DomainAllowanceConfig {
-            id: "allowance::1234567890::98765".to_string(),
             child_id: child1.id.clone(),
             amount: 10.0,
             day_of_week: 1,
@@ -394,7 +387,6 @@ mod tests {
         };
         
         let config2 = DomainAllowanceConfig {
-            id: "allowance::2345678901::87654".to_string(),
             child_id: child2.id.clone(),
             amount: 15.0,
             day_of_week: 5,
@@ -410,10 +402,10 @@ mod tests {
         let configs = repo.list_allowance_configs().unwrap();
         assert_eq!(configs.len(), 2);
         
-        // Verify both configs are present
+        // Verify both configs are present by checking child_ids
         let child_ids: Vec<&String> = configs.iter().map(|c| &c.child_id).collect();
-        assert!(child_ids.contains(&&child1.id));
-        assert!(child_ids.contains(&&child2.id));
+        assert!(child_ids.contains(&&child1.id), "Child1 ID not found in configs");
+        assert!(child_ids.contains(&&child2.id), "Child2 ID not found in configs");
     }
 
     #[test]
@@ -421,8 +413,7 @@ mod tests {
         let (repo, _child_repo, _temp_dir, _child) = setup_test_repo_with_child();
         
         let config = DomainAllowanceConfig {
-            id: "allowance::9999999999::98765".to_string(),
-            child_id: "child::nonexistent".to_string(),
+            child_id: "nonexistent_child".to_string(),  // ID matches directory name
             amount: 10.0,
             day_of_week: 1,
             is_active: true,

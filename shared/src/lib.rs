@@ -468,7 +468,6 @@ impl Default for MoneyManagementConfig {
 /// Represents an allowance configuration
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AllowanceConfig {
-    pub id: String,
     pub child_id: String,
     pub amount: f64,
     pub day_of_week: u8, // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
@@ -748,16 +747,11 @@ pub struct LogEntry {
 }
 
 impl AllowanceConfig {
-    /// Generate an allowance config ID based on child ID and timestamp
-    pub fn generate_id(child_id: &str, epoch_millis: u64) -> String {
-        format!("allowance::{}::{}", child_id, epoch_millis)
-    }
-    
     /// Get the day name for the configured day of week
     pub fn day_name(&self) -> &'static str {
         match self.day_of_week {
             0 => "Sunday",
-            1 => "Monday", 
+            1 => "Monday",
             2 => "Tuesday",
             3 => "Wednesday",
             4 => "Thursday",
@@ -766,7 +760,7 @@ impl AllowanceConfig {
             _ => "Invalid",
         }
     }
-    
+
     /// Validate day of week value
     pub fn is_valid_day_of_week(day: u8) -> bool {
         day <= 6
@@ -778,17 +772,17 @@ impl Child {
     pub fn generate_id(epoch_millis: u64) -> String {
         format!("child::{}", epoch_millis)
     }
-    
+
     /// Parse a child ID to extract the timestamp
     pub fn parse_id(id: &str) -> Result<u64, ChildIdError> {
         let parts: Vec<&str> = id.split("::").collect();
         if parts.len() != 2 || parts[0] != "child" {
             return Err(ChildIdError::InvalidFormat);
         }
-        
+
         parts[1].parse::<u64>().map_err(|_| ChildIdError::InvalidTimestamp)
     }
-    
+
     /// Extract timestamp from child ID
     pub fn extract_timestamp(&self) -> Result<u64, ChildIdError> {
         Self::parse_id(&self.id)
@@ -905,12 +899,6 @@ mod tests {
     }
 
     #[test]
-    fn test_allowance_config_generate_id() {
-        let id = AllowanceConfig::generate_id("child::123", 1702516122000);
-        assert_eq!(id, "allowance::child::123::1702516122000");
-    }
-
-    #[test]
     fn test_allowance_config_day_names() {
         let days = [
             (0, "Sunday"),
@@ -925,7 +913,6 @@ mod tests {
 
         for (day_num, expected_name) in days {
             let config = AllowanceConfig {
-                id: "test".to_string(),
                 child_id: "test".to_string(),
                 amount: 10.0,
                 day_of_week: day_num,

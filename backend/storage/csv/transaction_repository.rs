@@ -11,6 +11,8 @@ use crate::backend::domain::models::transaction::{
 use super::connection::CsvConnection;
 use super::child_repository::ChildRepository;
 use crate::backend::storage::ChildStorage;
+use crate::backend::storage::traits::TransactionStorage;
+use serde::{Deserialize, Serialize};
 
 /// CSV-based transaction repository
 #[derive(Clone)]
@@ -455,14 +457,33 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
 mod tests {
     use super::*;
     use crate::backend::storage::TransactionStorage;
-    use crate::backend::storage::csv::test_utils::{TestEnvironment, RepositoryTestHelper};
-    
-    fn setup_test_repo() -> Result<(TransactionRepository, TestEnvironment)> {
-        let env = TestEnvironment::new()?;
-        let repo = TransactionRepository::new(env.connection.clone());
-        Ok((repo, env))
+    use crate::backend::domain::models::child::Child as DomainChild;
+    use chrono::Utc;
+    use std::sync::Arc;
+    use tempfile::TempDir;
+
+    fn setup_test_repo() -> Result<(TransactionRepository, TempDir)> {
+        let temp_dir = TempDir::new()?;
+        let connection = CsvConnection::new(temp_dir.path())?;
+        let repo = TransactionRepository::new(connection);
+        Ok((repo, temp_dir))
     }
-    
+
+    fn setup_test_child(temp_dir: &TempDir) -> Result<DomainChild> {
+        let child = DomainChild {
+            id: "child::test_123".to_string(),
+            name: "Test Child".to_string(),
+            birthdate: chrono::NaiveDate::parse_from_str("2010-01-01", "%Y-%m-%d").unwrap(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+
+        let connection = CsvConnection::new(temp_dir.path())?;
+        let child_repo = ChildRepository::new(Arc::new(connection));
+        child_repo.store_child(&child)?;
+        Ok(child)
+    }
+
     #[test]
     fn test_compare_dates_timezone_fix() -> Result<()> {
         let (repo, _env) = setup_test_repo()?;
@@ -552,36 +573,29 @@ mod tests {
     
     #[test]
     fn test_delete_transaction() -> Result<()> {
-        let helper = RepositoryTestHelper::new()?;
-        
-        // Create a test child using the helper
-        let child = helper.create_test_child("Test Child", "delete_test_123")?;
-        
+        let (repo, temp_dir) = setup_test_repo()?;
+        let child = setup_test_child(&temp_dir)?;
+
+        // Create a test transaction
         let transaction = DomainTransaction {
-            id: "to_delete".to_string(),
+            id: "test_transaction_123".to_string(),
             child_id: child.id.clone(),
-            date: chrono::DateTime::parse_from_rfc3339("2024-01-15T10:30:00Z").unwrap(),
-            description: "Will be deleted".to_string(),
-            amount: 100.0,
-            balance: 100.0,
+            date: chrono::DateTime::parse_from_rfc3339("2025-01-01T12:00:00Z").unwrap(),
+            description: "Test transaction".to_string(),
+            amount: 10.0,
+            balance: 10.0,
             transaction_type: DomainTransactionType::Income,
         };
-        
-        // Store transaction
-        helper.transaction_repo.store_transaction(&transaction)?;
-        
-        // Verify it exists
-        let retrieved = helper.transaction_repo.get_transaction(&child.id, "to_delete")?;
-        assert!(retrieved.is_some());
-        
-        // Delete transaction
-        let deleted = helper.transaction_repo.delete_transaction(&child.id, "to_delete")?;
+
+        // Store and verify
+        repo.store_transaction(&transaction)?;
+        assert!(repo.get_transaction(&child.id, &transaction.id)?.is_some());
+
+        // Delete and verify
+        let deleted = repo.delete_transaction(&child.id, &transaction.id)?;
         assert!(deleted);
-        
-        // Verify it's gone
-        let retrieved = helper.transaction_repo.get_transaction(&child.id, "to_delete")?;
-        assert!(retrieved.is_none());
-        
+        assert!(repo.get_transaction(&child.id, &transaction.id)?.is_none());
+
         Ok(())
     }
     

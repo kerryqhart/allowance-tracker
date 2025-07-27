@@ -32,7 +32,6 @@
 //! - Atomic file writes with temp files
 
 use anyhow::Result;
-use async_trait::async_trait;
 use chrono::Utc;
 use log::{info, debug};
 use serde::{Deserialize, Serialize};
@@ -67,7 +66,6 @@ impl Default for GlobalConfig {
 }
 
 /// Storage trait for global configuration operations
-#[async_trait]
 pub trait GlobalConfigStorage: Send + Sync {
     /// Get the global configuration
     fn get_global_config(&self) -> Result<GlobalConfig>;
@@ -229,7 +227,7 @@ mod tests {
         
         // Create a test child first
         let child = DomainChild {
-            id: "child::1234567890".to_string(),
+            id: "test_child".to_string(),  // ID matches directory name
             name: "Test Child".to_string(),
             birthdate: chrono::NaiveDate::parse_from_str("2010-01-01", "%Y-%m-%d").unwrap(),
             created_at: Utc::now(),
@@ -251,7 +249,7 @@ mod tests {
         
         // Create and set a child first
         let child = DomainChild {
-            id: "child::1234567890".to_string(),
+            id: "test_child".to_string(),  // ID matches directory name
             name: "Test Child".to_string(),
             birthdate: chrono::NaiveDate::parse_from_str("2010-01-01", "%Y-%m-%d").unwrap(),
             created_at: Utc::now(),
@@ -303,7 +301,7 @@ mod tests {
         
         // Create a child and set as active
         let child = DomainChild {
-            id: "child::1234567890".to_string(),
+            id: "test_child".to_string(),  // ID matches directory name
             name: "Test Child".to_string(),
             birthdate: chrono::NaiveDate::parse_from_str("2010-01-01", "%Y-%m-%d").unwrap(),
             created_at: Utc::now(),
