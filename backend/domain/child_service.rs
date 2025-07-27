@@ -37,9 +37,14 @@ impl ChildService {
         let birthdate = NaiveDate::parse_from_str(&command.birthdate, "%Y-%m-%d")
             .context("Invalid birthdate format in create_child command")?;
 
-        // Create the domain child
+        // Use the directory-safe name as the canonical child ID so that the
+        // ID always matches the directory that stores the child’s data.
+        // This prevents mismatches that can silently route updates to the
+        // wrong directory when redirects are involved.
+        let safe_dir_name = CsvConnection::generate_safe_directory_name(command.name.trim());
+
         let child = DomainChild {
-            id: DomainChild::generate_id(now.timestamp_millis() as u64),
+            id: safe_dir_name.clone(),
             name: command.name.trim().to_string(),
             birthdate,
             created_at: now,

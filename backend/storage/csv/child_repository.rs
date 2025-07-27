@@ -125,6 +125,16 @@ impl ChildRepository {
                 .with_timezone(&chrono::Utc),
         };
 
+        // Fail fast if the child ID does not match the directory where we
+        // found the YAML.  This guards against legacy/hand-edited files that
+        // could route new writes to the wrong directory via redirects.
+        if domain_child.id != directory_name {
+            return Err(anyhow::anyhow!(
+                "Child ID mismatch: YAML id '{}' does not match containing directory '{}'",
+                domain_child.id, directory_name
+            ));
+        }
+
         Ok(Some(domain_child))
     }
     
