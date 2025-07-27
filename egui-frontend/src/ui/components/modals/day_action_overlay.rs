@@ -112,7 +112,7 @@ impl AllowanceTrackerApp {
                 );
                 
                 // Center the modal content
-                ui.allocate_ui_at_rect(screen_rect, |ui| {
+                ui.allocate_new_ui(egui::UiBuilder::new().max_rect(screen_rect), |ui| {
                     ui.centered_and_justified(|ui| {
                         // Modal card with proper styling
                         egui::Frame::window(&ui.style())

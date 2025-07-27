@@ -164,7 +164,7 @@ impl CalendarDay {
         }
         
         // Draw the content within the allocated cell rectangle
-        let ui_result = ui.allocate_ui_at_rect(cell_rect, |ui| {
+        let ui_result = ui.allocate_new_ui(egui::UiBuilder::new().max_rect(cell_rect), |ui| {
             ui.vertical(|ui| {
                 ui.set_width(width);
                 ui.set_height(height);
@@ -783,7 +783,7 @@ impl AllowanceTrackerApp {
         // Calendar container positioned with consistent margins
         
         // Draw calendar content (no background card)
-        ui.allocate_ui_at_rect(card_rect, |ui| {
+        ui.allocate_new_ui(egui::UiBuilder::new().max_rect(card_rect), |ui| {
             ui.vertical(|ui| {
                 // Align the calendar content to the left to match navigation buttons
                 ui.allocate_ui_with_layout(

@@ -41,7 +41,7 @@ pub fn render_responsive_transaction_table(ui: &mut egui::Ui, available_rect: eg
     );
     
     // Draw table content using full available area
-    ui.allocate_ui_at_rect(table_rect, |ui| {
+    ui.allocate_new_ui(egui::UiBuilder::new().max_rect(table_rect), |ui| {
         ui.vertical(|ui| {
             ui.add_space(8.0); // Reduced spacing since no title
             
@@ -124,7 +124,7 @@ pub fn render_responsive_transaction_table(ui: &mut egui::Ui, available_rect: eg
                                         
                                         // Draw the row content ON TOP of the button
                                         let button_rect = button_response.rect;
-                                        ui.allocate_ui_at_rect(button_rect, |ui| {
+                                        ui.allocate_new_ui(egui::UiBuilder::new().max_rect(button_rect), |ui| {
                                             ui.horizontal(|ui| {
                                                 // Fine-tuned data column spacing
                                                 ui.spacing_mut().item_spacing.x = 6.5; // Reduced from 7.5px

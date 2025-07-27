@@ -98,19 +98,19 @@ impl eframe::App for AllowanceTrackerApp {
             //           header_height + selection_bar_height + subheader_height);
             
             // Layer 1: Header (existing function, positioned in header area)
-            ui.allocate_ui_at_rect(header_rect, |ui| {
+            ui.allocate_new_ui(egui::UiBuilder::new().max_rect(header_rect), |ui| {
                 self.render_header(ui);
             });
             
             // Layer 2: Selection controls bar (only when in selection mode)
             if self.interaction.transaction_selection_mode {
-                ui.allocate_ui_at_rect(selection_bar_rect, |ui| {
+                ui.allocate_new_ui(egui::UiBuilder::new().max_rect(selection_bar_rect), |ui| {
                     self.render_selection_controls_bar(ui);
                 });
             }
             
             // Layer 3: Subheader (Calendar/Table toggle buttons)
-            ui.allocate_ui_at_rect(subheader_rect, |ui| {
+            ui.allocate_new_ui(egui::UiBuilder::new().max_rect(subheader_rect), |ui| {
                 ui.horizontal_centered(|ui| {
                     ui.add_space(20.0); // Left padding
                     
@@ -128,7 +128,7 @@ impl eframe::App for AllowanceTrackerApp {
             });
             
             // Layer 4: Content (main content area)
-            ui.allocate_ui_at_rect(content_rect, |ui| {
+            ui.allocate_new_ui(egui::UiBuilder::new().max_rect(content_rect), |ui| {
                 // Error and success messages
                 self.render_messages(ui);
                 

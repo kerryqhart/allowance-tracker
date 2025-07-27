@@ -75,7 +75,7 @@ impl AllowanceTrackerApp {
             egui::vec2(content_rect.width() - 80.0, content_rect.height() - 20.0) // Use almost full height
         );
         
-        ui.allocate_ui_at_rect(chart_rect, |ui| {
+        ui.allocate_new_ui(egui::UiBuilder::new().max_rect(chart_rect), |ui| {
             if let Some(ref _child) = self.get_current_child_from_backend() {
                 if self.chart.chart_data.is_empty() {
                     // Show loading state

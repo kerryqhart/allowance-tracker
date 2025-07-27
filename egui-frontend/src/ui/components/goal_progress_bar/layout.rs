@@ -101,7 +101,7 @@ impl GoalLayout {
         
         // Content area with internal margins
         let mut result = None;
-        ui.allocate_ui_at_rect(card_rect, |ui| {
+        ui.allocate_new_ui(egui::UiBuilder::new().max_rect(card_rect), |ui| {
             ui.vertical(|ui| {
                 // Top padding
                 ui.add_space(self.config.card_vertical_padding);
@@ -300,7 +300,7 @@ impl GoalLayout {
         section_rect: egui::Rect,
         content: impl FnOnce(&mut egui::Ui) -> R
     ) -> R {
-        ui.allocate_ui_at_rect(section_rect, |ui| {
+        ui.allocate_new_ui(egui::UiBuilder::new().max_rect(section_rect), |ui| {
             ui.vertical_centered(|ui| {
                 content(ui)
             }).inner
@@ -314,7 +314,7 @@ impl GoalLayout {
         section_rect: egui::Rect,
         content: impl FnOnce(&mut egui::Ui) -> R
     ) -> R {
-        ui.allocate_ui_at_rect(section_rect, |ui| {
+        ui.allocate_new_ui(egui::UiBuilder::new().max_rect(section_rect), |ui| {
             content(ui)
         }).inner
     }
@@ -326,7 +326,7 @@ impl GoalLayout {
         section_rect: egui::Rect,
         content: impl FnOnce(&mut egui::Ui) -> R
     ) -> R {
-        ui.allocate_ui_at_rect(section_rect, |ui| {
+        ui.allocate_new_ui(egui::UiBuilder::new().max_rect(section_rect), |ui| {
             ui.vertical_centered(|ui| {
                 content(ui)
             }).inner

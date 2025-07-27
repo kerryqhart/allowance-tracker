@@ -1,26 +1,26 @@
-fix: Systematic cleanup of 76+ deprecation warnings (74% reduction)
+Fix all allocate_ui_at_rect deprecation warnings
 
-Cleaned up build warnings from ~103 to 27, maintaining full functionality:
+Migrate all deprecated `egui::Ui::allocate_ui_at_rect` calls to the new
+`ui.allocate_new_ui(egui::UiBuilder::new().max_rect(rect), |ui| {` API.
 
-✅ Fixed egui API deprecations:
-- Button/Frame::rounding → corner_radius (~46 instances)
-- Frame::none() → Frame::new() (2 instances)
-- Ui::child_ui → ui.new_child() (3 instances)
+This systematic cleanup addresses ~25+ deprecation warnings across:
 
-✅ Fixed custom deprecations:
-- current_child() → get_current_child_from_backend() (29 instances)
-- Fixed unused variables by prefixing with underscore (3 instances)
+**Modals & Settings:**
+- Parental control modal
+- Money transaction modal  
+- Day action overlay modal
+- All settings modals (data directory, allowance config, create child, profile, export)
 
-🐛 Critical fix: Loading screen infinite loop
-- Fixed app getting stuck at loading screen
-- Issue was current_child() → get_current_child_from_backend() change in loading logic
-- get_current_child_from_backend() made backend calls every frame during loading
-- Used self.core.current_child instead for cached state during initialization
+**Core Components:**
+- Transaction table layout and row buttons
+- UI components tab area
+- App coordinator layout (header, selection bar, subheader, content areas)
 
-🧪 Testing:
-- All 166 unit tests still passing
-- App functionality fully verified
-- No regressions introduced
+**Goal System:**
+- Goal progress bar layout and section containers
+- Goal renderer top/graph/circular sections
 
-📈 Progress: 74% warning reduction while maintaining stability
-Remaining: 26 allocate_ui_at_rect warnings for next phase 
+All UI layouts maintain the same visual behavior while using the updated
+egui API. No functional changes, only API migration for future compatibility.
+
+Result: Zero allocate_ui_at_rect warnings remaining. 

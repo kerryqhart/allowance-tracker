@@ -169,7 +169,7 @@ impl AllowanceTrackerApp {
         log::info!("   📍 Bottom sections should start at same Y: left={:.1}, right={:.1}", bottom_left_rect.min.y, bottom_right_rect.min.y);
         
         // TOP SECTION: Progress bar (DIRECT rendering)
-        ui.allocate_ui_at_rect(top_rect, |ui| {
+        ui.allocate_new_ui(egui::UiBuilder::new().max_rect(top_rect), |ui| {
             log::info!("🎯 Rendering progress bar in top section");
             
             let header_style = SectionHeaderStyle::default();
@@ -221,7 +221,7 @@ impl AllowanceTrackerApp {
 
         
         // DIRECT RENDERING: No nested UI hierarchy
-        ui.allocate_ui_at_rect(graph_rect, |ui| {
+        ui.allocate_new_ui(egui::UiBuilder::new().max_rect(graph_rect), |ui| {
             let header_style = SectionHeaderStyle::default();
             
             ui.vertical(|ui| {
@@ -277,7 +277,7 @@ impl AllowanceTrackerApp {
         if let Some(mut circular_progress) = self.goal.circular_progress.take() {
             circular_progress.update_progress(&goal, Some(&calculation));
             
-            ui.allocate_ui_at_rect(right_rect_with_margin, |ui| {
+            ui.allocate_new_ui(egui::UiBuilder::new().max_rect(right_rect_with_margin), |ui| {
                 let header_style = SectionHeaderStyle::default();
                 
                 ui.vertical(|ui| {
@@ -310,7 +310,7 @@ impl AllowanceTrackerApp {
             self.goal.circular_progress = Some(circular_progress);
         } else {
             // Fallback state - show initialization message
-            ui.allocate_ui_at_rect(right_rect_with_margin, |ui| {
+            ui.allocate_new_ui(egui::UiBuilder::new().max_rect(right_rect_with_margin), |ui| {
                 let header_style = SectionHeaderStyle::default();
                 
                 ui.vertical(|ui| {

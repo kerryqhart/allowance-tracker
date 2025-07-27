@@ -275,7 +275,7 @@ impl AllowanceTrackerApp {
         );
         
         // Draw tabs in the calculated position
-        ui.allocate_ui_at_rect(tabs_rect, |ui| {
+        ui.allocate_new_ui(egui::UiBuilder::new().max_rect(tabs_rect), |ui| {
             ui.horizontal(|ui| {
                 // Add padding to align with calendar content
                 ui.add_space(15.0);
