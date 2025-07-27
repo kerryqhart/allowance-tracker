@@ -13,8 +13,8 @@
 //! - Legacy colors (for backward compatibility)
 //!
 //! ## Usage:
-//! ```rust
-//! use crate::ui::components::styling::colors;
+//! ```rust,no_run
+//! use allowance_tracker_egui::ui::components::styling::colors;
 //! 
 //! let hover_color = colors::HOVER_BORDER;
 //! let bg_color = colors::CARD_BACKGROUND;

@@ -1,26 +1,22 @@
-Fix all allocate_ui_at_rect deprecation warnings
+Fix remaining warnings and doctest issues
 
-Migrate all deprecated `egui::Ui::allocate_ui_at_rect` calls to the new
-`ui.allocate_new_ui(egui::UiBuilder::new().max_rect(rect), |ui| {` API.
+Clean up all remaining code warnings and fix doctest compilation issues:
 
-This systematic cleanup addresses ~25+ deprecation warnings across:
+**Warning Cleanup:**
+- Remove unused imports:
+  - std::path::Path from child_service.rs
+  - CreateChildCommand from allowance_service.rs
+  - chrono::Utc from goal_service.rs
+- Fix unused variables by prefixing with underscore:
+  - _service and _service_default in export_service.rs
+  - _dest_base in connection.rs
+  - _original_dir in connection.rs
+  - _transaction in transaction_repository.rs
 
-**Modals & Settings:**
-- Parental control modal
-- Money transaction modal  
-- Day action overlay modal
-- All settings modals (data directory, allowance config, create child, profile, export)
+**Doctest Fixes:**
+- Fix file tree Unicode box characters by marking as text blocks
+- Fix import paths in doctests to use allowance_tracker_egui
+- Add proper function context for examples
+- Add no_run attribute to prevent actual execution
 
-**Core Components:**
-- Transaction table layout and row buttons
-- UI components tab area
-- App coordinator layout (header, selection bar, subheader, content areas)
-
-**Goal System:**
-- Goal progress bar layout and section containers
-- Goal renderer top/graph/circular sections
-
-All UI layouts maintain the same visual behavior while using the updated
-egui API. No functional changes, only API migration for future compatibility.
-
-Result: Zero allocate_ui_at_rect warnings remaining. 
+Result: Zero warnings and all tests passing (unit tests and doctests). 

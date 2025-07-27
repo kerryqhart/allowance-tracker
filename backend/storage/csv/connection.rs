@@ -808,7 +808,7 @@ mod tests {
         connection.verify_child_data_exists(&original_dir)?;
         
         // Create destination with escaped path (simulating user input)
-        let dest_base = create_test_destination_with_complex_path(temp_dir.path())?;
+        let _dest_base = create_test_destination_with_complex_path(temp_dir.path())?;
         let escaped_dest_path = format!("{}{}Test\\ Documents{}com\\~apple\\~CloudDocs{}Kids\\ Data{}Child\\'s\\ Money", 
             temp_dir.path().to_string_lossy(),
             std::path::MAIN_SEPARATOR,
@@ -852,7 +852,7 @@ mod tests {
         let original_dir = connection.get_child_directory(child_name);
         
         // Create destination with escaped path
-        let dest_base = create_test_destination_with_complex_path(temp_dir.path())?;
+        let _dest_base = create_test_destination_with_complex_path(temp_dir.path())?;
         let escaped_dest_path = format!("{}{}Test\\ Documents{}com\\~apple\\~CloudDocs{}Kids\\ Data{}Child\\'s\\ Money",
             temp_dir.path().to_string_lossy(),
             std::path::MAIN_SEPARATOR,
@@ -945,7 +945,7 @@ mod tests {
         
         // Create test child data
         connection.create_test_child_data(child_name)?;
-        let original_dir = connection.get_child_directory(child_name);
+        let _original_dir = connection.get_child_directory(child_name);
         
         // First relocate to a different location
         let dest_dir = temp_dir.path().join("new_location");

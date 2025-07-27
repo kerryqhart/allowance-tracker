@@ -6,7 +6,7 @@
 //!
 //! ## File Structure
 //!
-//! ```
+//! ```text
 //! data/
 //! ├── global_config.yaml
 //! └── {child_name}/

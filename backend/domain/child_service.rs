@@ -242,7 +242,7 @@ impl ChildService {
 mod tests {
     use super::*;
     use tempfile::tempdir;
-    use std::path::Path;
+
     use crate::backend::domain::commands::child::{
         CreateChildCommand, UpdateChildCommand, GetChildCommand,
         DeleteChildCommand, SetActiveChildCommand

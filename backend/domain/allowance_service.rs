@@ -414,7 +414,7 @@ impl AllowanceService {
 mod tests {
     use super::*;
     use crate::backend::domain::models::child::Child as DomainChild;
-    use crate::backend::domain::commands::child::CreateChildCommand;
+
     use tempfile::tempdir;
 
     fn setup_test() -> AllowanceService {

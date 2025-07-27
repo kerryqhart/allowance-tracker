@@ -21,17 +21,20 @@
 //! - Consistent styling patterns across all components
 //!
 //! ## Usage:
-//! ```rust
-//! use crate::ui::components::styling::{CURRENT_THEME, colors, setup_kid_friendly_style};
+//! ```rust,no_run
+//! use allowance_tracker_egui::ui::components::styling::{CURRENT_THEME, colors, setup_kid_friendly_style};
+//! use eframe::egui::Context;
 //! 
-//! // Use theme colors
-//! let hover_color = CURRENT_THEME.interactive.hover_border;
-//! 
-//! // Use convenience constants  
-//! let bg_color = colors::CARD_BACKGROUND;
-//! 
-//! // Use drawing functions
-//! setup_kid_friendly_style(ctx);
+//! fn example(ctx: &Context) {
+//!     // Use theme colors
+//!     let hover_color = CURRENT_THEME.interactive.hover_border;
+//!     
+//!     // Use convenience constants  
+//!     let bg_color = colors::CARD_BACKGROUND;
+//!     
+//!     // Use drawing functions
+//!     setup_kid_friendly_style(ctx);
+//! }
 //! ```
 
 pub mod theme;

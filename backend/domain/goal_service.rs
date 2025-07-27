@@ -582,7 +582,7 @@ mod tests {
     use crate::backend::domain::commands::child::SetActiveChildCommand;
     use crate::backend::domain::commands::allowance::UpdateAllowanceConfigCommand;
     use crate::backend::domain::commands::transactions::CreateTransactionCommand;
-    use chrono::Utc;
+
 
     fn create_test_service() -> GoalService {
         let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");

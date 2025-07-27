@@ -312,10 +312,10 @@ mod tests {
     
     #[test]
     fn test_export_service_creation() {
-        let service = ExportService::new();
+        let _service = ExportService::new();
         assert!(true); // Service created successfully
         
-        let service_default = ExportService::default();
+        let _service_default = ExportService::default();
         assert!(true); // Default service created successfully
     }
 } 

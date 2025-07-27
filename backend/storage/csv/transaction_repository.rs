@@ -620,7 +620,7 @@ mod tests {
         use chrono::{DateTime, FixedOffset};
         
         // Create a dummy transaction to inspect its field types
-        let transaction = DomainTransaction {
+        let _transaction = DomainTransaction {
             id: "test".to_string(),
             child_id: "child".to_string(),
             date: chrono::DateTime::parse_from_rfc3339("2024-01-01T12:00:00Z").unwrap(), // Fixed domain model to use DateTime

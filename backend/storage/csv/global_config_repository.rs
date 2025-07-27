@@ -5,7 +5,7 @@
 //!
 //! ## File Structure
 //!
-//! ```
+//! ```text
 //! data/
 //! ├── global_config.yaml    ← This module manages this file
 //! └── {child_name}/
