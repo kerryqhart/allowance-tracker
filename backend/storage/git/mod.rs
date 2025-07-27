@@ -17,10 +17,10 @@
 //! 
 //! fn example() -> anyhow::Result<()> {
 //!     let git_manager = GitManager::new();
-//!     
+//! 
 //!     // Ensure repository exists
 //!     git_manager.ensure_repo_exists("/path/to/child/directory")?;
-//!     
+//! 
 //!     // Commit a file change
 //!     git_manager.commit_file_change(
 //!         "/path/to/child/directory",

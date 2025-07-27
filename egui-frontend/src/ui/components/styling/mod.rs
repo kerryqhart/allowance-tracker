@@ -28,10 +28,10 @@
 //! fn example(ctx: &Context) {
 //!     // Use theme colors
 //!     let hover_color = CURRENT_THEME.interactive.hover_border;
-//!     
+//! 
 //!     // Use convenience constants  
 //!     let bg_color = colors::CARD_BACKGROUND;
-//!     
+//! 
 //!     // Use drawing functions
 //!     setup_kid_friendly_style(ctx);
 //! }

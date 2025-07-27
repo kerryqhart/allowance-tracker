@@ -26,7 +26,7 @@ use log::{info, warn};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::backend::storage::csv::{CsvConnection, CsvGoalRepository};
+use crate::backend::storage::csv::{CsvConnection, GoalRepository};
 use crate::backend::domain::{child_service::ChildService, AllowanceService, TransactionService, BalanceService};
 use crate::backend::domain::models::goal::{DomainGoal, DomainGoalState};
 use crate::backend::domain::commands::goal::{
@@ -40,7 +40,7 @@ use shared::GoalCalculation;
 /// Service for managing goals and goal-related calculations
 #[derive(Clone)]
 pub struct GoalService {
-    goal_repository: CsvGoalRepository,
+    goal_repository: GoalRepository,
     child_service: ChildService,
     allowance_service: AllowanceService,
     transaction_service: TransactionService,
@@ -57,7 +57,7 @@ impl GoalService {
         transaction_service: TransactionService,
         balance_service: BalanceService,
     ) -> Self {
-        let goal_repository = CsvGoalRepository::new((*csv_conn).clone());
+        let goal_repository = GoalRepository::new((*csv_conn).clone());
         Self {
             goal_repository,
             child_service,
@@ -169,7 +169,7 @@ impl GoalService {
         let current_goal_domain = self.goal_repository.get_current_goal(&child_id)?;
         
         // Calculate completion projection if goal exists
-        let calculation = if let Some(ref goal) = current_goal_domain {
+        let calculation = if let Some(goal) = &current_goal_domain {
             Some(self.calculate_goal_completion(&child_id, goal.target_amount)?)
         } else {
             None

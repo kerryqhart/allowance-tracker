@@ -1,22 +1,14 @@
-Fix remaining warnings and doctest issues
+Remove duplicate csv-prefixed repository files
 
-Clean up all remaining code warnings and fix doctest compilation issues:
+Clean up old csv-prefixed repository files that were replaced by their
+non-prefixed versions:
 
-**Warning Cleanup:**
-- Remove unused imports:
-  - std::path::Path from child_service.rs
-  - CreateChildCommand from allowance_service.rs
-  - chrono::Utc from goal_service.rs
-- Fix unused variables by prefixing with underscore:
-  - _service and _service_default in export_service.rs
-  - _dest_base in connection.rs
-  - _original_dir in connection.rs
-  - _transaction in transaction_repository.rs
+- csv_allowance_repository.rs → allowance_repository.rs
+- csv_child_repository.rs → child_repository.rs
+- csv_parental_control_repository.rs → parental_control_repository.rs
+- csv_transaction_repository.rs → transaction_repository.rs
+- csv_goal_repository.rs → goal_repository.rs
 
-**Doctest Fixes:**
-- Fix file tree Unicode box characters by marking as text blocks
-- Fix import paths in doctests to use allowance_tracker_egui
-- Add proper function context for examples
-- Add no_run attribute to prevent actual execution
-
-Result: Zero warnings and all tests passing (unit tests and doctests). 
+These files were leftover from the repository refactoring and are no
+longer needed as their functionality has been moved to the non-prefixed
+versions. 

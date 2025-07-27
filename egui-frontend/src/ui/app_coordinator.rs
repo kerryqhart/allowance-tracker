@@ -40,7 +40,7 @@ impl eframe::App for AllowanceTrackerApp {
             self.interaction.child_dropdown.is_open = false;
         }
         
-        // Load initial data on first run  
+        // Load initial data on first run
         // Note: Use cached current_child here to avoid infinite backend calls during loading
         if self.ui.loading && self.core.current_child.is_none() {
             self.load_initial_data();
