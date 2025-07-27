@@ -32,6 +32,21 @@ use crate::backend::domain::models::allowance::AllowanceConfig as DomainAllowanc
 use super::connection::CsvConnection;
 use crate::backend::storage::GitManager;
 use serde_yaml;
+use serde::{Serialize, Deserialize};
+
+/// YAML representation of an allowance config that omits the redundant child_id.
+/// The child_id is implicit from the directory name, so storing it in the file
+/// can become stale if the ID ever changes.  We therefore write/read this
+/// trimmed struct on disk and inject the child_id in memory.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct YamlAllowanceConfig {
+    id: String,
+    amount: f64,
+    day_of_week: u8,
+    is_active: bool,
+    created_at: String,
+    updated_at: String,
+}
 
 /// CSV-based allowance config repository using per-child YAML files
 #[derive(Clone)]
@@ -68,7 +83,18 @@ impl AllowanceRepository {
         }
         
         let yaml_path = self.get_allowance_config_path(child_directory);
-        let yaml_content = serde_yaml::to_string(config)?;
+
+        // Convert to YAML struct without child_id before serialising
+        let yaml_model = YamlAllowanceConfig {
+            id: config.id.clone(),
+            amount: config.amount,
+            day_of_week: config.day_of_week,
+            is_active: config.is_active,
+            created_at: config.created_at.clone(),
+            updated_at: config.updated_at.clone(),
+        };
+
+        let yaml_content = serde_yaml::to_string(&yaml_model)?;
         
         // Use atomic write pattern: write to temp file, then rename
         let temp_path = yaml_path.with_extension("tmp");
@@ -90,8 +116,19 @@ impl AllowanceRepository {
         }
         
         let yaml_content = std::fs::read_to_string(&yaml_path)?;
-        let config: DomainAllowanceConfig = serde_yaml::from_str(&yaml_content)?;
-        
+        let yaml_model: YamlAllowanceConfig = serde_yaml::from_str(&yaml_content)?;
+
+        // Inject child_id from directory
+        let config = DomainAllowanceConfig {
+            id: yaml_model.id,
+            child_id: child_directory.to_string(),
+            amount: yaml_model.amount,
+            day_of_week: yaml_model.day_of_week,
+            is_active: yaml_model.is_active,
+            created_at: yaml_model.created_at,
+            updated_at: yaml_model.updated_at,
+        };
+
         debug!("Loaded allowance config for child directory '{}' from {:?}", child_directory, yaml_path);
         Ok(Some(config))
     }
