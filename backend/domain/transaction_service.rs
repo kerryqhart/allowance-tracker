@@ -378,7 +378,7 @@ impl TransactionService {
         if let Ok(active_child) = self.get_active_child() {
             info!("🎯 ALLOWANCE DEBUG: Found active child: {}", active_child.id);
             let current_date = Local::now().naive_local().date();
-            let check_from_date = current_date - chrono::Duration::days(7);
+            let check_from_date = current_date - chrono::Duration::days(90);
             info!("🎯 ALLOWANCE DEBUG: Checking allowances from {} to {}", check_from_date, current_date);
 
             let pending_allowances = match self.allowance_service.get_pending_allowance_dates(&active_child.id, check_from_date, current_date) {
