@@ -51,7 +51,6 @@ struct YamlAllowanceConfig {
 #[derive(Clone)]
 pub struct AllowanceRepository {
     connection: CsvConnection,
-    #[allow(dead_code)]
     git_manager: GitManager,
 }
 
@@ -93,14 +92,22 @@ impl AllowanceRepository {
         };
 
         let yaml_content = serde_yaml::to_string(&yaml_model)?;
-        
+
         // Use atomic write pattern: write to temp file, then rename
         let temp_path = yaml_path.with_extension("tmp");
         std::fs::write(&temp_path, yaml_content)?;
         std::fs::rename(&temp_path, &yaml_path)?;
-        
+
         debug!("Saved allowance config for child directory '{}' to {:?}", child_directory, yaml_path);
-        
+
+        // Git commit the allowance config change
+        let action_description = format!("Updated allowance config (${:.2}/week, active: {})", config.amount, config.is_active);
+        let _ = self.git_manager.commit_file_change(
+            &child_dir,
+            "allowance_config.yaml",
+            &action_description
+        );
+
         Ok(())
     }
     

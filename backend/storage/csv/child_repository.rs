@@ -23,7 +23,6 @@ use serde_yaml;
 #[derive(Clone)]
 pub struct ChildRepository {
     connection: Arc<CsvConnection>,
-    #[allow(dead_code)]
     git_manager: GitManager,
 }
 
@@ -164,9 +163,17 @@ impl ChildRepository {
         let temp_path = yaml_path.with_extension("tmp");
         fs::write(&temp_path, yaml_content)?;
         fs::rename(&temp_path, &yaml_path)?;
-        
+
         info!("Saved child {} to directory: {}", child.name, directory_name);
-        
+
+        // Git commit the child.yaml change
+        let action_description = format!("Updated child profile: {}", child.name);
+        let _ = self.git_manager.commit_file_change(
+            &child_dir,
+            "child.yaml",
+            &action_description
+        );
+
         Ok(())
     }
     

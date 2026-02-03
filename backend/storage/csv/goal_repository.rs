@@ -1,4 +1,5 @@
 use crate::backend::domain::models::goal::{DomainGoal, DomainGoalState};
+use crate::backend::storage::GitManager;
 use anyhow::Result;
 use log::warn;
 use serde::{Deserialize, Serialize};
@@ -55,12 +56,16 @@ impl TryFrom<GoalRecord> for DomainGoal {
 #[derive(Debug, Clone)]
 pub struct GoalRepository {
     connection: CsvConnection,
+    git_manager: GitManager,
 }
 
 impl GoalRepository {
     /// Create a new goal repository
     pub fn new(connection: CsvConnection) -> Self {
-        Self { connection }
+        Self {
+            connection,
+            git_manager: GitManager::new(),
+        }
     }
 
     fn read_goals(&self, child_id: &str) -> Result<Vec<DomainGoal>> {
@@ -87,19 +92,30 @@ impl GoalRepository {
 
     fn write_goals(&self, child_id: &str, goals: &[DomainGoal]) -> Result<()> {
         let file_path = self.connection.get_goals_file_path(child_id);
-        
+
         // Ensure the parent directory exists
         if let Some(parent) = file_path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        
-        let file = fs::File::create(file_path)?;
+
+        let file = fs::File::create(&file_path)?;
         let mut wtr = csv::Writer::from_writer(BufWriter::new(file));
         for goal in goals {
             let record = GoalRecord::from(goal.clone());
             wtr.serialize(record)?;
         }
         wtr.flush()?;
+
+        // Git commit the goals file change
+        if let Some(parent_dir) = file_path.parent() {
+            let action_description = format!("Updated goals for child directory: {}", child_id);
+            let _ = self.git_manager.commit_file_change(
+                parent_dir,
+                "goals.csv",
+                &action_description
+            );
+        }
+
         Ok(())
     }
 }

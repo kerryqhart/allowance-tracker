@@ -45,8 +45,8 @@ dirs = "6.0.0"
 # Native file dialogs for cross-platform file browsing
 rfd = "0.15"
 
-# Git integration - temporarily removed to avoid OpenSSL build issues
-# git2 = "0.19"
+# Git integration for local repository operations (no network features = no OpenSSL needed)
+git2 = { version = "0.19", default-features = false }
 
 # Email functionality
 lettre = { version = "0.11", default-features = false, features = ["tokio1", "tokio1-rustls-tls", "smtp-transport", "builder"] }

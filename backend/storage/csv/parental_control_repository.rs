@@ -69,9 +69,7 @@ impl From<ParentalControlAttemptRecord> for DomainParentalControlAttempt {
 /// CSV-based parental control repository using per-child CSV files
 #[derive(Clone)]
 pub struct ParentalControlRepository {
-    #[allow(dead_code)]
     connection: CsvConnection,
-    #[allow(dead_code)]
     git_manager: GitManager,
 }
 

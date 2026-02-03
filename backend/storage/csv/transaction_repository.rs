@@ -11,21 +11,24 @@ use crate::backend::domain::models::transaction::{
 use super::connection::CsvConnection;
 use super::child_repository::ChildRepository;
 use crate::backend::storage::ChildStorage;
+use crate::backend::storage::GitManager;
 
 /// CSV-based transaction repository
 #[derive(Clone)]
 pub struct TransactionRepository {
     connection: CsvConnection,
     child_repository: ChildRepository,
+    git_manager: GitManager,
 }
 
 impl TransactionRepository {
     /// Create a new CSV transaction repository
     pub fn new(connection: CsvConnection) -> Self {
         let child_repository = ChildRepository::new(Arc::new(connection.clone()));
-        Self { 
+        Self {
             connection,
             child_repository,
+            git_manager: GitManager::new(),
         }
     }
     
@@ -94,22 +97,22 @@ impl TransactionRepository {
         Ok(chrono::Utc::now().with_timezone(&FixedOffset::east_opt(0).unwrap()))
     }
     
-    /// Write all transactions for a child to their CSV file
-    fn write_transactions(&self, child_name: &str, transactions: &[DomainTransaction]) -> Result<()> {
+    /// Write all transactions for a child to their CSV file (internal, no git commit)
+    fn write_transactions_internal(&self, child_name: &str, transactions: &[DomainTransaction]) -> Result<()> {
         let file_path = self.connection.get_transactions_file_path(child_name);
-        
+
         let file = OpenOptions::new()
             .write(true)
             .create(true)
             .truncate(true)
             .open(&file_path)?;
-        
+
         let writer = BufWriter::new(file);
         let mut csv_writer = Writer::from_writer(writer);
-        
+
         // Write header
         csv_writer.write_record(&["id", "child_id", "date", "description", "amount", "balance"])?;
-        
+
         // Write transactions
         for transaction in transactions {
             csv_writer.write_record(&[
@@ -121,8 +124,24 @@ impl TransactionRepository {
                 &transaction.balance.to_string(),
             ])?;
         }
-        
+
         csv_writer.flush()?;
+        Ok(())
+    }
+
+    /// Write all transactions and commit to git (for user-facing operations)
+    fn write_transactions(&self, child_name: &str, transactions: &[DomainTransaction]) -> Result<()> {
+        self.write_transactions_internal(child_name, transactions)?;
+
+        // Git commit the transaction file change
+        let child_dir = self.connection.get_child_directory(child_name);
+        let action_description = format!("Updated transactions (total: {})", transactions.len());
+        let _ = self.git_manager.commit_file_change(
+            &child_dir,
+            "transactions.csv",
+            &action_description
+        );
+
         Ok(())
     }
     
@@ -160,10 +179,16 @@ impl TransactionRepository {
         self.read_transactions(&child_name)
     }
     
-    /// Write transactions using child_id, extracting child name
+    /// Write transactions using child_id, extracting child name (with git commit)
     pub fn write_transactions_by_id(&self, child_id: &str, transactions: &[DomainTransaction]) -> Result<()> {
         let child_name = self.get_child_directory_name(child_id)?;
         self.write_transactions(&child_name, transactions)
+    }
+
+    /// Write transactions using child_id without git commit (for internal batch operations)
+    fn write_transactions_by_id_internal(&self, child_id: &str, transactions: &[DomainTransaction]) -> Result<()> {
+        let child_name = self.get_child_directory_name(child_id)?;
+        self.write_transactions_internal(&child_name, transactions)
     }
     
     /// Compare two DateTime objects properly handling timezone conversion
@@ -426,11 +451,12 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
             }
 
             if needs_write {
-                self.write_transactions_by_id(&child_id, &transactions)
+                // Use internal method to avoid git commits during balance recalculation
+                self.write_transactions_by_id_internal(&child_id, &transactions)
                     .unwrap_or_default();
             }
         }
-        
+
         Ok(())
     }
 
