@@ -36,19 +36,21 @@ impl Backend {
         // Use the real data directory in ~/Documents/Allowance Tracker
         let home_dir = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Could not find home directory"))?;
         let data_path = home_dir.join("Documents").join("Allowance Tracker");
-        
+
+        // Load email config path before moving data_path
+        let email_config_path = data_path.join("email_config.toml");
+
         // Create the CSV connection with the real data directory
         log::info!("🔍 Backend::new() using real data path: {:?}", data_path);
         let csv_connection = Arc::new(CsvConnection::new(data_path)?);
-        
+
         // Create services using the Arc<CsvConnection> pattern
         let child_service = domain::child_service::ChildService::new(csv_connection.clone());
         let allowance_service = domain::AllowanceService::new(csv_connection.clone());
         let balance_service = domain::BalanceService::new(csv_connection.clone());
-        
+
         // Load email config and create TransactionService with email support
-        let email_config_path = std::path::Path::new("email_config.toml");
-        let email_config = domain::EmailConfigService::load_config_or_default(email_config_path);
+        let email_config = domain::EmailConfigService::load_config_or_default(&email_config_path);
         log::info!("📧 Email config loaded: SMTP server = {}", email_config.smtp_server);
         
         let transaction_service = Arc::new(domain::TransactionService::with_email_service(
