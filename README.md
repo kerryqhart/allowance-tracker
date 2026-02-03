@@ -11,6 +11,10 @@ A fun and engaging desktop allowance tracking application for kids, built with R
 - **Child Profiles** - Support for multiple children with individual accounts
 - **CSV Data Storage** - Human-readable data files for easy backup and portability
 - **Native Desktop UI** - Fast, responsive interface built with egui
+- **Email Notifications** - Get alerts when transactions are added (Gmail SMTP)
+- **Automatic Allowances** - Scheduled weekly allowance distribution
+- **Parental Controls** - Protected access to settings and transaction deletion
+- **Custom Data Location** - Choose where your data is stored
 
 ## Architecture
 

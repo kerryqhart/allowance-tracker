@@ -67,6 +67,7 @@ pub mod commands;
 pub mod models;
 pub mod email_service;
 pub mod email_config_service;
+pub mod mappers;
 
 pub use transaction_service::*;
 pub use transaction_table::*;

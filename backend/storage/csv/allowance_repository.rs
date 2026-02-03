@@ -250,7 +250,7 @@ mod tests {
     use tempfile::TempDir;
     use chrono::Utc;
     use crate::backend::domain::models::child::Child as DomainChild;
-    use crate::backend::storage::ChildStorage;
+    use crate::backend::storage::{ChildStorage, AllowanceStorage};
     use crate::backend::storage::csv::ChildRepository;
     use std::sync::Arc;
 

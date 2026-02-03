@@ -38,7 +38,7 @@ impl UIState {
             loading: true, // Start with loading=true during app initialization
             error_message: None,
             last_allowance_refresh: None,
-            allowance_refresh_interval: Duration::from_secs(60), // 1 minute (temporarily for testing)
+            allowance_refresh_interval: Duration::from_secs(120), // 2 minutes
         }
     }
     

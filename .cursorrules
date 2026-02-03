@@ -94,14 +94,6 @@ allowance-tracker/
 - `cargo test --workspace` - Run all tests
 - `cargo build --release` - Build optimized production binary
 
-## Known Issues & TODOs
-- Enhanced calendar interactions
-- Transaction editing and deletion
-- Data export/import functionality
-- Advanced filtering and search
-- Multiple child support
-- Backup and restore features
-
 ## File Naming & Organization
 - Use kebab-case for file names
 - Group related functionality in modules

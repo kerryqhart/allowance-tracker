@@ -11,23 +11,14 @@ pub fn to_dto(child: crate::backend::domain::models::child::Child) -> Child {
     }
 }
 
-/// Simple transaction mapper for converting domain transactions to DTOs
+/// Re-export transaction mapper from backend for convenience
+pub use crate::backend::domain::mappers::transaction_to_dto;
+
+/// Wrapper struct for backward compatibility with existing code using TransactionMapper::to_dto
 pub struct TransactionMapper;
 
 impl TransactionMapper {
     pub fn to_dto(domain_tx: crate::backend::domain::models::transaction::Transaction) -> Transaction {
-        Transaction {
-            id: domain_tx.id,
-            child_id: domain_tx.child_id,
-            date: domain_tx.date,
-            description: domain_tx.description,
-            amount: domain_tx.amount,
-            balance: domain_tx.balance,
-            transaction_type: match domain_tx.transaction_type {
-                crate::backend::domain::models::transaction::TransactionType::Income => TransactionType::Income,
-                crate::backend::domain::models::transaction::TransactionType::Expense => TransactionType::Expense,
-                crate::backend::domain::models::transaction::TransactionType::FutureAllowance => TransactionType::FutureAllowance,
-            },
-        }
+        transaction_to_dto(domain_tx)
     }
 } 

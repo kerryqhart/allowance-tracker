@@ -476,80 +476,51 @@ impl AllowanceTrackerApp {
     // ====================
     // ADD MONEY FORM VALIDATION METHODS
     // ====================
-    
+
     /// Validate the add money form and update validation state
+    /// Delegates to MoneyManagementService for consistent validation logic
     pub fn validate_add_money_form(&mut self) {
+        use crate::backend::domain::money_management::MoneyManagementService;
+
         self.form.add_money_description_error = None;
         self.form.add_money_amount_error = None;
-        
-        // Validate description
-        let description = self.form.add_money_description.trim();
-        if description.is_empty() {
-            self.form.add_money_description_error = Some("Description is required".to_string());
-        } else if description.len() > 70 {
-            self.form.add_money_description_error = Some(format!("Description too long ({}/70 characters)", description.len()));
-        }
-        
-        // Validate amount
-        let amount_input = self.form.add_money_amount.trim();
-        if amount_input.is_empty() {
-            // Don't show "Amount is required" error immediately - let the grayed button be sufficient
-            self.form.add_money_amount_error = None;
-        } else {
-            // Clean and parse amount
-            match self.clean_and_parse_amount(amount_input) {
-                Ok(amount) => {
-                    if amount <= 0.0 {
-                        self.form.add_money_amount_error = Some("Amount must be positive".to_string());
-                    } else if amount > 1_000_000.0 {
-                        self.form.add_money_amount_error = Some("Amount too large (max $1,000,000)".to_string());
-                    } else if amount < 0.01 {
-                        self.form.add_money_amount_error = Some("Amount too small (min $0.01)".to_string());
-                    } else if self.has_too_many_decimal_places(amount) {
-                        self.form.add_money_amount_error = Some("Maximum 2 decimal places allowed".to_string());
-                    }
+
+        let service = MoneyManagementService::new();
+        let description = &self.form.add_money_description;
+        let amount_input = &self.form.add_money_amount;
+
+        // Use domain service validation
+        let validation = service.validate_add_money_form(description, amount_input);
+
+        // Map validation errors to UI state
+        for error in &validation.errors {
+            use shared::MoneyValidationError;
+            match error {
+                MoneyValidationError::EmptyDescription |
+                MoneyValidationError::DescriptionTooLong(_) => {
+                    self.form.add_money_description_error = Some(service.get_error_message(error));
                 }
-                Err(error) => {
-                    self.form.add_money_amount_error = Some(error);
+                MoneyValidationError::EmptyAmount => {
+                    // Don't show "Amount is required" error immediately - let the grayed button be sufficient
+                }
+                _ => {
+                    self.form.add_money_amount_error = Some(service.get_error_message(error));
                 }
             }
         }
-        
+
         // Update overall validation state
-        self.form.add_money_is_valid = self.form.add_money_description_error.is_none() && self.form.add_money_amount_error.is_none();
+        self.form.add_money_is_valid = self.form.add_money_description_error.is_none()
+            && self.form.add_money_amount_error.is_none()
+            && !description.trim().is_empty()
+            && !amount_input.trim().is_empty();
     }
-    
-    /// Clean and parse amount input string (similar to MoneyManagementService)
+
+    /// Clean and parse amount input string
+    /// Delegates to MoneyManagementService for consistent parsing logic
     fn clean_and_parse_amount(&self, amount_input: &str) -> Result<f64, String> {
-        // Clean the input - remove dollar signs, spaces, commas
-        let cleaned = amount_input
-            .trim()
-            .replace("$", "")
-            .replace(",", "")
-            .replace(" ", "");
-
-        // Handle empty input after cleaning
-        if cleaned.is_empty() {
-            return Err("Amount cannot be empty".to_string());
-        }
-
-        // Try to parse as float
-        cleaned.parse::<f64>()
-            .map_err(|_| "Invalid number format".to_string())
-    }
-    
-    /// Check if amount has too many decimal places
-    fn has_too_many_decimal_places(&self, _amount: f64) -> bool {
-        // Check the original input string instead of the parsed float
-        let input = self.form.add_money_amount.trim();
-        if let Some(decimal_pos) = input.find('.') {
-            let decimal_part = &input[decimal_pos + 1..];
-            // Reject if more than 2 decimal places
-            if decimal_part.len() > 2 {
-                return true;
-            }
-        }
-        false
+        use crate::backend::domain::money_management::MoneyManagementService;
+        MoneyManagementService::new().clean_and_parse_amount(amount_input)
     }
     
     /// Format amount for currency display ($XX.XX)
@@ -569,11 +540,11 @@ impl AllowanceTrackerApp {
     /// Auto-format amount field as user types (adds $ and proper decimal formatting)
     pub fn auto_format_amount_field(&mut self) {
         let input = self.form.add_money_amount.clone();
-        
+
         // Only auto-format if the input looks like a valid number
         if let Ok(amount) = self.clean_and_parse_amount(&input) {
-            // Only format if the amount is reasonable and has <= 2 decimal places
-            if amount > 0.0 && amount < 1_000_000.0 && !self.has_too_many_decimal_places(amount) {
+            // Only format if the amount is reasonable
+            if amount > 0.0 && amount < 1_000_000.0 {
                 // Format as $XX.XX but only if user isn't currently typing
                 if !input.ends_with('.') && !input.ends_with('0') {
                     self.form.add_money_amount = format!("{:.2}", amount);
@@ -585,61 +556,55 @@ impl AllowanceTrackerApp {
     // ====================
     // GENERIC MONEY TRANSACTION FORM VALIDATION METHODS
     // ====================
-    
+
     /// Validate a generic money transaction form and update its validation state
+    /// Delegates amount validation to MoneyManagementService for consistency
     pub fn validate_money_transaction_form(&self, form_state: &mut MoneyTransactionFormState, config: &MoneyTransactionModalConfig) {
+        use crate::backend::domain::money_management::MoneyManagementService;
+
         form_state.description_error = None;
         form_state.amount_error = None;
-        
-        // Validate description
+
+        let service = MoneyManagementService::new();
+
+        // Validate description (use UI config for max length)
         let description = form_state.description.trim();
         if description.is_empty() {
             form_state.description_error = Some("Description is required".to_string());
         } else if description.len() > config.max_description_length {
-            form_state.description_error = Some(format!("Description too long ({}/{} characters)", description.len(), config.max_description_length));
+            form_state.description_error = Some(format!(
+                "Description too long ({}/{} characters)",
+                description.len(),
+                config.max_description_length
+            ));
         }
-        
-        // Validate amount
+
+        // Validate amount using domain service
         let amount_input = form_state.amount.trim();
-        if amount_input.is_empty() {
-            // Don't show "Amount is required" error immediately - let the grayed button be sufficient
-            form_state.amount_error = None;
-        } else {
-            // Clean and parse amount
-            match self.clean_and_parse_amount(amount_input) {
-                Ok(amount) => {
-                    if amount <= 0.0 {
-                        form_state.amount_error = Some("Amount must be positive".to_string());
-                    } else if amount > 1_000_000.0 {
-                        form_state.amount_error = Some("Amount too large (max $1,000,000)".to_string());
-                    } else if amount < 0.01 {
-                        form_state.amount_error = Some("Amount too small (min $0.01)".to_string());
-                    } else if self.has_too_many_decimal_places_generic(amount, &form_state.amount) {
-                        form_state.amount_error = Some("Maximum 2 decimal places allowed".to_string());
+        if !amount_input.is_empty() {
+            let validation = service.validate_add_money_form(description, amount_input);
+            for error in &validation.errors {
+                use shared::MoneyValidationError;
+                match error {
+                    MoneyValidationError::EmptyDescription |
+                    MoneyValidationError::DescriptionTooLong(_) => {
+                        // Skip - we handle description validation above with UI config
+                    }
+                    MoneyValidationError::EmptyAmount => {
+                        // Don't show error for empty - let grayed button be sufficient
+                    }
+                    _ => {
+                        form_state.amount_error = Some(service.get_error_message(error));
                     }
                 }
-                Err(error) => {
-                    form_state.amount_error = Some(error);
-                }
             }
         }
-        
+
         // Update overall validation state
-        form_state.is_valid = form_state.description_error.is_none() && form_state.amount_error.is_none();
-    }
-    
-    /// Check if amount has too many decimal places for generic form (takes amount input string)
-    fn has_too_many_decimal_places_generic(&self, _amount: f64, amount_input: &str) -> bool {
-        // Check the original input string instead of the parsed float
-        let input = amount_input.trim();
-        if let Some(decimal_pos) = input.find('.') {
-            let decimal_part = &input[decimal_pos + 1..];
-            // Reject if more than 2 decimal places
-            if decimal_part.len() > 2 {
-                return true;
-            }
-        }
-        false
+        form_state.is_valid = form_state.description_error.is_none()
+            && form_state.amount_error.is_none()
+            && !description.is_empty()
+            && !amount_input.is_empty();
     }
     
     // ====================

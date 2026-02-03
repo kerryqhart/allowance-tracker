@@ -21,26 +21,7 @@ use crate::backend::domain::child_service::ChildService;
 use crate::backend::domain::transaction_service::TransactionService;
 use crate::backend::domain::goal_service::GoalService;
 
-// Create TransactionMapper placeholder
-struct TransactionMapper;
-
-impl TransactionMapper {
-    pub fn to_dto(transaction: crate::backend::domain::models::transaction::Transaction) -> shared::Transaction {
-        shared::Transaction {
-            id: transaction.id,
-            date: transaction.date,
-            amount: transaction.amount,
-            description: transaction.description,
-            transaction_type: match transaction.transaction_type {
-                crate::backend::domain::models::transaction::TransactionType::Income => shared::TransactionType::Income,
-                crate::backend::domain::models::transaction::TransactionType::Expense => shared::TransactionType::Expense,
-                crate::backend::domain::models::transaction::TransactionType::FutureAllowance => shared::TransactionType::FutureAllowance,
-            },
-            balance: transaction.balance,
-            child_id: transaction.child_id,
-        }
-    }
-}
+use crate::backend::domain::mappers::transaction_to_dto;
 
 /// Money management service that handles all money-related business logic
 #[derive(Clone)]
@@ -116,7 +97,7 @@ impl MoneyManagementService {
         info!("🚀 MONEY MANAGEMENT: Creating transaction via TransactionService...");
         let domain_tx = transaction_service.create_transaction_domain(cmd)?;
         
-        let transaction = TransactionMapper::to_dto(domain_tx);
+        let transaction = transaction_to_dto(domain_tx);
         info!("✅ MONEY MANAGEMENT: Transaction created successfully: {:?}", transaction);
         
         // Step 5: Check for goal completion after successful transaction
@@ -223,7 +204,7 @@ impl MoneyManagementService {
         info!("🚀 MONEY MANAGEMENT: Creating transaction via TransactionService...");
         let domain_tx = transaction_service.create_transaction_domain(cmd)?;
         
-        let transaction = TransactionMapper::to_dto(domain_tx);
+        let transaction = transaction_to_dto(domain_tx);
         info!("✅ MONEY MANAGEMENT: Transaction created successfully: {:?}", transaction);
         
         // Step 5: Check for goal completion after successful transaction
