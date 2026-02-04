@@ -295,16 +295,20 @@ No known vulnerabilities detected in current dependencies.
 11. **Fix EST/EDT timezone bug in transaction_service.rs**
 12. **Externalize parental control answer to config file**
 
-### Major Refactors (Days)
+### Major Refactors (Days) - Prioritized
 
-1. **Reduce deep nesting throughout UI** - Extract nested logic to methods
-2. **Split Transaction into data vs context types** - Balance shouldn't be stored inline
-3. **Create newtype IDs** - `TransactionId`, `ChildId`, `GoalId` for type safety
-4. **Consolidate TransactionMapper** - Currently defined in 3 places
-5. **Complete state management migration** - Remove "TEMPORARY" compatibility fields
-6. **Add comprehensive tests for UI components** - Currently only `ui_state.rs` has tests
-7. **Refactor allowance duplicate detection** - Don't rely on description text matching
-8. **Fix TOCTOU race condition in allowance checking**
+| Priority | Refactor | Effort |
+|----------|----------|--------|
+| **1 (Top)** | Consolidate TransactionMapper - Currently defined in 3 places | 0.5-1 day |
+| **2 (High)** | Reduce deep nesting throughout UI - Extract nested logic to methods | 2-3 days |
+| **3 (High)** | Add comprehensive tests for UI components - Currently only `ui_state.rs` has tests | 2-4 days |
+| **4 (Medium)** | Complete state management migration - Remove "TEMPORARY" compatibility fields | 1-2 days |
+| **5 (Medium)** | Refactor allowance duplicate detection - Don't rely on description text matching | 1-2 days |
+| **6 (Low)** | Create newtype IDs - `TransactionId`, `ChildId`, `GoalId` for type safety | 2-3 days |
+
+**Skipped (not worth the effort):**
+- Split Transaction into data vs context types - Current design works, purist refactor
+- Fix TOCTOU race condition - Single-user desktop app, race is theoretical
 
 ### Optional/Nice-to-Have
 
