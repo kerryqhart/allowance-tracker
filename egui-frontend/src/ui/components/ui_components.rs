@@ -18,6 +18,53 @@
 use eframe::egui;
 use crate::ui::app_state::{AllowanceTrackerApp, MainTab};
 
+/// Preset button styles for consistent UI
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ButtonPreset {
+    Primary,    // Green action buttons
+    Secondary,  // Gray/neutral buttons
+    Danger,     // Red destructive buttons
+}
+
+impl ButtonPreset {
+    /// Get the fill color for this preset
+    pub fn fill_color(&self) -> egui::Color32 {
+        match self {
+            ButtonPreset::Primary => egui::Color32::from_rgb(76, 175, 80),
+            ButtonPreset::Secondary => egui::Color32::from_rgb(158, 158, 158),
+            ButtonPreset::Danger => egui::Color32::from_rgb(244, 67, 54),
+        }
+    }
+
+    /// Get the hover fill color for this preset
+    pub fn hover_color(&self) -> egui::Color32 {
+        match self {
+            ButtonPreset::Primary => egui::Color32::from_rgb(56, 142, 60),
+            ButtonPreset::Secondary => egui::Color32::from_rgb(117, 117, 117),
+            ButtonPreset::Danger => egui::Color32::from_rgb(211, 47, 47),
+        }
+    }
+
+    /// Get the text color for this preset
+    pub fn text_color(&self) -> egui::Color32 {
+        egui::Color32::WHITE
+    }
+}
+
+/// Create a styled button with consistent appearance
+pub fn styled_button(ui: &mut egui::Ui, text: &str, preset: ButtonPreset) -> egui::Response {
+    let button = egui::Button::new(
+        egui::RichText::new(text)
+            .font(egui::FontId::new(14.0, egui::FontFamily::Proportional))
+            .color(preset.text_color())
+    )
+    .fill(preset.fill_color())
+    .min_size(egui::vec2(80.0, 32.0))
+    .corner_radius(egui::CornerRadius::same(4));
+
+    ui.add(button)
+}
+
 impl AllowanceTrackerApp {
     /// Draw card background with proper styling
     pub fn draw_card_background(&self, ui: &mut egui::Ui, rect: egui::Rect) {
