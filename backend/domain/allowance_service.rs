@@ -6,6 +6,7 @@ use std::sync::Arc;
 use crate::backend::storage::csv::{CsvConnection, AllowanceRepository, TransactionRepository};
 use crate::backend::storage::traits::{AllowanceStorage, TransactionStorage};
 use crate::backend::domain::child_service::ChildService;
+use crate::backend::domain::age::age_on_date;
 use crate::backend::domain::models::allowance::AllowanceConfig;
 use crate::backend::domain::models::transaction::{Transaction as DomainTransaction, TransactionType as DomainTransactionType};
 use crate::backend::domain::commands::allowance::{
@@ -216,8 +217,8 @@ impl AllowanceService {
         
         let config = match allowance_config {
             Some(config) if config.is_active => {
-                info!("🔮 ALLOWANCE DEBUG: Found active config - amount: ${:.2}, day_of_week: {} ({})", 
-                     config.amount, config.day_of_week, config.day_name());
+                info!("🔮 ALLOWANCE DEBUG: Found active config - amount: ${:.2}, day_of_week: {} ({}), use_age_based: {}",
+                     config.amount, config.day_of_week, config.day_name(), config.use_age_based_amount);
                 config
             },
             Some(_config) => {
@@ -230,9 +231,27 @@ impl AllowanceService {
             }
         };
 
+        // If using age-based amount, fetch child's birthdate
+        let child_birthdate = if config.use_age_based_amount {
+            let get_child_command = GetChildCommand { child_id: child_id.to_string() };
+            match self.child_service.get_child(get_child_command)? {
+                result if result.child.is_some() => {
+                    let child = result.child.unwrap();
+                    info!("🔮 ALLOWANCE DEBUG: Age-based mode - child birthdate: {}", child.birthdate);
+                    Some(child.birthdate)
+                }
+                _ => {
+                    warn!("🔮 ALLOWANCE DEBUG: Age-based amount enabled but child not found: {}", child_id);
+                    return Ok(Vec::new());
+                }
+            }
+        } else {
+            None
+        };
+
         let mut future_allowances = Vec::new();
         let current_date = Local::now().date_naive();
-        
+
         info!("🔮 ALLOWANCE DEBUG: Current date: {}", current_date);
 
         // Iterate through each date in the range
@@ -250,8 +269,22 @@ impl AllowanceService {
             // Check if this date is in the future and matches the allowance day of week
             if current > current_date {
                 if day_of_week == config.day_of_week {
-                    info!("🔮 ALLOWANCE DEBUG: ✅ CREATING future allowance for {} on {}", child_id, current);
-                    
+                    // Calculate the amount based on mode
+                    let amount = if config.use_age_based_amount {
+                        if let Some(birthdate) = child_birthdate {
+                            let age = age_on_date(birthdate, current);
+                            info!("🔮 ALLOWANCE DEBUG: Age-based amount for {} on {}: age {} = ${}",
+                                 child_id, current, age, age);
+                            age as f64
+                        } else {
+                            config.amount
+                        }
+                    } else {
+                        config.amount
+                    };
+
+                    info!("🔮 ALLOWANCE DEBUG: ✅ CREATING future allowance for {} on {} - ${:.2}", child_id, current, amount);
+
                     // This is a future allowance day!
                     // Create DateTime at 12:00 UTC for the date
                     let naive_datetime = current.and_hms_opt(12, 0, 0).unwrap();
@@ -259,20 +292,20 @@ impl AllowanceService {
                     let transaction_datetime = naive_datetime.and_local_timezone(utc_offset)
                         .single()
                         .unwrap();
-                    
+
                     let allowance_transaction = DomainTransaction {
                         id: format!("future-allowance::{}::{}", child_id, current.format("%Y-%m-%d")),
                         child_id: child_id.to_string(),
                         date: transaction_datetime,
                         description: "Upcoming allowance".to_string(),
-                        amount: config.amount,
+                        amount,
                         balance: f64::NAN, // Balance calculation delegated to BalanceService
                         transaction_type: DomainTransactionType::FutureAllowance,
                     };
-                    
+
                     future_allowances.push(allowance_transaction);
-                    info!("🔮 ALLOWANCE DEBUG: Generated future allowance for {} on {} (day_of_week: {}, expected: {}, datetime: {})", 
-                          child_id, current, day_of_week, config.day_of_week, transaction_datetime);
+                    info!("🔮 ALLOWANCE DEBUG: Generated future allowance for {} on {} (day_of_week: {}, expected: {}, datetime: {}, amount: ${:.2})",
+                          child_id, current, day_of_week, config.day_of_week, transaction_datetime, amount);
                 } else {
                     info!("🔮 ALLOWANCE DEBUG: ❌ Future date {} doesn't match allowance day (got {}, need {})", 
                          current, day_of_week, config.day_of_week);
@@ -1209,5 +1242,76 @@ mod tests {
             .expect("Failed to check allowance for date");
 
         assert!(has_allowance_with_other_income, "Should still detect allowance even with other income on same day");
+    }
+
+    #[test]
+    fn test_generate_future_allowance_with_age_based_amount() {
+        let service = setup_test();
+
+        // Strategy: Create a child whose birthday is 10 days from now.
+        // Then generate allowances spanning that birthday to see the age change.
+        let today = Local::now().date_naive();
+        let future_birthday = today + chrono::Duration::days(10);
+
+        // Child was born 6 years before this future birthday date
+        let birth_year = future_birthday.year() - 6;
+        let birthdate = NaiveDate::from_ymd_opt(birth_year, future_birthday.month(), future_birthday.day()).unwrap();
+        let birthdate_str = birthdate.format("%Y-%m-%d").to_string();
+
+        // Create child with computed birthdate
+        let create_command = crate::backend::domain::commands::child::CreateChildCommand {
+            name: "Test Child".to_string(),
+            birthdate: birthdate_str,
+        };
+        let child_result = service.child_service.create_child(create_command)
+            .expect("Failed to create test child");
+        let child = child_result.child;
+
+        // Create age-based allowance config - use every day (0=Sunday) to guarantee hits
+        // We'll use the day of week that matches tomorrow to ensure we get allowances
+        let tomorrow = today + chrono::Duration::days(1);
+        let day_of_week = tomorrow.weekday().num_days_from_sunday() as u8;
+
+        let command = UpdateAllowanceConfigCommand {
+            child_id: Some(child.id.clone()),
+            amount: 0.0, // Amount ignored when use_age_based_amount is true
+            day_of_week,
+            is_active: true,
+            use_age_based_amount: true,
+        };
+
+        service.update_allowance_config(command).expect("Failed to create allowance config");
+
+        // Generate allowances for 3 weeks starting tomorrow
+        // This will span before and after the birthday (which is 10 days out)
+        let start_date = tomorrow;
+        let end_date = tomorrow + chrono::Duration::days(21);
+
+        let future_allowances = service
+            .generate_future_allowance_transactions(&child.id, start_date, end_date)
+            .expect("Failed to generate future allowances");
+
+        // Should have 3 occurrences of the allowance day in a 3-week span
+        assert!(future_allowances.len() >= 2, "Should generate at least 2 future allowances, got {}", future_allowances.len());
+
+        // Check that amounts change around the birthday
+        // Before birthday: age 5, After birthday: age 6
+        let mut found_age_5 = false;
+        let mut found_age_6 = false;
+
+        for allowance in &future_allowances {
+            let allowance_date = allowance.date.date_naive();
+            if allowance_date < future_birthday {
+                assert_eq!(allowance.amount, 5.0,
+                    "Before birthday ({}) should be age 5, got {}", allowance_date, allowance.amount);
+                found_age_5 = true;
+            } else {
+                assert_eq!(allowance.amount, 6.0,
+                    "On/after birthday ({}) should be age 6, got {}", allowance_date, allowance.amount);
+                found_age_6 = true;
+            }
+        }
+
+        assert!(found_age_5 || found_age_6, "Should find at least one allowance before or after birthday");
     }
 } 
