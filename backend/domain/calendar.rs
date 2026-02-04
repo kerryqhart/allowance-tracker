@@ -294,8 +294,6 @@ impl CalendarService {
                 balance: 0.0,
                 transactions: Vec::new(),
                 day_type: CalendarDayType::PaddingBefore,
-                #[allow(deprecated)]
-                is_empty: true,
             });
         }
         
@@ -312,8 +310,6 @@ impl CalendarService {
                 balance: day_balance,
                 transactions: day_transactions,
                 day_type: CalendarDayType::MonthDay,
-                #[allow(deprecated)]
-                is_empty: false,
             });
         }
         
@@ -333,8 +329,6 @@ impl CalendarService {
                     balance: 0.0,
                     transactions: Vec::new(),
                     day_type: CalendarDayType::PaddingAfter,
-                    #[allow(deprecated)]
-                    is_empty: true,
                 });
             }
         }

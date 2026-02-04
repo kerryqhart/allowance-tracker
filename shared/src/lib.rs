@@ -92,8 +92,6 @@ pub struct CalendarDay {
     pub balance: f64,
     pub transactions: Vec<Transaction>,
     pub day_type: CalendarDayType,
-    #[deprecated(note = "Use day_type instead of is_empty")]
-    pub is_empty: bool, // For padding days before/after month
 }
 
 /// Request for calendar month data
