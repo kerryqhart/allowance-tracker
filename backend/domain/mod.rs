@@ -57,6 +57,7 @@ pub mod transaction_table;
 pub mod calendar;
 pub mod money_management;
 pub mod child_service;
+pub mod age;
 pub mod parental_control_service;
 pub mod allowance_service;
 pub mod balance_service;
