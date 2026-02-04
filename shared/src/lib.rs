@@ -181,18 +181,9 @@ pub struct ValidationResult {
     pub is_valid: bool,
     pub errors: Vec<ValidationError>,
     pub cleaned_amount: Option<f64>,
+    pub suggestions: Vec<String>,
 }
 
-/// Specific validation errors
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum ValidationError {
-    EmptyDescription,
-    DescriptionTooLong(usize),
-    InvalidAmount(String),
-    AmountNotPositive,
-    AmountTooLarge,
-    AmountTooSmall,
-}
 
 /// Request for formatted transaction table data
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -282,14 +273,14 @@ pub struct DeleteTransactionsResponse {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MoneyFormValidation {
     pub is_valid: bool,
-    pub errors: Vec<MoneyValidationError>,
+    pub errors: Vec<ValidationError>,
     pub cleaned_amount: Option<f64>,
     pub suggestions: Vec<String>,
 }
 
-/// Specific validation errors for money forms
+/// Specific validation errors for form input
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum MoneyValidationError {
+pub enum ValidationError {
     EmptyDescription,
     DescriptionTooLong(usize),
     EmptyAmount,

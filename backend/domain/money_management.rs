@@ -9,7 +9,7 @@ use anyhow::Result;
 use shared::{
     AddMoneyRequest, AddMoneyResponse, SpendMoneyRequest, SpendMoneyResponse,
     CreateTransactionRequest, MoneyFormState, MoneyFormValidation,
-    MoneyManagementConfig, MoneyValidationError,
+    MoneyManagementConfig, ValidationError,
 };
 use chrono::{DateTime, Utc, Duration, TimeZone, Local};
 use crate::backend::domain::commands::transactions::CreateTransactionCommand;
@@ -276,34 +276,34 @@ impl MoneyManagementService {
         // Validate description
         let description_trimmed = description.trim();
         if description_trimmed.is_empty() {
-            errors.push(MoneyValidationError::EmptyDescription);
+            errors.push(ValidationError::EmptyDescription);
             suggestions.push("Try: Gift from grandma, gift from aunt...".to_string());
         } else if description_trimmed.len() > self.config.max_description_length {
-            errors.push(MoneyValidationError::DescriptionTooLong(description_trimmed.len()));
+            errors.push(ValidationError::DescriptionTooLong(description_trimmed.len()));
         }
 
         // Validate and parse amount
         let cleaned_amount = if amount_input.trim().is_empty() {
-            errors.push(MoneyValidationError::EmptyAmount);
+            errors.push(ValidationError::EmptyAmount);
             suggestions.push("Enter a positive amount like $5.00 or $10".to_string());
             None
         } else {
             match self.clean_and_parse_amount(amount_input) {
                 Ok(amount) => {
                     if amount <= 0.0 {
-                        errors.push(MoneyValidationError::AmountNotPositive);
+                        errors.push(ValidationError::AmountNotPositive);
                         suggestions.push("Amount must be greater than 0".to_string());
                         None
                     } else if amount < self.config.min_amount {
-                        errors.push(MoneyValidationError::AmountTooSmall(self.config.min_amount));
+                        errors.push(ValidationError::AmountTooSmall(self.config.min_amount));
                         suggestions.push(format!("Minimum amount is {}{:.2}", self.config.currency_symbol, self.config.min_amount));
                         None
                     } else if amount > self.config.max_amount {
-                        errors.push(MoneyValidationError::AmountTooLarge(self.config.max_amount));
+                        errors.push(ValidationError::AmountTooLarge(self.config.max_amount));
                         suggestions.push(format!("Maximum amount is {}{:.2}", self.config.currency_symbol, self.config.max_amount));
                         None
                     } else if self.has_too_many_decimal_places(amount) {
-                        errors.push(MoneyValidationError::AmountPrecisionTooHigh);
+                        errors.push(ValidationError::AmountPrecisionTooHigh);
                         suggestions.push("Use at most 2 decimal places (like $5.25)".to_string());
                         None
                     } else {
@@ -311,7 +311,7 @@ impl MoneyManagementService {
                     }
                 }
                 Err(parse_error) => {
-                    errors.push(MoneyValidationError::InvalidAmountFormat(parse_error));
+                    errors.push(ValidationError::InvalidAmountFormat(parse_error));
                     suggestions.push("Enter a valid number like $5.00 or $10".to_string());
                     None
                 }
@@ -402,34 +402,34 @@ impl MoneyManagementService {
     }
 
     /// Get user-friendly error message for validation error
-    pub fn get_error_message(&self, error: &MoneyValidationError) -> String {
+    pub fn get_error_message(&self, error: &ValidationError) -> String {
         match error {
-            MoneyValidationError::EmptyDescription => "Please enter a description".to_string(),
-            MoneyValidationError::DescriptionTooLong(len) => {
+            ValidationError::EmptyDescription => "Please enter a description".to_string(),
+            ValidationError::DescriptionTooLong(len) => {
                 format!("Description is too long ({} characters). Maximum is {}.", len, self.config.max_description_length)
             }
-            MoneyValidationError::EmptyAmount => "Please enter an amount".to_string(),
-            MoneyValidationError::InvalidAmountFormat(msg) => {
+            ValidationError::EmptyAmount => "Please enter an amount".to_string(),
+            ValidationError::InvalidAmountFormat(msg) => {
                 format!("Please enter a valid amount (like 5 or 5.00): {}", msg)
             }
-            MoneyValidationError::AmountNotPositive => "Amount must be greater than 0".to_string(),
-            MoneyValidationError::AmountTooSmall(min) => {
+            ValidationError::AmountNotPositive => "Amount must be greater than 0".to_string(),
+            ValidationError::AmountTooSmall(min) => {
                 format!("Amount is too small. Minimum is {}{:.2}", self.config.currency_symbol, min)
             }
-            MoneyValidationError::AmountTooLarge(max) => {
+            ValidationError::AmountTooLarge(max) => {
                 format!("Amount is too large. Maximum is {}{:.2}", self.config.currency_symbol, max)
             }
-            MoneyValidationError::AmountPrecisionTooHigh => "Amount has too many decimal places. Use at most 2 decimal places.".to_string(),
+            ValidationError::AmountPrecisionTooHigh => "Amount has too many decimal places. Use at most 2 decimal places.".to_string(),
         }
     }
 
     /// Get all validation error messages as a list
-    pub fn get_error_messages(&self, errors: &[MoneyValidationError]) -> Vec<String> {
+    pub fn get_error_messages(&self, errors: &[ValidationError]) -> Vec<String> {
         errors.iter().map(|e| self.get_error_message(e)).collect()
     }
 
     /// Get the first error message (for displaying single error)
-    pub fn get_first_error_message(&self, errors: &[MoneyValidationError]) -> Option<String> {
+    pub fn get_first_error_message(&self, errors: &[ValidationError]) -> Option<String> {
         errors.first().map(|e| self.get_error_message(e))
     }
 
@@ -517,34 +517,34 @@ impl MoneyManagementService {
         // Validate description
         let description_trimmed = description.trim();
         if description_trimmed.is_empty() {
-            errors.push(MoneyValidationError::EmptyDescription);
+            errors.push(ValidationError::EmptyDescription);
             suggestions.push("Try: Toy, book, game...".to_string());
         } else if description_trimmed.len() > self.config.max_description_length {
-            errors.push(MoneyValidationError::DescriptionTooLong(description_trimmed.len()));
+            errors.push(ValidationError::DescriptionTooLong(description_trimmed.len()));
         }
 
         // Validate and parse amount (user enters positive, we'll convert to negative later)
         let cleaned_amount = if amount_input.trim().is_empty() {
-            errors.push(MoneyValidationError::EmptyAmount);
+            errors.push(ValidationError::EmptyAmount);
             suggestions.push("Enter how much you spent, like $2.50 or $5".to_string());
             None
         } else {
             match self.clean_and_parse_amount(amount_input) {
                 Ok(amount) => {
                     if amount <= 0.0 {
-                        errors.push(MoneyValidationError::AmountNotPositive);
+                        errors.push(ValidationError::AmountNotPositive);
                         suggestions.push("Amount must be greater than 0".to_string());
                         None
                     } else if amount < self.config.min_amount {
-                        errors.push(MoneyValidationError::AmountTooSmall(self.config.min_amount));
+                        errors.push(ValidationError::AmountTooSmall(self.config.min_amount));
                         suggestions.push(format!("Minimum amount is {}{:.2}", self.config.currency_symbol, self.config.min_amount));
                         None
                     } else if amount > self.config.max_amount {
-                        errors.push(MoneyValidationError::AmountTooLarge(self.config.max_amount));
+                        errors.push(ValidationError::AmountTooLarge(self.config.max_amount));
                         suggestions.push(format!("Maximum amount is {}{:.2}", self.config.currency_symbol, self.config.max_amount));
                         None
                     } else if self.has_too_many_decimal_places(amount) {
-                        errors.push(MoneyValidationError::AmountPrecisionTooHigh);
+                        errors.push(ValidationError::AmountPrecisionTooHigh);
                         suggestions.push("Use at most 2 decimal places (like $5.25)".to_string());
                         None
                     } else {
@@ -552,7 +552,7 @@ impl MoneyManagementService {
                     }
                 }
                 Err(parse_error) => {
-                    errors.push(MoneyValidationError::InvalidAmountFormat(parse_error));
+                    errors.push(ValidationError::InvalidAmountFormat(parse_error));
                     suggestions.push("Enter a valid number like $2.50 or $5".to_string());
                     None
                 }
@@ -684,7 +684,7 @@ impl MoneyManagementService {
         if let Some(date_obj) = date {
             let date_str = date_obj.to_rfc3339();
             if let Err(date_error) = self.validate_transaction_date(&date_str, child_created_at) {
-                validation.errors.push(MoneyValidationError::InvalidAmountFormat(date_error));
+                validation.errors.push(ValidationError::InvalidAmountFormat(date_error));
                 validation.is_valid = false;
             }
         }
@@ -700,7 +700,7 @@ impl MoneyManagementService {
         if let Some(date_obj) = date {
             let date_str = date_obj.to_rfc3339();
             if let Err(date_error) = self.validate_transaction_date(&date_str, child_created_at) {
-                validation.errors.push(MoneyValidationError::InvalidAmountFormat(date_error));
+                validation.errors.push(ValidationError::InvalidAmountFormat(date_error));
                 validation.is_valid = false;
             }
         }
@@ -761,7 +761,7 @@ mod tests {
         let validation = service.validate_add_money_form("", "10.50");
         
         assert!(!validation.is_valid);
-        assert!(matches!(validation.errors[0], MoneyValidationError::EmptyDescription));
+        assert!(matches!(validation.errors[0], ValidationError::EmptyDescription));
         assert!(!validation.suggestions.is_empty());
     }
 
@@ -772,7 +772,7 @@ mod tests {
         let validation = service.validate_add_money_form("Valid description", "abc");
         
         assert!(!validation.is_valid);
-        assert!(matches!(validation.errors[0], MoneyValidationError::InvalidAmountFormat(_)));
+        assert!(matches!(validation.errors[0], ValidationError::InvalidAmountFormat(_)));
         assert!(!validation.suggestions.is_empty());
     }
 
@@ -783,7 +783,7 @@ mod tests {
         let validation = service.validate_add_money_form("Valid description", "-5.00");
         
         assert!(!validation.is_valid);
-        assert!(matches!(validation.errors[0], MoneyValidationError::AmountNotPositive));
+        assert!(matches!(validation.errors[0], ValidationError::AmountNotPositive));
     }
 
     #[test]
@@ -875,13 +875,13 @@ mod tests {
     fn test_error_messages() {
         let service = create_test_service();
         
-        let error = MoneyValidationError::EmptyDescription;
+        let error = ValidationError::EmptyDescription;
         assert_eq!(service.get_error_message(&error), "Please enter a description");
         
-        let error = MoneyValidationError::AmountNotPositive;
+        let error = ValidationError::AmountNotPositive;
         assert_eq!(service.get_error_message(&error), "Amount must be greater than 0");
         
-        let error = MoneyValidationError::DescriptionTooLong(300);
+        let error = ValidationError::DescriptionTooLong(300);
         assert!(service.get_error_message(&error).contains("too long"));
     }
 
@@ -935,7 +935,7 @@ mod tests {
         let validation = service.validate_spend_money_form("", "5.00");
         
         assert!(!validation.is_valid);
-        assert!(matches!(validation.errors[0], MoneyValidationError::EmptyDescription));
+        assert!(matches!(validation.errors[0], ValidationError::EmptyDescription));
         assert!(!validation.suggestions.is_empty());
         assert!(validation.suggestions[0].contains("Toy"));
     }
@@ -947,7 +947,7 @@ mod tests {
         let validation = service.validate_spend_money_form("Valid description", "invalid");
         
         assert!(!validation.is_valid);
-        assert!(matches!(validation.errors[0], MoneyValidationError::InvalidAmountFormat(_)));
+        assert!(matches!(validation.errors[0], ValidationError::InvalidAmountFormat(_)));
         assert!(!validation.suggestions.is_empty());
     }
 

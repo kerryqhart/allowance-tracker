@@ -494,13 +494,13 @@ impl AllowanceTrackerApp {
 
         // Map validation errors to UI state
         for error in &validation.errors {
-            use shared::MoneyValidationError;
+            use shared::ValidationError;
             match error {
-                MoneyValidationError::EmptyDescription |
-                MoneyValidationError::DescriptionTooLong(_) => {
+                ValidationError::EmptyDescription |
+                ValidationError::DescriptionTooLong(_) => {
                     self.form.add_money_description_error = Some(service.get_error_message(error));
                 }
-                MoneyValidationError::EmptyAmount => {
+                ValidationError::EmptyAmount => {
                     // Don't show "Amount is required" error immediately - let the grayed button be sufficient
                 }
                 _ => {
@@ -584,13 +584,13 @@ impl AllowanceTrackerApp {
         if !amount_input.is_empty() {
             let validation = service.validate_add_money_form(description, amount_input);
             for error in &validation.errors {
-                use shared::MoneyValidationError;
+                use shared::ValidationError;
                 match error {
-                    MoneyValidationError::EmptyDescription |
-                    MoneyValidationError::DescriptionTooLong(_) => {
+                    ValidationError::EmptyDescription |
+                    ValidationError::DescriptionTooLong(_) => {
                         // Skip - we handle description validation above with UI config
                     }
-                    MoneyValidationError::EmptyAmount => {
+                    ValidationError::EmptyAmount => {
                         // Don't show error for empty - let grayed button be sufficient
                     }
                     _ => {

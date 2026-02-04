@@ -189,17 +189,17 @@ impl TransactionTableService {
                     errors.push(ValidationError::AmountNotPositive);
                     None
                 } else if amount > 1_000_000.0 {
-                    errors.push(ValidationError::AmountTooLarge);
+                    errors.push(ValidationError::AmountTooLarge(1_000_000.0));
                     None
                 } else if amount < 0.01 {
-                    errors.push(ValidationError::AmountTooSmall);
+                    errors.push(ValidationError::AmountTooSmall(0.01));
                     None
                 } else {
                     Some(amount)
                 }
             }
             Err(parse_error) => {
-                errors.push(ValidationError::InvalidAmount(parse_error.to_string()));
+                errors.push(ValidationError::InvalidAmountFormat(parse_error.to_string()));
                 None
             }
         };
@@ -208,6 +208,7 @@ impl TransactionTableService {
             is_valid: errors.is_empty(),
             errors,
             cleaned_amount,
+            suggestions: vec![],
         }
     }
 
@@ -260,12 +261,14 @@ impl TransactionTableService {
             ValidationError::DescriptionTooLong(len) => {
                 format!("Description is too long ({} characters). Maximum is 256.", len)
             }
-            ValidationError::InvalidAmount(msg) => {
+            ValidationError::InvalidAmountFormat(msg) => {
                 format!("Please enter a valid amount (like 5 or 5.00): {}", msg)
             }
             ValidationError::AmountNotPositive => "Amount must be greater than 0".to_string(),
-            ValidationError::AmountTooLarge => "Amount is too large. Maximum is $1,000,000".to_string(),
-            ValidationError::AmountTooSmall => "Amount is too small. Minimum is $0.01".to_string(),
+            ValidationError::AmountTooLarge(max) => format!("Amount is too large. Maximum is ${:.2}", max),
+            ValidationError::AmountTooSmall(min) => format!("Amount is too small. Minimum is ${:.2}", min),
+            ValidationError::EmptyAmount => "Please enter an amount".to_string(),
+            ValidationError::AmountPrecisionTooHigh => "Amount has too many decimal places".to_string(),
         }
     }
 
@@ -440,7 +443,7 @@ mod tests {
         // Invalid amount
         let result = service.validate_transaction_input("Valid", "abc");
         assert!(!result.is_valid);
-        assert!(matches!(result.errors[0], ValidationError::InvalidAmount(_)));
+        assert!(matches!(result.errors[0], ValidationError::InvalidAmountFormat(_)));
         
         // Negative amount
         let result = service.validate_transaction_input("Valid", "-5.00");
