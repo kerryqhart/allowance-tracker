@@ -2,7 +2,19 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use chrono::{Datelike, DateTime, FixedOffset, NaiveDate, Utc};
 
-/// Transaction ID in format: "transaction::<income|expense>::epoch_millis"
+/// A financial transaction representing money in or out.
+///
+/// Transactions are the core data type for tracking allowance money.
+/// Each transaction has a unique ID, amount (positive for income, negative for expenses),
+/// description, date, and running balance after the transaction.
+///
+/// # Fields
+/// - `id`: Unique identifier in format "transaction::{income|expense}::{timestamp_ms}"
+/// - `amount`: Positive for deposits/allowances, negative for spending
+/// - `description`: User-provided description of the transaction
+/// - `date`: When the transaction occurred (with timezone)
+/// - `balance`: Running balance after this transaction
+/// - `transaction_type`: Categorizes as Income or Expense for display
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Transaction {
     pub id: String,
@@ -85,7 +97,16 @@ pub struct CalendarMonth {
     pub first_day_of_week: u32, // 0 = Sunday, 1 = Monday, etc.
 }
 
-/// Represents a single day in the calendar
+/// A single day in the calendar view.
+///
+/// Represents one cell in the monthly calendar, containing all transactions
+/// for that day and summary information for display.
+///
+/// # Fields
+/// - `day`: The calendar date (1-31)
+/// - `balance`: Running balance at end of this day
+/// - `transactions`: All transactions that occurred on this day
+/// - `day_type`: Whether this is a normal day, today, or padding
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CalendarDay {
     pub day: u32,
@@ -290,7 +311,16 @@ pub struct MoneyFormState {
     pub show_success: bool,
 }
 
-/// Represents a child in the allowance tracking system
+/// A child whose allowance is being tracked.
+///
+/// Each child has their own transaction history, goals, and allowance configuration.
+/// The child's data is stored in a dedicated directory named after their sanitized name.
+///
+/// # Fields
+/// - `id`: Unique identifier in format "child::{timestamp_ms}"
+/// - `name`: Display name of the child
+/// - `birthdate`: Used for age-appropriate features and display
+/// - `created_at`/`updated_at`: Audit timestamps
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Child {
     pub id: String,
@@ -547,7 +577,18 @@ impl GoalState {
     }
 }
 
-/// A savings goal with target amount and description
+/// A savings goal the child is working toward.
+///
+/// Goals track progress toward a target amount and can calculate
+/// estimated completion dates based on allowance frequency.
+///
+/// # Fields
+/// - `id`: Unique identifier in format "goal::{child_id}::{timestamp_ms}"
+/// - `child_id`: The child this goal belongs to
+/// - `description`: What the child is saving for
+/// - `target_amount`: How much money is needed
+/// - `state`: Active, Completed, or Cancelled
+/// - `created_at`/`updated_at`: Lifecycle timestamps
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Goal {
     pub id: String,
