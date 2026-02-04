@@ -83,12 +83,10 @@ impl TransactionRepository {
         
         // Try parsing as date-only format (YYYY-MM-DD)
         if let Ok(naive_date) = NaiveDate::parse_from_str(date_str, "%Y-%m-%d") {
-            // Convert to beginning of day in Eastern Time
+            // Convert to beginning of day in local timezone (handles DST automatically)
             let naive_datetime = naive_date.and_hms_opt(0, 0, 0).unwrap();
-            let eastern_offset = FixedOffset::west_opt(5 * 3600).unwrap(); // EST (UTC-5)
-            
-            if let Some(dt) = naive_datetime.and_local_timezone(eastern_offset).single() {
-                return Ok(dt);
+            if let Some(local_dt) = naive_datetime.and_local_timezone(chrono::Local).single() {
+                return Ok(local_dt.fixed_offset());
             }
         }
         

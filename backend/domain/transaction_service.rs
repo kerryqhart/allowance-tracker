@@ -78,9 +78,8 @@ impl TransactionService {
         
         // ✅ FIXED: Use DateTime object directly from command (no parsing needed)
         let transaction_date = command.date.unwrap_or_else(|| {
-            // Create current time in Eastern timezone if no date provided
-            let eastern_offset = chrono::FixedOffset::west_opt(5 * 3600).unwrap(); // EST (UTC-5)
-            chrono::Utc::now().with_timezone(&eastern_offset)
+            // Use system local timezone (handles DST automatically)
+            chrono::Local::now().fixed_offset()
         });
 
         let transaction = self.create_transaction_internal(
