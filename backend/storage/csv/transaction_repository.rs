@@ -47,7 +47,7 @@ impl TransactionRepository {
         for result in csv_reader.records() {
             let record = result?;
             
-            // ✅ FIXED: Parse date string into DateTime object (CSV layer responsibility)
+            // FIXED: Parse date string into DateTime object (CSV layer responsibility)
             let date_str = record.get(2).unwrap_or("");
             let parsed_date = self.parse_date_string(date_str)?;
             
@@ -55,7 +55,7 @@ impl TransactionRepository {
             let transaction = DomainTransaction {
                 id: record.get(0).unwrap_or("").to_string(),
                 child_id: record.get(1).unwrap_or("").to_string(),
-                date: parsed_date,  // ✅ Now uses parsed DateTime object
+                date: parsed_date,  // Now uses parsed DateTime object
                 description: record.get(3).unwrap_or("").to_string(),
                 amount: record.get(4).unwrap_or("0").parse::<f64>().unwrap_or(0.0),
                 balance: record.get(5).unwrap_or("0").parse::<f64>().unwrap_or(0.0),
@@ -72,7 +72,7 @@ impl TransactionRepository {
         Ok(transactions)
     }
     
-    /// ✅ NEW: Parse date string into DateTime object - this is where the CSV layer handles date parsing
+    /// NEW: Parse date string into DateTime object - this is where the CSV layer handles date parsing
     fn parse_date_string(&self, date_str: &str) -> Result<chrono::DateTime<chrono::FixedOffset>> {
         use chrono::{DateTime, FixedOffset, NaiveDate};
         
@@ -116,7 +116,7 @@ impl TransactionRepository {
             csv_writer.write_record(&[
                 &transaction.id,
                 &transaction.child_id,
-                &transaction.date.to_rfc3339(),  // ✅ Convert DateTime back to string for CSV storage
+                &transaction.date.to_rfc3339(),  // Convert DateTime back to string for CSV storage
                 &transaction.description,
                 &transaction.amount.to_string(),
                 &transaction.balance.to_string(),
@@ -642,7 +642,7 @@ mod tests {
         
         for (i, date_str) in date_formats.iter().enumerate() {
             let result = repo.compare_dates(&repo.parse_date_string(date_str)?, "2024-06-15T23:59:59Z");
-            println!("✅ CSV layer successfully parsed date format #{}: '{}'", i + 1, date_str);
+            println!("CSV layer successfully parsed date format #{}: '{}'", i + 1, date_str);
             assert!(result != 0 || result == 0, "Date parsing should not fail");
         }
         
@@ -679,9 +679,9 @@ mod tests {
         // This assertion will fail until we fix the domain model
         // Comment out for now to prevent compilation errors
         // assert_ne!(date_field_type, TypeId::of::<String>(), 
-        //           "❌ VIOLATION: Domain Transaction.date should not be a String!");
+        //           "VIOLATION: Domain Transaction.date should not be a String!");
         
-        println!("⚠️  Domain model still uses String for date field - needs to be fixed!");
+        println!(" Domain model still uses String for date field - needs to be fixed!");
         
         Ok(())
     }
@@ -718,7 +718,7 @@ mod tests {
         let parsed = chrono::DateTime::parse_from_rfc3339(&date_str);
         assert!(parsed.is_ok(), "Date returned by CSV layer should be valid RFC3339: {}", date_str);
         
-        println!("✅ Date object can be converted to valid RFC3339: {}", date_str);
+        println!("Date object can be converted to valid RFC3339: {}", date_str);
         
         Ok(())
     }
@@ -758,7 +758,7 @@ mod tests {
             let parsed = chrono::DateTime::parse_from_rfc3339(&date_str);
             assert!(parsed.is_ok(), "Failed to parse {} date: {}", description, retrieved_tx.date);
             
-            println!("✅ Successfully handled {} timezone: {} -> {}", description, date_str, retrieved_tx.date);
+            println!("Successfully handled {} timezone: {} -> {}", description, date_str, retrieved_tx.date);
         }
         
         Ok(())
@@ -795,11 +795,11 @@ mod tests {
                     // If storage succeeded, verify the date was normalized
                     let retrieved = repo.get_transaction("test_child", &format!("invalid_date_{}", i))?;
                     if let Some(retrieved_tx) = retrieved {
-                        println!("✅ Invalid date '{}' was normalized to: '{}'", invalid_date, retrieved_tx.date);
+                        println!("Invalid date '{}' was normalized to: '{}'", invalid_date, retrieved_tx.date);
                     }
                 }
                 Err(e) => {
-                    println!("✅ Invalid date '{}' was rejected with error: {}", invalid_date, e);
+                    println!("Invalid date '{}' was rejected with error: {}", invalid_date, e);
                 }
             }
         }
@@ -860,7 +860,7 @@ mod tests {
         assert!(retrieved_tx1.date < retrieved_tx2.date, 
                 "Morning transaction should be earlier than afternoon transaction");
         
-        println!("✅ Storage layer preserves timestamp precision:");
+        println!("Storage layer preserves timestamp precision:");
         println!("   TX1: {} (hour: {})", retrieved_tx1.date.to_rfc3339(), retrieved_tx1.date.hour());
         println!("   TX2: {} (hour: {})", retrieved_tx2.date.to_rfc3339(), retrieved_tx2.date.hour());
         

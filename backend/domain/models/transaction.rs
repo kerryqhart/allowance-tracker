@@ -14,7 +14,7 @@ pub enum TransactionType {
 pub struct Transaction {
     pub id: String,
     pub child_id: String,
-    pub date: DateTime<FixedOffset>,  // ✅ FIXED: Now uses proper DateTime object
+    pub date: DateTime<FixedOffset>,  // FIXED: Now uses proper DateTime object
     pub description: String,
     pub amount: f64,
     pub balance: f64,

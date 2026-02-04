@@ -49,14 +49,14 @@ impl GoalProgressGraph {
         self.is_loading = true;
         self.error_message = None;
         
-        info!("🎯 Loading goal progress graph data for goal: {}", goal.description);
+        info!("Loading goal progress graph data for goal: {}", goal.description);
         
-        info!("🎯 Using domain APIs to get complete goal progression data");
+        info!("Using domain APIs to get complete goal progression data");
         
         // Use new domain APIs for complete goal progression data
         match backend.goal_service.get_goal_progression_data(goal) {
             Ok(domain_transactions) => {
-                info!("🎯 Successfully loaded {} progression transactions from domain APIs", domain_transactions.len());
+                info!("Successfully loaded {} progression transactions from domain APIs", domain_transactions.len());
                 
                 // Get balance at goal creation date using domain API
                 let goal_creation_date_str = match chrono::DateTime::parse_from_rfc3339(&goal.created_at) {
@@ -76,7 +76,7 @@ impl GoalProgressGraph {
                     }
                 };
                 
-                info!("🎯 Goal creation balance: ${:.2}", goal_creation_balance);
+                info!("Goal creation balance: ${:.2}", goal_creation_balance);
                 
                 // Convert domain transactions to UI data points using new converter
                 self.data_points = crate::ui::components::goal_progress_graph::data_preparation::convert_domain_transactions_to_data_points(
@@ -85,10 +85,10 @@ impl GoalProgressGraph {
                     goal_creation_balance
                 );
                 
-                info!("🎯 Generated {} goal graph data points from domain APIs", self.data_points.len());
+                info!("Generated {} goal graph data points from domain APIs", self.data_points.len());
                 
                 // Debug logging to see what data points we have
-                info!("🎯 GOAL GRAPH DEBUG: Data points breakdown:");
+                info!("GOAL GRAPH DEBUG: Data points breakdown:");
                 for (i, point) in self.data_points.iter().enumerate() {
                     info!("  Point {}: {} - ${:.2} (goal_start: {}, goal_target: {}, projection: {})", 
                            i, point.date, point.balance, point.is_goal_start, point.is_goal_target, point.is_projection);
@@ -97,7 +97,7 @@ impl GoalProgressGraph {
                 self.is_loading = false;
             }
             Err(e) => {
-                warn!("❌ Failed to load goal progression data from domain APIs: {}", e);
+                warn!("Failed to load goal progression data from domain APIs: {}", e);
                 self.error_message = Some(format!("Failed to load goal progression data: {}", e));
                 self.is_loading = false;
             }
@@ -129,7 +129,7 @@ impl GoalProgressGraph {
             // Show error state
             ui.vertical_centered(|ui| {
                 ui.add_space(ui.available_height() / 3.0);
-                ui.label(egui::RichText::new("❌ Failed to load")
+                ui.label(egui::RichText::new("Failed to load")
                     .font(egui::FontId::new(12.0, egui::FontFamily::Proportional))
                     .color(egui::Color32::RED));
                 ui.label(egui::RichText::new(error)
@@ -143,7 +143,7 @@ impl GoalProgressGraph {
             // Show empty state
             ui.vertical_centered(|ui| {
                 ui.add_space(ui.available_height() / 3.0);
-                ui.label(egui::RichText::new("📊 No data yet")
+                ui.label(egui::RichText::new("No data yet")
                     .font(egui::FontId::new(12.0, egui::FontFamily::Proportional))
                     .color(egui::Color32::from_rgb(120, 120, 120)));
                 ui.label(egui::RichText::new("Progress will appear as you save!")
@@ -278,7 +278,7 @@ impl GoalProgressGraph {
                 // Convert timestamp to readable date and format balance (same as balance chart)
                 if let Some(datetime) = chrono::DateTime::from_timestamp(point.x as i64, 0) {
                     let date = datetime.format("%m/%d").to_string();
-                    format!("📅 {}: ${:.2}", date, point.y)
+                    format!("{}: ${:.2}", date, point.y)
                 } else {
                     format!("${:.2}", point.y)
                 }
@@ -295,7 +295,7 @@ impl GoalProgressGraph {
                         format!("${:.2}", balance)
                     }
                 } else if name == "Goal" {
-                    format!("🎯 Target: ${:.2}", value.y)
+                    format!("Target: ${:.2}", value.y)
                 } else {
                     // Return empty string for other elements
                     String::new()

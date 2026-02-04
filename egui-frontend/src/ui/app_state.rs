@@ -56,7 +56,7 @@ pub struct AllowanceTrackerApp {
 impl AllowanceTrackerApp {
     /// Create a new AllowanceTrackerApp with modular architecture
     pub fn new(cc: &eframe::CreationContext<'_>) -> Result<Self, anyhow::Error> {
-        info!("🚀 Initializing AllowanceTrackerApp with modular architecture");
+        info!("Initializing AllowanceTrackerApp with modular architecture");
         
         // Setup custom fonts including Chalkboard
         crate::ui::setup_custom_fonts(&cc.egui_ctx);
@@ -70,13 +70,13 @@ impl AllowanceTrackerApp {
         match backend.transaction_service.as_ref().check_and_issue_pending_allowances() {
             Ok(count) => {
                 if count > 0 {
-                    info!("🎯 Issued {} pending allowances on app startup", count);
+                    info!("Issued {} pending allowances on app startup", count);
                 } else {
-                    info!("🎯 No pending allowances found on app startup");
+                    info!("No pending allowances found on app startup");
                 }
             }
             Err(e) => {
-                warn!("🎯 Failed to check pending allowances on startup: {}", e);
+                warn!("Failed to check pending allowances on startup: {}", e);
             }
         }
         
@@ -122,7 +122,7 @@ impl AllowanceTrackerApp {
         match self.backend().child_service.get_active_child() {
             Ok(result) => {
                 // Only log once per actual change, not every frame (commented out to reduce noise)
-                // log::info!("🔍 GET_CURRENT_CHILD_BACKEND: Raw result: {:?}", 
+                // log::info!("GET_CURRENT_CHILD_BACKEND: Raw result: {:?}", 
                 //     result.active_child.child.as_ref().map(|c| (&c.id, &c.name)));
                 
                 result.active_child.child.map(|domain_child| {
@@ -130,7 +130,7 @@ impl AllowanceTrackerApp {
                 })
             },
             Err(e) => {
-                log::warn!("❌ GET_CURRENT_CHILD_BACKEND: Failed to get current child from backend: {}", e);
+                log::warn!("GET_CURRENT_CHILD_BACKEND: Failed to get current child from backend: {}", e);
                 None
             }
         }
@@ -164,7 +164,7 @@ impl AllowanceTrackerApp {
     pub fn start_parental_control_challenge(&mut self, action: crate::ui::state::modal_state::ProtectedAction) {
         use crate::ui::state::modal_state::ParentalControlStage;
         
-        info!("🔒 Starting parental control challenge for: {:?}", action);
+        info!("Starting parental control challenge for: {:?}", action);
         self.modal.pending_protected_action = Some(action);
         self.modal.parental_control_stage = ParentalControlStage::Question1;
         self.modal.parental_control_input.clear();
@@ -175,7 +175,7 @@ impl AllowanceTrackerApp {
 
     /// Cancel parental control challenge
     pub fn cancel_parental_control_challenge(&mut self) {
-        info!("🔒 Cancelling parental control challenge");
+        info!("Cancelling parental control challenge");
         self.modal.show_parental_control_modal = false;
         self.modal.pending_protected_action = None;
         self.modal.parental_control_stage = ParentalControlStage::Question1;
@@ -213,7 +213,7 @@ impl AllowanceTrackerApp {
         
         // Reload calendar data for the new month
         self.load_calendar_data();
-        info!("📅 Navigated to previous month: {}/{}", self.calendar.selected_month, self.calendar.selected_year);
+        info!("Navigated to previous month: {}/{}", self.calendar.selected_month, self.calendar.selected_year);
     }
 
     /// Navigate to the next month
@@ -227,7 +227,7 @@ impl AllowanceTrackerApp {
         
         // Reload calendar data for the new month
         self.load_calendar_data();
-        info!("📅 Navigated to next month: {}/{}", self.calendar.selected_month, self.calendar.selected_year);
+        info!("Navigated to next month: {}/{}", self.calendar.selected_month, self.calendar.selected_year);
     }
 
     /// Get the current month name as a string
@@ -267,26 +267,26 @@ impl AllowanceTrackerApp {
                 self.modal.parental_control_loading = false;
                 
                 if result.success {
-                    info!("✅ Parental control authentication successful");
+                    info!("Parental control authentication successful");
                     self.modal.parental_control_stage = ParentalControlStage::Authenticated;
                     
                     // Execute the pending action
-                    info!("🔒 PARENTAL_CONTROL_SUCCESS: Checking for pending actions...");
-                    info!("🔒 pending_protected_action = {:?}", self.modal.pending_protected_action);
-                    info!("🔒 pending_settings_action = {:?}", self.modal.pending_settings_action);
+                    info!("PARENTAL_CONTROL_SUCCESS: Checking for pending actions...");
+                    info!("pending_protected_action = {:?}", self.modal.pending_protected_action);
+                    info!("pending_settings_action = {:?}", self.modal.pending_settings_action);
                     
                     if let Some(action) = self.modal.pending_protected_action {
-                        info!("🔒 EXECUTING protected action: {:?}", action);
+                        info!("EXECUTING protected action: {:?}", action);
                         self.execute_protected_action(action);
                     } else {
-                        log::warn!("🔒 WARNING: No pending protected action found after successful parental control!");
+                        log::warn!("WARNING: No pending protected action found after successful parental control!");
                     }
                     
                     // Close modal after brief success display
                     self.modal.show_parental_control_modal = false;
                     // Access granted feedback removed
                 } else {
-                    info!("❌ Parental control validation failed");
+                    info!("Parental control validation failed");
                     self.modal.parental_control_error = Some(result.message);
                     self.modal.parental_control_input.clear();
                 }
@@ -303,19 +303,19 @@ impl AllowanceTrackerApp {
     fn execute_protected_action(&mut self, action: crate::ui::state::modal_state::ProtectedAction) {
         use crate::ui::state::modal_state::ProtectedAction;
         
-        info!("🔒 EXECUTE_PROTECTED_ACTION called with: {:?}", action);
+        info!("EXECUTE_PROTECTED_ACTION called with: {:?}", action);
         
         match action {
             ProtectedAction::DeleteTransactions => {
-                info!("🗑️ Executing delete transactions action");
+                info!("Executing delete transactions action");
                 self.enter_transaction_selection_mode();
             }
             ProtectedAction::AccessSettings => {
-                info!("🔒 EXECUTING SETTINGS ACCESS ACTION!");
-                info!("🔒 Checking for pending_settings_action...");
+                info!("EXECUTING SETTINGS ACCESS ACTION!");
+                info!("Checking for pending_settings_action...");
                 if let Some(settings_action) = self.modal.pending_settings_action {
-                    info!("🔒 Found pending settings action: {:?}", settings_action);
-                    info!("🔒 CALLING execute_settings_action...");
+                    info!("Found pending settings action: {:?}", settings_action);
+                    info!("CALLING execute_settings_action...");
                     self.execute_settings_action(settings_action);
                 } else {
                     log::warn!("🚨 AccessSettings action triggered but no pending settings action found");
@@ -385,7 +385,7 @@ impl AllowanceTrackerApp {
                 }
             }
             SettingsAction::DeleteTransactions => {
-                info!("🗑️ Delete transactions action - entering selection mode");
+                info!("Delete transactions action - entering selection mode");
                 self.enter_transaction_selection_mode();
             }
             SettingsAction::ExportData => {
@@ -399,7 +399,7 @@ impl AllowanceTrackerApp {
                 self.settings.export_form.update_preview(child_name_ref);
             }
             SettingsAction::DataDirectory => {
-                info!("📁 Data directory action - opening modal");
+                info!("Data directory action - opening modal");
                 self.settings.show_data_directory_modal = true;
                 
                 // Clear form state when opening modal
@@ -414,7 +414,7 @@ impl AllowanceTrackerApp {
     
     /// Enter transaction selection mode for deletion
     pub fn enter_transaction_selection_mode(&mut self) {
-        info!("🎯 Entering transaction selection mode");
+        info!("Entering transaction selection mode");
         self.interaction.transaction_selection_mode = true;
         self.interaction.selected_transaction_ids.clear();
         
@@ -445,7 +445,7 @@ impl AllowanceTrackerApp {
             self.interaction.selected_transaction_ids.remove(transaction_id);
             // self.selected_transaction_ids.remove(transaction_id); // Sync compatibility field
         } else {
-            info!("✅ Selecting transaction: {}", transaction_id);
+            info!("Selecting transaction: {}", transaction_id);
             self.interaction.selected_transaction_ids.insert(transaction_id.to_string());
             // self.selected_transaction_ids.insert(transaction_id.to_string()); // Sync compatibility field
         }
@@ -614,12 +614,12 @@ impl AllowanceTrackerApp {
     pub fn submit_income_transaction(&mut self) -> bool {
         use crate::backend::domain::money_management::MoneyManagementService;
         use chrono::Timelike;
-        info!("💰 Submitting income transaction - Description: '{}', Amount: '{}'", 
+        info!("Submitting income transaction - Description: '{}', Amount: '{}'", 
                   self.form.income_form_state.description, self.form.income_form_state.amount);
         let amount = match self.clean_and_parse_amount(&self.form.income_form_state.amount) {
             Ok(amount) => amount,
             Err(error) => {
-                log::error!("❌ Failed to parse amount: {}", error);
+                log::error!("Failed to parse amount: {}", error);
                 self.ui.error_message = Some(format!("Invalid amount: {}", error));
                 return false;
             }
@@ -643,13 +643,13 @@ impl AllowanceTrackerApp {
             &self.backend().goal_service,
         ) {
             Ok(response) => {
-                info!("✅ Income transaction successful: {}", response.success_message);
+                info!("Income transaction successful: {}", response.success_message);
                 self.core.current_balance = response.new_balance;
                 self.load_calendar_data();
                 true
             }
             Err(error) => {
-                log::error!("❌ Income transaction failed: {}", error);
+                log::error!("Income transaction failed: {}", error);
                 self.ui.error_message = Some(format!("Failed to add money: {}", error));
                 false
             }
@@ -664,7 +664,7 @@ impl AllowanceTrackerApp {
         let amount = match self.clean_and_parse_amount(&self.form.expense_form_state.amount) {
             Ok(amount) => amount,
             Err(error) => {
-                log::error!("❌ Failed to parse amount: {}", error);
+                log::error!("Failed to parse amount: {}", error);
                 self.ui.error_message = Some(format!("Invalid amount: {}", error));
                 return false;
             }
@@ -688,13 +688,13 @@ impl AllowanceTrackerApp {
             &self.backend().goal_service,
         ) {
             Ok(response) => {
-                info!("✅ Expense transaction successful: {}", response.success_message);
+                info!("Expense transaction successful: {}", response.success_message);
                 self.core.current_balance = response.new_balance;
                 self.load_calendar_data();
                 true
             }
             Err(error) => {
-                log::error!("❌ Expense transaction failed: {}", error);
+                log::error!("Expense transaction failed: {}", error);
                 self.ui.error_message = Some(format!("Failed to spend money: {}", error));
                 false
             }

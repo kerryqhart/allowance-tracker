@@ -86,14 +86,14 @@ impl CsvConnection {
                     let path = PathBuf::from(redirected_path);
 
                     if path.exists() {
-                        debug!("✅ Child {} data redirected to: {}", child_name, path.display());
+                        debug!("Child {} data redirected to: {}", child_name, path.display());
                         return path;
                     } else {
-                        warn!("⚠️ Child {} redirect file points to non-existent directory: {}. Using default.", child_name, redirected_path);
+                        warn!("Child {} redirect file points to non-existent directory: {}. Using default.", child_name, redirected_path);
                     }
                 }
                 Err(e) => {
-                    error!("❌ Failed to read redirect file for child {}: {}. Using default directory.", child_name, e);
+                    error!("Failed to read redirect file for child {}: {}. Using default directory.", child_name, e);
                 }
             }
         }
@@ -148,11 +148,11 @@ impl CsvConnection {
     
     /// Relocate a child's data directory to a new location
     pub fn relocate_child_data_directory<P: AsRef<Path>>(&self, child_name: &str, new_path: P) -> Result<String> {
-        info!("🔄 Original input path: {:?}", new_path.as_ref().as_os_str());
+        info!("Original input path: {:?}", new_path.as_ref().as_os_str());
         
         // Convert to string and unescape common shell escape sequences
         let path_str = new_path.as_ref().to_string_lossy().to_string();
-        info!("🔍 Path as string: {}", path_str);
+        info!("Path as string: {}", path_str);
         
         // Unescape shell escape sequences
         let unescaped_path = path_str
@@ -162,111 +162,111 @@ impl CsvConnection {
             .replace("\\\"", "\"")            // Escaped double quotes
             .replace("\\\\", "\\");           // Escaped backslashes (do this last)
         
-        info!("🔍 Unescaped path: {}", unescaped_path);
+        info!("Unescaped path: {}", unescaped_path);
         let new_path = PathBuf::from(unescaped_path);
-        info!("🔄 Starting child data directory relocation for '{}' to: {}", child_name, new_path.display());
-        info!("🔍 Final path components: {:?}", new_path.components().collect::<Vec<_>>());
+        info!("Starting child data directory relocation for '{}' to: {}", child_name, new_path.display());
+        info!("Final path components: {:?}", new_path.components().collect::<Vec<_>>());
         
         let current_child_dir = {
             let base_dir = self.base_directory.lock().unwrap_or_else(|e| e.into_inner());
             base_dir.join(child_name)
         };
-        info!("🔍 Current child dir (base + name): {}", current_child_dir.display());
+        info!("Current child dir (base + name): {}", current_child_dir.display());
         
         // Check if it's the same path (no-op)
-        info!("🔍 About to call get_child_directory (lock released)...");
+        info!("About to call get_child_directory (lock released)...");
         let current_actual_dir = self.get_child_directory(child_name);
-        info!("🔍 Current actual dir (resolved): {}", current_actual_dir.display());
-        info!("🔍 Comparing paths: new={:?} vs current={:?}", new_path, current_actual_dir);
+        info!("Current actual dir (resolved): {}", current_actual_dir.display());
+        info!("Comparing paths: new={:?} vs current={:?}", new_path, current_actual_dir);
         
         if new_path == current_actual_dir {
-            info!("✅ Paths are the same - no operation needed");
+            info!("Paths are the same - no operation needed");
             return Ok(format!("Child '{}' data directory is already at the specified location", child_name));
         }
         
         // Validate that source directory exists and has data
-        info!("🔍 Checking if source directory exists: {}", current_actual_dir.display());
+        info!("Checking if source directory exists: {}", current_actual_dir.display());
         if !current_actual_dir.exists() {
             let error_msg = format!("Child '{}' directory does not exist: {}", child_name, current_actual_dir.display());
-            info!("❌ {}", error_msg);
+            info!("{}", error_msg);
             return Err(anyhow::anyhow!(error_msg));
         }
-        info!("✅ Source directory exists");
+        info!("Source directory exists");
         
         // Create parent directories for the target path if needed
         if let Some(parent) = new_path.parent() {
-            info!("🔍 Checking parent directory: {}", parent.display());
+            info!("Checking parent directory: {}", parent.display());
             if !parent.exists() {
                 info!("🔨 Creating parent directories...");
                 match fs::create_dir_all(parent) {
-                    Ok(_) => info!("✅ Created parent directories: {}", parent.display()),
+                    Ok(_) => info!("Created parent directories: {}", parent.display()),
                     Err(e) => {
                         let error_msg = format!("Failed to create parent directories: {}", e);
-                        info!("❌ {}", error_msg);
+                        info!("{}", error_msg);
                         return Err(anyhow::anyhow!(error_msg));
                     }
                 }
             } else {
-                info!("✅ Parent directories already exist");
+                info!("Parent directories already exist");
             }
         }
         
         // Validate target directory - it should not exist or be empty
-        info!("🔍 Checking if target directory exists: {}", new_path.display());
+        info!("Checking if target directory exists: {}", new_path.display());
         if new_path.exists() {
-            info!("📁 Target directory exists, checking if empty...");
+            info!("Target directory exists, checking if empty...");
             let entries: Result<Vec<_>, _> = fs::read_dir(&new_path)?.collect();
             match entries {
                 Ok(entries) => {
                     if !entries.is_empty() {
                         let error_msg = format!("Target directory is not empty: {}", new_path.display());
-                        info!("❌ {}", error_msg);
+                        info!("{}", error_msg);
                         return Err(anyhow::anyhow!(error_msg));
                     }
-                    info!("✅ Target directory is empty");
+                    info!("Target directory is empty");
                 }
                 Err(e) => {
                     let error_msg = format!("Failed to read target directory: {}", e);
-                    info!("❌ {}", error_msg);
+                    info!("{}", error_msg);
                     return Err(anyhow::anyhow!(error_msg));
                 }
             }
         } else {
-            info!("✅ Target directory does not exist (will be created)");
+            info!("Target directory does not exist (will be created)");
         }
         
         // Copy child directory contents to new location
-        info!("🔄 Starting copy operation from {} to {}", current_actual_dir.display(), new_path.display());
+        info!("Starting copy operation from {} to {}", current_actual_dir.display(), new_path.display());
         match Self::copy_directory_contents(&current_actual_dir, &new_path) {
-            Ok(_) => info!("✅ Successfully copied child '{}' data to new location", child_name),
+            Ok(_) => info!("Successfully copied child '{}' data to new location", child_name),
             Err(e) => {
                 let error_msg = format!("Failed to copy directory contents: {}", e);
-                info!("❌ {}", error_msg);
+                info!("{}", error_msg);
                 return Err(anyhow::anyhow!(error_msg));
             }
         }
         
         // Verify the copy was successful
-        info!("🔍 Verifying copy was successful...");
+        info!("Verifying copy was successful...");
         let key_files = ["child.yaml", "transactions.csv"];
         for file in &key_files {
             let source_file = current_actual_dir.join(file);
             let dest_file = new_path.join(file);
-            info!("🔍 Checking file: {}", file);
+            info!("Checking file: {}", file);
             
             if source_file.exists() {
                 info!("  📄 Source file exists: {}", source_file.display());
                 if !dest_file.exists() {
                     let error_msg = format!("File '{}' was not copied successfully - missing at destination", file);
-                    info!("❌ {}", error_msg);
+                    info!("{}", error_msg);
                     return Err(anyhow::anyhow!(error_msg));
                 }
-                info!("  ✅ Destination file exists: {}", dest_file.display());
+                info!("  Destination file exists: {}", dest_file.display());
             } else {
-                info!("  ⚠️ Source file does not exist: {}", source_file.display());
+                info!("  Source file does not exist: {}", source_file.display());
             }
         }
-        info!("✅ All key files verified successfully");
+        info!("All key files verified successfully");
         
         // If this was the first move (no redirect file yet), we need to handle the original directory
         let redirect_file = current_child_dir.join(".allowance_redirect");
@@ -405,24 +405,24 @@ impl CsvConnection {
         if !destination.exists() {
             info!("🔨 Creating destination directory: {}", destination.display());
             match fs::create_dir_all(destination) {
-                Ok(_) => info!("✅ Created destination directory"),
+                Ok(_) => info!("Created destination directory"),
                 Err(e) => {
                     let error_msg = format!("Failed to create destination directory: {}", e);
-                    info!("❌ {}", error_msg);
+                    info!("{}", error_msg);
                     return Err(anyhow::anyhow!(error_msg));
                 }
             }
         } else {
-            info!("✅ Destination directory already exists");
+            info!("Destination directory already exists");
         }
 
         // Read source directory
-        info!("🔍 Reading source directory entries...");
+        info!("Reading source directory entries...");
         let entries = match fs::read_dir(source) {
             Ok(entries) => entries,
             Err(e) => {
                 let error_msg = format!("Failed to read source directory: {}", e);
-                info!("❌ {}", error_msg);
+                info!("{}", error_msg);
                 return Err(anyhow::anyhow!(error_msg));
             }
         };
@@ -435,7 +435,7 @@ impl CsvConnection {
                 Ok(entry) => entry,
                 Err(e) => {
                     let error_msg = format!("Failed to read directory entry: {}", e);
-                    info!("❌ {}", error_msg);
+                    info!("{}", error_msg);
                     return Err(anyhow::anyhow!(error_msg));
                 }
             };
@@ -444,7 +444,7 @@ impl CsvConnection {
             let file_name = entry.file_name();
             let dest_path = destination.join(&file_name);
             
-            info!("📁 Processing: {} → {}", source_path.display(), dest_path.display());
+            info!("Processing: {} → {}", source_path.display(), dest_path.display());
 
             if source_path.is_dir() {
                 // Recursively copy subdirectories
@@ -456,7 +456,7 @@ impl CsvConnection {
                 info!("📄 Copying file...");
                 match fs::copy(&source_path, &dest_path) {
                     Ok(bytes) => {
-                        info!("✅ Copied {} bytes", bytes);
+                        info!("Copied {} bytes", bytes);
                         file_count += 1;
                     },
                     Err(e) => {
@@ -467,11 +467,11 @@ impl CsvConnection {
                         if is_git_object && dest_path.exists() && e.kind() == io::ErrorKind::PermissionDenied {
                             // Git objects are content-addressed, so if the file already exists 
                             // with the same name, it should be identical. Skip with a warning.
-                            info!("⚠️ Skipping git object (permission denied, file already exists): {}", dest_path.display());
+                            info!("Skipping git object (permission denied, file already exists): {}", dest_path.display());
                             file_count += 1; // Count as successful since we're intentionally skipping
                         } else {
                             let error_msg = format!("Failed to copy file {}: {}", source_path.display(), e);
-                            info!("❌ {}", error_msg);
+                            info!("{}", error_msg);
                             return Err(anyhow::anyhow!(error_msg));
                         }
                     }
@@ -479,7 +479,7 @@ impl CsvConnection {
             }
         }
 
-        info!("✅ Copy completed: {} files, {} directories", file_count, dir_count);
+        info!("Copy completed: {} files, {} directories", file_count, dir_count);
         Ok(())
     }
     
@@ -685,7 +685,7 @@ impl CsvConnection {
                     // Try parsing as shared::Child first
                     if let Ok(child) = serde_yaml::from_str::<shared::Child>(&yaml_content) {
                         if child.id == child_id {
-                            debug!("✅ Found child directory '{}' for child ID '{}'", dir_name, child_id);
+                            debug!("Found child directory '{}' for child ID '{}'", dir_name, child_id);
                             return Ok(Some(dir_name.to_string()));
                         }
                     }
@@ -693,7 +693,7 @@ impl CsvConnection {
             }
         }
         
-        debug!("❌ No child directory found for child ID '{}'", child_id);
+        debug!("No child directory found for child ID '{}'", child_id);
         Ok(None)
     }
     
@@ -778,7 +778,7 @@ mod tests {
         assert!(components.contains(&"Kids".to_string()));
         assert!(components.contains(&"Child's Money".to_string()));
         
-        println!("✅ Path unescaping test passed");
+        println!("Path unescaping test passed");
         Ok(())
     }
     
@@ -825,7 +825,7 @@ mod tests {
         // Verify data was copied to the unescaped path location
         connection.verify_child_data_exists(&redirect_path)?;
         
-        println!("✅ Escaped path relocation test passed");
+        println!("Escaped path relocation test passed");
         Ok(())
     }
     
@@ -862,7 +862,7 @@ mod tests {
         // Verify data is back in original location
         connection.verify_child_data_exists(&original_dir)?;
         
-        println!("✅ Revert after escaped path relocation test passed");
+        println!("Revert after escaped path relocation test passed");
         Ok(())
     }
     
@@ -921,7 +921,7 @@ mod tests {
         assert!(revert_result.contains("successfully reverted"));
         assert!(!redirect_file.exists());
         
-        println!("✅ Real-world complex escaped path test passed");
+        println!("Real-world complex escaped path test passed");
         Ok(())
     }
     
@@ -946,7 +946,7 @@ mod tests {
         // Should be a no-op
         assert!(result.contains("already at the specified location"));
         
-        println!("✅ No-op test with escaped paths passed");
+        println!("No-op test with escaped paths passed");
         Ok(())
     }
     
@@ -968,7 +968,7 @@ mod tests {
         let original_dir = connection.get_child_directory(child_name);
         connection.verify_child_data_exists(&original_dir)?;
         
-        println!("✅ Error handling test with invalid escaped paths passed");
+        println!("Error handling test with invalid escaped paths passed");
         Ok(())
     }
 }

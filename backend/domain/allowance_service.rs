@@ -70,7 +70,7 @@ impl AllowanceService {
 
         if let Some(ref config) = domain_allowance_config {
             info!("Found allowance config for child: {}", child_id);
-            info!("🔍 DEBUG: Allowance config details - day_of_week: {}, day_name: {}, amount: {}, is_active: {}", 
+            info!("DEBUG: Allowance config details - day_of_week: {}, day_name: {}, amount: {}, is_active: {}", 
                 config.day_of_week, config.day_name(), config.amount, config.is_active);
         } else {
             info!("No allowance config found for child: {}", child_id);
@@ -283,7 +283,7 @@ impl AllowanceService {
                         config.amount
                     };
 
-                    info!("🔮 ALLOWANCE DEBUG: ✅ CREATING future allowance for {} on {} - ${:.2}", child_id, current, amount);
+                    info!("🔮 ALLOWANCE DEBUG: CREATING future allowance for {} on {} - ${:.2}", child_id, current, amount);
 
                     // This is a future allowance day!
                     // Create DateTime at 12:00 UTC for the date
@@ -307,11 +307,11 @@ impl AllowanceService {
                     info!("🔮 ALLOWANCE DEBUG: Generated future allowance for {} on {} (day_of_week: {}, expected: {}, datetime: {}, amount: ${:.2})",
                           child_id, current, day_of_week, config.day_of_week, transaction_datetime, amount);
                 } else {
-                    info!("🔮 ALLOWANCE DEBUG: ❌ Future date {} doesn't match allowance day (got {}, need {})", 
+                    info!("🔮 ALLOWANCE DEBUG: Future date {} doesn't match allowance day (got {}, need {})", 
                          current, day_of_week, config.day_of_week);
                 }
             } else {
-                info!("🔮 ALLOWANCE DEBUG: ❌ Date {} is not in the future (current: {})", current, current_date);
+                info!("🔮 ALLOWANCE DEBUG: Date {} is not in the future (current: {})", current, current_date);
             }
             
             // Move to next day
@@ -326,9 +326,9 @@ impl AllowanceService {
               checked_days, future_allowances.len(), child_id);
 
         if future_allowances.is_empty() {
-            info!("🔮 ALLOWANCE DEBUG: ❌ NO FUTURE ALLOWANCES GENERATED! Check the configuration and date range.");
+            info!("🔮 ALLOWANCE DEBUG: NO FUTURE ALLOWANCES GENERATED! Check the configuration and date range.");
         } else {
-            info!("🔮 ALLOWANCE DEBUG: ✅ Generated future allowances:");
+            info!("🔮 ALLOWANCE DEBUG: Generated future allowances:");
             for allowance in &future_allowances {
                 info!("  - {} on {}: ${:.2}", allowance.id, allowance.date.format("%Y-%m-%d"), allowance.amount);
             }
@@ -371,7 +371,7 @@ impl AllowanceService {
                 // This is an allowance day - check if allowance already exists
                 if !self.has_allowance_for_date(&config.child_id, current)? {
                     pending_dates.push((current, config.amount));
-                    info!("🎯 Found pending allowance for {} on {} (${:.2})", 
+                    info!("Found pending allowance for {} on {} (${:.2})", 
                           child_id, current, config.amount);
                 }
             }
@@ -393,15 +393,15 @@ impl AllowanceService {
     /// Check if an allowance already exists for a specific date
     /// This is used to prevent duplicate allowances
     fn has_allowance_for_date(&self, child_id: &str, date: NaiveDate) -> Result<bool> {
-        info!("🎯 ALLOWANCE DEBUG: has_allowance_for_date() called for child {} on date {}", child_id, date);
+        info!("ALLOWANCE DEBUG: has_allowance_for_date() called for child {} on date {}", child_id, date);
         
         // Get all transactions for the child
         let transactions = self.transaction_repository.list_transactions(child_id, None, None)?;
-        info!("🎯 ALLOWANCE DEBUG: Retrieved {} total transactions for allowance check", transactions.len());
+        info!("ALLOWANCE DEBUG: Retrieved {} total transactions for allowance check", transactions.len());
         
         // Format the date as string prefix (YYYY-MM-DD) to match
         let date_prefix = date.format("%Y-%m-%d").to_string();
-        info!("🎯 ALLOWANCE DEBUG: Looking for allowances on date prefix: {}", date_prefix);
+        info!("ALLOWANCE DEBUG: Looking for allowances on date prefix: {}", date_prefix);
         
         // Check if any transaction for this date looks like an allowance
         // We'll be more conservative: look for any positive income on allowance day
@@ -412,25 +412,25 @@ impl AllowanceService {
             
             // Check if transaction is on this date and has positive amount (indicating income/allowance)
             if transaction_date_str.starts_with(&date_prefix) && transaction.amount > 0.0 {
-                info!("🎯 ALLOWANCE DEBUG: Found positive transaction on target date: {} (${:.2}) - {}", 
+                info!("ALLOWANCE DEBUG: Found positive transaction on target date: {} (${:.2}) - {}", 
                       transaction.id, transaction.amount, transaction.description);
                 // Check if the description suggests it's an allowance
                 let desc_lower = transaction.description.to_lowercase();
                 if desc_lower.contains("allowance") || desc_lower.contains("weekly") {
                     allowance_count += 1;
-                    info!("🎯 ALLOWANCE DEBUG: ✅ Found existing allowance {} for {} on {}: {}", 
+                    info!("ALLOWANCE DEBUG: Found existing allowance {} for {} on {}: {}", 
                           allowance_count, child_id, date, transaction.description);
                 } else {
-                    info!("🎯 ALLOWANCE DEBUG: ❌ Positive transaction but not an allowance: {}", transaction.description);
+                    info!("ALLOWANCE DEBUG: Positive transaction but not an allowance: {}", transaction.description);
                 }
             } else if transaction_date_str.starts_with(&date_prefix) {
-                info!("🎯 ALLOWANCE DEBUG: Found transaction on target date but not positive: {} (${:.2}) - {}", 
+                info!("ALLOWANCE DEBUG: Found transaction on target date but not positive: {} (${:.2}) - {}", 
                       transaction.id, transaction.amount, transaction.description);
             }
         }
         
         let has_allowance = allowance_count > 0;
-        info!("🎯 ALLOWANCE DEBUG: has_allowance_for_date() result: {} (found {} allowances)", has_allowance, allowance_count);
+        info!("ALLOWANCE DEBUG: has_allowance_for_date() result: {} (found {} allowances)", has_allowance, allowance_count);
         
         // Return true if we found at least one allowance for this date
         Ok(has_allowance)

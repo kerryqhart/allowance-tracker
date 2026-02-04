@@ -86,7 +86,7 @@ impl CalendarState {
         
         // Mark calendar as loading for new month
         self.calendar_loading = true;
-        log::info!("📅 Navigated to previous month: {}/{}", self.selected_month, self.selected_year);
+        log::info!("Navigated to previous month: {}/{}", self.selected_month, self.selected_year);
     }
 
     /// Navigate to the next month
@@ -100,7 +100,7 @@ impl CalendarState {
         
         // Mark calendar as loading for new month
         self.calendar_loading = true;
-        log::info!("📅 Navigated to next month: {}/{}", self.selected_month, self.selected_year);
+        log::info!("Navigated to next month: {}/{}", self.selected_month, self.selected_year);
     }
 
     /// Get the current month name as a string

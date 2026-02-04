@@ -20,13 +20,13 @@ fn load_app_icon() -> Result<egui::IconData, Box<dyn std::error::Error>> {
 }
 
 fn main() -> Result<(), eframe::Error> {
-    info!("🚀🚀🚀 ALLOWANCE TRACKER STARTING UP! 🚀🚀🚀");
-    info!("📋 This log proves our logging system is working correctly!");
+    info!("ALLOWANCE TRACKER STARTING UP! 🚀🚀🚀");
+    info!("This log proves our logging system is working correctly!");
 
     // Load custom app icon
     let app_icon = match load_app_icon() {
         Ok(icon) => {
-            info!("✅ Successfully loaded custom app icon");
+            info!("Successfully loaded custom app icon");
             Some(icon)
         }
         Err(e) => {

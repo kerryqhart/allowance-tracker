@@ -76,7 +76,7 @@ impl TransactionService {
 
         let active_child = self.get_active_child()?;
         
-        // ✅ FIXED: Use DateTime object directly from command (no parsing needed)
+        // FIXED: Use DateTime object directly from command (no parsing needed)
         let transaction_date = command.date.unwrap_or_else(|| {
             // Use system local timezone (handles DST automatically)
             chrono::Local::now().fixed_offset()
@@ -91,17 +91,17 @@ impl TransactionService {
 
         // Send email notification if email service is configured
         if let Some(email_service) = &self.email_service {
-            log::info!("📧 Email service is configured, sending notification for transaction: {}", transaction.id);
+            log::info!("Email service is configured, sending notification for transaction: {}", transaction.id);
             let action = if transaction.amount >= 0.0 { "earned" } else { "spent" };
             let current_balance = self.balance_service.get_current_balance(&active_child.id)?;
-            log::info!("📧 Sending email notification: {} ${:.2} for {}", action, transaction.amount.abs(), active_child.name);
+            log::info!("Sending email notification: {} ${:.2} for {}", action, transaction.amount.abs(), active_child.name);
             if let Err(e) = email_service.send_transaction_notification(&transaction, &active_child, action, current_balance) {
                 error!("Failed to send transaction notification email: {}", e);
             } else {
-                log::info!("📧 Email notification sent successfully!");
+                log::info!("Email notification sent successfully!");
             }
         } else {
-            log::info!("📧 No email service configured, skipping notification");
+            log::info!("No email service configured, skipping notification");
         }
 
         Ok(transaction)
@@ -292,7 +292,7 @@ impl TransactionService {
                 all_transactions.extend(future_allowances);
             },
             Err(e) => {
-                error!("❌ Failed to generate future allowances: {}", e);
+                error!("Failed to generate future allowances: {}", e);
                 // Continue without future allowances rather than failing
             }
         }
@@ -372,47 +372,47 @@ impl TransactionService {
     /// Check for and issue any pending allowances
     /// This should be called on app startup or on a scheduled basis
     pub fn check_and_issue_pending_allowances(&self) -> Result<u32> {
-        info!("🎯 ALLOWANCE DEBUG: check_and_issue_pending_allowances() called");
+        info!("ALLOWANCE DEBUG: check_and_issue_pending_allowances() called");
         if let Ok(active_child) = self.get_active_child() {
-            info!("🎯 ALLOWANCE DEBUG: Found active child: {}", active_child.id);
+            info!("ALLOWANCE DEBUG: Found active child: {}", active_child.id);
             let current_date = Local::now().naive_local().date();
             let check_from_date = current_date - chrono::Duration::days(90);
-            info!("🎯 ALLOWANCE DEBUG: Checking allowances from {} to {}", check_from_date, current_date);
+            info!("ALLOWANCE DEBUG: Checking allowances from {} to {}", check_from_date, current_date);
 
             let pending_allowances = match self.allowance_service.get_pending_allowance_dates(&active_child.id, check_from_date, current_date) {
                 Ok(dates) => dates,
                 Err(e) => {
-                    error!("🎯 ALLOWANCE DEBUG: Failed to get pending allowance dates: {}", e);
+                    error!("ALLOWANCE DEBUG: Failed to get pending allowance dates: {}", e);
                     return Ok(0);
                 }
             };
-            info!("🎯 ALLOWANCE DEBUG: Found {} pending allowances", pending_allowances.len());
+            info!("ALLOWANCE DEBUG: Found {} pending allowances", pending_allowances.len());
             
             let mut issued_count = 0;
             for (allowance_date, amount) in pending_allowances {
-                info!("🎯 ALLOWANCE DEBUG: About to create allowance for {} (${:.2})", allowance_date, amount);
+                info!("ALLOWANCE DEBUG: About to create allowance for {} (${:.2})", allowance_date, amount);
                 match self
                     .create_allowance_transaction(&active_child.id, allowance_date, amount)
                 {
                     Ok(transaction) => {
                         info!(
-                            "🎯 ALLOWANCE DEBUG: Successfully issued allowance: {} for ${:.2} on {}",
+                            "ALLOWANCE DEBUG: Successfully issued allowance: {} for ${:.2} on {}",
                             transaction.id, amount, allowance_date
                         );
                         issued_count += 1;
                     }
                     Err(e) => {
                         error!(
-                            "🎯 ALLOWANCE DEBUG: Failed to issue allowance for {} on {}: {}",
+                            "ALLOWANCE DEBUG: Failed to issue allowance for {} on {}: {}",
                             active_child.id, allowance_date, e
                         );
                     }
                 }
             }
-            info!("🎯 ALLOWANCE DEBUG: Total allowances issued: {}", issued_count);
+            info!("ALLOWANCE DEBUG: Total allowances issued: {}", issued_count);
             return Ok(issued_count);
         } else {
-            info!("🎯 ALLOWANCE DEBUG: No active child found");
+            info!("ALLOWANCE DEBUG: No active child found");
         }
         Ok(0)
     }
@@ -423,7 +423,7 @@ impl TransactionService {
         date: NaiveDate,
         amount: f64,
     ) -> Result<DomainTransaction> {
-        info!("🎯 ALLOWANCE DEBUG: create_allowance_transaction() called for child {}, date {}, amount ${:.2}", child_id, date, amount);
+        info!("ALLOWANCE DEBUG: create_allowance_transaction() called for child {}, date {}, amount ${:.2}", child_id, date, amount);
         
         // Convert NaiveDate to DateTime at noon Eastern time
         let allowance_datetime = date.and_hms_opt(12, 0, 0).unwrap();
@@ -433,7 +433,7 @@ impl TransactionService {
         );
         let eastern_offset = chrono::FixedOffset::west_opt(5 * 3600).unwrap();
         let eastern_datetime = utc_datetime.with_timezone(&eastern_offset);
-        info!("🎯 ALLOWANCE DEBUG: Transaction date: {}", eastern_datetime.to_rfc3339());
+        info!("ALLOWANCE DEBUG: Transaction date: {}", eastern_datetime.to_rfc3339());
 
         let result = self.create_transaction_internal(
             child_id,
@@ -443,7 +443,7 @@ impl TransactionService {
         );
 
         if let Ok(ref transaction) = result {
-            info!("🎯 ALLOWANCE DEBUG: create_allowance_transaction() completed for {}", transaction.id);
+            info!("ALLOWANCE DEBUG: create_allowance_transaction() completed for {}", transaction.id);
         }
 
         result

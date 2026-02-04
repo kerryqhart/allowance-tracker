@@ -24,7 +24,7 @@ impl AllowanceTrackerApp {
             return;
         }
 
-        log::info!("🚀 RENDERING CHILD SELECTOR MODAL");
+        log::info!("RENDERING CHILD SELECTOR MODAL");
 
         egui::Window::new("Select Child")
             .collapsible(false)
@@ -62,7 +62,7 @@ impl AllowanceTrackerApp {
                                     
                                     // DEBUG: Log hover state
                                     if response.hovered() {
-                                        log::info!("🔍 HOVER DETECTED for child: {}", child.name);
+                                        log::info!("HOVER DETECTED for child: {}", child.name);
                                     }
                                     
                                     // Determine background color based on hover state (like working chips)
@@ -147,7 +147,7 @@ impl AllowanceTrackerApp {
                         self.modal.show_child_selector = false;
                     }
                     
-                    if ui.button(egui::RichText::new("🔄 Refresh")
+                    if ui.button(egui::RichText::new("Refresh")
                         .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))).clicked() {
                         // Try to reload the active child
                         self.load_initial_data();

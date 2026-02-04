@@ -95,10 +95,10 @@ impl DataDirectoryService {
             None => return Err(anyhow::anyhow!("Child not found: {}", child_id_to_use)),
         };
 
-        info!("🔄 About to call csv_connection.relocate_child_data_directory with child '{}' (name: '{}') and path: {}", child_id_to_use, child_name, request.new_path);
+        info!("About to call csv_connection.relocate_child_data_directory with child '{}' (name: '{}') and path: {}", child_id_to_use, child_name, request.new_path);
         match self.csv_connection.relocate_child_data_directory(&child_name, &request.new_path) {
             Ok(message) => {
-                info!("✅ Data directory relocation successful for child '{}'", child_id_to_use);
+                info!("Data directory relocation successful for child '{}'", child_id_to_use);
                 Ok(RelocateDataDirectoryResponse {
                     success: true,
                     message,
@@ -107,9 +107,9 @@ impl DataDirectoryService {
             }
             Err(e) => {
                 let error_message = format!("Failed to relocate data directory for child '{}': {}", child_id_to_use, e);
-                info!("❌ Data directory relocation failed: {}", error_message);
+                info!("Data directory relocation failed: {}", error_message);
                 // Also log the full error chain for debugging
-                info!("❌ Full error details: {:?}", e);
+                info!("Full error details: {:?}", e);
                 Ok(RelocateDataDirectoryResponse {
                     success: false,
                     message: error_message,

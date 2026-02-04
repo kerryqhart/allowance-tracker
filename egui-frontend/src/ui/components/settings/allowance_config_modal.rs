@@ -21,7 +21,7 @@ impl AllowanceTrackerApp {
     /// Render the allowance configuration modal
     pub fn render_allowance_config_modal(&mut self, ctx: &egui::Context) {
         // Only log when modal state changes, not every frame
-        // log::info!("🔍 MODAL_CHECK: allowance config modal called, show_modal={}", self.settings.show_allowance_config_modal);
+        // log::info!("MODAL_CHECK: allowance config modal called, show_modal={}", self.settings.show_allowance_config_modal);
         if !self.settings.show_allowance_config_modal {
             return;
         }
@@ -70,7 +70,7 @@ impl AllowanceTrackerApp {
 
                                     // Success message if present
                                     if let Some(success_msg) = &self.settings.allowance_config_form.success_message {
-                                        ui.label(egui::RichText::new(format!("✅ {}", success_msg))
+                                        ui.label(egui::RichText::new(format!("{}", success_msg))
                                             .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))
                                             .color(egui::Color32::from_rgb(0, 150, 0)));
                                         
@@ -321,11 +321,11 @@ impl AllowanceTrackerApp {
         // Handle actions outside the UI closure to avoid borrowing conflicts
         // Only log action flags when there are actual actions (reduced noise)
         if should_submit || should_cancel {
-            log::info!("🔍 ACTION_FLAGS: should_submit={}, should_cancel={}", should_submit, should_cancel);
+            log::info!("ACTION_FLAGS: should_submit={}, should_cancel={}", should_submit, should_cancel);
         }
         
         if should_submit {
-            log::info!("🚀 CALLING submit_allowance_config_form()");
+            log::info!("CALLING submit_allowance_config_form()");
             self.submit_allowance_config_form();
         }
         if should_cancel {
@@ -341,20 +341,20 @@ impl AllowanceTrackerApp {
         // Store child birthdate for age calculation
         if let Some(ref child) = child_from_backend {
             self.settings.allowance_config_form.child_birthdate = Some(child.birthdate);
-            log::info!("🔍 MODAL_LOAD_DEBUG: Child birthdate: {}", child.birthdate);
+            log::info!("MODAL_LOAD_DEBUG: Child birthdate: {}", child.birthdate);
         } else {
             self.settings.allowance_config_form.child_birthdate = None;
         }
 
         let child_id = child_from_backend.as_ref().map(|c| c.id.clone());
-        log::info!("🔍 MODAL_LOAD_DEBUG: Using child_id for GetAllowanceConfigCommand: {:?}", child_id);
+        log::info!("MODAL_LOAD_DEBUG: Using child_id for GetAllowanceConfigCommand: {:?}", child_id);
 
         let command = GetAllowanceConfigCommand { child_id };
 
         match self.backend().allowance_service.get_allowance_config(command) {
             Ok(result) => {
                 if let Some(config) = result.allowance_config {
-                    log::info!("✅ Loaded existing allowance config: ${:.2} on {}, age_based={}",
+                    log::info!("Loaded existing allowance config: ${:.2} on {}, age_based={}",
                         config.amount, config.day_name(), config.use_age_based_amount);
                     self.settings.allowance_config_form.load_from_config(&config);
                 } else {
@@ -367,7 +367,7 @@ impl AllowanceTrackerApp {
                 }
             }
             Err(e) => {
-                log::error!("❌ Failed to load allowance config: {}", e);
+                log::error!("Failed to load allowance config: {}", e);
                 self.settings.allowance_config_form.error_message = Some(format!("Failed to load config: {}", e));
             }
         }
@@ -403,7 +403,7 @@ impl AllowanceTrackerApp {
                 self.settings.allowance_config_form.is_valid = self.settings.allowance_config_form.amount_error.is_none();
             }
             _ => {
-                log::warn!("⚠️ Unknown field for allowance config validation: {}", field_name);
+                log::warn!("Unknown field for allowance config validation: {}", field_name);
             }
         }
     }
@@ -417,7 +417,7 @@ impl AllowanceTrackerApp {
             self.validate_allowance_config_form_field("amount");
 
             if !self.settings.allowance_config_form.is_valid {
-                log::warn!("⚠️ Allowance config form validation failed");
+                log::warn!("Allowance config form validation failed");
                 return;
             }
         }
@@ -429,7 +429,7 @@ impl AllowanceTrackerApp {
             match self.settings.allowance_config_form.amount.trim().parse::<f64>() {
                 Ok(amt) => amt,
                 Err(e) => {
-                    log::error!("❌ Failed to parse amount: {}", e);
+                    log::error!("Failed to parse amount: {}", e);
                     self.settings.allowance_config_form.error_message = Some("Invalid amount format".to_string());
                     return;
                 }
@@ -452,7 +452,7 @@ impl AllowanceTrackerApp {
 
         match self.backend().allowance_service.update_allowance_config(command) {
             Ok(result) => {
-                log::info!("✅ Allowance config updated successfully: {}", result.success_message);
+                log::info!("Allowance config updated successfully: {}", result.success_message);
                 self.settings.allowance_config_form.is_saving = false;
 
                 // Generate appropriate success message
@@ -478,7 +478,7 @@ impl AllowanceTrackerApp {
                 self.load_calendar_data();
             }
             Err(e) => {
-                log::error!("❌ Failed to update allowance config: {}", e);
+                log::error!("Failed to update allowance config: {}", e);
                 self.settings.allowance_config_form.is_saving = false;
                 self.settings.allowance_config_form.error_message = Some(format!("Failed to update: {}", e));
             }

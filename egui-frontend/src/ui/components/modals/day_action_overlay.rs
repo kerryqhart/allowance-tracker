@@ -264,7 +264,7 @@ impl AllowanceTrackerApp {
                                                 let add_button_response = ui.add(add_button);
                                                 if add_button_response.clicked() && button_enabled {
                                                     // Submit form using existing validation
-                                                    log::info!("💰 Add money form submitted: '{}', ${}", 
+                                                    log::info!("Add money form submitted: '{}', ${}", 
                                                               self.form.add_money_description, self.form.add_money_amount);
                                                     
                                                     // Add Extra Money functionality not implemented yet
@@ -373,7 +373,7 @@ impl AllowanceTrackerApp {
                                         if ok_response.clicked() && button_enabled {
                                             match overlay_type {
                                                 crate::ui::app_state::OverlayType::AddMoney => {
-                                                    log::info!("💰 Add Extra Money clicked - Description: '{}', Amount: '{}'",
+                                                    log::info!("Add Extra Money clicked - Description: '{}', Amount: '{}'",
                                                               self.form.add_money_description, self.form.add_money_amount);
                                                     // Add Extra Money functionality not implemented yet
                                                 },

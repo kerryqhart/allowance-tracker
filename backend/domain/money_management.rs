@@ -45,26 +45,26 @@ impl MoneyManagementService {
         goal_service: &GoalService,
     ) -> Result<AddMoneyResponse> {
 
-        info!("💰 MONEY MANAGEMENT: Adding money - description: {}, amount: {}", request.description, request.amount);
+        info!("MONEY MANAGEMENT: Adding money - description: {}, amount: {}", request.description, request.amount);
 
         // Step 1: Check for active child first
-        info!("🔍 MONEY MANAGEMENT: Checking for active child...");
+        info!("MONEY MANAGEMENT: Checking for active child...");
         let active_child_response = child_service.get_active_child()?;
         // We need to access the connection somehow to debug further
         
         let active_child = match active_child_response.active_child.child {
             Some(child) => {
-                info!("✅ MONEY MANAGEMENT: Active child found: {}", child.id);
+                info!("MONEY MANAGEMENT: Active child found: {}", child.id);
                 child
             },
             None => {
-                error!("❌ MONEY MANAGEMENT: No active child found for add money operation");
+                error!("MONEY MANAGEMENT: No active child found for add money operation");
                 return Err(anyhow::anyhow!("No active child found. Please select a child first."));
             }
         };
 
         // Step 2: Enhanced validation that includes date validation if provided
-        info!("🔍 MONEY MANAGEMENT: Starting validation with date: {:?}", request.date);
+        info!("MONEY MANAGEMENT: Starting validation with date: {:?}", request.date);
         let validation = self.validate_add_money_form_with_date(
             &request.description, 
             &request.amount.to_string(),
@@ -72,19 +72,19 @@ impl MoneyManagementService {
             Some(&active_child.created_at.to_rfc3339())
         );
 
-        info!("🔍 MONEY MANAGEMENT: Validation result - is_valid: {}, errors: {:?}", validation.is_valid, validation.errors);
+        info!("MONEY MANAGEMENT: Validation result - is_valid: {}, errors: {:?}", validation.is_valid, validation.errors);
 
         if !validation.is_valid {
             let error_message = self.get_first_error_message(&validation.errors)
                 .unwrap_or_else(|| "Invalid input".to_string());
-            error!("❌ MONEY MANAGEMENT: Validation failed: {}", error_message);
+            error!("MONEY MANAGEMENT: Validation failed: {}", error_message);
             return Err(anyhow::anyhow!("Validation failed: {}", error_message));
         }
 
         // Step 3: Convert to CreateTransactionRequest
-        info!("🔄 MONEY MANAGEMENT: Converting to CreateTransactionRequest...");
+        info!("MONEY MANAGEMENT: Converting to CreateTransactionRequest...");
         let create_request = self.to_create_transaction_request(request.clone());
-        info!("✅ MONEY MANAGEMENT: CreateTransactionRequest: {:?}", create_request);
+        info!("MONEY MANAGEMENT: CreateTransactionRequest: {:?}", create_request);
 
         // Step 4: Convert DTO to domain command and create transaction
         let cmd = CreateTransactionCommand {
@@ -93,23 +93,23 @@ impl MoneyManagementService {
             date: create_request.date.clone(),
         };
 
-        info!("🚀 MONEY MANAGEMENT: Creating transaction via TransactionService...");
+        info!("MONEY MANAGEMENT: Creating transaction via TransactionService...");
         let domain_tx = transaction_service.create_transaction_domain(cmd)?;
         
         let transaction = transaction_to_dto(domain_tx);
-        info!("✅ MONEY MANAGEMENT: Transaction created successfully: {:?}", transaction);
+        info!("MONEY MANAGEMENT: Transaction created successfully: {:?}", transaction);
         
         // Step 5: Check for goal completion after successful transaction
-        info!("🎯 MONEY MANAGEMENT: Checking for goal completion after transaction...");
+        info!("MONEY MANAGEMENT: Checking for goal completion after transaction...");
         match goal_service.check_and_complete_goals(&active_child.id) {
             Ok(Some(completed_goal)) => {
-                info!("🎉 MONEY MANAGEMENT: Goal completed! Goal: {} ({})", completed_goal.id, completed_goal.description);
+                info!("MONEY MANAGEMENT: Goal completed! Goal: {} ({})", completed_goal.id, completed_goal.description);
             }
             Ok(None) => {
-                info!("📊 MONEY MANAGEMENT: No goal completion triggered");
+                info!("MONEY MANAGEMENT: No goal completion triggered");
             }
             Err(e) => {
-                error!("❌ MONEY MANAGEMENT: Error checking goal completion: {}", e);
+                error!("MONEY MANAGEMENT: Error checking goal completion: {}", e);
                 // Don't fail the transaction for goal checking errors
             }
         }
@@ -118,16 +118,16 @@ impl MoneyManagementService {
         let success_message = if let Some(date) = &request.date {
             // Check if this was a backdated transaction
             if self.is_backdated_transaction(date) {
-                info!("📅 MONEY MANAGEMENT: This was a backdated transaction");
-                format!("🎉 {} added successfully (backdated to {})!", 
+                info!("MONEY MANAGEMENT: This was a backdated transaction");
+                format!("{} added successfully (backdated to {})!", 
                               self.format_positive_amount(transaction.amount),
                               date.format("%Y-%m-%d"))
             } else {
-                info!("📅 MONEY MANAGEMENT: This was a current-date transaction");
+                info!("MONEY MANAGEMENT: This was a current-date transaction");
                 self.generate_success_message(transaction.amount)
             }
         } else {
-            info!("📅 MONEY MANAGEMENT: No date provided, using current date");
+            info!("MONEY MANAGEMENT: No date provided, using current date");
             self.generate_success_message(transaction.amount)
         };
         
@@ -140,7 +140,7 @@ impl MoneyManagementService {
             formatted_amount,
         };
 
-        info!("✅ MONEY MANAGEMENT: Sending success response: {:?}", response);
+        info!("MONEY MANAGEMENT: Sending success response: {:?}", response);
         Ok(response)
     }
 
@@ -156,22 +156,22 @@ impl MoneyManagementService {
         info!("💸 MONEY MANAGEMENT: Spending money - description: {}, amount: {}", request.description, request.amount);
 
         // Step 1: Check for active child first
-        info!("🔍 MONEY MANAGEMENT: Checking for active child...");
+        info!("MONEY MANAGEMENT: Checking for active child...");
         let active_child_response = child_service.get_active_child()?;
         
         let active_child = match active_child_response.active_child.child {
             Some(child) => {
-                info!("✅ MONEY MANAGEMENT: Active child found: {}", child.id);
+                info!("MONEY MANAGEMENT: Active child found: {}", child.id);
                 child
             },
             None => {
-                error!("❌ MONEY MANAGEMENT: No active child found for spend money operation");
+                error!("MONEY MANAGEMENT: No active child found for spend money operation");
                 return Err(anyhow::anyhow!("No active child found. Please select a child first."));
             }
         };
 
         // Step 2: Enhanced validation that includes date validation if provided
-        info!("🔍 MONEY MANAGEMENT: Starting validation with date: {:?}", request.date);
+        info!("MONEY MANAGEMENT: Starting validation with date: {:?}", request.date);
         let validation = self.validate_spend_money_form_with_date(
             &request.description, 
             &request.amount.to_string(),
@@ -179,19 +179,19 @@ impl MoneyManagementService {
             Some(&active_child.created_at.to_rfc3339())
         );
 
-        info!("🔍 MONEY MANAGEMENT: Validation result - is_valid: {}, errors: {:?}", validation.is_valid, validation.errors);
+        info!("MONEY MANAGEMENT: Validation result - is_valid: {}, errors: {:?}", validation.is_valid, validation.errors);
 
         if !validation.is_valid {
             let error_message = self.get_first_error_message(&validation.errors)
                 .unwrap_or_else(|| "Invalid input".to_string());
-            error!("❌ MONEY MANAGEMENT: Validation failed: {}", error_message);
+            error!("MONEY MANAGEMENT: Validation failed: {}", error_message);
             return Err(anyhow::anyhow!("Validation failed: {}", error_message));
         }
 
         // Step 3: Convert to CreateTransactionRequest (this will make the amount negative)
-        info!("🔄 MONEY MANAGEMENT: Converting to CreateTransactionRequest...");
+        info!("MONEY MANAGEMENT: Converting to CreateTransactionRequest...");
         let create_request = self.spend_to_create_transaction_request(request.clone());
-        info!("✅ MONEY MANAGEMENT: CreateTransactionRequest: {:?}", create_request);
+        info!("MONEY MANAGEMENT: CreateTransactionRequest: {:?}", create_request);
 
         // Step 4: Convert DTO to domain command and create transaction
         let cmd = CreateTransactionCommand {
@@ -200,24 +200,24 @@ impl MoneyManagementService {
             date: create_request.date.clone(),
         };
 
-        info!("🚀 MONEY MANAGEMENT: Creating transaction via TransactionService...");
+        info!("MONEY MANAGEMENT: Creating transaction via TransactionService...");
         let domain_tx = transaction_service.create_transaction_domain(cmd)?;
         
         let transaction = transaction_to_dto(domain_tx);
-        info!("✅ MONEY MANAGEMENT: Transaction created successfully: {:?}", transaction);
+        info!("MONEY MANAGEMENT: Transaction created successfully: {:?}", transaction);
         
         // Step 5: Check for goal completion after successful transaction
         // Note: Even spending can affect goal completion (though rarely)
-        info!("🎯 MONEY MANAGEMENT: Checking for goal completion after transaction...");
+        info!("MONEY MANAGEMENT: Checking for goal completion after transaction...");
         match goal_service.check_and_complete_goals(&active_child.id) {
             Ok(Some(completed_goal)) => {
-                info!("🎉 MONEY MANAGEMENT: Goal completed! Goal: {} ({})", completed_goal.id, completed_goal.description);
+                info!("MONEY MANAGEMENT: Goal completed! Goal: {} ({})", completed_goal.id, completed_goal.description);
             }
             Ok(None) => {
-                info!("📊 MONEY MANAGEMENT: No goal completion triggered");
+                info!("MONEY MANAGEMENT: No goal completion triggered");
             }
             Err(e) => {
-                error!("❌ MONEY MANAGEMENT: Error checking goal completion: {}", e);
+                error!("MONEY MANAGEMENT: Error checking goal completion: {}", e);
                 // Don't fail the transaction for goal checking errors
             }
         }
@@ -226,16 +226,16 @@ impl MoneyManagementService {
         let success_message = if let Some(date) = &request.date {
             // Check if this was a backdated transaction
             if self.is_backdated_transaction(date) {
-                info!("📅 MONEY MANAGEMENT: This was a backdated transaction");
+                info!("MONEY MANAGEMENT: This was a backdated transaction");
                 format!("💸 {} spent successfully (backdated to {})!", 
                               self.format_amount(request.amount.abs()),
                               date.format("%Y-%m-%d"))
             } else {
-                info!("📅 MONEY MANAGEMENT: This was a current-date transaction");
+                info!("MONEY MANAGEMENT: This was a current-date transaction");
                 self.generate_spend_success_message(request.amount)
             }
         } else {
-            info!("📅 MONEY MANAGEMENT: No date provided, using current date");
+            info!("MONEY MANAGEMENT: No date provided, using current date");
             self.generate_spend_success_message(request.amount)
         };
         
@@ -248,7 +248,7 @@ impl MoneyManagementService {
             formatted_amount,
         };
 
-        info!("✅ MONEY MANAGEMENT: Sending success response: {:?}", response);
+        info!("MONEY MANAGEMENT: Sending success response: {:?}", response);
         Ok(response)
     }
 
@@ -398,7 +398,7 @@ impl MoneyManagementService {
 
     /// Generate success message for successful money addition
     pub fn generate_success_message(&self, amount: f64) -> String {
-        format!("🎉 {} added successfully!", self.format_positive_amount(amount))
+        format!("{} added successfully!", self.format_positive_amount(amount))
     }
 
     /// Get user-friendly error message for validation error
@@ -841,7 +841,7 @@ mod tests {
         
         let message = service.generate_success_message(10.50);
         
-        assert_eq!(message, "🎉 +$10.50 added successfully!");
+        assert_eq!(message, "+$10.50 added successfully!");
     }
 
     #[test]

@@ -146,7 +146,7 @@ impl DropdownMenu {
             return None;
         }
 
-        log::info!("📋 RENDER_DROPDOWN_MENU called for {}", self.unique_id);
+        log::info!("RENDER_DROPDOWN_MENU called for {}", self.unique_id);
         
         // Create a stable area with a unique ID based on the dropdown instance
         let area_id = egui::Id::new(&self.unique_id);
@@ -218,7 +218,7 @@ impl DropdownMenu {
                                     item.label.clone()
                                 };
                                 
-                                log::info!("🚀 RENDERING DROPDOWN ITEM: {}", item.label);
+                                log::info!("RENDERING DROPDOWN ITEM: {}", item.label);
                                 
                                 // Create a clickable rect with manual text drawing to prevent text selection interference
                                 let button_response = ui.allocate_response(
@@ -242,7 +242,7 @@ impl DropdownMenu {
                                 
                                 // Check hover and paint background BEHIND the text
                                 if button_response.hovered() && item.is_enabled {
-                                    log::info!("🔍 DROPDOWN HOVER DETECTED: {}", item.label);
+                                    log::info!("DROPDOWN HOVER DETECTED: {}", item.label);
                                     
                                     // Paint hover background BEHIND by using a lower z-order
                                     ui.painter().rect_filled(

@@ -58,13 +58,13 @@ impl SectionHeaderStyle {
 impl AllowanceTrackerApp {
     /// Draw the main goal section using the centralized layout system
     pub fn draw_goal_section(&mut self, ui: &mut egui::Ui, available_rect: egui::Rect) {
-        log::info!("🎯 GOAL_SECTION: Received {}w x {}h from tab manager", available_rect.width(), available_rect.height());
+        log::info!("GOAL_SECTION: Received {}w x {}h from tab manager", available_rect.width(), available_rect.height());
         
         let layout = GoalLayout::new();
         
         // Check if we should use 3-section layout
         if self.goal.has_active_goal() && self.should_use_three_section_layout() {
-            log::info!("✅ Using NEW 3-section layout with direct rendering");
+            log::info!("Using NEW 3-section layout with direct rendering");
             self.ensure_goal_components_loaded();
             self.draw_three_section_goal_card_direct(ui, available_rect);
         } else {
@@ -105,7 +105,7 @@ impl AllowanceTrackerApp {
         let calculation = if let Some(ref c) = self.goal.goal_calculation { c.clone() } else { return; };
         
         log::info!("🎨 Drawing DIRECT 3-section goal card");
-        log::info!("🏠 Direct available space: {}w x {}h", available_rect.width(), available_rect.height());
+        log::info!("Direct available space: {}w x {}h", available_rect.width(), available_rect.height());
         
         // Calculate margins and sections with DIRECT rectangle calculations
         let card_margin = 20.0;
@@ -170,7 +170,7 @@ impl AllowanceTrackerApp {
         
         // TOP SECTION: Progress bar (DIRECT rendering)
         ui.allocate_new_ui(egui::UiBuilder::new().max_rect(top_rect), |ui| {
-            log::info!("🎯 Rendering progress bar in top section");
+            log::info!("Rendering progress bar in top section");
             
             let header_style = SectionHeaderStyle::default();
             
@@ -201,7 +201,7 @@ impl AllowanceTrackerApp {
         });
         
         // BOTTOM-LEFT SECTION: Goal progress graph (with margins)
-        log::info!("🎯 Bottom-left section rendering goal progression graph");
+        log::info!("Bottom-left section rendering goal progression graph");
         
         // Load graph data if needed using our helper method
         self.load_goal_component_data_if_needed(&goal);
@@ -216,7 +216,7 @@ impl AllowanceTrackerApp {
             ),
         );
         
-        log::info!("🎯 Graph rect (with margins): [{:.1} {:.1}] - [{:.1} {:.1}]", 
+        log::info!("Graph rect (with margins): [{:.1} {:.1}] - [{:.1} {:.1}]", 
                    graph_rect.min.x, graph_rect.min.y, graph_rect.max.x, graph_rect.max.y);
 
         
@@ -259,7 +259,7 @@ impl AllowanceTrackerApp {
         });
         
         // BOTTOM-RIGHT SECTION: Circular progress component (centered)
-        log::info!("🎯 Bottom-right section rendering circular progress component");
+        log::info!("Bottom-right section rendering circular progress component");
         
         // Apply same margins to the right section for consistent alignment
         let right_margin = 15.0; // Match the graph_margin
@@ -378,7 +378,7 @@ impl AllowanceTrackerApp {
     fn draw_goal_error_state(&self, ui: &mut egui::Ui, error: &str) {
         ui.vertical_centered(|ui| {
             ui.add_space(50.0);
-            ui.label(egui::RichText::new("❌ Failed to load goal")
+            ui.label(egui::RichText::new("Failed to load goal")
                 .font(egui::FontId::new(18.0, egui::FontFamily::Proportional))
                 .color(egui::Color32::RED)
                 .strong());
@@ -397,7 +397,7 @@ impl AllowanceTrackerApp {
         
         // Goal title
         layout.content_spacing(ui, GoalContentType::Title);
-        ui.label(egui::RichText::new(format!("🎯 You're saving for: {}", goal.description))
+        ui.label(egui::RichText::new(format!("You're saving for: {}", goal.description))
             .font(egui::FontId::new(20.0, egui::FontFamily::Proportional))
             .color(colors::TEXT_PRIMARY)
             .strong());
@@ -433,7 +433,7 @@ impl AllowanceTrackerApp {
         // Completion information
         layout.content_spacing(ui, GoalContentType::CompletionInfo);
         if calculation.amount_needed <= 0.0 {
-            ui.label(egui::RichText::new("🎉 Goal Complete! Congratulations!")
+            ui.label(egui::RichText::new("Goal Complete! Congratulations!")
                 .font(egui::FontId::new(22.0, egui::FontFamily::Proportional)) // Increased from 18.0
                 .color(egui::Color32::from_rgb(199, 112, 221)) // Changed from GREEN to pink
                 .strong());
@@ -488,11 +488,11 @@ impl AllowanceTrackerApp {
                 }
             }
         } else if calculation.exceeds_time_limit {
-            ui.label(egui::RichText::new("⚠️ This goal will take more than a year to complete with current allowance")
+            ui.label(egui::RichText::new("This goal will take more than a year to complete with current allowance")
                 .font(egui::FontId::new(14.0, egui::FontFamily::Proportional))
                 .color(egui::Color32::YELLOW));
         } else {
-            ui.label(egui::RichText::new("⚠️ No allowance configured - goal completion cannot be calculated")
+            ui.label(egui::RichText::new("No allowance configured - goal completion cannot be calculated")
                 .font(egui::FontId::new(14.0, egui::FontFamily::Proportional))
                 .color(egui::Color32::YELLOW));
         }
@@ -504,7 +504,7 @@ impl AllowanceTrackerApp {
             ui.add_space(60.0); // Increased top spacing for better centering
             
             // No goal message
-            ui.label(egui::RichText::new("🎯 No Goal Set")
+            ui.label(egui::RichText::new("No Goal Set")
                 .font(egui::FontId::new(24.0, egui::FontFamily::Proportional))
                 .color(colors::TEXT_PRIMARY)
                 .strong());
@@ -536,7 +536,7 @@ impl AllowanceTrackerApp {
 impl AllowanceTrackerApp {
     /// Load current goal data from backend
     pub fn load_goal_data(&mut self) {
-        info!("🎯 Loading goal data from backend");
+        info!("Loading goal data from backend");
         self.goal.start_loading();
         
         // Create command for getting current goal
@@ -547,11 +547,11 @@ impl AllowanceTrackerApp {
         // Call backend service
         match self.backend().goal_service.get_current_goal(command) {
             Ok(result) => {
-                info!("✅ Successfully loaded goal data");
+                info!("Successfully loaded goal data");
                 self.goal.set_goal_data(result.goal, result.calculation);
             }
             Err(error) => {
-                log::error!("❌ Failed to load goal data: {}", error);
+                log::error!("Failed to load goal data: {}", error);
                 self.goal.set_error(format!("Failed to load goal: {}", error));
             }
         }
@@ -559,7 +559,7 @@ impl AllowanceTrackerApp {
     
     /// Cancel the current goal
     pub fn cancel_current_goal(&mut self) {
-        info!("🎯 Cancelling current goal");
+        info!("Cancelling current goal");
         
         let command = crate::backend::domain::commands::goal::CancelGoalCommand {
             child_id: self.get_current_child_from_backend().as_ref().map(|c| c.id.clone()),
@@ -567,13 +567,13 @@ impl AllowanceTrackerApp {
         
         match self.backend().goal_service.cancel_goal(command) {
             Ok(_result) => {
-                info!("✅ Successfully cancelled goal");
+                info!("Successfully cancelled goal");
                 // Success feedback removed
                 // Reload goal data to update UI
                 self.load_goal_data();
             }
             Err(error) => {
-                log::error!("❌ Failed to cancel goal: {}", error);
+                log::error!("Failed to cancel goal: {}", error);
                 self.ui.error_message = Some(format!("Failed to cancel goal: {}", error));
             }
         }
@@ -581,7 +581,7 @@ impl AllowanceTrackerApp {
     
     /// Create a new goal
     pub fn create_goal(&mut self, description: String, target_amount: f64) {
-        info!("🎯 Creating new goal: {} - ${:.2}", description, target_amount);
+        info!("Creating new goal: {} - ${:.2}", description, target_amount);
         
         let command = crate::backend::domain::commands::goal::CreateGoalCommand {
             child_id: self.get_current_child_from_backend().as_ref().map(|c| c.id.clone()),
@@ -591,14 +591,14 @@ impl AllowanceTrackerApp {
         
         match self.backend().goal_service.create_goal(command) {
             Ok(_result) => {
-                info!("✅ Successfully created goal");
+                info!("Successfully created goal");
                 // Success feedback removed
                 self.goal.hide_creation_modal();
                 // Reload goal data to update UI
                 self.load_goal_data();
             }
             Err(error) => {
-                log::error!("❌ Failed to create goal: {}", error);
+                log::error!("Failed to create goal: {}", error);
                 self.goal.creation_form.set_submission_error(format!("Failed to create goal: {}", error));
             }
         }

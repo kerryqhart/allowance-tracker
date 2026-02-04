@@ -31,7 +31,7 @@ impl AllowanceTrackerApp {
                     let available_rect = ui.available_rect_before_wrap();
                     
                     // DEBUG: Log tab manager space allocation
-                    // info!("📋 TAB_MANAGER: available_rect.height={:.0}, passing to calendar", available_rect.height()); // Too verbose
+                    // info!("TAB_MANAGER: available_rect.height={:.0}, passing to calendar", available_rect.height()); // Too verbose
                     
                     self.draw_calendar_section_with_toggle(ui, available_rect, &self.calendar.calendar_transactions.clone());
                     
@@ -54,7 +54,7 @@ impl AllowanceTrackerApp {
                     let available_rect = ui.available_rect_before_wrap();
                     
                     // DEBUG: Log tab manager space allocation
-                    info!("📊 TAB_MANAGER: available_rect.height={:.0}, passing to chart", available_rect.height());
+                    info!("TAB_MANAGER: available_rect.height={:.0}, passing to chart", available_rect.height());
                     
                     self.draw_chart_section(ui, available_rect);
                     
@@ -66,7 +66,7 @@ impl AllowanceTrackerApp {
                     let available_rect = ui.available_rect_before_wrap();
                     
                     // DEBUG: Log tab manager space allocation
-                    info!("🎯 TAB_MANAGER: available_rect.height={:.0}, passing to goal", available_rect.height());
+                    info!("TAB_MANAGER: available_rect.height={:.0}, passing to goal", available_rect.height());
                     
                     self.draw_goal_section(ui, available_rect);
                     

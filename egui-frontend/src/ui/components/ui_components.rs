@@ -103,7 +103,7 @@ impl AllowanceTrackerApp {
         
         ui.horizontal(|ui| {
             // Goal button (appears rightmost due to right-to-left layout)
-            let goal_button = egui::Button::new(egui::RichText::new("🎯 Goal")
+            let goal_button = egui::Button::new(egui::RichText::new("Goal")
                 .font(egui::FontId::new(14.0, egui::FontFamily::Proportional))
                 .strong()
                 .color(if self.current_tab() == MainTab::Goal { 
@@ -127,7 +127,7 @@ impl AllowanceTrackerApp {
         ui.add_space(8.0);
         
             // Chart button (appears second rightmost due to right-to-left layout)
-            let chart_button = egui::Button::new(egui::RichText::new("📊 Chart")
+            let chart_button = egui::Button::new(egui::RichText::new("Chart")
                 .font(egui::FontId::new(14.0, egui::FontFamily::Proportional))
                 .strong()
                 .color(if self.current_tab() == MainTab::Chart { 
@@ -151,7 +151,7 @@ impl AllowanceTrackerApp {
         ui.add_space(8.0);
         
         // Table button (appears in middle due to right-to-left layout)
-        let table_button = egui::Button::new(egui::RichText::new("📋 Table")
+        let table_button = egui::Button::new(egui::RichText::new("Table")
                 .font(egui::FontId::new(14.0, egui::FontFamily::Proportional))
                 .strong()
                 .color(if self.current_tab() == MainTab::Table { 
@@ -175,7 +175,7 @@ impl AllowanceTrackerApp {
         ui.add_space(8.0);
         
         // Calendar button (appears leftmost due to right-to-left layout)
-        let calendar_button = egui::Button::new(egui::RichText::new("📅 Calendar")
+        let calendar_button = egui::Button::new(egui::RichText::new("Calendar")
                 .font(egui::FontId::new(14.0, egui::FontFamily::Proportional))
                 .strong()
                 .color(if self.current_tab() == MainTab::Calendar { 
@@ -235,7 +235,7 @@ impl AllowanceTrackerApp {
         header_ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             // Chart button
             let chart_button = egui::Button::new(
-                egui::RichText::new("📊 Chart")
+                egui::RichText::new("Chart")
                     .font(egui::FontId::new(14.0, egui::FontFamily::Proportional))
                     .color(if self.current_tab() == MainTab::Calendar { 
                         egui::Color32::WHITE 
@@ -261,7 +261,7 @@ impl AllowanceTrackerApp {
             
             // Table button
             let table_button = egui::Button::new(
-                egui::RichText::new("📋 Table")
+                egui::RichText::new("Table")
                     .font(egui::FontId::new(14.0, egui::FontFamily::Proportional))
                     .color(if self.current_tab() == MainTab::Table { 
                         egui::Color32::WHITE 
@@ -342,14 +342,14 @@ impl AllowanceTrackerApp {
                 };
                 
                 let calendar_button = if calendar_selected {
-                    egui::Button::new(egui::RichText::new("📅 Calendar")
+                    egui::Button::new(egui::RichText::new("Calendar")
                         .font(egui::FontId::new(18.0, egui::FontFamily::Proportional))
                         .color(egui::Color32::WHITE))
                         .fill(egui::Color32::WHITE) // Same white as calendar card
                         .corner_radius(calendar_rounding)
                         .stroke(egui::Stroke::new(1.5, egui::Color32::from_rgb(100, 150, 255))) // Purple border
                 } else {
-                    egui::Button::new(egui::RichText::new("📅 Calendar")
+                    egui::Button::new(egui::RichText::new("Calendar")
                         .font(egui::FontId::new(18.0, egui::FontFamily::Proportional))
                         .color(egui::Color32::from_rgb(100, 100, 100)))
                         .fill(egui::Color32::from_rgb(240, 240, 240)) // Theme inactive color
@@ -378,14 +378,14 @@ impl AllowanceTrackerApp {
                 };
                 
                 let table_button = if table_selected {
-                    egui::Button::new(egui::RichText::new("📋 Table")
+                    egui::Button::new(egui::RichText::new("Table")
                         .font(egui::FontId::new(18.0, egui::FontFamily::Proportional))
                         .color(egui::Color32::WHITE))
                         .fill(egui::Color32::WHITE) // Same white as calendar card
                         .corner_radius(table_rounding)
                         .stroke(egui::Stroke::new(1.5, egui::Color32::from_rgb(100, 150, 255))) // Purple border
                 } else {
-                    egui::Button::new(egui::RichText::new("📋 Table")
+                    egui::Button::new(egui::RichText::new("Table")
                         .font(egui::FontId::new(18.0, egui::FontFamily::Proportional))
                         .color(egui::Color32::from_rgb(100, 100, 100)))
                         .fill(egui::Color32::from_rgb(240, 240, 240)) // Theme inactive color

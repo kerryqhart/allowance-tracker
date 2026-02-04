@@ -127,7 +127,7 @@ pub fn render_responsive_transaction_table(ui: &mut egui::Ui, available_rect: eg
                                     
                                     // Transaction rows (like calendar day cards) - INFINITE SCROLL: Show all transactions
                                     for transaction in transactions.iter() {
-                                        // 🎯 BUTTON APPROACH: Use egui's built-in button hover instead of manual detection
+                                        // BUTTON APPROACH: Use egui's built-in button hover instead of manual detection
                                         let button_response = ui.add_sized(
                                             [content_width_with_scroll - 20.0, TABLE_ROW_HEIGHT],
                                             egui::Button::new("")
