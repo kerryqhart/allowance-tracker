@@ -282,17 +282,6 @@ pub enum ValidationError {
     AmountPrecisionTooHigh,
 }
 
-/// State for managing money input forms
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct MoneyFormState {
-    pub description: String,
-    pub amount_input: String,
-    pub is_submitting: bool,
-    pub error_message: Option<String>,
-    pub success_message: Option<String>,
-    pub show_success: bool,
-}
-
 /// A child whose allowance is being tracked.
 ///
 /// Each child has their own transaction history, goals, and allowance configuration.

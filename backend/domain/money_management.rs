@@ -8,7 +8,7 @@
 use anyhow::Result;
 use shared::{
     AddMoneyRequest, AddMoneyResponse, SpendMoneyRequest, SpendMoneyResponse,
-    CreateTransactionRequest, MoneyFormState, ValidationResult,
+    CreateTransactionRequest, ValidationResult,
     MoneyManagementConfig, ValidationError,
 };
 use chrono::{DateTime, Utc, Duration, TimeZone, Local};
@@ -256,18 +256,6 @@ impl MoneyManagementService {
         Self { config }
     }
 
-    /// Create a new form state for adding money
-    pub fn create_form_state() -> MoneyFormState {
-        MoneyFormState {
-            description: String::new(),
-            amount_input: String::new(),
-            is_submitting: false,
-            error_message: None,
-            success_message: None,
-            show_success: false,
-        }
-    }
-
     /// Validate the add money form input
     pub fn validate_add_money_form(&self, description: &str, amount_input: &str) -> ValidationResult {
         let mut errors = Vec::new();
@@ -431,43 +419,6 @@ impl MoneyManagementService {
     /// Get the first error message (for displaying single error)
     pub fn get_first_error_message(&self, errors: &[ValidationError]) -> Option<String> {
         errors.first().map(|e| self.get_error_message(e))
-    }
-
-    /// Update form state with validation results
-    pub fn update_form_state_with_validation(&self, mut state: MoneyFormState, validation: ValidationResult) -> MoneyFormState {
-        if validation.is_valid {
-            state.error_message = None;
-        } else {
-            state.error_message = self.get_first_error_message(&validation.errors);
-        }
-        state
-    }
-
-    /// Clear form state after successful submission
-    pub fn clear_form_after_success(&self, mut state: MoneyFormState, success_message: String) -> MoneyFormState {
-        state.description = String::new();
-        state.amount_input = String::new();
-        state.is_submitting = false;
-        state.error_message = None;
-        state.success_message = Some(success_message);
-        state.show_success = true;
-        state
-    }
-
-    /// Set form state to submitting
-    pub fn set_form_submitting(&self, mut state: MoneyFormState) -> MoneyFormState {
-        state.is_submitting = true;
-        state.error_message = None;
-        state.show_success = false;
-        state
-    }
-
-    /// Set form state with error
-    pub fn set_form_error(&self, mut state: MoneyFormState, error_message: String) -> MoneyFormState {
-        state.is_submitting = false;
-        state.error_message = Some(error_message);
-        state.show_success = false;
-        state
     }
 
     /// Generate common money descriptions as suggestions
@@ -842,33 +793,6 @@ mod tests {
         let message = service.generate_success_message(10.50);
         
         assert_eq!(message, "🎉 +$10.50 added successfully!");
-    }
-
-    #[test]
-    fn test_form_state_management() {
-        let service = create_test_service();
-        
-        let initial_state = MoneyManagementService::create_form_state();
-        assert_eq!(initial_state.description, "");
-        assert_eq!(initial_state.amount_input, "");
-        assert!(!initial_state.is_submitting);
-        assert!(initial_state.error_message.is_none());
-        
-        let submitting_state = service.set_form_submitting(initial_state);
-        assert!(submitting_state.is_submitting);
-        assert!(submitting_state.error_message.is_none());
-        
-        let error_state = service.set_form_error(submitting_state, "Test error".to_string());
-        assert!(!error_state.is_submitting);
-        assert_eq!(error_state.error_message, Some("Test error".to_string()));
-        
-        let success_state = service.clear_form_after_success(error_state, "Success!".to_string());
-        assert_eq!(success_state.description, "");
-        assert_eq!(success_state.amount_input, "");
-        assert!(!success_state.is_submitting);
-        assert!(success_state.error_message.is_none());
-        assert_eq!(success_state.success_message, Some("Success!".to_string()));
-        assert!(success_state.show_success);
     }
 
     #[test]
