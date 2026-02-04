@@ -473,6 +473,9 @@ impl AllowanceTrackerApp {
                 self.settings.allowance_config_form.original_day_of_week = Some(self.settings.allowance_config_form.day_of_week);
                 self.settings.allowance_config_form.original_use_age_based_amount = Some(self.settings.allowance_config_form.use_age_based_amount);
                 self.settings.allowance_config_form.has_existing_config = true;
+
+                // Refresh calendar to show updated projections
+                self.load_calendar_data();
             }
             Err(e) => {
                 log::error!("❌ Failed to update allowance config: {}", e);
