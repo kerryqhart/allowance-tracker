@@ -72,29 +72,19 @@ impl CsvConnection {
     
     /// Get the directory path for a child's data using the child name
     pub fn get_child_directory(&self, child_name: &str) -> PathBuf {
-        // debug!("🔍 get_child_directory called for: {}", child_name);
-        
         let base_dir = self.base_directory.lock().unwrap();
-        // debug!("🔍 Base directory locked: {}", base_dir.display());
-        
+
         // Check for redirect file in the child's directory
         let child_dir = base_dir.join(child_name);
-        // debug!("🔍 Child directory path: {}", child_dir.display());
-        
         let redirect_file = child_dir.join(".allowance_redirect");
-        // debug!("🔍 Redirect file path: {}", redirect_file.display());
-        
-        // debug!("🔍 Checking if redirect file exists...");
-                  if redirect_file.exists() {
-              // debug!("📁 Redirect file exists, reading it...");
+
+        if redirect_file.exists() {
             // Read the redirect file to get the actual directory
             match fs::read_to_string(&redirect_file) {
                 Ok(redirected_path) => {
                     let redirected_path = redirected_path.trim();
-                                          // debug!("📄 Redirect file content: {}", redirected_path);
                     let path = PathBuf::from(redirected_path);
-                    
-                    // debug!("🔍 Checking if redirected path exists: {}", path.display());
+
                     if path.exists() {
                         debug!("✅ Child {} data redirected to: {}", child_name, path.display());
                         return path;
@@ -106,12 +96,9 @@ impl CsvConnection {
                     error!("❌ Failed to read redirect file for child {}: {}. Using default directory.", child_name, e);
                 }
             }
-        } else {
-            // debug!("📁 No redirect file found");
         }
-        
+
         // No redirect or redirect failed, use default path
-        // debug!("✅ Using default child directory: {}", child_dir.display());
         child_dir
     }
     
