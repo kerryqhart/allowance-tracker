@@ -42,3 +42,6 @@ lcov.info
 
 # Rust-specific
 **/*.rs.bk
+
+# Git worktrees
+.worktrees/
