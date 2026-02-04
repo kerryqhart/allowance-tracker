@@ -199,8 +199,8 @@ impl AllowanceTrackerApp {
         self.modal.parental_control_error = None;
     }
 
-    /// Mark authentication as successful
-    pub fn authenticate_parental_control(&mut self) {
+    /// Mark parental control as authenticated and proceed to question stage
+    pub fn mark_parental_control_authenticated(&mut self) {
         self.modal.parental_control_stage = ParentalControlStage::Question1;
         self.modal.parental_control_input.clear();
         self.modal.parental_control_error = None;
