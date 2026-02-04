@@ -14,9 +14,7 @@
 
 use eframe::egui;
 use crate::ui::app_state::AllowanceTrackerApp;
-use crate::ui::components::settings::shared::{
-    SettingsModalStyle, render_form_field_with_error
-};
+use crate::ui::components::settings::shared::SettingsModalStyle;
 use crate::backend::domain::commands::allowance::{GetAllowanceConfigCommand, UpdateAllowanceConfigCommand};
 
 impl AllowanceTrackerApp {
@@ -413,22 +411,28 @@ impl AllowanceTrackerApp {
     /// Submit allowance configuration form
     pub fn submit_allowance_config_form(&mut self) {
         log::info!("⚙️ Submitting allowance config form");
-        
-        // Validate form first
-        self.validate_allowance_config_form_field("amount");
-        
-        if !self.settings.allowance_config_form.is_valid {
-            log::warn!("⚠️ Allowance config form validation failed");
-            return;
+
+        // Skip amount validation when using age-based amount
+        if !self.settings.allowance_config_form.use_age_based_amount {
+            self.validate_allowance_config_form_field("amount");
+
+            if !self.settings.allowance_config_form.is_valid {
+                log::warn!("⚠️ Allowance config form validation failed");
+                return;
+            }
         }
 
-        // Parse amount
-        let amount = match self.settings.allowance_config_form.amount.trim().parse::<f64>() {
-            Ok(amt) => amt,
-            Err(e) => {
-                log::error!("❌ Failed to parse amount: {}", e);
-                self.settings.allowance_config_form.error_message = Some("Invalid amount format".to_string());
-                return;
+        // Parse amount - use 0 for age-based (it's calculated from age at projection time)
+        let amount = if self.settings.allowance_config_form.use_age_based_amount {
+            0.0
+        } else {
+            match self.settings.allowance_config_form.amount.trim().parse::<f64>() {
+                Ok(amt) => amt,
+                Err(e) => {
+                    log::error!("❌ Failed to parse amount: {}", e);
+                    self.settings.allowance_config_form.error_message = Some("Invalid amount format".to_string());
+                    return;
+                }
             }
         };
 
@@ -436,35 +440,38 @@ impl AllowanceTrackerApp {
         self.settings.allowance_config_form.error_message = None;
 
         let child_from_backend = self.get_current_child_from_backend();
-        let child_from_cache = self.get_current_child_from_backend();
-        
-        // 🔍 SURGICAL DEBUG: Compare child IDs at submit time
-        log::info!("🔍 SUBMIT_DEBUG: Backend child: {:?}", 
-            child_from_backend.as_ref().map(|c| (&c.id, &c.name)));
-        log::info!("🔍 SUBMIT_DEBUG: UI Cache child: {:?}", 
-            child_from_cache.as_ref().map(|c| (&c.id, &c.name)));
-        
         let child_id = child_from_backend.as_ref().map(|c| c.id.clone());
-        log::info!("🔍 SUBMIT_DEBUG: Using child_id for UpdateAllowanceConfigCommand: {:?}", child_id);
-        
+
         let command = UpdateAllowanceConfigCommand {
             child_id,
             amount,
             day_of_week: self.settings.allowance_config_form.day_of_week,
-            is_active: true, // Always set to active when updating
-            use_age_based_amount: false, // Will be properly wired in later task
+            is_active: true,
+            use_age_based_amount: self.settings.allowance_config_form.use_age_based_amount,
         };
 
         match self.backend().allowance_service.update_allowance_config(command) {
             Ok(result) => {
                 log::info!("✅ Allowance config updated successfully: {}", result.success_message);
                 self.settings.allowance_config_form.is_saving = false;
-                self.settings.allowance_config_form.success_message = Some(self.settings.allowance_config_form.get_success_message());
+
+                // Generate appropriate success message
+                let success_msg = if self.settings.allowance_config_form.use_age_based_amount {
+                    if let Some(age) = self.settings.allowance_config_form.current_age() {
+                        format!("Age-based allowance: ${} every {}", age, self.settings.allowance_config_form.day_name())
+                    } else {
+                        format!("Age-based allowance every {}", self.settings.allowance_config_form.day_name())
+                    }
+                } else {
+                    self.settings.allowance_config_form.get_success_message()
+                };
+                self.settings.allowance_config_form.success_message = Some(success_msg);
                 self.settings.allowance_config_form.error_message = None;
-                
+
                 // Update original values for future change detection
                 self.settings.allowance_config_form.original_amount = Some(amount);
                 self.settings.allowance_config_form.original_day_of_week = Some(self.settings.allowance_config_form.day_of_week);
+                self.settings.allowance_config_form.original_use_age_based_amount = Some(self.settings.allowance_config_form.use_age_based_amount);
                 self.settings.allowance_config_form.has_existing_config = true;
             }
             Err(e) => {
