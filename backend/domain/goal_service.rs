@@ -797,12 +797,12 @@ mod tests {
         };
         
         let result = service.create_goal(command).expect("Failed to create goal");
-        
+
         // The calculation works as follows:
-        // Current balance: $10.00 (from initial allowance setup with auto-generated allowance)
-        // Amount needed: $30.00 - $10.00 = $20.00
-        // Allowances needed: ceil($20.00 / $5.00) = 4 allowances
-        assert_eq!(result.calculation.allowances_needed, 4);
+        // Current balance: $5.00 (from initial $5 transaction in test setup)
+        // Amount needed: $30.00 - $5.00 = $25.00
+        // Allowances needed: ceil($25.00 / $5.00) = 5 allowances
+        assert_eq!(result.calculation.allowances_needed, 5);
         assert!(result.calculation.is_achievable);
         assert!(result.calculation.projected_completion_date.is_some());
         assert!(!result.calculation.exceeds_time_limit);
