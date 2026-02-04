@@ -66,7 +66,7 @@ pub struct PaginationInfo {
 }
 
 /// Type of calendar day for explicit rendering logic
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum CalendarDayType {
     /// Empty padding day before the start of the month
     PaddingBefore,
@@ -77,7 +77,7 @@ pub enum CalendarDayType {
 }
 
 /// Represents a calendar month with its associated transaction data
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CalendarMonth {
     pub month: u32,
     pub year: u32,
@@ -86,7 +86,7 @@ pub struct CalendarMonth {
 }
 
 /// Represents a single day in the calendar
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CalendarDay {
     pub day: u32,
     pub balance: f64,
@@ -95,14 +95,14 @@ pub struct CalendarDay {
 }
 
 /// Request for calendar month data
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CalendarMonthRequest {
     pub month: u32,
     pub year: u32,
 }
 
 /// Represents the current focus date for calendar navigation
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CalendarFocusDate {
     pub month: u32,
     pub year: u32,
@@ -119,21 +119,21 @@ impl Default for CalendarFocusDate {
 }
 
 /// Request to update the calendar focus date
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct UpdateCalendarFocusRequest {
     pub month: u32,
     pub year: u32,
 }
 
 /// Response after updating calendar focus date
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct UpdateCalendarFocusResponse {
     pub focus_date: CalendarFocusDate,
     pub success_message: String,
 }
 
 /// Represents a formatted transaction for display purposes
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FormattedTransaction {
     pub id: String,
     pub formatted_date: String,
@@ -147,7 +147,7 @@ pub struct FormattedTransaction {
 }
 
 /// Type of transaction amount for styling and display
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum AmountType {
     Positive,
     Negative,
@@ -155,7 +155,7 @@ pub enum AmountType {
 }
 
 /// Validation result for transaction form input
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ValidationResult {
     pub is_valid: bool,
     pub errors: Vec<ValidationError>,
@@ -163,7 +163,7 @@ pub struct ValidationResult {
 }
 
 /// Specific validation errors
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ValidationError {
     EmptyDescription,
     DescriptionTooLong(usize),
@@ -174,21 +174,21 @@ pub enum ValidationError {
 }
 
 /// Request for formatted transaction table data
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TransactionTableRequest {
     pub limit: Option<u32>,
     pub after: Option<String>,
 }
 
 /// Response containing formatted transaction table data
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TransactionTableResponse {
     pub formatted_transactions: Vec<FormattedTransaction>,
     pub pagination: PaginationInfo,
 }
 
 /// Represents a parental control validation attempt
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ParentalControlAttempt {
     pub id: i64,
     pub attempted_value: String,
@@ -197,20 +197,20 @@ pub struct ParentalControlAttempt {
 }
 
 /// Request for parental control validation
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ParentalControlRequest {
     pub answer: String,
 }
 
 /// Response from parental control validation
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ParentalControlResponse {
     pub success: bool,
     pub message: String,
 }
 
 /// Request for spending money (creating a negative transaction)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SpendMoneyRequest {
     pub description: String,
     pub amount: f64,  // User provides positive amount, backend converts to negative
@@ -218,7 +218,7 @@ pub struct SpendMoneyRequest {
 }
 
 /// Response after spending money
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SpendMoneyResponse {
     pub transaction_id: String,
     pub success_message: String,
@@ -227,7 +227,7 @@ pub struct SpendMoneyResponse {
 }
 
 /// Request for adding money (creating a positive transaction)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AddMoneyRequest {
     pub description: String,
     pub amount: f64,
@@ -235,7 +235,7 @@ pub struct AddMoneyRequest {
 }
 
 /// Response after adding money
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AddMoneyResponse {
     pub transaction_id: String,
     pub success_message: String,
@@ -244,13 +244,13 @@ pub struct AddMoneyResponse {
 }
 
 /// Request for deleting multiple transactions
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DeleteTransactionsRequest {
     pub transaction_ids: Vec<String>,
 }
 
 /// Response after deleting transactions
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DeleteTransactionsResponse {
     pub deleted_count: usize,
     pub success_message: String,
@@ -258,7 +258,7 @@ pub struct DeleteTransactionsResponse {
 }
 
 /// Form validation result specific to money management
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MoneyFormValidation {
     pub is_valid: bool,
     pub errors: Vec<MoneyValidationError>,
@@ -267,7 +267,7 @@ pub struct MoneyFormValidation {
 }
 
 /// Specific validation errors for money forms
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum MoneyValidationError {
     EmptyDescription,
     DescriptionTooLong(usize),
@@ -280,7 +280,7 @@ pub enum MoneyValidationError {
 }
 
 /// State for managing money input forms
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MoneyFormState {
     pub description: String,
     pub amount_input: String,
@@ -301,67 +301,67 @@ pub struct Child {
 }
 
 /// Request for creating a new child
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CreateChildRequest {
     pub name: String,
     pub birthdate: String, // ISO 8601 date format (YYYY-MM-DD)
 }
 
 /// Request for updating an existing child
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct UpdateChildRequest {
     pub name: Option<String>,
     pub birthdate: Option<String>, // ISO 8601 date format (YYYY-MM-DD)
 }
 
 /// Response after creating or updating a child
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ChildResponse {
     pub child: Child,
     pub success_message: String,
 }
 
 /// Response containing a list of children
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ChildListResponse {
     pub children: Vec<Child>,
 }
 
 /// Request for setting the active child
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SetActiveChildRequest {
     pub child_id: String,
 }
 
 /// Response after setting active child
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SetActiveChildResponse {
     pub success_message: String,
     pub active_child: Child,
 }
 
 /// Response containing the active child information
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ActiveChildResponse {
     pub active_child: Option<Child>,
 }
 
 /// Response containing current data directory information
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GetDataDirectoryResponse {
     pub current_path: String,
     pub is_redirected: bool, // True if current location is via redirect file
 }
 
 /// Request to relocate data directory
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RelocateDataDirectoryRequest {
     pub child_id: Option<String>, // If None, uses active child
     pub new_path: String,
 }
 
 /// Response after relocating data directory
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RelocateDataDirectoryResponse {
     pub success: bool,
     pub message: String,
@@ -369,13 +369,13 @@ pub struct RelocateDataDirectoryResponse {
 }
 
 /// Request to revert data directory
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RevertDataDirectoryRequest {
     pub child_id: Option<String>, // If None, uses active child
 }
 
 /// Response after reverting data directory
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RevertDataDirectoryResponse {
     pub success: bool,
     pub message: String,
@@ -383,14 +383,14 @@ pub struct RevertDataDirectoryResponse {
 }
 
 /// Request to check if a directory has conflicts
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CheckDataDirectoryConflictRequest {
     pub child_id: Option<String>, // If None, uses active child
     pub new_path: String,
 }
 
 /// Response with conflict detection results
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CheckDataDirectoryConflictResponse {
     pub has_conflict: bool,
     pub conflict_details: Option<String>, // Description of what conflicts were found
@@ -398,7 +398,7 @@ pub struct CheckDataDirectoryConflictResponse {
 }
 
 /// User decision for resolving data directory conflicts
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ConflictResolution {
     /// Overwrite target location with current child data
     OverwriteTarget,
@@ -409,7 +409,7 @@ pub enum ConflictResolution {
 }
 
 /// Request to relocate with conflict resolution
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RelocateWithConflictResolutionRequest {
     pub child_id: Option<String>, // If None, uses active child
     pub new_path: String,
@@ -417,7 +417,7 @@ pub struct RelocateWithConflictResolutionRequest {
 }
 
 /// Response after relocating with conflict resolution
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RelocateWithConflictResolutionResponse {
     pub success: bool,
     pub message: String,
@@ -426,13 +426,13 @@ pub struct RelocateWithConflictResolutionResponse {
 }
 
 /// Request to return data to default location
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ReturnToDefaultLocationRequest {
     pub child_id: Option<String>, // If None, uses active child
 }
 
 /// Response after returning to default location
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ReturnToDefaultLocationResponse {
     pub success: bool,
     pub message: String,
@@ -440,7 +440,7 @@ pub struct ReturnToDefaultLocationResponse {
 }
 
 /// Configuration for money management forms
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MoneyManagementConfig {
     pub max_description_length: usize,
     pub min_amount: f64,
@@ -464,7 +464,7 @@ impl Default for MoneyManagementConfig {
 }
 
 /// Represents an allowance configuration
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AllowanceConfig {
     pub child_id: String,
     pub amount: f64,
@@ -477,19 +477,19 @@ pub struct AllowanceConfig {
 }
 
 /// Request for getting allowance configuration
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GetAllowanceConfigRequest {
     pub child_id: Option<String>, // If None, uses active child
 }
 
 /// Response containing allowance configuration
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GetAllowanceConfigResponse {
     pub allowance_config: Option<AllowanceConfig>,
 }
 
 /// Request for updating allowance configuration
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct UpdateAllowanceConfigRequest {
     pub child_id: Option<String>, // If None, uses active child
     pub amount: f64,
@@ -500,14 +500,14 @@ pub struct UpdateAllowanceConfigRequest {
 }
 
 /// Response after updating allowance configuration
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct UpdateAllowanceConfigResponse {
     pub allowance_config: AllowanceConfig,
     pub success_message: String,
 }
 
 /// Current date information from the backend
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CurrentDateResponse {
     pub month: u32,
     pub year: u32,
@@ -519,7 +519,7 @@ pub struct CurrentDateResponse {
 // Goal-related types
 
 /// Goal state enumeration
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum GoalState {
     Active,
     Cancelled,
@@ -548,7 +548,7 @@ impl GoalState {
 }
 
 /// A savings goal with target amount and description
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Goal {
     pub id: String,
     pub child_id: String,
@@ -567,7 +567,7 @@ impl Goal {
 }
 
 /// Goal completion projection calculations
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GoalCalculation {
     pub current_balance: f64,
     pub amount_needed: f64,
@@ -578,7 +578,7 @@ pub struct GoalCalculation {
 }
 
 /// Request to create a new goal
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CreateGoalRequest {
     pub child_id: Option<String>, // If None, uses active child
     pub description: String,
@@ -586,7 +586,7 @@ pub struct CreateGoalRequest {
 }
 
 /// Response after creating a goal
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CreateGoalResponse {
     pub goal: Goal,
     pub calculation: GoalCalculation,
@@ -594,7 +594,7 @@ pub struct CreateGoalResponse {
 }
 
 /// Request to update an existing goal
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct UpdateGoalRequest {
     pub child_id: Option<String>, // If None, uses active child
     pub description: Option<String>,
@@ -602,7 +602,7 @@ pub struct UpdateGoalRequest {
 }
 
 /// Response after updating a goal
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct UpdateGoalResponse {
     pub goal: Goal,
     pub calculation: GoalCalculation,
@@ -610,39 +610,39 @@ pub struct UpdateGoalResponse {
 }
 
 /// Request to get current goal information
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GetCurrentGoalRequest {
     pub child_id: Option<String>, // If None, uses active child
 }
 
 /// Response containing current goal with calculations
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GetCurrentGoalResponse {
     pub goal: Option<Goal>,
     pub calculation: Option<GoalCalculation>,
 }
 
 /// Request to get goal history
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GetGoalHistoryRequest {
     pub child_id: Option<String>, // If None, uses active child
     pub limit: Option<u32>,
 }
 
 /// Response containing goal history
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GetGoalHistoryResponse {
     pub goals: Vec<Goal>,
 }
 
 /// Request to cancel current goal
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CancelGoalRequest {
     pub child_id: Option<String>, // If None, uses active child
 }
 
 /// Response after cancelling a goal
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CancelGoalResponse {
     pub goal: Goal,
     pub success_message: String,
@@ -700,14 +700,14 @@ impl fmt::Display for TransactionIdError {
 impl std::error::Error for TransactionIdError {}
 
 /// Request to export transaction data as CSV
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ExportDataRequest {
     /// Optional child ID - if None, uses active child
     pub child_id: Option<String>,
 }
 
 /// Response containing CSV data for export
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ExportDataResponse {
     /// CSV content as a string
     pub csv_content: String,
@@ -719,7 +719,7 @@ pub struct ExportDataResponse {
     pub child_name: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ExportToPathRequest {
     /// Optional child ID - if None, uses active child
     pub child_id: Option<String>,
@@ -727,7 +727,7 @@ pub struct ExportToPathRequest {
     pub custom_path: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ExportToPathResponse {
     /// Whether the export was successful
     pub success: bool,
@@ -741,7 +741,7 @@ pub struct ExportToPathResponse {
     pub child_name: String,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogEntry {
     pub level: String,
     pub message: String,
