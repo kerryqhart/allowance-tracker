@@ -472,6 +472,8 @@ pub struct AllowanceConfig {
     pub amount: f64,
     pub day_of_week: u8, // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
     pub is_active: bool,
+    #[serde(default)]
+    pub use_age_based_amount: bool, // If true, amount = child's age in years
     pub created_at: DateTime<Utc>, // ✅ FIXED: Now uses proper DateTime object
     pub updated_at: DateTime<Utc>, // ✅ FIXED: Now uses proper DateTime object
 }
@@ -495,6 +497,8 @@ pub struct UpdateAllowanceConfigRequest {
     pub amount: f64,
     pub day_of_week: u8, // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
     pub is_active: bool,
+    #[serde(default)]
+    pub use_age_based_amount: bool,
 }
 
 /// Response after updating allowance configuration
@@ -917,6 +921,7 @@ mod tests {
                 amount: 10.0,
                 day_of_week: day_num,
                 is_active: true,
+                use_age_based_amount: false,
                 created_at: chrono::Utc::now(),
                 updated_at: chrono::Utc::now(),
             };
