@@ -100,7 +100,6 @@ impl ParentalControlRepository {
     // NOTE: find_child_directory_by_id method removed - now using centralized version in CsvConnection
     
     /// Get all child directories that exist
-    #[allow(dead_code)]
     fn get_all_child_directories(&self) -> Result<Vec<String>> {
         let base_dir = self.connection.base_directory();
         let mut directories = Vec::new();
@@ -134,7 +133,6 @@ impl ParentalControlRepository {
     }
     
     /// Get the next available ID for a specific child's parental control attempts file
-    #[allow(dead_code)]
     fn get_next_id(&self, child_directory: &str) -> Result<i64> {
         let csv_path = self.get_parental_control_file_path(child_directory);
         
@@ -162,7 +160,6 @@ impl ParentalControlRepository {
     }
     
     /// Append a parental control attempt to a specific child's CSV file
-    #[allow(dead_code)]
     fn append_parental_control_attempt(&self, child_directory: &str, record: &ParentalControlAttemptRecord) -> Result<()> {
         let child_dir = self.connection.get_child_directory(child_directory);
         
@@ -214,7 +211,6 @@ impl ParentalControlRepository {
     }
     
     /// Load parental control attempts from a specific child's CSV file
-    #[allow(dead_code)]
     fn load_parental_control_attempts_from_directory(&self, child_directory: &str, limit: Option<u32>) -> Result<Vec<DomainParentalControlAttempt>> {
         let csv_path = self.get_parental_control_file_path(child_directory);
         
