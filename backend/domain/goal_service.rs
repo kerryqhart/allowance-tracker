@@ -620,12 +620,13 @@ mod tests {
         service.transaction_service.as_ref().create_transaction_domain(initial_money_cmd)
             .expect("Failed to create initial transaction");
 
-        // Create an allowance configuration for the child  
+        // Create an allowance configuration for the child
         let create_allowance_cmd = UpdateAllowanceConfigCommand {
             child_id: Some(child_id.clone()),
             amount: 5.0,
             day_of_week: 0, // Sunday
             is_active: true,
+            use_age_based_amount: false,
         };
         service.allowance_service.update_allowance_config(create_allowance_cmd).expect("Failed to create allowance");
 

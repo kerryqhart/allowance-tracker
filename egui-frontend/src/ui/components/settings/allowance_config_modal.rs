@@ -404,6 +404,7 @@ impl AllowanceTrackerApp {
             amount,
             day_of_week: self.settings.allowance_config_form.day_of_week,
             is_active: true, // Always set to active when updating
+            use_age_based_amount: false, // Will be properly wired in later task
         };
 
         match self.backend().allowance_service.update_allowance_config(command) {

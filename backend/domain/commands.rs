@@ -84,6 +84,7 @@ pub mod allowance {
         pub amount: f64,
         pub day_of_week: u8,
         pub is_active: bool,
+        pub use_age_based_amount: bool,
     }
 
     /// Result of getting allowance configuration.

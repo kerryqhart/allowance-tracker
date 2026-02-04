@@ -136,6 +136,7 @@ impl AllowanceService {
                 config.amount = command.amount;
                 config.day_of_week = command.day_of_week;
                 config.is_active = command.is_active;
+                config.use_age_based_amount = command.use_age_based_amount;
                 config.updated_at = timestamp_rfc3339;
                 config
             }
@@ -146,6 +147,7 @@ impl AllowanceService {
                     amount: command.amount,
                     day_of_week: command.day_of_week,
                     is_active: command.is_active,
+                    use_age_based_amount: command.use_age_based_amount,
                     created_at: timestamp_rfc3339.clone(),
                     updated_at: timestamp_rfc3339,
                 }
@@ -463,6 +465,7 @@ mod tests {
             amount: 10.0,
             day_of_week: 1, // Monday
             is_active: true,
+            use_age_based_amount: false,
         };
 
         let update_response = service
@@ -505,6 +508,7 @@ mod tests {
             amount: 5.0,
             day_of_week: 0, // Sunday
             is_active: true,
+            use_age_based_amount: false,
         };
 
         let _initial_response = service
@@ -517,6 +521,7 @@ mod tests {
             amount: 15.0,
             day_of_week: 6, // Saturday
             is_active: false,
+            use_age_based_amount: false,
         };
 
         let update_response = service
@@ -541,6 +546,7 @@ mod tests {
             amount: 10.0,
             day_of_week: 7, // Invalid - should be 0-6
             is_active: true,
+            use_age_based_amount: false,
         };
 
         let result = service.update_allowance_config(command);
@@ -558,6 +564,7 @@ mod tests {
             amount: -5.0,
             day_of_week: 1,
             is_active: true,
+            use_age_based_amount: false,
         };
 
         let result = service.update_allowance_config(command);
@@ -576,6 +583,7 @@ mod tests {
             amount: 10.0,
             day_of_week: 1,
             is_active: true,
+            use_age_based_amount: false,
         };
 
         service
@@ -627,6 +635,7 @@ mod tests {
             amount: 5.0,
             day_of_week: 1,
             is_active: true,
+            use_age_based_amount: false,
         };
 
         let command2 = UpdateAllowanceConfigCommand {
@@ -634,6 +643,7 @@ mod tests {
             amount: 10.0,
             day_of_week: 5,
             is_active: false,
+            use_age_based_amount: false,
         };
 
         service
@@ -671,6 +681,7 @@ mod tests {
             amount: 10.0,
             day_of_week: 0,
             is_active: true,
+            use_age_based_amount: false,
             created_at: chrono::Utc::now().to_rfc3339(),
             updated_at: chrono::Utc::now().to_rfc3339(),
         };
@@ -729,11 +740,12 @@ mod tests {
             amount: 10.0,
             day_of_week: 1, // Monday
             is_active: false, // Inactive
+            use_age_based_amount: false,
         };
 
         service
             .update_allowance_config(command)
-            
+
             .expect("Failed to create allowance config");
 
         let from_date = Local::now().date_naive() - chrono::Duration::days(7);
@@ -759,11 +771,12 @@ mod tests {
             amount: 5.0,
             day_of_week: 0, // Sunday
             is_active: true,
+            use_age_based_amount: false,
         };
 
         service
             .update_allowance_config(command)
-            
+
             .expect("Failed to create allowance config");
 
         // Test a 7-day range that includes at least one Sunday
@@ -910,6 +923,7 @@ mod tests {
             amount: 10.0,
             day_of_week: 5, // Friday
             is_active: true,
+            use_age_based_amount: false,
         };
 
         service
@@ -946,12 +960,13 @@ mod tests {
         // Create active allowance config for today's day of week
         let today = Local::now().date_naive();
         let day_of_week = today.weekday().num_days_from_sunday() as u8;
-        
+
         let command = UpdateAllowanceConfigCommand {
             child_id: Some(child.id.clone()),
             amount: 10.0,
             day_of_week,
             is_active: true,
+            use_age_based_amount: false,
         };
 
         service
@@ -1061,12 +1076,13 @@ mod tests {
         
         // Create active allowance config for today's day of week
         let day_of_week = test_date.weekday().num_days_from_sunday() as u8;
-        
+
         let command = UpdateAllowanceConfigCommand {
             child_id: Some(child.id.clone()),
             amount: 10.0,
             day_of_week,
             is_active: true,
+            use_age_based_amount: false,
         };
 
         service
