@@ -8,7 +8,7 @@
 use anyhow::Result;
 use shared::{
     AddMoneyRequest, AddMoneyResponse, SpendMoneyRequest, SpendMoneyResponse,
-    CreateTransactionRequest, MoneyFormState, MoneyFormValidation,
+    CreateTransactionRequest, MoneyFormState, ValidationResult,
     MoneyManagementConfig, ValidationError,
 };
 use chrono::{DateTime, Utc, Duration, TimeZone, Local};
@@ -269,7 +269,7 @@ impl MoneyManagementService {
     }
 
     /// Validate the add money form input
-    pub fn validate_add_money_form(&self, description: &str, amount_input: &str) -> MoneyFormValidation {
+    pub fn validate_add_money_form(&self, description: &str, amount_input: &str) -> ValidationResult {
         let mut errors = Vec::new();
         let mut suggestions = Vec::new();
 
@@ -318,7 +318,7 @@ impl MoneyManagementService {
             }
         };
 
-        MoneyFormValidation {
+        ValidationResult {
             is_valid: errors.is_empty(),
             errors,
             cleaned_amount,
@@ -434,7 +434,7 @@ impl MoneyManagementService {
     }
 
     /// Update form state with validation results
-    pub fn update_form_state_with_validation(&self, mut state: MoneyFormState, validation: MoneyFormValidation) -> MoneyFormState {
+    pub fn update_form_state_with_validation(&self, mut state: MoneyFormState, validation: ValidationResult) -> MoneyFormState {
         if validation.is_valid {
             state.error_message = None;
         } else {
@@ -510,7 +510,7 @@ impl MoneyManagementService {
     }
 
     /// Validate the spend money form input
-    pub fn validate_spend_money_form(&self, description: &str, amount_input: &str) -> MoneyFormValidation {
+    pub fn validate_spend_money_form(&self, description: &str, amount_input: &str) -> ValidationResult {
         let mut errors = Vec::new();
         let mut suggestions = Vec::new();
 
@@ -559,7 +559,7 @@ impl MoneyManagementService {
             }
         };
 
-        MoneyFormValidation {
+        ValidationResult {
             is_valid: errors.is_empty(),
             errors,
             cleaned_amount,
@@ -677,7 +677,7 @@ impl MoneyManagementService {
     }
 
     /// Enhanced validation for add money form that includes date validation
-    pub fn validate_add_money_form_with_date(&self, description: &str, amount_input: &str, date: Option<&chrono::DateTime<chrono::FixedOffset>>, child_created_at: Option<&str>) -> MoneyFormValidation {
+    pub fn validate_add_money_form_with_date(&self, description: &str, amount_input: &str, date: Option<&chrono::DateTime<chrono::FixedOffset>>, child_created_at: Option<&str>) -> ValidationResult {
         let mut validation = self.validate_add_money_form(description, amount_input);
 
         // Add date validation if a date is provided
@@ -693,7 +693,7 @@ impl MoneyManagementService {
     }
 
     /// Enhanced validation for spend money form that includes date validation
-    pub fn validate_spend_money_form_with_date(&self, description: &str, amount_input: &str, date: Option<&chrono::DateTime<chrono::FixedOffset>>, child_created_at: Option<&str>) -> MoneyFormValidation {
+    pub fn validate_spend_money_form_with_date(&self, description: &str, amount_input: &str, date: Option<&chrono::DateTime<chrono::FixedOffset>>, child_created_at: Option<&str>) -> ValidationResult {
         let mut validation = self.validate_spend_money_form(description, amount_input);
 
         // Add date validation if a date is provided

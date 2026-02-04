@@ -269,15 +269,6 @@ pub struct DeleteTransactionsResponse {
     pub not_found_ids: Vec<String>,
 }
 
-/// Form validation result specific to money management
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct MoneyFormValidation {
-    pub is_valid: bool,
-    pub errors: Vec<ValidationError>,
-    pub cleaned_amount: Option<f64>,
-    pub suggestions: Vec<String>,
-}
-
 /// Specific validation errors for form input
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ValidationError {
