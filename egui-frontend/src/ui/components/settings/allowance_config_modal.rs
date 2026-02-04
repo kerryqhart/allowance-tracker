@@ -293,31 +293,33 @@ impl AllowanceTrackerApp {
     /// Load allowance configuration when modal opens
     pub fn load_allowance_config_for_modal(&mut self) {
         let child_from_backend = self.get_current_child_from_backend();
-        let child_from_cache = self.get_current_child_from_backend();
-        
-        // 🔍 SURGICAL DEBUG: Compare UI cache vs backend for current child
-        log::info!("🔍 MODAL_LOAD_DEBUG: Backend child: {:?}", 
-            child_from_backend.as_ref().map(|c| (&c.id, &c.name)));
-        log::info!("🔍 MODAL_LOAD_DEBUG: UI Cache child: {:?}", 
-            child_from_cache.as_ref().map(|c| (&c.id, &c.name)));
-        
+
+        // Store child birthdate for age calculation
+        if let Some(ref child) = child_from_backend {
+            self.settings.allowance_config_form.child_birthdate = Some(child.birthdate);
+            log::info!("🔍 MODAL_LOAD_DEBUG: Child birthdate: {}", child.birthdate);
+        } else {
+            self.settings.allowance_config_form.child_birthdate = None;
+        }
+
         let child_id = child_from_backend.as_ref().map(|c| c.id.clone());
         log::info!("🔍 MODAL_LOAD_DEBUG: Using child_id for GetAllowanceConfigCommand: {:?}", child_id);
-        
+
         let command = GetAllowanceConfigCommand { child_id };
-        
+
         match self.backend().allowance_service.get_allowance_config(command) {
             Ok(result) => {
-                log::info!("🔍 MODAL_LOAD_DEBUG: Backend returned config: amount={:?}, day={:?}", 
-                    result.allowance_config.as_ref().map(|c| c.amount),
-                    result.allowance_config.as_ref().map(|c| c.day_of_week));
-                
                 if let Some(config) = result.allowance_config {
-                    log::info!("✅ Loaded existing allowance config: ${:.2} on {}", config.amount, config.day_name());
+                    log::info!("✅ Loaded existing allowance config: ${:.2} on {}, age_based={}",
+                        config.amount, config.day_name(), config.use_age_based_amount);
                     self.settings.allowance_config_form.load_from_config(&config);
                 } else {
                     log::info!("ℹ️ No existing allowance config found, using defaults");
-                    self.settings.allowance_config_form.clear(); // Reset to defaults
+                    self.settings.allowance_config_form.clear();
+                    // Re-apply birthdate after clear
+                    if let Some(ref child) = child_from_backend {
+                        self.settings.allowance_config_form.child_birthdate = Some(child.birthdate);
+                    }
                 }
             }
             Err(e) => {
