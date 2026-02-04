@@ -32,5 +32,3 @@ pub mod allowance_config_modal; // Allowance configuration functionality
 pub mod shared;
 
 pub use state::*;
-
-// TODO: Future modules to implement (allowance_config_modal, data_directory_modal) 

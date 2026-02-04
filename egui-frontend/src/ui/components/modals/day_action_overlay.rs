@@ -373,8 +373,7 @@ impl AllowanceTrackerApp {
                                         if ok_response.clicked() && button_enabled {
                                             match overlay_type {
                                                 crate::ui::app_state::OverlayType::AddMoney => {
-                                                    // TODO: Implement add money logic in next phase
-                                                    log::info!("💰 Add Extra Money clicked - Description: '{}', Amount: '{}'", 
+                                                    log::info!("💰 Add Extra Money clicked - Description: '{}', Amount: '{}'",
                                                               self.form.add_money_description, self.form.add_money_amount);
                                                     // Add Extra Money functionality not implemented yet
                                                 },

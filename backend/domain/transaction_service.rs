@@ -194,7 +194,6 @@ impl TransactionService {
                 .list_transactions(&active_child.id, Some(query_limit), query.after)?
         };
 
-        // TODO: reintegrate future allowances generation once domain models are finished
         db_transactions.sort_by(|a, b| b.date.cmp(&a.date));
 
         let has_more = db_transactions.len() > limit as usize;

@@ -91,7 +91,6 @@ impl AllowanceTrackerApp {
                  self.interaction.selected_transaction_ids.len(), 
                  self.interaction.selected_transaction_ids);
 
-        // TODO: Implement actual deletion logic
         // For now, just clear the selection
         self.interaction.selected_transaction_ids.clear();
         self.interaction.transaction_selection_mode = false;
