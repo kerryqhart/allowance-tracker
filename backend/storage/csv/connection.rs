@@ -72,7 +72,7 @@ impl CsvConnection {
     
     /// Get the directory path for a child's data using the child name
     pub fn get_child_directory(&self, child_name: &str) -> PathBuf {
-        let base_dir = self.base_directory.lock().unwrap();
+        let base_dir = self.base_directory.lock().unwrap_or_else(|e| e.into_inner());
 
         // Check for redirect file in the child's directory
         let child_dir = base_dir.join(child_name);
@@ -136,13 +136,13 @@ impl CsvConnection {
     
     /// Get the current data directory path
     pub fn get_current_data_directory(&self) -> PathBuf {
-        let base_dir = self.base_directory.lock().unwrap();
+        let base_dir = self.base_directory.lock().unwrap_or_else(|e| e.into_inner());
         base_dir.clone()
     }
     
     /// Get the base directory path
     pub fn base_directory(&self) -> PathBuf {
-        let base_dir = self.base_directory.lock().unwrap();
+        let base_dir = self.base_directory.lock().unwrap_or_else(|e| e.into_inner());
         base_dir.clone()
     }
     
@@ -168,7 +168,7 @@ impl CsvConnection {
         info!("🔍 Final path components: {:?}", new_path.components().collect::<Vec<_>>());
         
         let current_child_dir = {
-            let base_dir = self.base_directory.lock().unwrap();
+            let base_dir = self.base_directory.lock().unwrap_or_else(|e| e.into_inner());
             base_dir.join(child_name)
         };
         info!("🔍 Current child dir (base + name): {}", current_child_dir.display());
@@ -497,7 +497,7 @@ impl CsvConnection {
     /// Clean up test data (useful for tests)
     #[cfg(test)]
     pub fn cleanup(&self) -> Result<()> {
-        let base_dir = self.base_directory.lock().unwrap();
+        let base_dir = self.base_directory.lock().unwrap_or_else(|e| e.into_inner());
         if base_dir.exists() {
             fs::remove_dir_all(&*base_dir)?;
         }
@@ -546,7 +546,7 @@ impl CsvConnection {
     pub fn revert_child_data_directory(&self, child_name: &str) -> Result<String> {
         info!("Starting child data directory revert for '{}'", child_name);
         
-        let base_dir = self.base_directory.lock().unwrap();
+        let base_dir = self.base_directory.lock().unwrap_or_else(|e| e.into_inner());
         let default_child_dir = base_dir.join(child_name);
         let redirect_file = default_child_dir.join(".allowance_redirect");
         

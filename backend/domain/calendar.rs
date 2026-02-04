@@ -448,7 +448,7 @@ impl CalendarService {
 
     /// Get the current focus date for calendar navigation
     pub fn get_focus_date(&self) -> CalendarFocusDate {
-        self.current_focus_date.lock().unwrap().clone()
+        self.current_focus_date.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     /// Set the focus date for calendar navigation
@@ -460,7 +460,7 @@ impl CalendarService {
         let new_focus_date = CalendarFocusDate { month, year };
         
         {
-            let mut focus_date = self.current_focus_date.lock().unwrap();
+            let mut focus_date = self.current_focus_date.lock().unwrap_or_else(|e| e.into_inner());
             *focus_date = new_focus_date.clone();
         }
         
