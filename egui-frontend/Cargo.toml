@@ -19,14 +19,12 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg"]
 # Local dependencies
 shared = { path = "../shared" }
 
-# Date and time handling with full features for backend compatibility
+# Date and time handling
 chrono = { version = "0.4", features = ["serde"] }
-time = { version = "0.3", features = ["serde", "formatting", "parsing", "macros"] }
 
 # Error handling and utilities
 anyhow = "1.0"
 log = "0.4"
-env_logger = "0.11"
 thiserror = "1.0"
 
 # Serialization for persistence
@@ -50,7 +48,6 @@ git2 = { version = "0.19", default-features = false }
 
 # Email functionality
 lettre = { version = "0.11", default-features = false, features = ["tokio1", "tokio1-rustls-tls", "smtp-transport", "builder"] }
-lettre_email = "0.9"
 toml = "0.8"
 
 [dev-dependencies]

@@ -11,8 +11,7 @@ use shared::{
     CreateTransactionRequest, MoneyFormState, MoneyFormValidation,
     MoneyManagementConfig, MoneyValidationError,
 };
-use chrono::{DateTime, Utc, Duration, TimeZone};
-use time::OffsetDateTime;
+use chrono::{DateTime, Utc, Duration, TimeZone, Local};
 use crate::backend::domain::commands::transactions::CreateTransactionCommand;
 use log::{info, error};
 
@@ -722,20 +721,10 @@ impl MoneyManagementService {
         *transaction_date < one_hour_ago
     }
 
-    /// Generate current RFC 3339 timestamp in Eastern Time
+    /// Generate current RFC 3339 timestamp in local time
     /// This is used as the default date when none is provided
     pub fn generate_current_timestamp(&self) -> Result<String, String> {
-        let now = std::time::SystemTime::now();
-        let utc_datetime = OffsetDateTime::from(now);
-        
-        // Convert to Eastern Time (assuming EST/EDT, UTC-5/-4)
-        // In a production app, you'd want to detect the actual timezone
-        let eastern_offset = time::UtcOffset::from_hms(-5, 0, 0)
-            .map_err(|e| format!("Failed to create timezone offset: {}", e))?;
-        let eastern_datetime = utc_datetime.to_offset(eastern_offset);
-        
-        eastern_datetime.format(&time::format_description::well_known::Rfc3339)
-            .map_err(|e| format!("Failed to format timestamp: {}", e))
+        Ok(Local::now().to_rfc3339())
     }
 }
 
