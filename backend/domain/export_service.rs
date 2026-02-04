@@ -171,9 +171,19 @@ impl ExportService {
         // Step 2: Determine the export directory
         let export_dir = match request.custom_path.clone() {
             Some(custom_path) if !custom_path.trim().is_empty() => {
-                // Basic path sanitization: remove quotes, trim whitespace, handle common issues
-                let cleaned_path = self.sanitize_path(&custom_path);
-                std::path::PathBuf::from(cleaned_path)
+                // Basic path sanitization with traversal protection
+                match self.sanitize_path(&custom_path) {
+                    Ok(cleaned_path) => std::path::PathBuf::from(cleaned_path),
+                    Err(e) => {
+                        return Ok(ExportToPathResponse {
+                            success: false,
+                            message: format!("Invalid export path: {}", e),
+                            file_path: String::new(),
+                            transaction_count: 0,
+                            child_name: String::new(),
+                        });
+                    }
+                }
             }
             _ => {
                 // Use default location: Documents folder
@@ -244,27 +254,32 @@ impl ExportService {
         }
     }
 
-    /// Basic path sanitization to handle common user input issues
-    fn sanitize_path(&self, path: &str) -> String {
+    /// Basic path sanitization with traversal protection
+    fn sanitize_path(&self, path: &str) -> Result<String, String> {
         let mut cleaned = path.trim().to_string();
-        
+
         // Remove surrounding quotes (single or double)
         if (cleaned.starts_with('"') && cleaned.ends_with('"')) ||
            (cleaned.starts_with('\'') && cleaned.ends_with('\'')) {
             cleaned = cleaned[1..cleaned.len()-1].to_string();
         }
-        
+
         // Trim again after quote removal
         cleaned = cleaned.trim().to_string();
-        
+
+        // Reject path traversal attempts
+        if cleaned.contains("..") {
+            return Err("Path cannot contain '..' (path traversal not allowed)".to_string());
+        }
+
         // Handle escaped spaces (common on some systems)
         cleaned = cleaned.replace("\\ ", " ");
-        
+
         // Remove any trailing slashes/backslashes
         while cleaned.ends_with('/') || cleaned.ends_with('\\') {
             cleaned.pop();
         }
-        
+
         // Handle tilde expansion for home directory
         if cleaned.starts_with('~') {
             if let Some(home) = dirs::home_dir() {
@@ -275,8 +290,8 @@ impl ExportService {
                 }
             }
         }
-        
-        cleaned
+
+        Ok(cleaned)
     }
 }
 
@@ -293,21 +308,31 @@ mod tests {
     #[test]
     fn test_sanitize_path() {
         let service = ExportService::new();
-        
+
         // Test quote removal and tilde expansion
         let home_dir = dirs::home_dir().unwrap().to_string_lossy().to_string();
         let expected_documents = std::path::PathBuf::from(&home_dir).join("Documents").to_string_lossy().to_string();
-        
-        assert_eq!(service.sanitize_path("\"~/Documents\""), expected_documents);
-        assert_eq!(service.sanitize_path("'~/Documents'"), expected_documents);
-        
-        // Test space handling
-        assert_eq!(service.sanitize_path("  /path/to/dir  "), "/path/to/dir");
-        assert_eq!(service.sanitize_path("/path\\ to\\ dir"), "/path to dir");
-        
+
+        assert_eq!(service.sanitize_path("\"~/Documents\"").unwrap(), expected_documents);
+        assert_eq!(service.sanitize_path("'~/Documents'").unwrap(), expected_documents);
+
+        // Test whitespace trimming
+        assert_eq!(service.sanitize_path("  /path/to/dir  ").unwrap(), "/path/to/dir");
+        assert_eq!(service.sanitize_path("/path\\ to\\ dir").unwrap(), "/path to dir");
+
         // Test trailing slash removal
-        assert_eq!(service.sanitize_path("/path/to/dir/"), "/path/to/dir");
-        assert_eq!(service.sanitize_path("/path/to/dir\\"), "/path/to/dir");
+        assert_eq!(service.sanitize_path("/path/to/dir/").unwrap(), "/path/to/dir");
+        assert_eq!(service.sanitize_path("/path/to/dir\\").unwrap(), "/path/to/dir");
+    }
+
+    #[test]
+    fn test_sanitize_path_rejects_traversal() {
+        let service = ExportService::new();
+
+        // Test path traversal rejection
+        assert!(service.sanitize_path("../etc/passwd").is_err());
+        assert!(service.sanitize_path("/path/../etc/passwd").is_err());
+        assert!(service.sanitize_path("~/Documents/..").is_err());
     }
     
     #[test]

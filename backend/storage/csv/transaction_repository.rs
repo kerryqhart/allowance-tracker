@@ -83,12 +83,10 @@ impl TransactionRepository {
         
         // Try parsing as date-only format (YYYY-MM-DD)
         if let Ok(naive_date) = NaiveDate::parse_from_str(date_str, "%Y-%m-%d") {
-            // Convert to beginning of day in Eastern Time
+            // Convert to beginning of day in local timezone (handles DST automatically)
             let naive_datetime = naive_date.and_hms_opt(0, 0, 0).unwrap();
-            let eastern_offset = FixedOffset::west_opt(5 * 3600).unwrap(); // EST (UTC-5)
-            
-            if let Some(dt) = naive_datetime.and_local_timezone(eastern_offset).single() {
-                return Ok(dt);
+            if let Some(local_dt) = naive_datetime.and_local_timezone(chrono::Local).single() {
+                return Ok(local_dt.fixed_offset());
             }
         }
         
@@ -274,11 +272,8 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
     ) -> Result<Option<DomainTransaction>> {
         // Convert child ID to child name for directory lookup
         let child_name = self.get_child_directory_name(child_id)?;
-        Ok(self
-            .read_transactions(&child_name)
-            .unwrap_or_default()
-            .into_iter()
-            .find(|t| t.id == transaction_id))
+        let transactions = self.read_transactions(&child_name)?;
+        Ok(transactions.into_iter().find(|t| t.id == transaction_id))
     }
 
     fn list_transactions(
@@ -335,14 +330,11 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
     fn update_transaction(&self, transaction: &DomainTransaction) -> Result<()> {
         info!("Updating transaction in CSV: {}", transaction.id);
 
-        let mut transactions = self
-            .read_transactions_by_id(&transaction.child_id)
-            .unwrap_or_default();
+        let mut transactions = self.read_transactions_by_id(&transaction.child_id)?;
 
         if let Some(index) = transactions.iter().position(|t| t.id == transaction.id) {
             transactions[index] = transaction.clone();
-            self.write_transactions_by_id(&transaction.child_id, &transactions)
-                .unwrap_or_default();
+            self.write_transactions_by_id(&transaction.child_id, &transactions)?;
         }
 
         Ok(())
@@ -354,8 +346,7 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
         transactions.retain(|t| t.id != transaction_id);
 
         if transactions.len() < original_len {
-            self.write_transactions_by_id(child_id, &transactions)
-                .unwrap_or_default();
+            self.write_transactions_by_id(child_id, &transactions)?;
             Ok(true)
         } else {
             Ok(false)
@@ -368,8 +359,7 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
         let mut transactions = self.read_transactions(&child_name)?;
         let initial_len = transactions.len();
         transactions.retain(|t| !transaction_ids.contains(&t.id));
-        self.write_transactions(&child_name, &transactions)
-            .unwrap_or_default();
+        self.write_transactions(&child_name, &transactions)?;
         Ok((initial_len - transactions.len()) as u32)
     }
 
@@ -452,8 +442,7 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
 
             if needs_write {
                 // Use internal method to avoid git commits during balance recalculation
-                self.write_transactions_by_id_internal(&child_id, &transactions)
-                    .unwrap_or_default();
+                self.write_transactions_by_id_internal(&child_id, &transactions)?;
             }
         }
 
