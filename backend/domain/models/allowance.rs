@@ -7,6 +7,8 @@ pub struct AllowanceConfig {
     pub amount: f64,
     pub day_of_week: u8, // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
     pub is_active: bool,
+    #[serde(default)]
+    pub use_age_based_amount: bool, // If true, amount = child's age in years
     pub created_at: String, // RFC 3339 timestamp
     pub updated_at: String, // RFC 3339 timestamp
 }

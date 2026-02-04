@@ -305,16 +305,21 @@ impl ProfileFormState {
 pub struct AllowanceConfigFormState {
     pub amount: String,
     pub day_of_week: u8, // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+    pub use_age_based_amount: bool, // If true, amount = child's age in years
     pub amount_error: Option<String>,
     pub is_valid: bool,
     pub is_saving: bool,
     pub success_message: Option<String>,
     pub error_message: Option<String>,
-    
+
     // Original values for change detection
     pub original_amount: Option<f64>,
     pub original_day_of_week: Option<u8>,
+    pub original_use_age_based_amount: Option<bool>,
     pub has_existing_config: bool,
+
+    // Child info for age calculation
+    pub child_birthdate: Option<chrono::NaiveDate>,
 }
 
 impl AllowanceConfigFormState {
@@ -323,6 +328,7 @@ impl AllowanceConfigFormState {
         Self {
             amount: "5.00".to_string(), // Default $5
             day_of_week: 5, // Default Friday
+            use_age_based_amount: false,
             amount_error: None,
             is_valid: true,
             is_saving: false,
@@ -330,7 +336,9 @@ impl AllowanceConfigFormState {
             error_message: None,
             original_amount: None,
             original_day_of_week: None,
+            original_use_age_based_amount: None,
             has_existing_config: false,
+            child_birthdate: None,
         }
     }
     
@@ -338,6 +346,7 @@ impl AllowanceConfigFormState {
     pub fn clear(&mut self) {
         self.amount = "5.00".to_string();
         self.day_of_week = 5;
+        self.use_age_based_amount = false;
         self.amount_error = None;
         self.is_valid = true;
         self.is_saving = false;
@@ -345,23 +354,27 @@ impl AllowanceConfigFormState {
         self.error_message = None;
         self.original_amount = None;
         self.original_day_of_week = None;
+        self.original_use_age_based_amount = None;
         self.has_existing_config = false;
+        self.child_birthdate = None;
     }
     
     /// Load existing allowance config into form
     pub fn load_from_config(&mut self, config: &crate::backend::domain::models::allowance::AllowanceConfig) {
         self.amount = format!("{:.2}", config.amount);
         self.day_of_week = config.day_of_week;
+        self.use_age_based_amount = config.use_age_based_amount;
         self.original_amount = Some(config.amount);
         self.original_day_of_week = Some(config.day_of_week);
+        self.original_use_age_based_amount = Some(config.use_age_based_amount);
         self.has_existing_config = true;
         self.amount_error = None;
         self.is_valid = true;
         self.success_message = None;
         self.error_message = None;
-        
-        log::info!("⚙️ LOADED_CONFIG: amount='{}' (original={:.2}), day={} (original={}), has_existing={}", 
-            self.amount, config.amount, self.day_of_week, config.day_of_week, self.has_existing_config);
+
+        log::info!("⚙️ LOADED_CONFIG: amount='{}', day={}, use_age_based={}",
+            self.amount, self.day_of_week, self.use_age_based_amount);
     }
     
     /// Check if form values have changed from original
@@ -370,35 +383,23 @@ impl AllowanceConfigFormState {
             log::info!("⚙️ CHANGE_DETECTION: No existing config, allowing changes");
             return true; // Always allow saving for new configs
         }
-        
+
         // Parse current amount
         let current_amount = self.amount.trim().parse::<f64>().unwrap_or(0.0);
-        
-        // Check if amount or day changed (only log when there are actual changes)
-        let amount_changed = self.original_amount.map(|orig| {
-            let changed = current_amount != orig;
-            if changed {
-                log::info!("⚙️ AMOUNT_CHANGE: current={:.2}, original={:.2}, changed={}", 
-                    current_amount, orig, changed);
-            }
-            changed
-        }).unwrap_or(true);
-        
-        let day_changed = self.original_day_of_week.map(|orig| {
-            let changed = orig != self.day_of_week;
-            if changed {
-                log::info!("⚙️ DAY_CHANGE: current={}, original={}, changed={}", 
-                    self.day_of_week, orig, changed);
-            }
-            changed
-        }).unwrap_or(true);
-        
-        let has_changes = amount_changed || day_changed;
+
+        // Check if amount, day, or age_based changed
+        let amount_changed = self.original_amount.map(|orig| current_amount != orig).unwrap_or(true);
+        let day_changed = self.original_day_of_week.map(|orig| orig != self.day_of_week).unwrap_or(true);
+        let age_based_changed = self.original_use_age_based_amount
+            .map(|orig| orig != self.use_age_based_amount)
+            .unwrap_or(true);
+
+        let has_changes = amount_changed || day_changed || age_based_changed;
         if has_changes {
-            log::info!("⚙️ HAS_CHANGES: amount_changed={}, day_changed={}, result={}", 
-                amount_changed, day_changed, has_changes);
+            log::info!("⚙️ HAS_CHANGES: amount={}, day={}, age_based={}",
+                amount_changed, day_changed, age_based_changed);
         }
-        
+
         has_changes
     }
     
@@ -418,9 +419,23 @@ impl AllowanceConfigFormState {
     
     /// Get success message based on form state
     pub fn get_success_message(&self) -> String {
-        format!("New allowance: ${:.2} every {}", 
-            self.amount.parse::<f64>().unwrap_or(0.0), 
+        format!("New allowance: ${:.2} every {}",
+            self.amount.parse::<f64>().unwrap_or(0.0),
             self.day_name())
+    }
+
+    /// Get current age based on stored birthdate
+    pub fn current_age(&self) -> Option<i32> {
+        self.child_birthdate.map(|birthdate| {
+            use chrono::Local;
+            let today = Local::now().date_naive();
+            crate::backend::domain::age::age_on_date(birthdate, today)
+        })
+    }
+
+    /// Check if age-based mode can be enabled (requires birthdate)
+    pub fn can_use_age_based(&self) -> bool {
+        self.child_birthdate.is_some()
     }
 }
 

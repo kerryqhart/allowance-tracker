@@ -43,6 +43,8 @@ struct YamlAllowanceConfig {
     amount: f64,
     day_of_week: u8,
     is_active: bool,
+    #[serde(default)]
+    use_age_based_amount: bool,
     created_at: String,
     updated_at: String,
 }
@@ -87,6 +89,7 @@ impl AllowanceRepository {
             amount: config.amount,
             day_of_week: config.day_of_week,
             is_active: config.is_active,
+            use_age_based_amount: config.use_age_based_amount,
             created_at: config.created_at.clone(),
             updated_at: config.updated_at.clone(),
         };
@@ -129,6 +132,7 @@ impl AllowanceRepository {
             amount: yaml_model.amount,
             day_of_week: yaml_model.day_of_week,
             is_active: yaml_model.is_active,
+            use_age_based_amount: yaml_model.use_age_based_amount,
             created_at: yaml_model.created_at,
             updated_at: yaml_model.updated_at,
         };
@@ -290,13 +294,14 @@ mod tests {
             amount: 10.0,
             day_of_week: 1, // Monday
             is_active: true,
+            use_age_based_amount: false,
             created_at: Utc::now().to_rfc3339(),
             updated_at: Utc::now().to_rfc3339(),
         };
-        
+
         // Store the config
         repo.store_allowance_config(&config).unwrap();
-        
+
         // Retrieve the config
         let retrieved = repo.get_allowance_config(&child.id).unwrap();
         assert!(retrieved.is_some());
@@ -317,13 +322,14 @@ mod tests {
             amount: 10.0,
             day_of_week: 1, // Monday
             is_active: true,
+            use_age_based_amount: false,
             created_at: Utc::now().to_rfc3339(),
             updated_at: Utc::now().to_rfc3339(),
         };
-        
+
         // Store the initial config
         repo.store_allowance_config(&config).unwrap();
-        
+
         // Update the config
         config.amount = 15.0;
         config.day_of_week = 5; // Friday
@@ -340,16 +346,17 @@ mod tests {
     #[test]
     fn test_delete_allowance_config() {
         let (repo, _child_repo, _temp_dir, child) = setup_test_repo_with_child();
-        
+
         let config = DomainAllowanceConfig {
             child_id: child.id.clone(),
             amount: 10.0,
             day_of_week: 1, // Monday
             is_active: true,
+            use_age_based_amount: false,
             created_at: Utc::now().to_rfc3339(),
             updated_at: Utc::now().to_rfc3339(),
         };
-        
+
         // Store the config
         repo.store_allowance_config(&config).unwrap();
         
@@ -388,15 +395,17 @@ mod tests {
             amount: 10.0,
             day_of_week: 1,
             is_active: true,
+            use_age_based_amount: false,
             created_at: Utc::now().to_rfc3339(),
             updated_at: Utc::now().to_rfc3339(),
         };
-        
+
         let config2 = DomainAllowanceConfig {
             child_id: child2.id.clone(),
             amount: 15.0,
             day_of_week: 5,
             is_active: false,
+            use_age_based_amount: false,
             created_at: Utc::now().to_rfc3339(),
             updated_at: Utc::now().to_rfc3339(),
         };
@@ -423,10 +432,11 @@ mod tests {
             amount: 10.0,
             day_of_week: 1,
             is_active: true,
+            use_age_based_amount: false,
             created_at: Utc::now().to_rfc3339(),
             updated_at: Utc::now().to_rfc3339(),
         };
-        
+
         // Storing config for nonexistent child should fail
         let result = repo.store_allowance_config(&config);
         assert!(result.is_err());

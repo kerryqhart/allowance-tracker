@@ -14,9 +14,7 @@
 
 use eframe::egui;
 use crate::ui::app_state::AllowanceTrackerApp;
-use crate::ui::components::settings::shared::{
-    SettingsModalStyle, render_form_field_with_error
-};
+use crate::ui::components::settings::shared::SettingsModalStyle;
 use crate::backend::domain::commands::allowance::{GetAllowanceConfigCommand, UpdateAllowanceConfigCommand};
 
 impl AllowanceTrackerApp {
@@ -130,26 +128,87 @@ impl AllowanceTrackerApp {
     /// Render the form content for allowance configuration modal
     fn render_allowance_config_form_content(&mut self, ui: &mut egui::Ui) {
         ui.vertical(|ui| {
-            // Amount field
-            let amount_response = render_form_field_with_error(
-                ui,
-                "Weekly Allowance Amount",
-                &mut self.settings.allowance_config_form.amount,
-                "Enter dollar amount (e.g., 5.00)",
-                &self.settings.allowance_config_form.amount_error,
-                Some(20), // Reasonable limit for allowance amounts
-            );
+            // Age-based toggle (above amount field)
+            let can_use_age_based = self.settings.allowance_config_form.can_use_age_based();
+            let was_age_based = self.settings.allowance_config_form.use_age_based_amount;
 
-            // Always validate amount (not just on change) to ensure change detection works
-            // Only log amount input when it actually changes to reduce noise
-            if amount_response.changed() {
-                log::info!("⚙️ AMOUNT_INPUT_STATE: value = '{}', changed = {}", 
-                    self.settings.allowance_config_form.amount, amount_response.changed());
-                log::info!("🔄 EGUI_DETECTED_CHANGE: Input field actually changed to '{}'", 
-                    self.settings.allowance_config_form.amount);
+            ui.horizontal(|ui| {
+                let checkbox = egui::Checkbox::new(
+                    &mut self.settings.allowance_config_form.use_age_based_amount,
+                    egui::RichText::new("Use age-based amount")
+                        .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))
+                );
+
+                let response = ui.add_enabled(can_use_age_based, checkbox);
+
+                if !can_use_age_based {
+                    response.on_disabled_hover_text("Requires child birthdate to be set");
+                }
+            });
+
+            // Pre-fill amount when toggling OFF age-based mode
+            if was_age_based && !self.settings.allowance_config_form.use_age_based_amount {
+                if let Some(age) = self.settings.allowance_config_form.current_age() {
+                    self.settings.allowance_config_form.amount = format!("{:.2}", age as f64);
+                    log::info!("⚙️ Pre-filled amount with current age: ${}", age);
+                }
             }
-            
-            self.validate_allowance_config_form_field("amount");
+
+            // Show age info when age-based is enabled
+            if self.settings.allowance_config_form.use_age_based_amount {
+                if let Some(age) = self.settings.allowance_config_form.current_age() {
+                    ui.label(egui::RichText::new(format!("(Child's age: {} = ${} allowance)", age, age))
+                        .font(egui::FontId::new(14.0, egui::FontFamily::Proportional))
+                        .color(egui::Color32::from_rgb(70, 130, 180)));
+                }
+            }
+
+            ui.add_space(15.0);
+
+            // Amount field - disabled when age-based
+            let amount_enabled = !self.settings.allowance_config_form.use_age_based_amount;
+
+            ui.label(egui::RichText::new("Weekly Allowance Amount")
+                .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))
+                .strong()
+                .color(if amount_enabled {
+                    egui::Color32::from_rgb(60, 60, 60)
+                } else {
+                    egui::Color32::from_rgb(150, 150, 150)
+                }));
+
+            ui.add_space(5.0);
+
+            // Show age-derived amount when in age-based mode
+            if self.settings.allowance_config_form.use_age_based_amount {
+                if let Some(age) = self.settings.allowance_config_form.current_age() {
+                    let mut display_amount = format!("${}.00", age);
+                    ui.add_enabled(false,
+                        egui::TextEdit::singleline(&mut display_amount)
+                            .desired_width(200.0)
+                            .hint_text("Age-based amount")
+                    );
+                }
+            } else {
+                let amount_response = ui.add_enabled(amount_enabled,
+                    egui::TextEdit::singleline(&mut self.settings.allowance_config_form.amount)
+                        .desired_width(200.0)
+                        .hint_text("Enter dollar amount (e.g., 5.00)")
+                );
+
+                if amount_response.changed() {
+                    log::info!("⚙️ Amount changed to '{}'", self.settings.allowance_config_form.amount);
+                }
+
+                self.validate_allowance_config_form_field("amount");
+
+                // Show amount error if present
+                if let Some(ref error) = self.settings.allowance_config_form.amount_error {
+                    ui.label(egui::RichText::new(error)
+                        .font(egui::FontId::new(13.0, egui::FontFamily::Proportional))
+                        .color(egui::Color32::from_rgb(200, 50, 50)));
+                }
+            }
 
             ui.add_space(15.0);
 
@@ -161,49 +220,29 @@ impl AllowanceTrackerApp {
 
             ui.add_space(5.0);
 
-            // Day dropdown with proper styling
-            let combo_response = egui::ComboBox::from_label("")
+            egui::ComboBox::from_label("")
                 .width(200.0)
                 .selected_text(self.settings.allowance_config_form.day_name())
                 .show_ui(ui, |ui| {
-                    // Style the dropdown content with solid background
                     ui.style_mut().visuals.extreme_bg_color = egui::Color32::WHITE;
-                    ui.style_mut().visuals.faint_bg_color = egui::Color32::from_rgb(248, 248, 248);
-                    ui.style_mut().visuals.widgets.noninteractive.bg_fill = egui::Color32::WHITE;
-                    ui.style_mut().visuals.widgets.inactive.bg_fill = egui::Color32::WHITE;
-                    
-                    let mut changed = false;
-                    let original_day = self.settings.allowance_config_form.day_of_week;
-                    
-                    changed |= ui.selectable_value(&mut self.settings.allowance_config_form.day_of_week, 0, "Sunday").changed();
-                    changed |= ui.selectable_value(&mut self.settings.allowance_config_form.day_of_week, 1, "Monday").changed();
-                    changed |= ui.selectable_value(&mut self.settings.allowance_config_form.day_of_week, 2, "Tuesday").changed();
-                    changed |= ui.selectable_value(&mut self.settings.allowance_config_form.day_of_week, 3, "Wednesday").changed();
-                    changed |= ui.selectable_value(&mut self.settings.allowance_config_form.day_of_week, 4, "Thursday").changed();
-                    changed |= ui.selectable_value(&mut self.settings.allowance_config_form.day_of_week, 5, "Friday").changed();
-                    changed |= ui.selectable_value(&mut self.settings.allowance_config_form.day_of_week, 6, "Saturday").changed();
-                    
-                    if changed {
-                        log::info!("⚙️ Day of week changed from {} to {} ({})", 
-                            original_day, 
-                            self.settings.allowance_config_form.day_of_week,
-                            self.settings.allowance_config_form.day_name());
-                    }
-                    
-                    changed
+                    ui.selectable_value(&mut self.settings.allowance_config_form.day_of_week, 0, "Sunday");
+                    ui.selectable_value(&mut self.settings.allowance_config_form.day_of_week, 1, "Monday");
+                    ui.selectable_value(&mut self.settings.allowance_config_form.day_of_week, 2, "Tuesday");
+                    ui.selectable_value(&mut self.settings.allowance_config_form.day_of_week, 3, "Wednesday");
+                    ui.selectable_value(&mut self.settings.allowance_config_form.day_of_week, 4, "Thursday");
+                    ui.selectable_value(&mut self.settings.allowance_config_form.day_of_week, 5, "Friday");
+                    ui.selectable_value(&mut self.settings.allowance_config_form.day_of_week, 6, "Saturday");
                 });
-            
-            // Log if the combo box interaction caused any issues
-            if let Some(inner_response) = combo_response.inner {
-                if inner_response {
-                    log::info!("⚙️ ComboBox day selection changed successfully");
-                }
-            }
 
             ui.add_space(10.0);
 
             // Help text
-            ui.label(egui::RichText::new("💡 Allowance will be automatically added every week on this day")
+            let help_text = if self.settings.allowance_config_form.use_age_based_amount {
+                "💡 Amount will automatically adjust when child has a birthday"
+            } else {
+                "💡 Allowance will be automatically added every week on this day"
+            };
+            ui.label(egui::RichText::new(help_text)
                 .font(egui::FontId::new(13.0, egui::FontFamily::Proportional))
                 .color(egui::Color32::from_rgb(120, 120, 120)));
         });
@@ -211,8 +250,13 @@ impl AllowanceTrackerApp {
 
     /// Render action buttons for allowance configuration modal
     fn render_allowance_config_action_buttons(&mut self, ui: &mut egui::Ui) {
-        let form_valid = self.settings.allowance_config_form.is_valid && 
-                        !self.settings.allowance_config_form.amount.trim().is_empty();
+        // When age-based mode is enabled, amount field doesn't need to be filled
+        let form_valid = if self.settings.allowance_config_form.use_age_based_amount {
+            self.settings.allowance_config_form.is_valid
+        } else {
+            self.settings.allowance_config_form.is_valid &&
+                !self.settings.allowance_config_form.amount.trim().is_empty()
+        };
         let has_changes = self.settings.allowance_config_form.has_changes();
         let is_saving = self.settings.allowance_config_form.is_saving;
         let button_enabled = form_valid && has_changes && !is_saving;
@@ -293,31 +337,33 @@ impl AllowanceTrackerApp {
     /// Load allowance configuration when modal opens
     pub fn load_allowance_config_for_modal(&mut self) {
         let child_from_backend = self.get_current_child_from_backend();
-        let child_from_cache = self.get_current_child_from_backend();
-        
-        // 🔍 SURGICAL DEBUG: Compare UI cache vs backend for current child
-        log::info!("🔍 MODAL_LOAD_DEBUG: Backend child: {:?}", 
-            child_from_backend.as_ref().map(|c| (&c.id, &c.name)));
-        log::info!("🔍 MODAL_LOAD_DEBUG: UI Cache child: {:?}", 
-            child_from_cache.as_ref().map(|c| (&c.id, &c.name)));
-        
+
+        // Store child birthdate for age calculation
+        if let Some(ref child) = child_from_backend {
+            self.settings.allowance_config_form.child_birthdate = Some(child.birthdate);
+            log::info!("🔍 MODAL_LOAD_DEBUG: Child birthdate: {}", child.birthdate);
+        } else {
+            self.settings.allowance_config_form.child_birthdate = None;
+        }
+
         let child_id = child_from_backend.as_ref().map(|c| c.id.clone());
         log::info!("🔍 MODAL_LOAD_DEBUG: Using child_id for GetAllowanceConfigCommand: {:?}", child_id);
-        
+
         let command = GetAllowanceConfigCommand { child_id };
-        
+
         match self.backend().allowance_service.get_allowance_config(command) {
             Ok(result) => {
-                log::info!("🔍 MODAL_LOAD_DEBUG: Backend returned config: amount={:?}, day={:?}", 
-                    result.allowance_config.as_ref().map(|c| c.amount),
-                    result.allowance_config.as_ref().map(|c| c.day_of_week));
-                
                 if let Some(config) = result.allowance_config {
-                    log::info!("✅ Loaded existing allowance config: ${:.2} on {}", config.amount, config.day_name());
+                    log::info!("✅ Loaded existing allowance config: ${:.2} on {}, age_based={}",
+                        config.amount, config.day_name(), config.use_age_based_amount);
                     self.settings.allowance_config_form.load_from_config(&config);
                 } else {
                     log::info!("ℹ️ No existing allowance config found, using defaults");
-                    self.settings.allowance_config_form.clear(); // Reset to defaults
+                    self.settings.allowance_config_form.clear();
+                    // Re-apply birthdate after clear
+                    if let Some(ref child) = child_from_backend {
+                        self.settings.allowance_config_form.child_birthdate = Some(child.birthdate);
+                    }
                 }
             }
             Err(e) => {
@@ -365,22 +411,28 @@ impl AllowanceTrackerApp {
     /// Submit allowance configuration form
     pub fn submit_allowance_config_form(&mut self) {
         log::info!("⚙️ Submitting allowance config form");
-        
-        // Validate form first
-        self.validate_allowance_config_form_field("amount");
-        
-        if !self.settings.allowance_config_form.is_valid {
-            log::warn!("⚠️ Allowance config form validation failed");
-            return;
+
+        // Skip amount validation when using age-based amount
+        if !self.settings.allowance_config_form.use_age_based_amount {
+            self.validate_allowance_config_form_field("amount");
+
+            if !self.settings.allowance_config_form.is_valid {
+                log::warn!("⚠️ Allowance config form validation failed");
+                return;
+            }
         }
 
-        // Parse amount
-        let amount = match self.settings.allowance_config_form.amount.trim().parse::<f64>() {
-            Ok(amt) => amt,
-            Err(e) => {
-                log::error!("❌ Failed to parse amount: {}", e);
-                self.settings.allowance_config_form.error_message = Some("Invalid amount format".to_string());
-                return;
+        // Parse amount - use 0 for age-based (it's calculated from age at projection time)
+        let amount = if self.settings.allowance_config_form.use_age_based_amount {
+            0.0
+        } else {
+            match self.settings.allowance_config_form.amount.trim().parse::<f64>() {
+                Ok(amt) => amt,
+                Err(e) => {
+                    log::error!("❌ Failed to parse amount: {}", e);
+                    self.settings.allowance_config_form.error_message = Some("Invalid amount format".to_string());
+                    return;
+                }
             }
         };
 
@@ -388,35 +440,42 @@ impl AllowanceTrackerApp {
         self.settings.allowance_config_form.error_message = None;
 
         let child_from_backend = self.get_current_child_from_backend();
-        let child_from_cache = self.get_current_child_from_backend();
-        
-        // 🔍 SURGICAL DEBUG: Compare child IDs at submit time
-        log::info!("🔍 SUBMIT_DEBUG: Backend child: {:?}", 
-            child_from_backend.as_ref().map(|c| (&c.id, &c.name)));
-        log::info!("🔍 SUBMIT_DEBUG: UI Cache child: {:?}", 
-            child_from_cache.as_ref().map(|c| (&c.id, &c.name)));
-        
         let child_id = child_from_backend.as_ref().map(|c| c.id.clone());
-        log::info!("🔍 SUBMIT_DEBUG: Using child_id for UpdateAllowanceConfigCommand: {:?}", child_id);
-        
+
         let command = UpdateAllowanceConfigCommand {
             child_id,
             amount,
             day_of_week: self.settings.allowance_config_form.day_of_week,
-            is_active: true, // Always set to active when updating
+            is_active: true,
+            use_age_based_amount: self.settings.allowance_config_form.use_age_based_amount,
         };
 
         match self.backend().allowance_service.update_allowance_config(command) {
             Ok(result) => {
                 log::info!("✅ Allowance config updated successfully: {}", result.success_message);
                 self.settings.allowance_config_form.is_saving = false;
-                self.settings.allowance_config_form.success_message = Some(self.settings.allowance_config_form.get_success_message());
+
+                // Generate appropriate success message
+                let success_msg = if self.settings.allowance_config_form.use_age_based_amount {
+                    if let Some(age) = self.settings.allowance_config_form.current_age() {
+                        format!("Age-based allowance: ${} every {}", age, self.settings.allowance_config_form.day_name())
+                    } else {
+                        format!("Age-based allowance every {}", self.settings.allowance_config_form.day_name())
+                    }
+                } else {
+                    self.settings.allowance_config_form.get_success_message()
+                };
+                self.settings.allowance_config_form.success_message = Some(success_msg);
                 self.settings.allowance_config_form.error_message = None;
-                
+
                 // Update original values for future change detection
                 self.settings.allowance_config_form.original_amount = Some(amount);
                 self.settings.allowance_config_form.original_day_of_week = Some(self.settings.allowance_config_form.day_of_week);
+                self.settings.allowance_config_form.original_use_age_based_amount = Some(self.settings.allowance_config_form.use_age_based_amount);
                 self.settings.allowance_config_form.has_existing_config = true;
+
+                // Refresh calendar to show updated projections
+                self.load_calendar_data();
             }
             Err(e) => {
                 log::error!("❌ Failed to update allowance config: {}", e);

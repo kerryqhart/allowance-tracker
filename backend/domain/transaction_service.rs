@@ -546,12 +546,13 @@ mod tests {
         // Create allowance config for today
         let today = chrono::Local::now().date_naive();
         let day_of_week = today.weekday().num_days_from_sunday() as u8;
-        
+
         let allowance_cmd = crate::backend::domain::commands::allowance::UpdateAllowanceConfigCommand {
             child_id: Some(child.id.clone()),
             amount: 10.0,
             day_of_week,
             is_active: true,
+            use_age_based_amount: false,
         };
         service.allowance_service.update_allowance_config(allowance_cmd).expect("Failed to create allowance config");
 
@@ -605,12 +606,13 @@ mod tests {
         // Create allowance config for today
         let today = chrono::Local::now().date_naive();
         let day_of_week = today.weekday().num_days_from_sunday() as u8;
-        
+
         let allowance_cmd = crate::backend::domain::commands::allowance::UpdateAllowanceConfigCommand {
             child_id: Some(child.id.clone()),
             amount: 10.0,
             day_of_week,
             is_active: true,
+            use_age_based_amount: false,
         };
         service.allowance_service.update_allowance_config(allowance_cmd).expect("Failed to create allowance config");
 
