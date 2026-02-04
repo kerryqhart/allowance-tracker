@@ -130,26 +130,87 @@ impl AllowanceTrackerApp {
     /// Render the form content for allowance configuration modal
     fn render_allowance_config_form_content(&mut self, ui: &mut egui::Ui) {
         ui.vertical(|ui| {
-            // Amount field
-            let amount_response = render_form_field_with_error(
-                ui,
-                "Weekly Allowance Amount",
-                &mut self.settings.allowance_config_form.amount,
-                "Enter dollar amount (e.g., 5.00)",
-                &self.settings.allowance_config_form.amount_error,
-                Some(20), // Reasonable limit for allowance amounts
-            );
+            // Age-based toggle (above amount field)
+            let can_use_age_based = self.settings.allowance_config_form.can_use_age_based();
+            let was_age_based = self.settings.allowance_config_form.use_age_based_amount;
 
-            // Always validate amount (not just on change) to ensure change detection works
-            // Only log amount input when it actually changes to reduce noise
-            if amount_response.changed() {
-                log::info!("⚙️ AMOUNT_INPUT_STATE: value = '{}', changed = {}", 
-                    self.settings.allowance_config_form.amount, amount_response.changed());
-                log::info!("🔄 EGUI_DETECTED_CHANGE: Input field actually changed to '{}'", 
-                    self.settings.allowance_config_form.amount);
+            ui.horizontal(|ui| {
+                let checkbox = egui::Checkbox::new(
+                    &mut self.settings.allowance_config_form.use_age_based_amount,
+                    egui::RichText::new("Use age-based amount")
+                        .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))
+                );
+
+                let response = ui.add_enabled(can_use_age_based, checkbox);
+
+                if !can_use_age_based {
+                    response.on_disabled_hover_text("Requires child birthdate to be set");
+                }
+            });
+
+            // Pre-fill amount when toggling OFF age-based mode
+            if was_age_based && !self.settings.allowance_config_form.use_age_based_amount {
+                if let Some(age) = self.settings.allowance_config_form.current_age() {
+                    self.settings.allowance_config_form.amount = format!("{:.2}", age as f64);
+                    log::info!("⚙️ Pre-filled amount with current age: ${}", age);
+                }
             }
-            
-            self.validate_allowance_config_form_field("amount");
+
+            // Show age info when age-based is enabled
+            if self.settings.allowance_config_form.use_age_based_amount {
+                if let Some(age) = self.settings.allowance_config_form.current_age() {
+                    ui.label(egui::RichText::new(format!("(Child's age: {} = ${} allowance)", age, age))
+                        .font(egui::FontId::new(14.0, egui::FontFamily::Proportional))
+                        .color(egui::Color32::from_rgb(70, 130, 180)));
+                }
+            }
+
+            ui.add_space(15.0);
+
+            // Amount field - disabled when age-based
+            let amount_enabled = !self.settings.allowance_config_form.use_age_based_amount;
+
+            ui.label(egui::RichText::new("Weekly Allowance Amount")
+                .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))
+                .strong()
+                .color(if amount_enabled {
+                    egui::Color32::from_rgb(60, 60, 60)
+                } else {
+                    egui::Color32::from_rgb(150, 150, 150)
+                }));
+
+            ui.add_space(5.0);
+
+            // Show age-derived amount when in age-based mode
+            if self.settings.allowance_config_form.use_age_based_amount {
+                if let Some(age) = self.settings.allowance_config_form.current_age() {
+                    let mut display_amount = format!("${}.00", age);
+                    ui.add_enabled(false,
+                        egui::TextEdit::singleline(&mut display_amount)
+                            .desired_width(200.0)
+                            .hint_text("Age-based amount")
+                    );
+                }
+            } else {
+                let amount_response = ui.add_enabled(amount_enabled,
+                    egui::TextEdit::singleline(&mut self.settings.allowance_config_form.amount)
+                        .desired_width(200.0)
+                        .hint_text("Enter dollar amount (e.g., 5.00)")
+                );
+
+                if amount_response.changed() {
+                    log::info!("⚙️ Amount changed to '{}'", self.settings.allowance_config_form.amount);
+                }
+
+                self.validate_allowance_config_form_field("amount");
+
+                // Show amount error if present
+                if let Some(ref error) = self.settings.allowance_config_form.amount_error {
+                    ui.label(egui::RichText::new(error)
+                        .font(egui::FontId::new(13.0, egui::FontFamily::Proportional))
+                        .color(egui::Color32::from_rgb(200, 50, 50)));
+                }
+            }
 
             ui.add_space(15.0);
 
@@ -161,49 +222,29 @@ impl AllowanceTrackerApp {
 
             ui.add_space(5.0);
 
-            // Day dropdown with proper styling
-            let combo_response = egui::ComboBox::from_label("")
+            egui::ComboBox::from_label("")
                 .width(200.0)
                 .selected_text(self.settings.allowance_config_form.day_name())
                 .show_ui(ui, |ui| {
-                    // Style the dropdown content with solid background
                     ui.style_mut().visuals.extreme_bg_color = egui::Color32::WHITE;
-                    ui.style_mut().visuals.faint_bg_color = egui::Color32::from_rgb(248, 248, 248);
-                    ui.style_mut().visuals.widgets.noninteractive.bg_fill = egui::Color32::WHITE;
-                    ui.style_mut().visuals.widgets.inactive.bg_fill = egui::Color32::WHITE;
-                    
-                    let mut changed = false;
-                    let original_day = self.settings.allowance_config_form.day_of_week;
-                    
-                    changed |= ui.selectable_value(&mut self.settings.allowance_config_form.day_of_week, 0, "Sunday").changed();
-                    changed |= ui.selectable_value(&mut self.settings.allowance_config_form.day_of_week, 1, "Monday").changed();
-                    changed |= ui.selectable_value(&mut self.settings.allowance_config_form.day_of_week, 2, "Tuesday").changed();
-                    changed |= ui.selectable_value(&mut self.settings.allowance_config_form.day_of_week, 3, "Wednesday").changed();
-                    changed |= ui.selectable_value(&mut self.settings.allowance_config_form.day_of_week, 4, "Thursday").changed();
-                    changed |= ui.selectable_value(&mut self.settings.allowance_config_form.day_of_week, 5, "Friday").changed();
-                    changed |= ui.selectable_value(&mut self.settings.allowance_config_form.day_of_week, 6, "Saturday").changed();
-                    
-                    if changed {
-                        log::info!("⚙️ Day of week changed from {} to {} ({})", 
-                            original_day, 
-                            self.settings.allowance_config_form.day_of_week,
-                            self.settings.allowance_config_form.day_name());
-                    }
-                    
-                    changed
+                    ui.selectable_value(&mut self.settings.allowance_config_form.day_of_week, 0, "Sunday");
+                    ui.selectable_value(&mut self.settings.allowance_config_form.day_of_week, 1, "Monday");
+                    ui.selectable_value(&mut self.settings.allowance_config_form.day_of_week, 2, "Tuesday");
+                    ui.selectable_value(&mut self.settings.allowance_config_form.day_of_week, 3, "Wednesday");
+                    ui.selectable_value(&mut self.settings.allowance_config_form.day_of_week, 4, "Thursday");
+                    ui.selectable_value(&mut self.settings.allowance_config_form.day_of_week, 5, "Friday");
+                    ui.selectable_value(&mut self.settings.allowance_config_form.day_of_week, 6, "Saturday");
                 });
-            
-            // Log if the combo box interaction caused any issues
-            if let Some(inner_response) = combo_response.inner {
-                if inner_response {
-                    log::info!("⚙️ ComboBox day selection changed successfully");
-                }
-            }
 
             ui.add_space(10.0);
 
             // Help text
-            ui.label(egui::RichText::new("💡 Allowance will be automatically added every week on this day")
+            let help_text = if self.settings.allowance_config_form.use_age_based_amount {
+                "💡 Amount will automatically adjust when child has a birthday"
+            } else {
+                "💡 Allowance will be automatically added every week on this day"
+            };
+            ui.label(egui::RichText::new(help_text)
                 .font(egui::FontId::new(13.0, egui::FontFamily::Proportional))
                 .color(egui::Color32::from_rgb(120, 120, 120)));
         });
@@ -211,8 +252,13 @@ impl AllowanceTrackerApp {
 
     /// Render action buttons for allowance configuration modal
     fn render_allowance_config_action_buttons(&mut self, ui: &mut egui::Ui) {
-        let form_valid = self.settings.allowance_config_form.is_valid && 
-                        !self.settings.allowance_config_form.amount.trim().is_empty();
+        // When age-based mode is enabled, amount field doesn't need to be filled
+        let form_valid = if self.settings.allowance_config_form.use_age_based_amount {
+            self.settings.allowance_config_form.is_valid
+        } else {
+            self.settings.allowance_config_form.is_valid &&
+                !self.settings.allowance_config_form.amount.trim().is_empty()
+        };
         let has_changes = self.settings.allowance_config_form.has_changes();
         let is_saving = self.settings.allowance_config_form.is_saving;
         let button_enabled = form_valid && has_changes && !is_saving;
