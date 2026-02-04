@@ -181,18 +181,9 @@ pub struct ValidationResult {
     pub is_valid: bool,
     pub errors: Vec<ValidationError>,
     pub cleaned_amount: Option<f64>,
+    pub suggestions: Vec<String>,
 }
 
-/// Specific validation errors
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum ValidationError {
-    EmptyDescription,
-    DescriptionTooLong(usize),
-    InvalidAmount(String),
-    AmountNotPositive,
-    AmountTooLarge,
-    AmountTooSmall,
-}
 
 /// Request for formatted transaction table data
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -278,18 +269,9 @@ pub struct DeleteTransactionsResponse {
     pub not_found_ids: Vec<String>,
 }
 
-/// Form validation result specific to money management
+/// Specific validation errors for form input
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct MoneyFormValidation {
-    pub is_valid: bool,
-    pub errors: Vec<MoneyValidationError>,
-    pub cleaned_amount: Option<f64>,
-    pub suggestions: Vec<String>,
-}
-
-/// Specific validation errors for money forms
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum MoneyValidationError {
+pub enum ValidationError {
     EmptyDescription,
     DescriptionTooLong(usize),
     EmptyAmount,
@@ -298,17 +280,6 @@ pub enum MoneyValidationError {
     AmountTooSmall(f64),
     AmountTooLarge(f64),
     AmountPrecisionTooHigh,
-}
-
-/// State for managing money input forms
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct MoneyFormState {
-    pub description: String,
-    pub amount_input: String,
-    pub is_submitting: bool,
-    pub error_message: Option<String>,
-    pub success_message: Option<String>,
-    pub show_success: bool,
 }
 
 /// A child whose allowance is being tracked.
