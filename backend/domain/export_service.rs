@@ -10,32 +10,12 @@ use log::{info, error};
 use std::fs;
 
 
-use shared::{ExportDataRequest, ExportDataResponse, ExportToPathRequest, ExportToPathResponse, Transaction, TransactionType};
+use shared::{ExportDataRequest, ExportDataResponse, ExportToPathRequest, ExportToPathResponse, Transaction};
 use crate::backend::domain::child_service::ChildService;
 use crate::backend::domain::transaction_service::TransactionService;
 use crate::backend::domain::commands::transactions::TransactionListQuery;
 use crate::backend::domain::commands::child::GetChildCommand;
-
-// Create TransactionMapper placeholder
-struct TransactionMapper;
-
-impl TransactionMapper {
-    pub fn to_dto(transaction: crate::backend::domain::models::transaction::Transaction) -> Transaction {
-        Transaction {
-            id: transaction.id,
-            date: transaction.date,
-            amount: transaction.amount,
-            description: transaction.description,
-            transaction_type: match transaction.transaction_type {
-                crate::backend::domain::models::transaction::TransactionType::Income => TransactionType::Income,
-                crate::backend::domain::models::transaction::TransactionType::Expense => TransactionType::Expense,
-                crate::backend::domain::models::transaction::TransactionType::FutureAllowance => TransactionType::FutureAllowance,
-            },
-            balance: transaction.balance,
-            child_id: transaction.child_id,
-        }
-    }
-}
+use crate::backend::domain::mappers::transaction_to_dto;
 
 /// Export service that handles all export-related business logic
 #[derive(Clone)]
@@ -103,7 +83,7 @@ impl ExportService {
         let mut transactions: Vec<Transaction> = domain_res
             .transactions
             .into_iter()
-            .map(TransactionMapper::to_dto)
+            .map(transaction_to_dto)
             .collect();
 
         // Sort chronologically (oldest first)

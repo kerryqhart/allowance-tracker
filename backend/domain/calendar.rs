@@ -11,31 +11,10 @@ use chrono::{Local, Datelike};
 use std::sync::{Arc, Mutex};
 use log::{self, info};
 
-// Add imports for the new orchestration method
 use crate::backend::domain::transaction_service::TransactionService;
 use crate::backend::domain::commands::transactions::CalendarTransactionsQuery;
+use crate::backend::domain::mappers::transaction_to_dto;
 use anyhow::Result;
-
-// We need to create a TransactionMapper module - for now let's create a simple placeholder
-struct TransactionMapper;
-
-impl TransactionMapper {
-    pub fn to_dto(transaction: crate::backend::domain::models::transaction::Transaction) -> Transaction {
-        Transaction {
-            id: transaction.id,
-            date: transaction.date,
-            amount: transaction.amount,
-            description: transaction.description,
-            transaction_type: match transaction.transaction_type {
-                crate::backend::domain::models::transaction::TransactionType::Income => TransactionType::Income,
-                crate::backend::domain::models::transaction::TransactionType::Expense => TransactionType::Expense,
-                crate::backend::domain::models::transaction::TransactionType::FutureAllowance => TransactionType::FutureAllowance,
-            },
-            balance: transaction.balance,
-            child_id: transaction.child_id,
-        }
-    }
-}
 
 /// Calendar service that handles all calendar-related business logic
 #[derive(Clone)]
@@ -74,7 +53,7 @@ impl CalendarService {
         let dto_transactions: Vec<Transaction> = result
             .transactions
             .into_iter()
-            .map(TransactionMapper::to_dto)
+            .map(transaction_to_dto)
             .collect();
         
         info!("🗓️ CALENDAR: Total transactions for calendar: {} transactions", dto_transactions.len());
