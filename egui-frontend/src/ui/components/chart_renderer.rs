@@ -55,6 +55,29 @@ pub struct ChartDataPoint {
 }
 
 impl AllowanceTrackerApp {
+    /// Render message when no child is selected
+    fn render_chart_no_child(&self, ui: &mut egui::Ui, height: f32) {
+        ui.vertical_centered(|ui| {
+            ui.add_space(height / 3.0);
+            ui.label(egui::RichText::new("Select a child to view their balance chart")
+                .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))
+                .color(egui::Color32::from_rgb(120, 120, 120)));
+        });
+    }
+
+    /// Render loading state for chart
+    fn render_chart_loading(&mut self, ui: &mut egui::Ui, height: f32) {
+        ui.vertical_centered(|ui| {
+            ui.add_space(height / 3.0);
+            ui.label(egui::RichText::new("Loading chart data...")
+                .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))
+                .color(egui::Color32::from_rgb(120, 120, 120)));
+        });
+
+        // Load data on first render
+        self.load_chart_data();
+    }
+
     /// Draw the chart section with header and chart content
     pub fn draw_chart_section(&mut self, ui: &mut egui::Ui, available_rect: egui::Rect) {
         info!("CHART: draw_chart_section called with rect height={:.0}", available_rect.height());
@@ -76,30 +99,14 @@ impl AllowanceTrackerApp {
         );
         
         ui.allocate_new_ui(egui::UiBuilder::new().max_rect(chart_rect), |ui| {
-            if let Some(ref _child) = self.get_current_child_from_backend() {
-                if self.chart.chart_data.is_empty() {
-                    // Show loading state
-                    ui.vertical_centered(|ui| {
-                        ui.add_space(chart_rect.height() / 3.0);
-                        ui.label(egui::RichText::new("Loading chart data...")
-                            .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))
-                            .color(egui::Color32::from_rgb(120, 120, 120)));
-                    });
-                    
-                    // Load data on first render
-                    self.load_chart_data();
-                } else {
-                    // Render the actual chart
-                    self.render_balance_chart(ui);
-                }
+            let chart_height = chart_rect.height();
+
+            if self.get_current_child_from_backend().is_none() {
+                self.render_chart_no_child(ui, chart_height);
+            } else if self.chart.chart_data.is_empty() {
+                self.render_chart_loading(ui, chart_height);
             } else {
-                // No child selected
-                ui.vertical_centered(|ui| {
-                    ui.add_space(chart_rect.height() / 3.0);
-                    ui.label(egui::RichText::new("Select a child to view their balance chart")
-                        .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))
-                        .color(egui::Color32::from_rgb(120, 120, 120)));
-                });
+                self.render_balance_chart(ui);
             }
         });
     }
