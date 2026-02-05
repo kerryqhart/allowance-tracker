@@ -417,7 +417,7 @@ pub fn convert_domain_transactions_to_data_points(
     log::info!("Generated {} total data points for goal graph", data_points.len());
     
     // Debug final data points
-    log::info!("🎯 DATA CONVERSION DEBUG: Final data points:");
+    log::info!("DATA CONVERSION DEBUG: Final data points:");
     for (i, point) in data_points.iter().enumerate() {
         log::info!("  Final point {}: {} - ${:.2} (goal_start: {}, goal_target: {}, projection: {})", 
                    i, point.date, point.balance, point.is_goal_start, point.is_goal_target, point.is_projection);

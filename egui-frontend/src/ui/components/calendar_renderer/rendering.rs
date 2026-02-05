@@ -724,7 +724,7 @@ impl AllowanceTrackerApp {
     /// Draw calendar section with toggle header integrated
     pub fn draw_calendar_section_with_toggle(&mut self, ui: &mut egui::Ui, available_rect: egui::Rect, transactions: &[Transaction]) {
         // DEBUG: Log calendar entry point for comparison with goal
-        // log::info!("📅 CALENDAR DEBUG: available_rect = {:?}", available_rect); // Too verbose
+        // log::info!("CALENDAR DEBUG: available_rect = {:?}", available_rect); // Too verbose
         
         // Calendar rendering with responsive layout
         
@@ -752,7 +752,7 @@ impl AllowanceTrackerApp {
         let actual_available_rect = ui.available_rect_before_wrap();
                 // Calculate optimal calendar dimensions
         
-        // 🎯 CORRECT CALCULATION: Subtract larger bottom margin to match side margins
+        // CORRECT CALCULATION: Subtract larger bottom margin to match side margins
         let final_card_height = actual_available_rect.height() - 40.0; // 40px total: 20px bottom margin + 20px internal padding
         
         // Calculate dynamic cell height based on calendar data
@@ -866,7 +866,7 @@ impl AllowanceTrackerApp {
                 .collect()
         } else {
             // No calendar data available - return empty calendar
-            println!("⚠️ No calendar month data available for {}/{}", self.calendar.selected_month, self.calendar.selected_year);
+            println!("No calendar month data available for {}/{}", self.calendar.selected_month, self.calendar.selected_year);
             Vec::new()
         };
         

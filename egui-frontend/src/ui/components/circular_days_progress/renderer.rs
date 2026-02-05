@@ -90,7 +90,7 @@ impl CircularDaysProgress {
             // Show error state
             ui.vertical_centered(|ui| {
                 ui.add_space(ui.available_height() / 3.0);
-                ui.label(egui::RichText::new("❌ Error")
+                ui.label(egui::RichText::new("Error")
                     .font(egui::FontId::new(12.0, egui::FontFamily::Proportional))
                     .color(egui::Color32::RED));
                 ui.label(egui::RichText::new(error)

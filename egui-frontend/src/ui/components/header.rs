@@ -29,7 +29,7 @@ use crate::ui::components::dropdown_menu::{DropdownMenuItem, DropdownButtonConfi
 impl AllowanceTrackerApp {
     /// Render the header
     pub fn render_header(&mut self, ui: &mut egui::Ui) {
-        // info!("🏠 RENDER_HEADER called"); // Too verbose
+        // info!("RENDER_HEADER called"); // Too verbose
         // Use Frame with translucent fill for proper transparency
         let header_height = 60.0;
         
@@ -58,11 +58,11 @@ impl AllowanceTrackerApp {
                             
                             // Add spacing between settings and child selector
                             ui.add_space(15.0);
-                            // 🎯 FIXED: Use backend as source of truth for header display
+                            // FIXED: Use backend as source of truth for header display
                             let current_child_from_backend = self.get_current_child_from_backend();
                             
                             // Header display debug (commented out to reduce noise)
-                            // log::info!("🏠 HEADER_DISPLAY: Current child from backend: {:?}", 
+                            // log::info!("HEADER_DISPLAY: Current child from backend: {:?}", 
                             //     current_child_from_backend.as_ref().map(|c| (&c.id, &c.name)));
                             
                             if let Some(child) = &current_child_from_backend {
@@ -123,11 +123,11 @@ impl AllowanceTrackerApp {
             Err(_) => vec![],
         };
         
-        // 🔍 SURGICAL DEBUG: Available children and current selection
+        // SURGICAL DEBUG: Available children and current selection
         let current_child_from_backend = self.get_current_child_from_backend();
-        log::info!("🎯 DROPDOWN_DEBUG: Available children: {:?}", 
+        log::info!("DROPDOWN_DEBUG: Available children: {:?}", 
             children_list.iter().map(|c| (&c.id, &c.name)).collect::<Vec<_>>());
-        log::info!("🎯 DROPDOWN_DEBUG: Backend says current child: {:?}", 
+        log::info!("DROPDOWN_DEBUG: Backend says current child: {:?}", 
             current_child_from_backend.as_ref().map(|c| (&c.id, &c.name)));
 
         let menu_items: Vec<DropdownMenuItem> = if children_list.is_empty() {
@@ -139,13 +139,13 @@ impl AllowanceTrackerApp {
             }]
         } else {
             children_list.iter().map(|child| {
-                // 🎯 FIXED: Use backend as source of truth for dropdown display
+                // FIXED: Use backend as source of truth for dropdown display
                 let is_current = current_child_from_backend.as_ref()
                     .map(|c| c.id == child.id)
                     .unwrap_or(false);
                 
-                // 🔍 SURGICAL DEBUG: Log each dropdown item
-                log::info!("🎯 DROPDOWN_ITEM: {} ({}), is_current: {}", 
+                // SURGICAL DEBUG: Log each dropdown item
+                log::info!("DROPDOWN_ITEM: {} ({}), is_current: {}", 
                     child.name, child.id, is_current);
                 
                 DropdownMenuItem {
@@ -175,20 +175,20 @@ impl AllowanceTrackerApp {
             if index < children_list.len() {
                 let selected_child = &children_list[index];
                 
-                // 🔍 SURGICAL DEBUG: Child selection process - CRITICAL PATH
-                log::info!("🎯🎯🎯 DROPDOWN_CLICKED: User clicked child {} ({})", 
+                // SURGICAL DEBUG: Child selection process - CRITICAL PATH
+                log::info!("DROPDOWN_CLICKED: User clicked child {} ({})",
                     selected_child.name, selected_child.id);
                 
                 let current_before_switch = self.get_current_child_from_backend();
-                log::info!("🔍 BEFORE_SWITCH: Backend thinks current child is: {:?}", 
+                log::info!("BEFORE_SWITCH: Backend thinks current child is: {:?}", 
                     current_before_switch.as_ref().map(|c| (&c.id, &c.name)));
                 
-                // 🎯 FIXED: Use backend as source of truth, not UI cache
+                // FIXED: Use backend as source of truth, not UI cache
                 let is_current = current_before_switch.as_ref()
                     .map(|c| c.id == selected_child.id)
                     .unwrap_or(false);
                 
-                log::info!("🎯 IS_CURRENT_CHECK: Selected child {} is_current={}", selected_child.name, is_current);
+                log::info!("IS_CURRENT_CHECK: Selected child {} is_current={}", selected_child.name, is_current);
                 
                 if !is_current {
                     // Set this child as active
@@ -196,29 +196,29 @@ impl AllowanceTrackerApp {
                         child_id: selected_child.id.clone(),
                     };
                     
-                    log::info!("🚀🚀🚀 EXECUTING_COMMAND: SetActiveChildCommand {{ child_id: {} }}", selected_child.id);
+                    log::info!("EXECUTING_COMMAND: SetActiveChildCommand {{ child_id: {} }}", selected_child.id);
                     
                     match self.backend().child_service.set_active_child(command) {
                         Ok(result) => {
-                            log::info!("✅✅✅ BACKEND_SUCCESS: Child service says switch to {} worked!", selected_child.name);
-                            log::info!("🔄 SWITCH_RESULT: Backend result details: {:?}", result);
+                            log::info!("BACKEND_SUCCESS: Child service says switch to {} worked!", selected_child.name);
+                            log::info!("SWITCH_RESULT: Backend result details: {:?}", result);
                             
                             // Critical verification: Check if the switch actually worked
                             let current_after_switch = self.get_current_child_from_backend();
-                            log::info!("🔍 AFTER_SWITCH_VERIFY: Backend now thinks current child is: {:?}", 
+                            log::info!("AFTER_SWITCH_VERIFY: Backend now thinks current child is: {:?}", 
                                 current_after_switch.as_ref().map(|c| (&c.id, &c.name)));
                             
                             // Double-check: Did the switch actually work?
                             let switch_worked = current_after_switch.as_ref()
                                 .map(|c| c.id == selected_child.id)
                                 .unwrap_or(false);
-                            log::info!("🎯 VERIFICATION: Did switch to {} actually work? {}", 
+                            log::info!("VERIFICATION: Did switch to {} actually work? {}", 
                                 selected_child.name, switch_worked);
                             
                             self.refresh_all_data_for_current_child();
                         }
                         Err(e) => {
-                            log::error!("❌❌❌ BACKEND_ERROR: Child service failed to switch to {}: {}", selected_child.name, e);
+                            log::error!("BACKEND_ERROR: Child service failed to switch to {}: {}", selected_child.name, e);
                             self.ui.error_message = Some(format!("Failed to select child: {}", e));
                         }
                     }
@@ -323,7 +323,7 @@ impl AllowanceTrackerApp {
                 }
             };
             
-            info!("🔒 Settings menu item selected: {:?} - triggering parental control", settings_action);
+            info!("Settings menu item selected: {:?} - triggering parental control", settings_action);
             
             // Store the settings action for execution after parental control
             self.modal.pending_settings_action = Some(settings_action);
@@ -336,7 +336,7 @@ impl AllowanceTrackerApp {
     /// Render error messages
     pub fn render_messages(&self, ui: &mut egui::Ui) {
         if let Some(error) = &self.ui.error_message {
-            ui.colored_label(egui::Color32::RED, format!("❌ {}", error));
+            ui.colored_label(egui::Color32::RED, format!("{}", error));
         }
     }
     
@@ -346,7 +346,7 @@ impl AllowanceTrackerApp {
             return; // Only show when in selection mode
         }
         
-        info!("🎯 RENDER_SELECTION_CONTROLS_BAR called");
+        info!("RENDER_SELECTION_CONTROLS_BAR called");
         
         // Selection controls bar with distinct styling
         let frame = egui::Frame::new()
@@ -359,7 +359,7 @@ impl AllowanceTrackerApp {
             ui.horizontal(|ui| {
                 // Selection mode indicator on the left
                 ui.add(egui::Label::new(
-                    egui::RichText::new("🗑️ Delete Mode")
+                    egui::RichText::new("Delete Mode")
                         .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))
                         .strong()
                         .color(egui::Color32::from_rgb(180, 100, 0)) // Dark orange
@@ -391,7 +391,7 @@ impl AllowanceTrackerApp {
                     );
                     
                     if exit_button.clicked() {
-                        info!("❌ Exit selection mode button clicked");
+                        info!("Exit selection mode button clicked");
                         self.exit_transaction_selection_mode();
                     }
                     
@@ -408,7 +408,7 @@ impl AllowanceTrackerApp {
                     let delete_button = ui.add_enabled(
                         delete_enabled,
                         egui::Button::new(
-                            egui::RichText::new(format!("🗑️ Delete ({})", count))
+                            egui::RichText::new(format!("Delete ({})", count))
                                 .font(egui::FontId::new(13.0, egui::FontFamily::Proportional))
                                 .color(egui::Color32::WHITE)
                         )
@@ -418,7 +418,7 @@ impl AllowanceTrackerApp {
                     );
                     
                     if delete_button.clicked() && delete_enabled {
-                        info!("🗑️ Delete selected transactions button clicked");
+                        info!("Delete selected transactions button clicked");
                         self.delete_selected_transactions();
                     }
                 });
@@ -431,23 +431,23 @@ impl AllowanceTrackerApp {
     /// Delete the selected transactions
     fn delete_selected_transactions(&mut self) {
         if self.interaction.selected_transaction_ids.is_empty() {
-            log::warn!("⚠️ No transactions selected for deletion");
+            log::warn!("No transactions selected for deletion");
             return;
         }
         let transaction_ids: Vec<String> = self.interaction.selected_transaction_ids.iter().cloned().collect();
-        info!("🗑️ Attempting to delete {} transactions: {:?}", transaction_ids.len(), transaction_ids);
+        info!("Attempting to delete {} transactions: {:?}", transaction_ids.len(), transaction_ids);
         let command = crate::backend::domain::commands::transactions::DeleteTransactionsCommand {
             transaction_ids: transaction_ids.clone(),
         };
         match self.backend().transaction_service.as_ref().delete_transactions_domain(command) {
             Ok(result) => {
-                info!("✅ Successfully deleted {} transactions", result.deleted_count);
+                info!("Successfully deleted {} transactions", result.deleted_count);
                 self.exit_transaction_selection_mode();
                 self.load_calendar_data();
                 self.load_balance();
             }
             Err(e) => {
-                log::error!("❌ Failed to delete transactions: {}", e);
+                log::error!("Failed to delete transactions: {}", e);
                 self.ui.error_message = Some(format!("Failed to delete transactions: {}", e));
             }
         }

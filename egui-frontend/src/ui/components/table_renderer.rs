@@ -26,7 +26,7 @@ impl AllowanceTrackerApp {
     pub fn draw_transactions_section_with_toggle(&mut self, ui: &mut egui::Ui, available_rect: egui::Rect, transactions: &[Transaction]) {
         // Load initial table data if not loaded yet
         if !self.table.initial_load_complete && !self.table.is_loading_more {
-            log::info!("📋 Table not loaded yet, triggering initial load");
+            log::info!("Table not loaded yet, triggering initial load");
             self.load_initial_table_transactions();
         }
         
@@ -104,7 +104,7 @@ impl AllowanceTrackerApp {
                         
                         // Trigger loading when this area becomes visible
                         if trigger_response.rect.intersects(ui.clip_rect()) {
-                            log::info!("📋 Infinite scroll trigger area visible - loading more transactions");
+                            log::info!("Infinite scroll trigger area visible - loading more transactions");
                             self.load_more_table_transactions();
                         }
                     }
@@ -118,7 +118,7 @@ impl AllowanceTrackerApp {
                 
                 // If scrolled to within 200px of bottom, trigger loading
                 if content_height > visible_height && scroll_offset + visible_height + 200.0 >= content_height {
-                    log::info!("📋 Near bottom of scroll - loading more transactions (offset: {:.0}, content: {:.0}, visible: {:.0})", 
+                    log::info!("Near bottom of scroll - loading more transactions (offset: {:.0}, content: {:.0}, visible: {:.0})", 
                               scroll_offset, content_height, visible_height);
                     self.load_more_table_transactions();
                 }

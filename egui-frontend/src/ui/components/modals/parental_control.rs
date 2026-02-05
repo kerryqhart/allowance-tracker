@@ -22,7 +22,7 @@ impl AllowanceTrackerApp {
             return;
         }
         
-        log::info!("🔒 Rendering parental control modal - stage: {:?}", self.modal.parental_control_stage);
+        log::info!("Rendering parental control modal - stage: {:?}", self.modal.parental_control_stage);
         
         // Use Area with Foreground order to ensure it appears above everything
         egui::Area::new(egui::Id::new("parental_control_modal_overlay"))
@@ -54,7 +54,7 @@ impl AllowanceTrackerApp {
                                         ui.add_space(15.0);
                                         
                                         // Title
-                                        ui.label(egui::RichText::new("🔒 Parental Control")
+                                        ui.label(egui::RichText::new("Parental Control")
                                              .font(egui::FontId::new(28.0, egui::FontFamily::Proportional))
                                              .strong()
                                              .color(egui::Color32::from_rgb(220, 50, 50)));

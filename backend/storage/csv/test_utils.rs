@@ -157,7 +157,7 @@ pub fn cleanup_orphaned_test_directories() -> Result<()> {
                 if dir_name.starts_with("test_data_") {
                     // This is an orphaned test directory
                     if let Err(e) = fs::remove_dir_all(&path) {
-                        eprintln!("⚠️  Failed to clean up orphaned test directory {:?}: {}", path, e);
+                        eprintln!(" Failed to clean up orphaned test directory {:?}: {}", path, e);
                     } else {
                         cleaned_count += 1;
                         #[cfg(test)]

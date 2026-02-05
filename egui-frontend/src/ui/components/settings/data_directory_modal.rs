@@ -31,7 +31,7 @@ impl AllowanceTrackerApp {
             return;
         }
 
-        log::info!("📁 Rendering data directory modal");
+        log::info!("Rendering data directory modal");
 
         // Load current directory if not already loaded
         if self.settings.data_directory_form.current_path.is_empty() && !self.settings.data_directory_form.is_loading {
@@ -65,7 +65,7 @@ impl AllowanceTrackerApp {
                                     ui.add_space(15.0);
 
                                     // Title
-                                    ui.label(egui::RichText::new("📁 Data Directory")
+                                    ui.label(egui::RichText::new("Data Directory")
                                         .font(egui::FontId::new(style.title_font_size, egui::FontFamily::Proportional))
                                         .strong()
                                         .color(style.title_color));
@@ -106,7 +106,7 @@ impl AllowanceTrackerApp {
                         );
                         
                         if !modal_rect.contains(pointer_pos) {
-                            log::info!("📁 Data directory modal closed via backdrop click");
+                            log::info!("Data directory modal closed via backdrop click");
                             self.close_data_directory_modal();
                         }
                     }
@@ -169,7 +169,7 @@ impl AllowanceTrackerApp {
                     .font(egui::FontId::new(14.0, egui::FontFamily::Proportional)));
                 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button(egui::RichText::new("📁 Browse...")
+                    if ui.button(egui::RichText::new("Browse...")
                         .font(egui::FontId::new(14.0, egui::FontFamily::Proportional)))
                         .clicked() 
                     {
@@ -221,7 +221,7 @@ impl AllowanceTrackerApp {
     fn render_conflict_resolution_content(&mut self, ui: &mut egui::Ui) {
         ui.vertical(|ui| {
             // Conflict warning
-            ui.label(egui::RichText::new("⚠️ Conflict Detected")
+            ui.label(egui::RichText::new("Conflict Detected")
                 .font(egui::FontId::new(18.0, egui::FontFamily::Proportional))
                 .strong()
                 .color(egui::Color32::from_rgb(200, 100, 0)));
@@ -345,14 +345,14 @@ impl AllowanceTrackerApp {
             self.move_data_directory();
         }
         if should_close {
-            log::info!("📁 Data directory modal closed");
+            log::info!("Data directory modal closed");
             self.close_data_directory_modal();
         }
     }
 
     /// Load current data directory from backend
     fn load_current_data_directory(&mut self) {
-        log::info!("📁 Loading current data directory");
+        log::info!("Loading current data directory");
         self.settings.data_directory_form.set_loading(true);
 
         let child_id = self.get_current_child_from_backend().as_ref().map(|c| c.id.clone());
@@ -362,7 +362,7 @@ impl AllowanceTrackerApp {
                 self.settings.data_directory_form.current_path = response.current_path;
                 self.settings.data_directory_form.is_redirected = response.is_redirected;
                 self.settings.data_directory_form.set_loading(false);
-                log::info!("✅ Loaded current directory: {} (redirected: {})", self.settings.data_directory_form.current_path, response.is_redirected);
+                log::info!("Loaded current directory: {} (redirected: {})", self.settings.data_directory_form.current_path, response.is_redirected);
             }
             Err(e) => {
                 log::error!("🚨 Failed to load current directory: {}", e);
@@ -374,7 +374,7 @@ impl AllowanceTrackerApp {
 
     /// Open native file browser to select directory
     fn open_data_directory_browser(&mut self) {
-        log::info!("📁 Opening native directory browser");
+        log::info!("Opening native directory browser");
 
         // Open directory picker dialog
         let directory_dialog = rfd::FileDialog::new()
@@ -394,17 +394,17 @@ impl AllowanceTrackerApp {
 
         // Execute the dialog
         if let Some(path) = dialog_with_dir.pick_folder() {
-            log::info!("📁 User selected directory: {:?}", path);
+            log::info!("User selected directory: {:?}", path);
             self.settings.data_directory_form.new_path = path.to_string_lossy().to_string();
             self.settings.data_directory_form.clear_messages();
         } else {
-            log::info!("📁 User cancelled directory selection");
+            log::info!("User cancelled directory selection");
         }
     }
 
     /// Move data directory (with automatic conflict checking)
     fn move_data_directory(&mut self) {
-        log::info!("📁 Moving data directory");
+        log::info!("Moving data directory");
         self.settings.data_directory_form.set_loading(true);
 
         let child_id = self.get_current_child_from_backend().as_ref().map(|c| c.id.clone());
@@ -418,10 +418,10 @@ impl AllowanceTrackerApp {
                 self.settings.data_directory_form.set_loading(false);
                 
                 if response.has_conflict {
-                    log::info!("⚠️ Conflict detected: {:?}", response.conflict_details);
+                    log::info!("Conflict detected: {:?}", response.conflict_details);
                     self.settings.data_directory_form.set_conflict(true, response.conflict_details);
                 } else {
-                    log::info!("✅ No conflicts - proceeding with relocation");
+                    log::info!("No conflicts - proceeding with relocation");
                     // No conflicts, proceed directly with relocation
                     self.proceed_with_simple_relocation();
                 }
@@ -436,7 +436,7 @@ impl AllowanceTrackerApp {
 
     /// Proceed with simple relocation (no conflicts)
     fn proceed_with_simple_relocation(&mut self) {
-        log::info!("📁 Proceeding with simple relocation");
+        log::info!("Proceeding with simple relocation");
         self.settings.data_directory_form.set_loading(true);
 
         let child_id = self.get_current_child_from_backend().as_ref().map(|c| c.id.clone());
@@ -451,7 +451,7 @@ impl AllowanceTrackerApp {
                 self.settings.data_directory_form.set_loading(false);
                 
                 if response.success {
-                    log::info!("✅ Data directory relocated successfully");
+                    log::info!("Data directory relocated successfully");
                     self.settings.data_directory_form.set_success(response.message);
                     // Update current path
                     self.settings.data_directory_form.current_path = response.new_path;
@@ -470,7 +470,7 @@ impl AllowanceTrackerApp {
 
     /// Proceed with conflict resolution
     fn proceed_with_data_directory_resolution(&mut self) {
-        log::info!("📁 Proceeding with conflict resolution");
+        log::info!("Proceeding with conflict resolution");
         
         let resolution = match self.settings.data_directory_form.user_decision.clone() {
             Some(resolution) => resolution,
@@ -481,7 +481,7 @@ impl AllowanceTrackerApp {
         };
 
         if matches!(resolution, ConflictResolution::Cancel) {
-            log::info!("📁 User chose to cancel");
+            log::info!("User chose to cancel");
             self.close_data_directory_modal();
             return;
         }
@@ -500,7 +500,7 @@ impl AllowanceTrackerApp {
                 self.settings.data_directory_form.set_loading(false);
                 
                 if response.success {
-                    log::info!("✅ Data directory conflict resolved successfully");
+                    log::info!("Data directory conflict resolved successfully");
                     let message = if let Some(archived_to) = response.archived_to {
                         format!("{}\n\nArchived to: {}", response.message, archived_to)
                     } else {
@@ -526,7 +526,7 @@ impl AllowanceTrackerApp {
 
     /// Return data to default location
     fn return_to_default_location(&mut self) {
-        log::info!("📁 Returning data to default location");
+        log::info!("Returning data to default location");
         self.settings.data_directory_form.set_loading(true);
 
         let child_id = self.get_current_child_from_backend().as_ref().map(|c| c.id.clone());
@@ -537,7 +537,7 @@ impl AllowanceTrackerApp {
                 self.settings.data_directory_form.set_loading(false);
                 
                 if response.success {
-                    log::info!("✅ Successfully returned to default location");
+                    log::info!("Successfully returned to default location");
                     self.settings.data_directory_form.set_success(response.message);
                     // Update current path and redirect status
                     self.settings.data_directory_form.current_path = response.default_path;
@@ -559,6 +559,6 @@ impl AllowanceTrackerApp {
     fn close_data_directory_modal(&mut self) {
         self.settings.show_data_directory_modal = false;
         self.settings.data_directory_form.clear();
-        log::info!("📁 Data directory modal closed and form reset");
+        log::info!("Data directory modal closed and form reset");
     }
 } 

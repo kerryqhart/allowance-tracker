@@ -37,7 +37,7 @@ impl AllowanceTrackerApp {
     /// Refresh all data for current child - common method used when switching children
     /// This ensures all views (calendar, table, chart, goals) are updated consistently
     pub fn refresh_all_data_for_current_child(&mut self) {
-        info!("🔄 Refreshing all data for current child");
+        info!("Refreshing all data for current child");
         
         self.load_balance();
         self.load_calendar_data();
@@ -45,12 +45,12 @@ impl AllowanceTrackerApp {
         self.load_chart_data();
         self.load_goal_data();
         
-        info!("✅ All data refreshed for current child");
+        info!("All data refreshed for current child");
     }
 
     /// Load initial data
     pub fn load_initial_data(&mut self) {
-        info!("📊 Loading initial data");
+        info!("Loading initial data");
         
         // Load active child
         match self.backend().child_service.get_active_child() {
@@ -74,7 +74,7 @@ impl AllowanceTrackerApp {
     
     /// Reset table state when switching to a new child
     pub fn reset_table_for_new_child(&mut self) {
-        log::info!("📋 Resetting table state for new child");
+        log::info!("Resetting table state for new child");
         
         // Clear all table state
         self.table.reset();
@@ -87,7 +87,7 @@ impl AllowanceTrackerApp {
     pub fn load_balance(&mut self) {
         let current_child = self.get_current_child_from_backend().clone();
         if let Some(child) = &current_child {
-            info!("💰 Loading balance for child: {} (ID: {})", child.name, child.id);
+            info!("Loading balance for child: {} (ID: {})", child.name, child.id);
             
             // Get the most recent transaction to get the current balance
             let query = TransactionListQuery {
@@ -97,46 +97,46 @@ impl AllowanceTrackerApp {
                 end_date: None,
             };
             
-            info!("💰 DEBUG: About to call list_transactions_domain with query: {:?}", query);
+            info!("DEBUG: About to call list_transactions_domain with query: {:?}", query);
             
             match self.backend().transaction_service.as_ref().list_transactions_domain(query) {
                 Ok(result) => {
-                    info!("💰 DEBUG: list_transactions_domain returned {} transactions", result.transactions.len());
+                    info!("DEBUG: list_transactions_domain returned {} transactions", result.transactions.len());
                     
                     if let Some(latest_transaction) = result.transactions.first() {
                         self.core.current_balance = latest_transaction.balance;
-                        log::info!("📊 Updated balance from latest transaction {}: ${:.2}", 
+                        log::info!("Updated balance from latest transaction {}: ${:.2}", 
                                   latest_transaction.id, self.core.current_balance);
                     } else {
                         // No transactions found - set balance to 0
                         self.core.current_balance = 0.0;
-                        log::info!("📊 No transactions found, setting balance to $0.00");
+                        log::info!("No transactions found, setting balance to $0.00");
                     }
                 }
                 Err(e) => {
-                    warn!("❌ Failed to load balance for child {}: {}", child.name, e);
+                    warn!("Failed to load balance for child {}: {}", child.name, e);
                     self.ui.error_message = Some(format!("Failed to load balance: {}", e));
                     self.core.current_balance = 0.0;
                 }
             }
         } else {
-            log::warn!("⚠️ No current child - unable to update balance");
+            log::warn!("No current child - unable to update balance");
             // Clear balance if no child is selected
             self.core.current_balance = 0.0;
         }
         
-        log::info!("📊 Balance update complete - Final balance: ${:.2}", self.core.current_balance);
+        log::info!("Balance update complete - Final balance: ${:.2}", self.core.current_balance);
     }
     
     /// Load calendar data for the selected month/year
     pub fn load_calendar_data(&mut self) {
-        log::info!("📅 Loading calendar data for {}/{}", self.calendar.selected_month, self.calendar.selected_year);
+        log::info!("Loading calendar data for {}/{}", self.calendar.selected_month, self.calendar.selected_year);
         
         // Calculate the start and end dates for the selected month
         let start_date = match chrono::NaiveDate::from_ymd_opt(self.calendar.selected_year, self.calendar.selected_month, 1) {
             Some(date) => date,
             None => {
-                log::error!("❌ Failed to create start date for {}/{}", self.calendar.selected_month, self.calendar.selected_year);
+                log::error!("Failed to create start date for {}/{}", self.calendar.selected_month, self.calendar.selected_year);
                 self.ui.error_message = Some("Invalid date".to_string());
                 return;
             }
@@ -158,16 +158,16 @@ impl AllowanceTrackerApp {
             &self.backend().transaction_service,
         ) {
             Ok(calendar_month) => {
-                log::info!("📊 Successfully loaded calendar month with {} days for {}/{}", 
+                log::info!("Successfully loaded calendar month with {} days for {}/{}", 
                           calendar_month.days.len(), self.calendar.selected_month, self.calendar.selected_year);
                 
                 // DEBUG: Log July 21st specifically
                 if self.calendar.selected_month == 7 && self.calendar.selected_year == 2025 {
                     if let Some(july_21) = calendar_month.days.iter().find(|d| d.day == 21) {
-                        log::info!("🔍 FRONTEND DEBUG: July 21st from backend - balance: ${:.2}, transactions: {}", 
+                        log::info!("FRONTEND DEBUG: July 21st from backend - balance: ${:.2}, transactions: {}", 
                                   july_21.balance, july_21.transactions.len());
                         for (i, tx) in july_21.transactions.iter().enumerate() {
-                            log::info!("🔍 FRONTEND DEBUG: July 21st transaction {}: {} at {} = balance ${:.2}", 
+                            log::info!("FRONTEND DEBUG: July 21st transaction {}: {} at {} = balance ${:.2}", 
                                       i + 1, tx.description, tx.date.format("%H:%M:%S"), tx.balance);
                         }
                     }
@@ -188,11 +188,11 @@ impl AllowanceTrackerApp {
                 // TEMPORARY: Sync compatibility field
                 // self.calendar_transactions = all_transactions; // Removed
                 
-                log::info!("🔄 Converted to {} DTO transactions", self.calendar.calendar_transactions.len());
+                log::info!("Converted to {} DTO transactions", self.calendar.calendar_transactions.len());
                 
                 // Debug first few transactions to verify conversion
                 for (i, transaction) in self.calendar.calendar_transactions.iter().enumerate() {
-                    log::debug!("📝 Transaction {}: {} on {} (amount: ${})", 
+                    log::debug!("Transaction {}: {} on {} (amount: ${})", 
                                i + 1, transaction.description, transaction.date, transaction.amount);
                 }
                 
@@ -211,7 +211,7 @@ impl AllowanceTrackerApp {
                 }
             }
             Err(e) => {
-                log::error!("❌ Failed to load transactions: {}", e);
+                log::error!("Failed to load transactions: {}", e);
                 self.ui.error_message = Some(format!("Failed to load transactions: {}", e));
                 
                 // Clear modular fields
@@ -227,7 +227,7 @@ impl AllowanceTrackerApp {
     
     /// Load initial transactions for the table view
     pub fn load_initial_table_transactions(&mut self) {
-        log::info!("📋 Loading initial transactions for table view");
+        log::info!("Loading initial transactions for table view");
         
         // Reset table state for fresh load
         self.table.reset();
@@ -242,11 +242,11 @@ impl AllowanceTrackerApp {
         if let Some(child) = &current_child {
             // Check if we can load more
             if !self.table.can_load_more() {
-                log::info!("📋 Cannot load more transactions: already loading or no more available");
+                log::info!("Cannot load more transactions: already loading or no more available");
                 return;
             }
             
-            log::info!("📋 Loading more transactions for child: {} (cursor: {:?})", 
+            log::info!("Loading more transactions for child: {} (cursor: {:?})", 
                       child.name, self.table.next_cursor);
             
             // Mark as loading
@@ -259,11 +259,11 @@ impl AllowanceTrackerApp {
                 end_date: None,
             };
             
-            log::info!("📋 Making pagination request with query: {:?}", query);
+            log::info!("Making pagination request with query: {:?}", query);
             
             match self.backend().transaction_service.as_ref().list_transactions_domain(query) {
                 Ok(result) => {
-                    log::info!("📋 Successfully loaded {} more transactions (has_more: {})", 
+                    log::info!("Successfully loaded {} more transactions (has_more: {})", 
                               result.transactions.len(), result.pagination.has_more);
                     
                     // Convert domain transactions to DTOs
@@ -281,16 +281,16 @@ impl AllowanceTrackerApp {
                         result.pagination.next_cursor,
                     );
                     
-                    log::info!("📋 Table now has {} total transactions", self.table.transaction_count());
+                    log::info!("Table now has {} total transactions", self.table.transaction_count());
                 }
                 Err(e) => {
-                    log::error!("❌ Failed to load more transactions: {}", e);
+                    log::error!("Failed to load more transactions: {}", e);
                     self.table.handle_error(format!("Failed to load transactions: {}", e));
                     self.ui.error_message = Some(format!("Failed to load transactions: {}", e));
                 }
             }
         } else {
-            log::warn!("📋 No active child selected for table transactions");
+            log::warn!("No active child selected for table transactions");
             self.table.handle_error("No child selected".to_string());
         }
     }

@@ -41,7 +41,7 @@ impl Backend {
         let email_config_path = data_path.join("email_config.toml");
 
         // Create the CSV connection with the real data directory
-        log::info!("🔍 Backend::new() using real data path: {:?}", data_path);
+        log::info!("Backend::new() using real data path: {:?}", data_path);
         let csv_connection = Arc::new(CsvConnection::new(data_path)?);
 
         // Create services using the Arc<CsvConnection> pattern
@@ -51,7 +51,7 @@ impl Backend {
 
         // Load email config and create TransactionService with email support
         let email_config = domain::EmailConfigService::load_config_or_default(&email_config_path);
-        log::info!("📧 Email config loaded: SMTP server = {}", email_config.smtp_server);
+        log::info!("Email config loaded: SMTP server = {}", email_config.smtp_server);
         
         let transaction_service = Arc::new(domain::TransactionService::with_email_service(
             csv_connection.clone(),

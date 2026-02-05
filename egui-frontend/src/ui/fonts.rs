@@ -75,9 +75,9 @@ pub fn setup_custom_fonts(ctx: &egui::Context) {
             vec!["Chalkboard".to_owned()],
         );
         
-        info!("✅ Chalkboard font loaded successfully!");
+        info!("Chalkboard font loaded successfully!");
     } else {
-        warn!("⚠️ Could not load Chalkboard font, using default fonts");
+        warn!("Could not load Chalkboard font, using default fonts");
     }
     
     // Try to load Apple Color Emoji font and add it to default fonts (not Chalkboard)
@@ -90,17 +90,17 @@ pub fn setup_custom_fonts(ctx: &egui::Context) {
         // Add emoji font as fallback to default system fonts only
         if let Some(proportional_fonts) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
             proportional_fonts.push("AppleColorEmoji".to_owned());
-            info!("✅ Added emoji support to Proportional font family");
+            info!("Added emoji support to Proportional font family");
         }
         
         if let Some(monospace_fonts) = fonts.families.get_mut(&egui::FontFamily::Monospace) {
             monospace_fonts.push("AppleColorEmoji".to_owned());
-            info!("✅ Added emoji support to Monospace font family");
+            info!("Added emoji support to Monospace font family");
         }
         
-        info!("✅ Apple Color Emoji font loaded and added to default fonts!");
+        info!("Apple Color Emoji font loaded and added to default fonts!");
     } else {
-        warn!("⚠️ Could not load Apple Color Emoji font");
+        warn!("Could not load Apple Color Emoji font");
     }
     
     // Set the fonts

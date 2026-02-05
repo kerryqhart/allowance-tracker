@@ -412,7 +412,7 @@ impl GoalService {
                 ) {
                     Ok(projected_balance) => {
                         allowance.balance = projected_balance;
-                        info!("🎯 Calculated projected balance for {}: ${:.2}", 
+                        info!("Calculated projected balance for {}: ${:.2}", 
                               allowance.date.format("%Y-%m-%d"), projected_balance);
                     }
                     Err(e) => {
@@ -427,7 +427,7 @@ impl GoalService {
         info!("Generated {} future allowances", future_allowances.len());
         
         // Debug logging for future allowances
-        info!("🎯 DOMAIN DEBUG: Future allowances breakdown:");
+        info!("DOMAIN DEBUG: Future allowances breakdown:");
         for (i, allowance) in future_allowances.iter().enumerate() {
             info!("  Future allowance {}: {} - ${:.2} (type: {:?})", 
                    i, allowance.date.format("%Y-%m-%d"), allowance.balance, allowance.transaction_type);
@@ -705,7 +705,7 @@ mod tests {
             
             // For now, let's assume this is the correct behavior if goal completion worked
             // In a real system, we'd want to check the goal history or have a different API
-            println!("✅ Test passes - Goal appears to have been completed and is no longer active");
+            println!("Test passes - Goal appears to have been completed and is no longer active");
         }
     }
 

@@ -1,6 +1,15 @@
 use eframe::egui;
 use shared::*;
 
+/// Column width percentages for transaction table [date, description, amount, balance]
+const TABLE_COLUMN_WIDTHS: [f32; 4] = [0.18, 0.48, 0.17, 0.17];
+
+/// Table layout constants
+const TABLE_SCROLL_BAR_SPACE: f32 = 30.0;
+const TABLE_HEADER_HEIGHT: f32 = 40.0;
+const TABLE_ROW_HEIGHT: f32 = 25.0;
+const TABLE_CONTENT_MARGIN: f32 = 20.0;
+
 /// Render the transaction table (simplified version)
 pub fn render_transaction_table(ui: &mut egui::Ui, transactions: &[Transaction]) {
     // Use the responsive version with a default rectangle
@@ -24,12 +33,7 @@ pub fn render_responsive_transaction_table(ui: &mut egui::Ui, available_rect: eg
     let table_width = available_table_width * 0.92;
     
     // Calculate column widths to account for scroll bar (shared by headers and rows)
-    let scroll_bar_space = 30.0; // Space for scroll bar
-    let content_width_with_scroll = table_width - scroll_bar_space;
-    
-    // Calendar-style dimensions
-    let header_height = 40.0; // Similar to calendar day headers
-    let row_height = 25.0; // Compact row height
+    let content_width_with_scroll = table_width - TABLE_SCROLL_BAR_SPACE;
     let row_spacing = 0.0; // No space between rows (very tight)
     
     // Use all available space - no height restrictions or borders
@@ -71,19 +75,14 @@ pub fn render_responsive_transaction_table(ui: &mut egui::Ui, available_rect: eg
                                 
                                 let header_names = ["DATE", "DESCRIPTION", "AMOUNT", "BALANCE"];
                                 // Use reduced width to match row constraints and avoid scroll bar overlap
-                                let content_width_minus_scrollbar = content_width_with_scroll - 20.0;
-                                let header_widths = [
-                                    content_width_minus_scrollbar * 0.18, // date (reduced from 0.20)
-                                    content_width_minus_scrollbar * 0.48, // description (increased from 0.40)
-                                    content_width_minus_scrollbar * 0.17, // amount (reduced from 0.20)
-                                    content_width_minus_scrollbar * 0.17, // balance (reduced from 0.20)
-                                ];
+                                let content_width_minus_scrollbar = content_width_with_scroll - TABLE_CONTENT_MARGIN;
+                                let col_widths: [f32; 4] = TABLE_COLUMN_WIDTHS.map(|w| content_width_minus_scrollbar * w);
                                 
                                 // Headers
                                 for (i, name) in header_names.iter().enumerate() {
-                                    let width = header_widths[i];
+                                    let width = col_widths[i];
                                     ui.allocate_ui_with_layout(
-                                        egui::vec2(width, header_height),
+                                        egui::vec2(width, TABLE_HEADER_HEIGHT),
                                         egui::Layout::centered_and_justified(egui::Direction::TopDown),
                                         |ui| {
                                             let header_rect = ui.available_rect_before_wrap();
@@ -128,9 +127,9 @@ pub fn render_responsive_transaction_table(ui: &mut egui::Ui, available_rect: eg
                                     
                                     // Transaction rows (like calendar day cards) - INFINITE SCROLL: Show all transactions
                                     for transaction in transactions.iter() {
-                                        // 🎯 BUTTON APPROACH: Use egui's built-in button hover instead of manual detection
+                                        // BUTTON APPROACH: Use egui's built-in button hover instead of manual detection
                                         let button_response = ui.add_sized(
-                                            [content_width_with_scroll - 20.0, row_height],
+                                            [content_width_with_scroll - 20.0, TABLE_ROW_HEIGHT],
                                             egui::Button::new("")
                                                 .fill(egui::Color32::TRANSPARENT) // Invisible until hovered
                                                 .stroke(egui::Stroke::NONE) // No border
@@ -150,13 +149,8 @@ pub fn render_responsive_transaction_table(ui: &mut egui::Ui, available_rect: eg
                                                 ui.spacing_mut().item_spacing.y = 0.5; // Reduced from 1.0px
                                                 
                                                 // Use reduced width to match content constraint and avoid scroll bar overlap
-                                                let content_width_minus_scrollbar = content_width_with_scroll - 20.0;
-                                                let row_widths = [
-                                                    content_width_minus_scrollbar * 0.18, // date (reduced from 0.20)
-                                                    content_width_minus_scrollbar * 0.48, // description (increased from 0.40)
-                                                    content_width_minus_scrollbar * 0.17, // amount (reduced from 0.20)
-                                                    content_width_minus_scrollbar * 0.17, // balance (reduced from 0.20)
-                                                ];
+                                                let content_width_minus_scrollbar = content_width_with_scroll - TABLE_CONTENT_MARGIN;
+                                                let col_widths: [f32; 4] = TABLE_COLUMN_WIDTHS.map(|w| content_width_minus_scrollbar * w);
                                                 
                                                 let cell_bg_color = if is_hovered {
                                                     egui::Color32::from_rgba_unmultiplied(255, 255, 255, 132) // More opaque when hovered (increased by 10%)
@@ -166,12 +160,12 @@ pub fn render_responsive_transaction_table(ui: &mut egui::Ui, available_rect: eg
                                                 let cell_border_color = egui::Color32::from_rgba_unmultiplied(200, 200, 200, 100);
                                                 
                                                 // Render cells with exact same spacing as headers
-                                                for (i, &width) in row_widths.iter().enumerate() {
+                                                for (i, &width) in col_widths.iter().enumerate() {
                                                     match i {
                                                         0 => {
                                                             // Date cell
                                                             ui.allocate_ui_with_layout(
-                                                                egui::vec2(width, row_height),
+                                                                egui::vec2(width, TABLE_ROW_HEIGHT),
                                                                 egui::Layout::centered_and_justified(egui::Direction::TopDown),
                                                                 |ui| {
                                                                     let cell_rect = ui.available_rect_before_wrap();
@@ -203,7 +197,7 @@ pub fn render_responsive_transaction_table(ui: &mut egui::Ui, available_rect: eg
                                                         1 => {
                                                             // Description cell
                                                             ui.allocate_ui_with_layout(
-                                                                egui::vec2(width, row_height),
+                                                                egui::vec2(width, TABLE_ROW_HEIGHT),
                                                                 egui::Layout::centered_and_justified(egui::Direction::TopDown),
                                                                 |ui| {
                                                                     let cell_rect = ui.available_rect_before_wrap();
@@ -233,7 +227,7 @@ pub fn render_responsive_transaction_table(ui: &mut egui::Ui, available_rect: eg
                                                         2 => {
                                                             // Amount cell  
                                                             ui.allocate_ui_with_layout(
-                                                                egui::vec2(width, row_height),
+                                                                egui::vec2(width, TABLE_ROW_HEIGHT),
                                                                 egui::Layout::centered_and_justified(egui::Direction::TopDown),
                                                                 |ui| {
                                                                     let cell_rect = ui.available_rect_before_wrap();
@@ -271,7 +265,7 @@ pub fn render_responsive_transaction_table(ui: &mut egui::Ui, available_rect: eg
                                                         3 => {
                                                             // Balance cell
                                                             ui.allocate_ui_with_layout(
-                                                                egui::vec2(width, row_height),
+                                                                egui::vec2(width, TABLE_ROW_HEIGHT),
                                                                 egui::Layout::centered_and_justified(egui::Direction::TopDown),
                                                                 |ui| {
                                                                     let cell_rect = ui.available_rect_before_wrap();

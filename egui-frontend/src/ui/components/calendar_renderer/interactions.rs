@@ -22,7 +22,7 @@ impl AllowanceTrackerApp {
         
         // TEMPORARY: Sync compatibility field  
         
-        log::info!("📅 Selected day: {}", clicked_date);
+        log::info!("Selected day: {}", clicked_date);
     }
 
     /// Render action icons above the selected day
@@ -74,7 +74,7 @@ impl AllowanceTrackerApp {
                     if ui.add_sized(glyph_size, button).clicked() {
                         self.calendar.active_overlay = Some(glyph.overlay_type());
                         self.calendar.modal_just_opened = true; // Prevent backdrop click detection this frame
-                        println!("🎯 Day menu glyph '{}' clicked for date: {}", glyph_text, selected_date);
+                        println!("Day menu glyph '{}' clicked for date: {}", glyph_text, selected_date);
                     }
                 });
         }
@@ -83,11 +83,11 @@ impl AllowanceTrackerApp {
     /// Handle transaction deletion (placeholder for now)
     pub fn handle_transaction_deletion(&mut self) -> bool {
         if self.interaction.selected_transaction_ids.is_empty() {
-            println!("⚠️ No transactions selected for deletion");
+            println!("No transactions selected for deletion");
             return false;
         }
 
-        println!("🗑️ Would delete {} transactions: {:?}", 
+        println!("Would delete {} transactions: {:?}", 
                  self.interaction.selected_transaction_ids.len(), 
                  self.interaction.selected_transaction_ids);
 
@@ -103,7 +103,7 @@ impl AllowanceTrackerApp {
         // Create action overlay for the clicked glyph type
         match glyph {
             DayMenuGlyph::AddMoney | DayMenuGlyph::SpendMoney => {
-                log::info!("💰 Action glyph clicked: {:?}", glyph);
+                log::info!("Action glyph clicked: {:?}", glyph);
                 self.calendar.active_overlay = Some(glyph.overlay_type());
                 self.calendar.modal_just_opened = true; // Prevent backdrop click detection this frame
                 true
@@ -114,9 +114,9 @@ impl AllowanceTrackerApp {
     /// Exit transaction selection mode
     pub fn exit_transaction_selection(&mut self) {
         if self.interaction.selected_transaction_ids.is_empty() {
-            log::info!("🔄 Exiting transaction selection mode (no transactions selected)");
+            log::info!("Exiting transaction selection mode (no transactions selected)");
         } else {
-            log::info!("🔄 Exiting transaction selection mode. {} transaction(s) were selected: {:?}", 
+            log::info!("Exiting transaction selection mode. {} transaction(s) were selected: {:?}", 
                       self.interaction.selected_transaction_ids.len(), 
                       self.interaction.selected_transaction_ids);
         }
@@ -130,10 +130,10 @@ impl AllowanceTrackerApp {
     pub fn toggle_day_expanded(&mut self, date: chrono::NaiveDate) {
         if self.calendar.expanded_day == Some(date) {
             self.calendar.expanded_day = None;
-            log::info!("📅 Collapsed day: {}", date);
+            log::info!("Collapsed day: {}", date);
         } else {
             self.calendar.expanded_day = Some(date);
-            log::info!("📅 Expanded day: {}", date);
+            log::info!("Expanded day: {}", date);
         }
     }
 
@@ -144,7 +144,7 @@ impl AllowanceTrackerApp {
             
             // TEMPORARY: Sync compatibility field
             
-            log::info!("📅 Cleared day selection");
+            log::info!("Cleared day selection");
         }
     }
 } 

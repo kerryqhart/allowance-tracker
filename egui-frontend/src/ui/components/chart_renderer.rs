@@ -55,9 +55,32 @@ pub struct ChartDataPoint {
 }
 
 impl AllowanceTrackerApp {
+    /// Render message when no child is selected
+    fn render_chart_no_child(&self, ui: &mut egui::Ui, height: f32) {
+        ui.vertical_centered(|ui| {
+            ui.add_space(height / 3.0);
+            ui.label(egui::RichText::new("Select a child to view their balance chart")
+                .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))
+                .color(egui::Color32::from_rgb(120, 120, 120)));
+        });
+    }
+
+    /// Render loading state for chart
+    fn render_chart_loading(&mut self, ui: &mut egui::Ui, height: f32) {
+        ui.vertical_centered(|ui| {
+            ui.add_space(height / 3.0);
+            ui.label(egui::RichText::new("Loading chart data...")
+                .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))
+                .color(egui::Color32::from_rgb(120, 120, 120)));
+        });
+
+        // Load data on first render
+        self.load_chart_data();
+    }
+
     /// Draw the chart section with header and chart content
     pub fn draw_chart_section(&mut self, ui: &mut egui::Ui, available_rect: egui::Rect) {
-        info!("📊 CHART: draw_chart_section called with rect height={:.0}", available_rect.height());
+        info!("CHART: draw_chart_section called with rect height={:.0}", available_rect.height());
         
         // Calculate content area (accounting for card margins)
         let content_margin = 20.0;
@@ -76,30 +99,14 @@ impl AllowanceTrackerApp {
         );
         
         ui.allocate_new_ui(egui::UiBuilder::new().max_rect(chart_rect), |ui| {
-            if let Some(ref _child) = self.get_current_child_from_backend() {
-                if self.chart.chart_data.is_empty() {
-                    // Show loading state
-                    ui.vertical_centered(|ui| {
-                        ui.add_space(chart_rect.height() / 3.0);
-                        ui.label(egui::RichText::new("Loading chart data...")
-                            .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))
-                            .color(egui::Color32::from_rgb(120, 120, 120)));
-                    });
-                    
-                    // Load data on first render
-                    self.load_chart_data();
-                } else {
-                    // Render the actual chart
-                    self.render_balance_chart(ui);
-                }
+            let chart_height = chart_rect.height();
+
+            if self.get_current_child_from_backend().is_none() {
+                self.render_chart_no_child(ui, chart_height);
+            } else if self.chart.chart_data.is_empty() {
+                self.render_chart_loading(ui, chart_height);
             } else {
-                // No child selected
-                ui.vertical_centered(|ui| {
-                    ui.add_space(chart_rect.height() / 3.0);
-                    ui.label(egui::RichText::new("Select a child to view their balance chart")
-                        .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))
-                        .color(egui::Color32::from_rgb(120, 120, 120)));
-                });
+                self.render_balance_chart(ui);
             }
         });
     }
@@ -158,7 +165,7 @@ impl AllowanceTrackerApp {
                 // Convert timestamp to readable date and format balance
                 if let Some(datetime) = chrono::DateTime::from_timestamp(point.x as i64, 0) {
                     let date = datetime.format("%m/%d").to_string();
-                    format!("📅 {}: ${:.2}", date, point.y)
+                    format!("{}: ${:.2}", date, point.y)
                 } else {
                     format!("${:.2}", point.y)
                 }
@@ -253,16 +260,16 @@ impl AllowanceTrackerApp {
     /// Load chart data for the selected period and child
     pub fn load_chart_data(&mut self) {
         let Some(ref child) = self.get_current_child_from_backend() else {
-            warn!("📊 No child selected for chart data loading");
+            warn!("No child selected for chart data loading");
             return;
         };
         
-        info!("📊 Loading chart data for child: {} (period: {:?})", child.name, self.chart.selected_period);
+        info!("Loading chart data for child: {} (period: {:?})", child.name, self.chart.selected_period);
         
         // Calculate date range based on selected period
         let (start_date, end_date) = self.get_date_range_for_period(self.chart.selected_period);
         
-        info!("📊 Chart date range: {} to {} ({} days)", start_date, end_date, (end_date - start_date).num_days());
+        info!("Chart date range: {} to {} ({} days)", start_date, end_date, (end_date - start_date).num_days());
         
         // Fetch transactions directly from backend for the specified date range
         // Convert dates to RFC3339 format for backend query
@@ -276,11 +283,11 @@ impl AllowanceTrackerApp {
             end_date: Some(end_date_str.clone()),
         };
         
-        info!("📊 Fetching transactions from backend with query: start_date={}, end_date={}, limit=10000", start_date_str, end_date_str);
+        info!("Fetching transactions from backend with query: start_date={}, end_date={}, limit=10000", start_date_str, end_date_str);
         
         match self.backend().transaction_service.as_ref().list_transactions_domain(query) {
             Ok(result) => {
-                info!("📊 Successfully loaded {} transactions from backend for chart", result.transactions.len());
+                info!("Successfully loaded {} transactions from backend for chart", result.transactions.len());
                 
                 // Convert domain transactions to DTO format for chart processing
                 let dto_transactions: Vec<shared::Transaction> = result.transactions
@@ -300,7 +307,7 @@ impl AllowanceTrackerApp {
                     })
                     .collect();
                 
-                info!("📊 Converted to {} DTO transactions for chart", dto_transactions.len());
+                info!("Converted to {} DTO transactions for chart", dto_transactions.len());
                 
                 // Convert to references for prepare_chart_data compatibility
                 let transaction_refs: Vec<&shared::Transaction> = dto_transactions.iter().collect();
@@ -308,10 +315,10 @@ impl AllowanceTrackerApp {
                 // Prepare chart data points
                 self.chart.chart_data = self.prepare_chart_data(&transaction_refs, start_date, end_date);
                 
-                info!("📊 Generated {} chart data points", self.chart.chart_data.len());
+                info!("Generated {} chart data points", self.chart.chart_data.len());
             }
             Err(e) => {
-                warn!("❌ Failed to load chart data from backend: {}", e);
+                warn!("Failed to load chart data from backend: {}", e);
             }
         }
     }

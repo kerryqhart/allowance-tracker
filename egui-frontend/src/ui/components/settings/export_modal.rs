@@ -154,7 +154,7 @@ impl AllowanceTrackerApp {
                         .strong());
                     
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button(egui::RichText::new("📁 Browse...")
+                        if ui.button(egui::RichText::new("Browse...")
                             .font(egui::FontId::new(14.0, egui::FontFamily::Proportional)))
                             .clicked() 
                         {
@@ -254,13 +254,13 @@ impl AllowanceTrackerApp {
             // Show messages if any
             if let Some(ref success_msg) = self.settings.export_form.success_message {
                 ui.add_space(10.0);
-                ui.label(egui::RichText::new(format!("✅ {}", success_msg))
+                ui.label(egui::RichText::new(format!("{}", success_msg))
                     .color(egui::Color32::from_rgb(0, 150, 0)));
             }
 
             if let Some(ref error_msg) = self.settings.export_form.error_message {
                 ui.add_space(10.0);
-                ui.label(egui::RichText::new(format!("❌ {}", error_msg))
+                ui.label(egui::RichText::new(format!("{}", error_msg))
                     .color(egui::Color32::from_rgb(200, 0, 0)));
             }
         });
@@ -321,7 +321,7 @@ impl AllowanceTrackerApp {
 
     /// Open native file browser to select export location
     fn open_file_browser(&mut self) {
-        log::info!("📁 Opening native file browser for export location");
+        log::info!("Opening native file browser for export location");
 
         // Generate default filename based on current child
         let child_name = self.get_current_child_from_backend().as_ref().map(|c| c.name.clone());
@@ -354,7 +354,7 @@ impl AllowanceTrackerApp {
 
         // Execute the dialog
         if let Some(path) = dialog_with_dir.save_file() {
-            log::info!("📁 User selected export path: {:?}", path);
+            log::info!("User selected export path: {:?}", path);
             self.settings.export_form.selected_file_path = Some(path.to_string_lossy().to_string());
             
             // Update preview with selected path
@@ -364,7 +364,7 @@ impl AllowanceTrackerApp {
             // Clear any existing error messages
             self.settings.export_form.clear_messages();
         } else {
-            log::info!("📁 User cancelled file selection");
+            log::info!("User cancelled file selection");
         }
     }
 
@@ -399,7 +399,7 @@ impl AllowanceTrackerApp {
                 self.settings.export_form.is_exporting = false;
                 
                 if response.success {
-                    log::info!("✅ Export completed successfully: {}", response.file_path);
+                    log::info!("Export completed successfully: {}", response.file_path);
                     
                     let success_message = format!(
                         "Successfully exported {} transactions to:\n{}",

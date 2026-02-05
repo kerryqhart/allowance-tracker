@@ -30,12 +30,12 @@ impl AllowanceTrackerApp {
                   old_month, old_year, self.calendar.selected_month, self.calendar.selected_year);
         
         if self.calendar.selected_month == 6 {
-            println!("🗓️  🎯 Navigated to June {} - about to load calendar data", self.calendar.selected_year);
+            println!("🗓️  Navigated to June {} - about to load calendar data", self.calendar.selected_year);
         }
         
         self.load_calendar_data();
         
-        println!("🔄 Calendar data reloaded for {}/{}", self.calendar.selected_month, self.calendar.selected_year);
+        println!("Calendar data reloaded for {}/{}", self.calendar.selected_month, self.calendar.selected_year);
     }
 
     /// Convert backend CalendarDay to frontend CalendarDay structure
@@ -140,7 +140,7 @@ impl AllowanceTrackerApp {
         
         // DEBUG: Log July 21st conversion specifically (commented out - too verbose)
         // if date.month() == 7 && date.year() == 2025 && backend_day.day == 21 {
-        //     log::info!("🔍 FRONTEND CONVERT DEBUG: July 21st - backend balance: ${:.2}, frontend balance: ${:.2}, transactions: {}", 
+        //     log::info!("FRONTEND CONVERT DEBUG: July 21st - backend balance: ${:.2}, frontend balance: ${:.2}, transactions: {}", 
         //               backend_day.balance, backend_day.balance, all_transactions.len());
         // }
         

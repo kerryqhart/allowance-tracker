@@ -48,7 +48,7 @@ impl EmailService {
     }
 
     pub fn initialize(&mut self) -> Result<()> {
-        info!("📧 Initializing email service for SMTP server: {}:{}", self.config.smtp_server, self.config.smtp_port);
+        info!("Initializing email service for SMTP server: {}:{}", self.config.smtp_server, self.config.smtp_port);
         
         let tls_params = TlsParameters::new(self.config.smtp_server.clone())
             .context("Failed to create TLS parameters")?;
@@ -64,7 +64,7 @@ impl EmailService {
             .build();
 
         self.transport = Some(transport);
-        info!("📧 Email service initialized successfully");
+        info!("Email service initialized successfully");
         Ok(())
     }
 
@@ -110,7 +110,7 @@ impl EmailService {
                 email_builder = email_builder.bcc(email.parse::<Mailbox>().context("Failed to parse BCC email")?);
             }
         } else {
-            info!("📧 No email recipients configured, skipping email send");
+            info!("No email recipients configured, skipping email send");
             return Ok(());
         }
 
@@ -120,7 +120,7 @@ impl EmailService {
             .context("Failed to build email")?;
 
         transport.send(&email).context("Failed to send email")?;
-        info!("📧 Transaction notification email sent successfully to {} recipients", self.config.to_emails.len());
+        info!("Transaction notification email sent successfully to {} recipients", self.config.to_emails.len());
         Ok(())
     }
 
@@ -163,7 +163,7 @@ impl EmailService {
                 email_builder = email_builder.bcc(email.parse::<Mailbox>().context("Failed to parse BCC email")?);
             }
         } else {
-            info!("📧 No email recipients configured, skipping email send");
+            info!("No email recipients configured, skipping email send");
             return Ok(());
         }
 
@@ -173,7 +173,7 @@ impl EmailService {
             .context("Failed to build email")?;
 
         transport.send(&email).context("Failed to send email")?;
-        info!("📧 Transaction deletion notification email sent successfully to {} recipients", self.config.to_emails.len());
+        info!("Transaction deletion notification email sent successfully to {} recipients", self.config.to_emails.len());
         Ok(())
     }
 }

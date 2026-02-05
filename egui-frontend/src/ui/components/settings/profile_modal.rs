@@ -126,7 +126,7 @@ impl AllowanceTrackerApp {
             }
             
             if let Some(error) = &self.settings.profile_form.name_error {
-                ui.label(egui::RichText::new(format!("❌ {}", error))
+                ui.label(egui::RichText::new(format!("{}", error))
                     .font(egui::FontId::new(12.0, egui::FontFamily::Proportional))
                     .color(egui::Color32::RED));
             }
@@ -154,7 +154,7 @@ impl AllowanceTrackerApp {
             }
             
             if let Some(error) = &self.settings.profile_form.birthdate_error {
-                ui.label(egui::RichText::new(format!("❌ {}", error))
+                ui.label(egui::RichText::new(format!("{}", error))
                     .font(egui::FontId::new(12.0, egui::FontFamily::Proportional))
                     .color(egui::Color32::RED));
             }
@@ -381,7 +381,7 @@ impl AllowanceTrackerApp {
             return;
         };
         
-        log::info!("💾 Saving profile changes for child: {}", child_id);
+        log::info!("Saving profile changes for child: {}", child_id);
         
         self.settings.profile_form.is_saving = true;
         
@@ -395,7 +395,7 @@ impl AllowanceTrackerApp {
         // Call backend service
         match self.backend().child_service.update_child(command) {
             Ok(result) => {
-                log::info!("✅ Profile updated successfully");
+                log::info!("Profile updated successfully");
                 
                 // Update current child data
                 self.core.current_child = Some(crate::ui::mappers::to_dto(result.child));
@@ -406,7 +406,7 @@ impl AllowanceTrackerApp {
                 // Profile update success feedback removed
             }
             Err(error) => {
-                log::error!("❌ Failed to update profile: {}", error);
+                log::error!("Failed to update profile: {}", error);
                 self.settings.profile_form.is_saving = false;
                 self.ui.error_message = Some(format!("Failed to update profile: {}", error));
             }
@@ -415,7 +415,7 @@ impl AllowanceTrackerApp {
     
     /// Close the profile modal and reset form
     fn close_profile_modal(&mut self) {
-        log::info!("❌ Closing profile modal");
+        log::info!("Closing profile modal");
         self.settings.show_profile_modal = false;
         self.settings.profile_form.clear();
     }

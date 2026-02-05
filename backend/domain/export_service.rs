@@ -66,11 +66,11 @@ impl ExportService {
             let active_child_response = child_service.get_active_child()?;
             match active_child_response.active_child.child {
                 Some(child) => {
-                    info!("✅ EXPORT: Using active child: {}", child.id);
+                    info!("EXPORT: Using active child: {}", child.id);
                     child.id
                 }
                 None => {
-                    error!("❌ EXPORT: No active child found and no child_id provided");
+                    error!("EXPORT: No active child found and no child_id provided");
                     return Err(anyhow::anyhow!("No active child set and no child_id provided"));
                 }
             }
@@ -83,12 +83,12 @@ impl ExportService {
         let child = match child_service.get_child(get_child_command)? {
             result if result.child.is_some() => result.child.unwrap(),
             _ => {
-                error!("❌ EXPORT: Child not found: {}", child_id_to_use);
+                error!("EXPORT: Child not found: {}", child_id_to_use);
                 return Err(anyhow::anyhow!("Child not found: {}", child_id_to_use));
             }
         };
 
-        info!("✅ EXPORT: Exporting transactions for child: {}", child.name);
+        info!("EXPORT: Exporting transactions for child: {}", child.name);
 
         // Step 3: Get all transactions for the child (no pagination for export)
         let domain_query = TransactionListQuery {
@@ -109,7 +109,7 @@ impl ExportService {
         // Sort chronologically (oldest first)
         transactions.sort_by(|a, b| a.date.cmp(&b.date));
 
-        info!("✅ EXPORT: Retrieved {} transactions for export", transactions.len());
+        info!("EXPORT: Retrieved {} transactions for export", transactions.len());
 
         // Step 4: Generate CSV content
         let mut csv_content = String::new();
@@ -145,7 +145,7 @@ impl ExportService {
             child_name: child.name,
         };
 
-        info!("✅ EXPORT: Successfully exported {} transactions for child: {} - generated CSV content ({} bytes) with filename: {}", 
+        info!("EXPORT: Successfully exported {} transactions for child: {} - generated CSV content ({} bytes) with filename: {}", 
               response.transaction_count, response.child_name, response.csv_content.len(), response.filename);
 
         Ok(response)
@@ -159,7 +159,7 @@ impl ExportService {
         child_service: &ChildService,
         transaction_service: &TransactionService,
     ) -> Result<ExportToPathResponse> {
-        info!("📁 EXPORT: Exporting to path - custom_path: {:?}", request.custom_path);
+        info!("EXPORT: Exporting to path - custom_path: {:?}", request.custom_path);
 
         // Step 1: First, get the export data using existing logic
         let export_request = ExportDataRequest {
@@ -194,7 +194,7 @@ impl ExportService {
                         match dirs::home_dir() {
                             Some(home_dir) => home_dir,
                             None => {
-                                error!("❌ EXPORT: Could not determine default export directory");
+                                error!("EXPORT: Could not determine default export directory");
                                 return Ok(ExportToPathResponse {
                                     success: false,
                                     message: "Failed to determine export directory".to_string(),
@@ -215,7 +215,7 @@ impl ExportService {
         // Step 4: Ensure the directory exists
         if let Some(parent_dir) = file_path.parent() {
             if let Err(e) = fs::create_dir_all(parent_dir) {
-                error!("❌ EXPORT: Failed to create export directory {:?}: {}", parent_dir, e);
+                error!("EXPORT: Failed to create export directory {:?}: {}", parent_dir, e);
                 return Ok(ExportToPathResponse {
                     success: false,
                     message: format!("Failed to create export directory: {}", e),
@@ -230,7 +230,7 @@ impl ExportService {
         match fs::write(&file_path, &export_response.csv_content) {
             Ok(_) => {
                 let file_path_str = file_path.to_string_lossy().to_string();
-                info!("✅ EXPORT: Successfully exported {} transactions for {} to: {}", 
+                info!("EXPORT: Successfully exported {} transactions for {} to: {}", 
                       export_response.transaction_count, export_response.child_name, file_path_str);
                 
                 Ok(ExportToPathResponse {
@@ -242,7 +242,7 @@ impl ExportService {
                 })
             }
             Err(e) => {
-                error!("❌ EXPORT: Failed to write export file to {:?}: {}", file_path, e);
+                error!("EXPORT: Failed to write export file to {:?}: {}", file_path, e);
                 Ok(ExportToPathResponse {
                     success: false,
                     message: format!("Failed to write export file: {}", e),

@@ -61,7 +61,7 @@ impl AllowanceTrackerApp {
                     ui.add_space(10.0);
                     
                     // Modal header
-                    ui.label(egui::RichText::new("🎯 Create New Goal")
+                    ui.label(egui::RichText::new("Create New Goal")
                         .font(egui::FontId::new(20.0, egui::FontFamily::Proportional))
                         .color(colors::TEXT_PRIMARY)
                         .strong());
@@ -83,7 +83,7 @@ impl AllowanceTrackerApp {
                     
                     // Description error
                     if let Some(error) = &self.goal.creation_form.description_error {
-                        ui.label(egui::RichText::new(format!("❌ {}", error))
+                        ui.label(egui::RichText::new(format!("{}", error))
                             .font(egui::FontId::new(12.0, egui::FontFamily::Proportional))
                             .color(egui::Color32::RED));
                     }
@@ -113,7 +113,7 @@ impl AllowanceTrackerApp {
                     
                     // Amount error
                     if let Some(error) = &self.goal.creation_form.amount_error {
-                        ui.label(egui::RichText::new(format!("❌ {}", error))
+                        ui.label(egui::RichText::new(format!("{}", error))
                             .font(egui::FontId::new(12.0, egui::FontFamily::Proportional))
                             .color(egui::Color32::RED));
                     }
@@ -122,7 +122,7 @@ impl AllowanceTrackerApp {
                     
                     // Submission error
                     if let Some(error) = &self.goal.creation_form.submission_error {
-                        ui.label(egui::RichText::new(format!("❌ {}", error))
+                        ui.label(egui::RichText::new(format!("{}", error))
                             .font(egui::FontId::new(14.0, egui::FontFamily::Proportional))
                             .color(egui::Color32::RED));
                         ui.add_space(10.0);

@@ -21,7 +21,7 @@ pub struct Transaction {
     /// ID of the child this transaction belongs to
     pub child_id: String,
     /// Timestamp with timezone information
-    pub date: DateTime<FixedOffset>,  // ✅ FIXED: Now uses proper DateTime object
+    pub date: DateTime<FixedOffset>,  // FIXED: Now uses proper DateTime object
     /// Description of the transaction (max 256 characters)
     pub description: String,
     /// Transaction amount (positive for income, negative for expense)
@@ -296,9 +296,9 @@ pub enum ValidationError {
 pub struct Child {
     pub id: String,
     pub name: String,
-    pub birthdate: NaiveDate, // ✅ FIXED: Now uses proper NaiveDate object
-    pub created_at: DateTime<Utc>, // ✅ FIXED: Now uses proper DateTime object
-    pub updated_at: DateTime<Utc>, // ✅ FIXED: Now uses proper DateTime object
+    pub birthdate: NaiveDate, // FIXED: Now uses proper NaiveDate object
+    pub created_at: DateTime<Utc>, // FIXED: Now uses proper DateTime object
+    pub updated_at: DateTime<Utc>, // FIXED: Now uses proper DateTime object
 }
 
 /// Request for creating a new child
@@ -473,8 +473,8 @@ pub struct AllowanceConfig {
     pub is_active: bool,
     #[serde(default)]
     pub use_age_based_amount: bool, // If true, amount = child's age in years
-    pub created_at: DateTime<Utc>, // ✅ FIXED: Now uses proper DateTime object
-    pub updated_at: DateTime<Utc>, // ✅ FIXED: Now uses proper DateTime object
+    pub created_at: DateTime<Utc>, // FIXED: Now uses proper DateTime object
+    pub updated_at: DateTime<Utc>, // FIXED: Now uses proper DateTime object
 }
 
 /// Request for getting allowance configuration
@@ -567,8 +567,8 @@ pub struct Goal {
     pub description: String,
     pub target_amount: f64,
     pub state: GoalState,
-    pub created_at: DateTime<Utc>, // ✅ FIXED: Now uses proper DateTime object
-    pub updated_at: DateTime<Utc>, // ✅ FIXED: Now uses proper DateTime object
+    pub created_at: DateTime<Utc>, // FIXED: Now uses proper DateTime object
+    pub updated_at: DateTime<Utc>, // FIXED: Now uses proper DateTime object
 }
 
 impl Goal {
@@ -868,7 +868,7 @@ mod tests {
         let transaction = Transaction {
             id: "transaction::income::1702516122000".to_string(),
             child_id: "test_child_id".to_string(),
-            date: Utc::now().with_timezone(&FixedOffset::east_opt(0).unwrap()), // ✅ FIXED: Use east_opt instead
+            date: Utc::now().with_timezone(&FixedOffset::east_opt(0).unwrap()), // FIXED: Use east_opt instead
             description: "Test transaction".to_string(),
             amount: 10.0,
             balance: 100.0,
@@ -904,9 +904,9 @@ mod tests {
         let child = Child {
             id: "child::1702516122000".to_string(),
             name: "Test Child".to_string(),
-            birthdate: NaiveDate::from_ymd_opt(2015, 6, 15).unwrap(),  // ✅ FIXED: Use proper NaiveDate
-            created_at: DateTime::parse_from_rfc3339("2023-12-14T01:02:02.000Z").unwrap().with_timezone(&Utc),  // ✅ FIXED: Use proper DateTime
-            updated_at: DateTime::parse_from_rfc3339("2023-12-14T01:02:02.000Z").unwrap().with_timezone(&Utc),  // ✅ FIXED: Use proper DateTime
+            birthdate: NaiveDate::from_ymd_opt(2015, 6, 15).unwrap(),  // FIXED: Use proper NaiveDate
+            created_at: DateTime::parse_from_rfc3339("2023-12-14T01:02:02.000Z").unwrap().with_timezone(&Utc),  // FIXED: Use proper DateTime
+            updated_at: DateTime::parse_from_rfc3339("2023-12-14T01:02:02.000Z").unwrap().with_timezone(&Utc),  // FIXED: Use proper DateTime
         };
 
         assert_eq!(child.extract_timestamp().unwrap(), 1702516122000);

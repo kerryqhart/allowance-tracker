@@ -255,7 +255,7 @@ impl AllowanceTrackerApp {
         // Execute create child command
         match self.backend().child_service.create_child(command) {
             Ok(result) => {
-                log::info!("✅ Child created successfully: {}", result.child.name);
+                log::info!("Child created successfully: {}", result.child.name);
                 
                 // Clone child name and ID before moving
                 let child_name = result.child.name.clone();
@@ -268,7 +268,7 @@ impl AllowanceTrackerApp {
 
                 match self.backend().child_service.set_active_child(set_active_command) {
                     Ok(_) => {
-                        log::info!("✅ New child set as active: {}", child_name);
+                        log::info!("New child set as active: {}", child_name);
                         
                         // Update current child in core state 
                         let child_dto = crate::ui::mappers::to_dto(result.child);

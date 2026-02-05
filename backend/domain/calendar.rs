@@ -243,7 +243,7 @@ impl CalendarService {
                 // Find the last normal transaction (non-NaN balance) in chronological order
                 if let Some(final_normal_transaction) = sorted_day_transactions.iter().rev().find(|tx| !tx.balance.is_nan()) {
                     day_final_balance = final_normal_transaction.balance;
-                    log::info!("🔍 BACKEND BALANCE DEBUG: Day {}: Using final normal transaction balance ${:.2} from transaction {} (had {} transactions)", 
+                    log::info!("BACKEND BALANCE DEBUG: Day {}: Using final normal transaction balance ${:.2} from transaction {} (had {} transactions)", 
                               day, final_normal_transaction.balance, final_normal_transaction.id, sorted_day_transactions.len());
                 }
                 

@@ -31,7 +31,7 @@ use crate::ui::components::styling::{setup_kid_friendly_style, draw_image_backgr
 
 impl eframe::App for AllowanceTrackerApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // log::info!("🔄 APP UPDATE called - main render loop"); // Commented out - too verbose
+        // log::info!("APP UPDATE called - main render loop"); // Commented out - too verbose
         // Set up kid-friendly styling
         setup_kid_friendly_style(ctx);
         
@@ -177,7 +177,7 @@ impl AllowanceTrackerApp {
             }
             MainTab::Table => {
                 // Show table title in subheader
-                ui.label(egui::RichText::new("📋 Recent Transactions")
+                ui.label(egui::RichText::new("Recent Transactions")
                     .font(egui::FontId::new(18.0, egui::FontFamily::Proportional))
                     .color(egui::Color32::WHITE)
                     .strong());
@@ -185,7 +185,7 @@ impl AllowanceTrackerApp {
             MainTab::Chart => {
                 ui.horizontal(|ui| {
                     // Chart title on the left
-                    ui.label(egui::RichText::new("📊 Balance Chart")
+                    ui.label(egui::RichText::new("Balance Chart")
                         .font(egui::FontId::new(18.0, egui::FontFamily::Proportional))
                         .color(egui::Color32::WHITE)
                         .strong());
@@ -276,7 +276,7 @@ impl AllowanceTrackerApp {
             MainTab::Goal => {
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                     // Show goal title in subheader with proper vertical centering
-                    ui.label(egui::RichText::new("🎯 My Goal")
+                    ui.label(egui::RichText::new("My Goal")
                         .font(egui::FontId::new(18.0, egui::FontFamily::Proportional))
                         .color(egui::Color32::WHITE)
                         .strong());
@@ -400,27 +400,27 @@ impl AllowanceTrackerApp {
     pub fn refresh_allowances(&mut self) {
         // Check if it's time to refresh allowances (throttled to avoid excessive calls)
         if self.ui.should_refresh_allowances() {
-            log::info!("🔄 Performing periodic allowance refresh check");
+            log::info!("Performing periodic allowance refresh check");
             
             // Use the existing backend method to check and issue pending allowances
             match self.core.backend.transaction_service.as_ref().check_and_issue_pending_allowances() {
                 Ok(count) => {
                     if count > 0 {
-                        log::info!("🎯 Periodic refresh: Issued {} pending allowances", count);
+                        log::info!("Periodic refresh: Issued {} pending allowances", count);
                         
                         // Reload calendar data to show the new allowance transactions immediately
                         // This ensures the calendar view updates without requiring manual navigation
-                        log::info!("🔄 Reloading calendar data to show new allowances");
+                        log::info!("Reloading calendar data to show new allowances");
                         self.load_calendar_data();
                         
                         // Optionally show a success message to the user
                         // self.ui.set_success_message(format!("Issued {} allowances!", count));
                     } else {
-                        log::debug!("🎯 Periodic refresh: No pending allowances found");
+                        log::debug!("Periodic refresh: No pending allowances found");
                     }
                 }
                 Err(e) => {
-                    log::warn!("🎯 Periodic refresh failed: {}", e);
+                    log::warn!("Periodic refresh failed: {}", e);
                     // Don't show error to user for background refresh - just log it
                 }
             }

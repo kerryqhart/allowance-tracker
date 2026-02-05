@@ -81,7 +81,7 @@ pub fn render_form_field_with_error(
 
         // Error message display
         if let Some(error_msg) = error {
-            ui.label(egui::RichText::new(format!("❌ {}", error_msg))
+            ui.label(egui::RichText::new(format!("{}", error_msg))
                 .color(egui::Color32::RED)
                 .font(egui::FontId::new(14.0, egui::FontFamily::Proportional)));
         } else {
