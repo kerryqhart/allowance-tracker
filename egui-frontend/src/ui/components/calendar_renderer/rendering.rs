@@ -692,12 +692,45 @@ impl CalendarDay {
 
 impl AllowanceTrackerApp {
 
-    
+    /// Calculate all layout dimensions for calendar rendering
+    fn calculate_calendar_layout(&self, ui: &egui::Ui, available_rect: egui::Rect) -> CalendarLayout {
+        let content_width = available_rect.width() - 40.0;
+        let calendar_width = content_width;
+        let total_spacing = CALENDAR_CARD_SPACING * 6.0;
+        let cell_width = (calendar_width - total_spacing) / 7.0;
 
-    
-    /// Calculate running balances for all days in the month, carrying forward balances
-    /// from previous days when there are no transactions
+        let actual_available_rect = ui.available_rect_before_wrap();
+        let card_height = actual_available_rect.height() - 40.0;
 
+        let header_height = header::HEADER_HEIGHT;
+        let calendar_container_padding = 20.0;
+
+        // Get calendar data to determine row count
+        let calendar_days_count = if let Some(ref calendar_month) = self.calendar.calendar_month {
+            calendar_month.days.len()
+        } else {
+            35
+        };
+
+        let rows_needed = (calendar_days_count as f32 / 7.0).ceil();
+        let vertical_spacing = CALENDAR_CARD_SPACING * (rows_needed - 1.0);
+        let available_height_for_cells = card_height - calendar_container_padding - header_height - vertical_spacing;
+        let cell_height = (available_height_for_cells / rows_needed).max(40.0).min(200.0);
+
+        let card_rect = egui::Rect::from_min_size(
+            egui::pos2(actual_available_rect.left() + 20.0, actual_available_rect.top() + 20.0),
+            egui::vec2(content_width, card_height)
+        );
+
+        CalendarLayout {
+            cell_width,
+            cell_height,
+            calendar_width,
+            card_height,
+            card_rect,
+            header_height,
+        }
+    }
 
     /// Draw calendar section with toggle header integrated
     pub fn draw_calendar_section_with_toggle(&mut self, ui: &mut egui::Ui, available_rect: egui::Rect, transactions: &[Transaction]) {
