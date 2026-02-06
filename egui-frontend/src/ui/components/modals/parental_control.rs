@@ -175,7 +175,8 @@ impl AllowanceTrackerApp {
             // Text input - more compact
             let text_input = egui::TextEdit::singleline(&mut self.modal.parental_control_input)
                 .desired_width(300.0)
-                .font(egui::FontId::new(16.0, egui::FontFamily::Proportional));
+                .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))
+                .password(true);
             
             let input_response = ui.add(text_input);
             
