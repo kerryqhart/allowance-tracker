@@ -404,41 +404,25 @@ impl CalendarDay {
     /// Render a single calendar chip with unified styling and hover effects
     /// Returns the transaction ID if the checkbox was clicked (for selection toggle)
     /// Returns "ELLIPSIS_CLICKED" if the ellipsis chip was clicked (for expansion toggle)
-    /// Returns "COLLAPSE_CLICKED" if the collapse button was clicked (handled separately)
     fn render_calendar_chip(&self, ui: &mut egui::Ui, chip: &CalendarChip, width: f32, _height: f32, config: &RenderConfig) -> Option<String> {
-        
-        // Get the font family for calendar rendering
         let font_family = get_calendar_font_family(ui.ctx());
-        
-        // Get chip styling from the chip type
-        let chip_color = chip.chip_type.primary_color();
-        let text_color = chip.chip_type.text_color();
-        let uses_dotted_border = chip.chip_type.uses_dotted_border();
-        
-        // Calculate chip dimensions based on layout
         let (chip_width, chip_height, chip_font_size) = calculate_chip_dimensions(config.is_grid_layout, width);
-        
+
         // Check if we should show checkbox (only for deletable transactions in selection mode)
-        let show_checkbox = config.transaction_selection_mode && 
+        let show_checkbox = config.transaction_selection_mode &&
                             !matches!(chip.chip_type, CalendarChipType::FutureAllowance | CalendarChipType::Goal);
         let checkbox_width = if show_checkbox { 16.0 } else { 0.0 };
         let checkbox_spacing = if show_checkbox { 4.0 } else { 0.0 };
-        
-        // Adjust chip width to accommodate checkbox
         let adjusted_chip_width = if show_checkbox {
             chip_width - checkbox_width - checkbox_spacing
         } else {
             chip_width
         };
-        
-        // Opaque white background for all transaction chips
-        let chip_background = egui::Color32::from_rgba_unmultiplied(255, 255, 255, 255);
-        
-        let mut checkbox_clicked = None;
-        
+
+        let mut result = None;
+
         ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
             if show_checkbox {
-                // Horizontal layout with checkbox and chip
                 ui.horizontal(|ui| {
                     // Checkbox on the left
                     let is_selected = config.selected_transaction_ids.contains(&chip.transaction.id);
@@ -446,121 +430,44 @@ impl CalendarDay {
                         [checkbox_width, checkbox_width],
                         egui::Checkbox::new(&mut is_selected.clone(), "")
                     );
-                    
+
                     if checkbox_response.clicked() {
-                        checkbox_clicked = Some(chip.transaction.id.clone());
+                        result = Some(chip.transaction.id.clone());
                     }
-                    
+
                     ui.add_space(checkbox_spacing);
-                    
+
                     // Chip on the right
                     let (rect, response) = ui.allocate_exact_size(egui::vec2(adjusted_chip_width, chip_height), egui::Sense::hover());
-                    
-                    // Determine if we should show hover effect
-                    let is_hovered = response.hovered();
-                    
-                    // Background color - slightly darker when hovered
-                    let background_color = if is_hovered {
-                        egui::Color32::from_rgba_unmultiplied(245, 245, 245, 255) // Light gray on hover
-                    } else {
-                        chip_background
-                    };
-                    
-                    // Draw background
-                    ui.painter().rect_filled(
-                        rect,
-                        egui::CornerRadius::same(4),
-                        background_color
-                    );
-                    
-                    // Draw border - solid or dotted based on chip type
-                    if uses_dotted_border {
-                        self.draw_dotted_border(ui, rect, chip_color);
-                    } else {
-                        // Draw solid border
-                        ui.painter().rect_stroke(
-                            rect,
-                            egui::CornerRadius::same(4),
-                            egui::Stroke::new(1.0, chip_color),
-                            egui::StrokeKind::Outside
-            );
-                    }
-                    
-                    // Draw text
-                    ui.painter().text(
-                        rect.center(),
-                        egui::Align2::CENTER_CENTER,
-                        &chip.display_amount,
-                        egui::FontId::new(chip_font_size, font_family.clone()),
-                        text_color,
-                    );
-                    
-                    // Show floating tooltip when hovering
-                    if is_hovered && !chip.transaction.description.is_empty() {
+                    self.draw_chip_visual(ui, chip, rect, response.hovered(), font_family.clone(), chip_font_size);
+
+                    if response.hovered() && !chip.transaction.description.is_empty() {
                         self.show_transaction_tooltip(ui, &chip.transaction.description, rect);
                     }
                 });
             } else {
-                // Original chip rendering without checkbox
+                // Determine sense based on chip type
                 let sense = if matches!(chip.chip_type, CalendarChipType::Ellipsis) {
-                    egui::Sense::hover().union(egui::Sense::click()) // Ellipsis chips are clickable
+                    egui::Sense::hover().union(egui::Sense::click())
                 } else {
-                    egui::Sense::hover() // Regular chips only hover
+                    egui::Sense::hover()
                 };
+
                 let (rect, response) = ui.allocate_exact_size(egui::vec2(chip_width, chip_height), sense);
-                
-                // Determine if we should show hover effect
-                let is_hovered = response.hovered();
-                
+                self.draw_chip_visual(ui, chip, rect, response.hovered(), font_family.clone(), chip_font_size);
+
                 // Check for ellipsis click
                 if response.clicked() && matches!(chip.chip_type, CalendarChipType::Ellipsis) {
-                    checkbox_clicked = Some("ELLIPSIS_CLICKED".to_string());
+                    result = Some("ELLIPSIS_CLICKED".to_string());
                 }
-                
-                // Background color - slightly darker when hovered
-                let background_color = if is_hovered {
-                    egui::Color32::from_rgba_unmultiplied(245, 245, 245, 255) // Light gray on hover
-                } else {
-                    chip_background
-                };
-                
-                // Draw background
-                ui.painter().rect_filled(
-                    rect,
-                    egui::CornerRadius::same(4),
-                    background_color
-                );
-                
-                // Draw border - solid or dotted based on chip type
-                if uses_dotted_border {
-                    self.draw_dotted_border(ui, rect, chip_color);
-                } else {
-                    // Draw solid border
-                    ui.painter().rect_stroke(
-                        rect,
-                        egui::CornerRadius::same(4),
-                        egui::Stroke::new(1.0, chip_color),
-                        egui::StrokeKind::Outside
-            );
-                }
-                
-                // Draw text
-                ui.painter().text(
-                    rect.center(),
-                    egui::Align2::CENTER_CENTER,
-                    &chip.display_amount,
-                    egui::FontId::new(chip_font_size, font_family.clone()),
-                    text_color,
-                );
-                
-                // Show floating tooltip when hovering
-                if is_hovered && !chip.transaction.description.is_empty() {
+
+                if response.hovered() && !chip.transaction.description.is_empty() {
                     self.show_transaction_tooltip(ui, &chip.transaction.description, rect);
                 }
             }
         });
-        
-        checkbox_clicked
+
+        result
     }
     
     /// Show a floating tooltip with transaction description
