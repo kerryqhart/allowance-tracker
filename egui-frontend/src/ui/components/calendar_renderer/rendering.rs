@@ -137,6 +137,47 @@ impl CalendarDay {
         }
     }
 
+    /// Render collapse button at bottom of expanded day cell
+    /// Returns true if clicked
+    fn render_collapse_button(&self, ui: &mut egui::Ui, cell_rect: egui::Rect) -> bool {
+        let collapse_height = 22.0;
+        let collapse_rect = egui::Rect::from_min_size(
+            egui::pos2(cell_rect.left(), cell_rect.bottom() - collapse_height),
+            egui::vec2(cell_rect.width(), collapse_height)
+        );
+
+        let collapse_response = ui.allocate_rect(collapse_rect, egui::Sense::hover().union(egui::Sense::click()));
+
+        let collapse_bg_color = if collapse_response.hovered() {
+            egui::Color32::from_rgba_unmultiplied(245, 245, 245, 255)
+        } else {
+            egui::Color32::WHITE
+        };
+
+        ui.painter().rect_filled(
+            collapse_rect,
+            egui::CornerRadius::ZERO,
+            collapse_bg_color
+        );
+
+        // Draw triangle symbol
+        let triangle_size = 8.0;
+        let center = collapse_rect.center();
+        let triangle_points = [
+            egui::pos2(center.x, center.y - triangle_size / 2.0),
+            egui::pos2(center.x - triangle_size / 2.0, center.y + triangle_size / 2.0),
+            egui::pos2(center.x + triangle_size / 2.0, center.y + triangle_size / 2.0),
+        ];
+
+        ui.painter().add(egui::Shape::convex_polygon(
+            triangle_points.to_vec(),
+            egui::Color32::from_rgb(120, 120, 120),
+            egui::Stroke::NONE,
+        ));
+
+        collapse_response.clicked()
+    }
+
     /// Render this calendar day with configurable styling
     pub fn render(&self, ui: &mut egui::Ui, width: f32, height: f32) -> egui::Response {
         let (response, _) = self.render_with_config(ui, width, height, &RenderConfig::default());
@@ -297,49 +338,7 @@ impl CalendarDay {
         
         // Render collapse button OUTSIDE content flow if day is expanded
         if config.expanded_day == Some(self.date) {
-            let collapse_height = 22.0;
-            let collapse_rect = egui::Rect::from_min_size(
-                egui::pos2(cell_rect.left(), cell_rect.bottom() - collapse_height),
-                egui::vec2(cell_rect.width(), collapse_height)
-            );
-            
-            // Check for hover and click
-            let collapse_response = ui.allocate_rect(collapse_rect, egui::Sense::hover().union(egui::Sense::click()));
-            
-            // Style as solid white bar (no border)
-            let collapse_bg_color = if collapse_response.hovered() {
-                egui::Color32::from_rgba_unmultiplied(245, 245, 245, 255) // Very light gray on hover
-            } else {
-                egui::Color32::WHITE // Solid white
-            };
-            
-            // Draw collapse button background - no rounding for perfect border alignment
-            ui.painter().rect_filled(
-                collapse_rect,
-                egui::CornerRadius::ZERO, // No rounding for perfect border alignment
-                collapse_bg_color
-            );
-            
-            // Draw triangle symbol using painter (more reliable than Unicode)
-            let triangle_size = 8.0;
-            let center = collapse_rect.center();
-            
-            // Define triangle points (pointing up for "collapse")
-            let triangle_points = [
-                egui::pos2(center.x, center.y - triangle_size / 2.0), // Top point
-                egui::pos2(center.x - triangle_size / 2.0, center.y + triangle_size / 2.0), // Bottom left
-                egui::pos2(center.x + triangle_size / 2.0, center.y + triangle_size / 2.0), // Bottom right
-            ];
-            
-            // Draw filled triangle
-            ui.painter().add(egui::Shape::convex_polygon(
-                triangle_points.to_vec(),
-                egui::Color32::from_rgb(120, 120, 120), // Medium gray for visibility
-                egui::Stroke::NONE,
-            ));
-            
-            // Handle collapse click
-            if collapse_response.clicked() {
+            if self.render_collapse_button(ui, cell_rect) {
                 clicked_transaction_ids.push("COLLAPSE_CLICKED".to_string());
             }
         }
