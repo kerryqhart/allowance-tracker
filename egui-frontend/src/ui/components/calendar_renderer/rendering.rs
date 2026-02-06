@@ -350,6 +350,57 @@ impl CalendarDay {
         (response, clicked_transaction_ids)
     }
     
+    /// Draw the visual elements of a chip (background, border, text)
+    fn draw_chip_visual(
+        &self,
+        ui: &mut egui::Ui,
+        chip: &CalendarChip,
+        rect: egui::Rect,
+        is_hovered: bool,
+        font_family: egui::FontFamily,
+        chip_font_size: f32,
+    ) {
+        let chip_color = chip.chip_type.primary_color();
+        let text_color = chip.chip_type.text_color();
+        let uses_dotted_border = chip.chip_type.uses_dotted_border();
+        let chip_background = egui::Color32::from_rgba_unmultiplied(255, 255, 255, 255);
+
+        // Background color - slightly darker when hovered
+        let background_color = if is_hovered {
+            egui::Color32::from_rgba_unmultiplied(245, 245, 245, 255)
+        } else {
+            chip_background
+        };
+
+        // Draw background
+        ui.painter().rect_filled(
+            rect,
+            egui::CornerRadius::same(4),
+            background_color
+        );
+
+        // Draw border - solid or dotted based on chip type
+        if uses_dotted_border {
+            self.draw_dotted_border(ui, rect, chip_color);
+        } else {
+            ui.painter().rect_stroke(
+                rect,
+                egui::CornerRadius::same(4),
+                egui::Stroke::new(1.0, chip_color),
+                egui::StrokeKind::Outside
+            );
+        }
+
+        // Draw text
+        ui.painter().text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            &chip.display_amount,
+            egui::FontId::new(chip_font_size, font_family),
+            text_color,
+        );
+    }
+
     /// Render a single calendar chip with unified styling and hover effects
     /// Returns the transaction ID if the checkbox was clicked (for selection toggle)
     /// Returns "ELLIPSIS_CLICKED" if the ellipsis chip was clicked (for expansion toggle)
