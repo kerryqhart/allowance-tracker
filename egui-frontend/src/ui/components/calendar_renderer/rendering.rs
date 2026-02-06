@@ -734,109 +734,46 @@ impl AllowanceTrackerApp {
 
     /// Draw calendar section with toggle header integrated
     pub fn draw_calendar_section_with_toggle(&mut self, ui: &mut egui::Ui, available_rect: egui::Rect, transactions: &[Transaction]) {
-        // DEBUG: Log calendar entry point for comparison with goal
-        // log::info!("CALENDAR DEBUG: available_rect = {:?}", available_rect); // Too verbose
-        
-        // Calendar rendering with responsive layout
-        
-        // Get the font family for calendar rendering
         let font_family = get_calendar_font_family(ui.ctx());
-        
-        // Use the existing draw_calendar_section method but with toggle header
-        ui.add_space(15.0);
-        // Add top spacing for visual separation
-        
-        // Calculate responsive dimensions - same as original
-        let content_width = available_rect.width() - 40.0;
-        
-        // Calendar takes up full available width to align with navigation buttons
-        let calendar_width = content_width;
-        
-        // HYPOTHESIS A: Break the coupling chain at multiple points
-        let total_spacing = CALENDAR_CARD_SPACING * 6.0;
-        
-        // Step 1: Calculate cell width from horizontal space (unchanged - works fine)
-        let cell_width = (calendar_width - total_spacing) / 7.0;
-        
-        // Step 2: Apply TEST RECTANGLE SUCCESS FORMULA 
-        // Use simple approach that worked perfectly: available_height - 40px margins
-        let actual_available_rect = ui.available_rect_before_wrap();
-                // Calculate optimal calendar dimensions
-        
-        // CORRECT CALCULATION: Subtract larger bottom margin to match side margins
-        let final_card_height = actual_available_rect.height() - 40.0; // 40px total: 20px bottom margin + 20px internal padding
-        
-        // Calculate dynamic cell height based on calendar data
-        let header_height = header::HEADER_HEIGHT;
-        let calendar_container_padding = 20.0;
-        
-        // Get calendar data to determine row count
-        let calendar_days_count = if let Some(ref calendar_month) = self.calendar.calendar_month {
-            calendar_month.days.len()
-        } else {
-            35 // Default fallback
-        };
-        
-        let rows_needed = (calendar_days_count as f32 / 7.0).ceil();
-        let vertical_spacing = CALENDAR_CARD_SPACING * (rows_needed - 1.0);
-        let available_height_for_cells = final_card_height - calendar_container_padding - header_height - vertical_spacing;
-        let dynamic_cell_height = (available_height_for_cells / rows_needed).max(40.0).min(200.0);
-        
-        // Dynamic cell height calculation complete
-        
 
-        
-        let card_rect = egui::Rect::from_min_size(
-            egui::pos2(actual_available_rect.left() + 20.0, actual_available_rect.top() + 20.0),
-            egui::vec2(content_width, final_card_height)
-        );
-        
-        // Calendar container positioned with consistent margins
-        
-        // Draw calendar content (no background card)
-        ui.allocate_new_ui(egui::UiBuilder::new().max_rect(card_rect), |ui| {
+        ui.add_space(15.0);
+
+        let layout = self.calculate_calendar_layout(ui, available_rect);
+
+        ui.allocate_new_ui(egui::UiBuilder::new().max_rect(layout.card_rect), |ui| {
             ui.vertical(|ui| {
-                // Align the calendar content to the left to match navigation buttons
                 ui.allocate_ui_with_layout(
                     egui::vec2(ui.available_width(), ui.available_height()),
                     egui::Layout::top_down(egui::Align::LEFT),
                     |ui| {
-                        // Constrain calendar to calculated dimensions  
-                                                        // Render calendar with optimal sizing
                         ui.allocate_ui_with_layout(
-                            egui::vec2(calendar_width, final_card_height),
+                            egui::vec2(layout.calendar_width, layout.card_height),
                             egui::Layout::top_down(egui::Align::LEFT),
                             |ui| {
-                                // Day headers - consistent layout with automatic spacing matching day cards
+                                // Day headers
                                 ui.horizontal(|ui| {
-                                    ui.spacing_mut().item_spacing.x = CALENDAR_CARD_SPACING; // Match day cards spacing
+                                    ui.spacing_mut().item_spacing.x = CALENDAR_CARD_SPACING;
                                     let day_names = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
                                     for day_name in day_names.iter() {
                                         ui.allocate_ui_with_layout(
-                                            egui::vec2(cell_width, header_height),
+                                            egui::vec2(layout.cell_width, layout.header_height),
                                             egui::Layout::centered_and_justified(egui::Direction::TopDown),
                                             |ui| {
-                                                // Get the rect for this header
                                                 let header_rect = ui.available_rect_before_wrap();
-                                                
-                                                // Draw card-like background
-                                                let bg_color = header::background_color();
+
                                                 ui.painter().rect_filled(
                                                     header_rect,
                                                     egui::CornerRadius::same(2),
-                                                    bg_color
+                                                    header::background_color()
                                                 );
-                                                
-                                                // Draw border
-                                                let border_color = header::border_color();
+
                                                 ui.painter().rect_stroke(
                                                     header_rect,
                                                     egui::CornerRadius::same(2),
-                                                    egui::Stroke::new(1.0, border_color),
+                                                    egui::Stroke::new(1.0, header::border_color()),
                                                     egui::StrokeKind::Outside
-            );
-                                                
-                                                // Draw text - disable selection to prevent dropdown interference
+                                                );
+
                                                 ui.add(egui::Label::new(egui::RichText::new(*day_name)
                                                     .font(egui::FontId::new(header::HEADER_FONT_SIZE, font_family.clone()))
                                                     .strong()
@@ -844,15 +781,12 @@ impl AllowanceTrackerApp {
                                                     .selectable(false));
                                             },
                                         );
-                                        
-                                        // No manual spacing - using automatic spacing system like day cards
                                     }
                                 });
-                                
-                                ui.add_space(5.0); // Small gap between headers and calendar
-                                
-                                // Calendar days - use corrected manual method with dynamic cell height
-                                self.draw_calendar_days_responsive(ui, transactions, cell_width, dynamic_cell_height);
+
+                                ui.add_space(5.0);
+
+                                self.draw_calendar_days_responsive(ui, transactions, layout.cell_width, layout.cell_height);
                             }
                         );
                     }
