@@ -61,6 +61,41 @@ impl CalendarDay {
         );
     }
 
+    /// Calculate and draw background fill for day cell with hover/selection effects
+    fn draw_day_cell_background(
+        &self,
+        ui: &egui::Ui,
+        cell_rect: egui::Rect,
+        is_hovered: bool,
+        config: &RenderConfig,
+    ) {
+        let base_bg_color = self.day_type.background_color(self.is_today);
+        let bg_color = if config.is_selected {
+            egui::Color32::from_rgba_unmultiplied(230, 190, 235, 140) // Purple-pink for selection
+        } else if is_hovered {
+            if self.is_today {
+                egui::Color32::from_rgba_unmultiplied(255, 248, 220, 180) // More opaque yellow
+            } else {
+                match self.day_type {
+                    CalendarDayType::CurrentMonth => {
+                        egui::Color32::from_rgba_unmultiplied(255, 255, 255, 120) // More opaque white
+                    }
+                    CalendarDayType::FillerDay => {
+                        egui::Color32::from_rgba_unmultiplied(120, 120, 120, 160) // More opaque gray
+                    }
+                }
+            }
+        } else {
+            base_bg_color
+        };
+
+        ui.painter().rect_filled(
+            cell_rect,
+            egui::CornerRadius::same(2),
+            bg_color
+        );
+    }
+
     /// Render this calendar day with configurable styling
     pub fn render(&self, ui: &mut egui::Ui, width: f32, height: f32) -> egui::Response {
         let (response, _) = self.render_with_config(ui, width, height, &RenderConfig::default());
@@ -95,37 +130,8 @@ impl CalendarDay {
             self.draw_today_shadow(ui, cell_rect);
         }
         
-        // Draw background for the day cell using centralized color scheme with hover effect
-        let base_bg_color = self.day_type.background_color(self.is_today);
-        let bg_color = if config.is_selected {
-            // Selected day gets a purple-pink tint matching the Create Goal button
-            egui::Color32::from_rgba_unmultiplied(230, 190, 235, 140) // Purple-pink for selection
-        } else if is_hovered {
-            // Make more opaque when hovered - same approach as chips
-            if self.is_today {
-                // For today, make the yellow background more solid
-                egui::Color32::from_rgba_unmultiplied(255, 248, 220, 180) // More opaque yellow
-            } else {
-                match self.day_type {
-                    CalendarDayType::CurrentMonth => {
-                        // Make current month days more opaque white
-                        egui::Color32::from_rgba_unmultiplied(255, 255, 255, 120) // More opaque white
-                    }
-                    CalendarDayType::FillerDay => {
-                        // Make filler days more opaque gray
-                        egui::Color32::from_rgba_unmultiplied(120, 120, 120, 160) // More opaque gray
-                    }
-                }
-            }
-        } else {
-            base_bg_color
-        };
-        
-        ui.painter().rect_filled(
-            cell_rect,
-            egui::CornerRadius::same(2),
-            bg_color
-        );
+        // Draw background for the day cell
+        self.draw_day_cell_background(ui, cell_rect, is_hovered, config);
         
         // Draw border around the day cell using centralized color scheme
         if config.is_selected {
