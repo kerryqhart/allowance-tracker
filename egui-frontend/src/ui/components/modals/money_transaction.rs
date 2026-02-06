@@ -75,88 +75,10 @@ impl AllowanceTrackerApp {
                                         .color(egui::Color32::from_rgb(80, 80, 80)));
                                     
                                     ui.add_space(20.0);
-                                    
-                                    // Description field with validation
-                                    ui.horizontal(|ui| {
-                                        ui.label(egui::RichText::new("Description:")
-                                            .font(egui::FontId::new(14.0, egui::FontFamily::Proportional))
-                                            .color(egui::Color32::from_rgb(60, 60, 60)));
-                                        
-                                        // Character count
-                                        let char_count = form_state.description.len();
-                                        let count_color = if char_count > config.max_description_length { 
-                                            egui::Color32::from_rgb(220, 50, 50) // Red if over limit
-                                        } else if char_count > (config.max_description_length * 4 / 5) { 
-                                            egui::Color32::from_rgb(255, 140, 0) // Orange if approaching limit (80%)
-                                        } else { 
-                                            egui::Color32::from_rgb(120, 120, 120) // Gray for normal
-                                        };
-                                        
-                                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                            ui.label(egui::RichText::new(format!("{}/{}", char_count, config.max_description_length))
-                                                .font(egui::FontId::new(12.0, egui::FontFamily::Proportional))
-                                                .color(count_color));
-                                        });
-                                    });
-                                    ui.add_space(5.0);
-                                    
-                                    // Description field
-                                    let description_response = ui.add(
-                                        egui::TextEdit::singleline(&mut form_state.description)
-                                            .hint_text(config.description_placeholder)
-                                            .desired_width(400.0)
-                                            .font(egui::FontId::new(14.0, egui::FontFamily::Proportional))
-                                    );
-                                    
-                                    // Show description error message
-                                    if let Some(error) = &form_state.description_error {
-                                        ui.add_space(3.0);
-                                        ui.label(egui::RichText::new(error)
-                                            .font(egui::FontId::new(12.0, egui::FontFamily::Proportional))
-                                            .color(egui::Color32::from_rgb(220, 50, 50)));
-                                    }
-                                    
-                                    ui.add_space(15.0);
-                                    
-                                    // Amount field with validation
-                                    ui.horizontal(|ui| {
-                                        ui.label(egui::RichText::new("Amount:")
-                                            .font(egui::FontId::new(14.0, egui::FontFamily::Proportional))
-                                            .color(egui::Color32::from_rgb(60, 60, 60)));
-                                    });
-                                    ui.add_space(5.0);
-                                    
-                                    // Amount input with static dollar sign
-                                    ui.horizontal(|ui| {
-                                        // Static dollar sign
-                                        ui.label(egui::RichText::new("$")
-                                            .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))
-                                            .color(egui::Color32::from_rgb(60, 60, 60)));
-                                        
-                                        ui.add_space(2.0);
-                                        
-                                        // Amount field
-                                        let amount_response = ui.add(
-                                            egui::TextEdit::singleline(&mut form_state.amount)
-                                                .hint_text(config.amount_placeholder)
-                                                .desired_width(120.0)
-                                                .font(egui::FontId::new(14.0, egui::FontFamily::Proportional))
-                                        );
-                                        
-                                        // Validate form whenever fields change
-                                        if description_response.changed() || amount_response.changed() {
-                                            self.validate_money_transaction_form(form_state, config);
-                                        }
-                                    });
-                                    
-                                    // Show amount error message
-                                    if let Some(error) = &form_state.amount_error {
-                                        ui.add_space(3.0);
-                                        ui.label(egui::RichText::new(error)
-                                            .font(egui::FontId::new(12.0, egui::FontFamily::Proportional))
-                                            .color(egui::Color32::from_rgb(220, 50, 50)));
-                                    }
-                                    
+
+                                    // Form fields
+                                    self.render_money_transaction_form_content(ui, config, form_state);
+
                                     ui.add_space(30.0);
                                     
                                     // Buttons
@@ -255,4 +177,94 @@ impl AllowanceTrackerApp {
             
         form_submitted
     }
-} 
+
+    /// Render the form fields (description + amount) for money transaction modal
+    /// Returns the description_response for validation triggering
+    fn render_money_transaction_form_content(
+        &mut self,
+        ui: &mut egui::Ui,
+        config: &crate::ui::app_state::MoneyTransactionModalConfig,
+        form_state: &mut crate::ui::app_state::MoneyTransactionFormState,
+    ) {
+        // Description field with validation
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("Description:")
+                .font(egui::FontId::new(14.0, egui::FontFamily::Proportional))
+                .color(egui::Color32::from_rgb(60, 60, 60)));
+
+            // Character count
+            let char_count = form_state.description.len();
+            let count_color = if char_count > config.max_description_length {
+                egui::Color32::from_rgb(220, 50, 50) // Red if over limit
+            } else if char_count > (config.max_description_length * 4 / 5) {
+                egui::Color32::from_rgb(255, 140, 0) // Orange if approaching limit (80%)
+            } else {
+                egui::Color32::from_rgb(120, 120, 120) // Gray for normal
+            };
+
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(egui::RichText::new(format!("{}/{}", char_count, config.max_description_length))
+                    .font(egui::FontId::new(12.0, egui::FontFamily::Proportional))
+                    .color(count_color));
+            });
+        });
+        ui.add_space(5.0);
+
+        // Description field
+        let description_response = ui.add(
+            egui::TextEdit::singleline(&mut form_state.description)
+                .hint_text(config.description_placeholder)
+                .desired_width(400.0)
+                .font(egui::FontId::new(14.0, egui::FontFamily::Proportional))
+        );
+
+        // Show description error message
+        if let Some(error) = &form_state.description_error {
+            ui.add_space(3.0);
+            ui.label(egui::RichText::new(error)
+                .font(egui::FontId::new(12.0, egui::FontFamily::Proportional))
+                .color(egui::Color32::from_rgb(220, 50, 50)));
+        }
+
+        ui.add_space(15.0);
+
+        // Amount field with validation
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("Amount:")
+                .font(egui::FontId::new(14.0, egui::FontFamily::Proportional))
+                .color(egui::Color32::from_rgb(60, 60, 60)));
+        });
+        ui.add_space(5.0);
+
+        // Amount input with static dollar sign
+        ui.horizontal(|ui| {
+            // Static dollar sign
+            ui.label(egui::RichText::new("$")
+                .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))
+                .color(egui::Color32::from_rgb(60, 60, 60)));
+
+            ui.add_space(2.0);
+
+            // Amount field
+            let amount_response = ui.add(
+                egui::TextEdit::singleline(&mut form_state.amount)
+                    .hint_text(config.amount_placeholder)
+                    .desired_width(120.0)
+                    .font(egui::FontId::new(14.0, egui::FontFamily::Proportional))
+            );
+
+            // Validate form whenever fields change
+            if description_response.changed() || amount_response.changed() {
+                self.validate_money_transaction_form(form_state, config);
+            }
+        });
+
+        // Show amount error message
+        if let Some(error) = &form_state.amount_error {
+            ui.add_space(3.0);
+            ui.label(egui::RichText::new(error)
+                .font(egui::FontId::new(12.0, egui::FontFamily::Proportional))
+                .color(egui::Color32::from_rgb(220, 50, 50)));
+        }
+    }
+}
