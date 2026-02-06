@@ -392,22 +392,46 @@ impl DataDirectoryService {
         Ok(archive_path)
     }
 
+    /// Ensure a path is writable by owner (Unix only, no-op on other platforms)
+    #[cfg(unix)]
+    fn ensure_writable(path: &std::path::Path, mode_bits: u32) {
+        if let Ok(mut perms) = std::fs::metadata(path).map(|m| m.permissions()) {
+            perms.set_mode(perms.mode() | mode_bits);
+            let _ = std::fs::set_permissions(path, perms);
+        }
+    }
+
+    /// Set permissions on a copied file based on source (Unix only)
+    #[cfg(unix)]
+    fn set_copied_file_permissions(source: &std::path::Path, dest: &std::path::Path) {
+        let Ok(source_perms) = std::fs::metadata(source).map(|m| m.permissions()) else {
+            return;
+        };
+
+        // Git objects need read+write; regular files just need write
+        let extra_mode = if source.to_string_lossy().contains(".git/objects/") {
+            0o600
+        } else {
+            0o200
+        };
+
+        let new_perms = std::fs::Permissions::from_mode(source_perms.mode() | extra_mode);
+        if std::fs::set_permissions(dest, new_perms).is_err() {
+            Self::ensure_writable(dest, 0o200);
+        }
+    }
+
     /// Recursively copy directory contents
     fn copy_directory_recursive(&self, source: &std::path::Path, dest: &std::path::Path) -> Result<()> {
         info!("Creating destination directory: {}", dest.display());
         std::fs::create_dir_all(dest).map_err(|e| {
             anyhow::anyhow!("Failed to create directory {}: {}", dest.display(), e)
         })?;
-        
-        // Ensure destination directory is writable
+
+        // Ensure destination directory is writable (owner: rwx)
         #[cfg(unix)]
-        {
-            if let Ok(mut perms) = std::fs::metadata(dest).map(|m| m.permissions()) {
-                perms.set_mode(perms.mode() | 0o700); // Ensure owner can read, write, execute
-                let _ = std::fs::set_permissions(dest, perms);
-            }
-        }
-        
+        Self::ensure_writable(dest, 0o700);
+
         info!("Reading source directory: {}", source.display());
         for entry in std::fs::read_dir(source).map_err(|e| {
             anyhow::anyhow!("Failed to read source directory {}: {}", source.display(), e)
@@ -415,55 +439,32 @@ impl DataDirectoryService {
             let entry = entry.map_err(|e| anyhow::anyhow!("Error reading directory entry in {}: {}", source.display(), e))?;
             let path = entry.path();
             let dest_path = dest.join(entry.file_name());
-            
+
             info!("Processing: {} -> {}", path.display(), dest_path.display());
-            
+
             if path.is_dir() {
                 self.copy_directory_recursive(&path, &dest_path)?;
-            } else {
-                // If destination file exists and might be read-only (like git objects), make it writable first
-                if dest_path.exists() {
-                    #[cfg(unix)]
-                    {
-                        if let Ok(mut perms) = std::fs::metadata(&dest_path).map(|m| m.permissions()) {
-                            perms.set_mode(perms.mode() | 0o600); // Make sure owner can read and write
-                            let _ = std::fs::set_permissions(&dest_path, perms);
-                        }
-                    }
-                }
-                
-                // Copy the file
-                std::fs::copy(&path, &dest_path).map_err(|e| {
-                    anyhow::anyhow!("Failed to copy file {} to {}: {}", path.display(), dest_path.display(), e)
-                })?;
-                
-                // Set appropriate permissions on the copied file
-                #[cfg(unix)]
-                {
-                    if let Ok(source_perms) = std::fs::metadata(&path).map(|m| m.permissions()) {
-                        // For git objects, preserve original permissions but ensure owner can write
-                        let mut new_mode = source_perms.mode();
-                        if path.to_string_lossy().contains(".git/objects/") {
-                            new_mode |= 0o600; // Ensure git objects are readable and writable by owner
-                        } else {
-                            new_mode |= 0o200; // Ensure regular files are writable by owner
-                        }
-                        
-                        let new_perms = std::fs::Permissions::from_mode(new_mode);
-                        if let Err(_) = std::fs::set_permissions(&dest_path, new_perms) {
-                            // If setting permissions fails, at least try to make it writable
-                            if let Ok(mut perms) = std::fs::metadata(&dest_path).map(|m| m.permissions()) {
-                                perms.set_mode(perms.mode() | 0o200);
-                                let _ = std::fs::set_permissions(&dest_path, perms);
-                            }
-                        }
-                    }
-                }
-                
-                info!("Successfully copied file: {} -> {}", path.display(), dest_path.display());
+                continue;
             }
+
+            // Make existing destination writable before overwriting
+            #[cfg(unix)]
+            if dest_path.exists() {
+                Self::ensure_writable(&dest_path, 0o600);
+            }
+
+            // Copy the file
+            std::fs::copy(&path, &dest_path).map_err(|e| {
+                anyhow::anyhow!("Failed to copy file {} to {}: {}", path.display(), dest_path.display(), e)
+            })?;
+
+            // Set appropriate permissions on the copied file
+            #[cfg(unix)]
+            Self::set_copied_file_permissions(&path, &dest_path);
+
+            info!("Successfully copied file: {} -> {}", path.display(), dest_path.display());
         }
-        
+
         Ok(())
     }
 
