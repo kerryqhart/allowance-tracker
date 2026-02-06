@@ -47,7 +47,20 @@ use super::layout::*;
 
 
 impl CalendarDay {
-    
+
+    /// Draw subtle shadow behind today's cell
+    fn draw_today_shadow(&self, ui: &egui::Ui, cell_rect: egui::Rect) {
+        let shadow_rect = egui::Rect::from_min_size(
+            cell_rect.min + egui::vec2(2.0, 2.0),
+            cell_rect.size()
+        );
+        ui.painter().rect_filled(
+            shadow_rect,
+            egui::CornerRadius::same(2),
+            egui::Color32::from_rgba_unmultiplied(0, 0, 0, 30)
+        );
+    }
+
     /// Render this calendar day with configurable styling
     pub fn render(&self, ui: &mut egui::Ui, width: f32, height: f32) -> egui::Response {
         let (response, _) = self.render_with_config(ui, width, height, &RenderConfig::default());
@@ -79,15 +92,7 @@ impl CalendarDay {
         
         // Draw shadow first (behind everything else) for today's date
         if self.is_today {
-            let shadow_rect = egui::Rect::from_min_size(
-                cell_rect.min + egui::vec2(2.0, 2.0),
-                cell_rect.size()
-            );
-            ui.painter().rect_filled(
-                shadow_rect,
-                egui::CornerRadius::same(2),
-                egui::Color32::from_rgba_unmultiplied(0, 0, 0, 30) // Subtle shadow
-            );
+            self.draw_today_shadow(ui, cell_rect);
         }
         
         // Draw background for the day cell using centralized color scheme with hover effect
