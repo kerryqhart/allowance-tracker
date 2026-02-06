@@ -193,9 +193,98 @@ render_money_transaction_modal()             // ~100 lines
 
 ---
 
-## Phase 2b: calendar_renderer/rendering.rs (Future)
+## Phase 2b: calendar_renderer/rendering.rs
 
-Largest opportunity for improvement. `render_with_config()` is 266 lines. Design TBD after completing money_transaction.rs.
+### Problem
+
+`rendering.rs` is 979 lines with several methods that mix concerns and duplicate code:
+
+| Method | Lines | Issue |
+|--------|-------|-------|
+| `render_with_config()` | 266 | 5 distinct visual operations mixed together |
+| `render_calendar_chip()` | 156 | Two branches duplicate 90% of chip rendering |
+| `draw_calendar_section_with_toggle()` | 127 | Layout calculation mixed with rendering |
+
+### Solution: Three-Part Refactoring
+
+#### Part A: Extract Visual Helpers from render_with_config()
+
+Extract 4 helper methods for distinct visual operations:
+
+```rust
+/// Draw subtle shadow behind today's cell
+fn draw_today_shadow(&self, ui: &egui::Ui, cell_rect: egui::Rect)
+
+/// Draw background fill for day cell with hover/selection effects
+fn draw_day_cell_background(&self, ui: &egui::Ui, cell_rect: egui::Rect,
+                            is_hovered: bool, config: &RenderConfig) -> egui::Color32
+
+/// Draw border around day cell (handles today's double-outline, selection, normal)
+fn draw_day_cell_border(&self, ui: &egui::Ui, cell_rect: egui::Rect, config: &RenderConfig)
+
+/// Render collapse button at bottom of expanded day cell
+/// Returns true if clicked
+fn render_collapse_button(&self, ui: &mut egui::Ui, cell_rect: egui::Rect) -> bool
+```
+
+Keep content rendering (day number, balance, chips) inline - it's the core purpose.
+
+**Result:** `render_with_config()` reduced from 266 to ~80 lines.
+
+#### Part B: DRY Up render_calendar_chip()
+
+Extract common chip visual rendering to eliminate duplication between checkbox/no-checkbox branches:
+
+```rust
+/// Draw the visual elements of a chip (background, border, text)
+fn draw_chip_visual(
+    &self,
+    ui: &mut egui::Ui,
+    chip: &CalendarChip,
+    rect: egui::Rect,
+    is_hovered: bool,
+    font_family: egui::FontFamily,
+    chip_font_size: f32,
+)
+```
+
+**Result:** `render_calendar_chip()` reduced from 156 to ~80 lines.
+
+#### Part C: Separate Layout from Rendering
+
+Extract layout calculation into a struct:
+
+```rust
+/// Calculated layout dimensions for calendar rendering
+struct CalendarLayout {
+    cell_width: f32,
+    cell_height: f32,
+    calendar_width: f32,
+    card_height: f32,
+    card_rect: egui::Rect,
+    header_height: f32,
+}
+
+impl AllowanceTrackerApp {
+    /// Calculate all layout dimensions for calendar rendering
+    fn calculate_calendar_layout(&self, ui: &egui::Ui, available_rect: egui::Rect) -> CalendarLayout
+}
+```
+
+**Result:** Clear separation of "what size" vs "draw it", self-documenting layout.
+
+### Files Changed
+
+- `egui-frontend/src/ui/components/calendar_renderer/rendering.rs`
+
+### Expected Outcome
+
+- File reduced from ~979 lines to ~750 lines
+- `render_with_config()`: 266 → ~80 lines
+- `render_calendar_chip()`: 156 → ~80 lines
+- `draw_calendar_section_with_toggle()`: 127 → ~60 lines (plus ~40 line layout method)
+- Eliminated code duplication in chip rendering
+- Clear separation of concerns
 
 ---
 
