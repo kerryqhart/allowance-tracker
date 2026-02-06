@@ -36,8 +36,15 @@ use super::types::*;
 use super::styling::*;
 use super::layout::*;
 
-
-
+/// Calculated layout dimensions for calendar rendering
+struct CalendarLayout {
+    cell_width: f32,
+    cell_height: f32,
+    calendar_width: f32,
+    card_height: f32,
+    card_rect: egui::Rect,
+    header_height: f32,
+}
 
 
 
