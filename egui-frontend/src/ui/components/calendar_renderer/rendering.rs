@@ -96,6 +96,47 @@ impl CalendarDay {
         );
     }
 
+    /// Draw border around day cell (handles today's double-outline, selection, normal)
+    fn draw_day_cell_border(&self, ui: &egui::Ui, cell_rect: egui::Rect, config: &RenderConfig) {
+        if config.is_selected {
+            // Selected day gets a purple-pink border
+            ui.painter().rect_stroke(
+                cell_rect,
+                egui::CornerRadius::same(2),
+                egui::Stroke::new(2.0, egui::Color32::from_rgb(199, 112, 221)),
+                egui::StrokeKind::Outside
+            );
+        } else if self.is_today {
+            // Double outline for today: white inner + dark outer
+            ui.painter().rect_stroke(
+                cell_rect,
+                egui::CornerRadius::same(2),
+                egui::Stroke::new(2.0, egui::Color32::WHITE),
+                egui::StrokeKind::Outside
+            );
+
+            let outer_rect = egui::Rect::from_min_size(
+                cell_rect.min - egui::vec2(1.0, 1.0),
+                cell_rect.size() + egui::vec2(2.0, 2.0)
+            );
+            ui.painter().rect_stroke(
+                outer_rect,
+                egui::CornerRadius::same(2),
+                egui::Stroke::new(2.0, self.day_type.border_color(self.is_today)),
+                egui::StrokeKind::Outside
+            );
+        } else {
+            // Normal single outline
+            let border_color = self.day_type.border_color(self.is_today);
+            ui.painter().rect_stroke(
+                cell_rect,
+                egui::CornerRadius::same(2),
+                egui::Stroke::new(0.5, border_color),
+                egui::StrokeKind::Outside
+            );
+        }
+    }
+
     /// Render this calendar day with configurable styling
     pub fn render(&self, ui: &mut egui::Ui, width: f32, height: f32) -> egui::Response {
         let (response, _) = self.render_with_config(ui, width, height, &RenderConfig::default());
@@ -133,46 +174,8 @@ impl CalendarDay {
         // Draw background for the day cell
         self.draw_day_cell_background(ui, cell_rect, is_hovered, config);
         
-        // Draw border around the day cell using centralized color scheme
-        if config.is_selected {
-            // Selected day gets a purple-pink border matching the Create Goal button
-            ui.painter().rect_stroke(
-                cell_rect,
-                egui::CornerRadius::same(2),
-                egui::Stroke::new(2.0, egui::Color32::from_rgb(199, 112, 221)), // Purple-pink border for selection
-                egui::StrokeKind::Outside
-            );
-        } else if self.is_today {
-            // Double outline for today: white inner + dark outer for high visibility
-            // Draw white inner outline first
-            ui.painter().rect_stroke(
-                cell_rect,
-                egui::CornerRadius::same(2),
-                egui::Stroke::new(2.0, egui::Color32::WHITE),
-                egui::StrokeKind::Outside
-            );
-            
-            // Draw dark outer outline
-            let outer_rect = egui::Rect::from_min_size(
-                cell_rect.min - egui::vec2(1.0, 1.0),
-                cell_rect.size() + egui::vec2(2.0, 2.0)
-            );
-            ui.painter().rect_stroke(
-                outer_rect,
-                egui::CornerRadius::same(2),
-                egui::Stroke::new(2.0, self.day_type.border_color(self.is_today)),
-                egui::StrokeKind::Outside
-            );
-        } else {
-            // Normal single outline for other days
-            let border_color = self.day_type.border_color(self.is_today);
-            ui.painter().rect_stroke(
-                cell_rect,
-                egui::CornerRadius::same(2),
-                egui::Stroke::new(0.5, border_color),
-                egui::StrokeKind::Outside
-            );
-        }
+        // Draw border around the day cell
+        self.draw_day_cell_border(ui, cell_rect, config);
         
         // Draw the content within the allocated cell rectangle
         let ui_result = ui.allocate_new_ui(egui::UiBuilder::new().max_rect(cell_rect), |ui| {
