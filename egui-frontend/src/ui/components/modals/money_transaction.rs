@@ -80,63 +80,12 @@ impl AllowanceTrackerApp {
                                     self.render_money_transaction_form_content(ui, config, form_state);
 
                                     ui.add_space(30.0);
-                                    
-                                    // Buttons
-                                    ui.horizontal(|ui| {
-                                        ui.add_space(50.0);
-                                        
-                                        // Submit button
-                                        let button_enabled = form_state.is_valid && 
-                                            !form_state.description.trim().is_empty() && 
-                                            !form_state.amount.trim().is_empty();
-                                        
-                                        let button_color = if button_enabled {
-                                            config.color
-                                        } else {
-                                            egui::Color32::from_rgb(180, 180, 180) // Gray when disabled
-                                        };
-                                        
-                                        let submit_button = egui::Button::new(egui::RichText::new(config.button_text)
-                                            .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))
-                                            .color(egui::Color32::WHITE))
-                                            .fill(button_color)
-                                            .stroke(egui::Stroke::new(2.0, button_color))
-                                            .corner_radius(egui::CornerRadius::same(10))
-                                            .min_size(egui::vec2(150.0, 40.0));
-                                        
-                                        let submit_response = ui.add(submit_button);
-                                        
-                                        if submit_response.clicked() && button_enabled {
-                                            form_submitted = true;
-                                        }
-                                        
-                                        // Show tooltip for disabled button
-                                        if !button_enabled && submit_response.hovered() {
-                                            submit_response.on_hover_text("Please fix the errors above to continue");
-                                        }
-                                        
-                                        ui.add_space(30.0);
-                                        
-                                        // Cancel button
-                                        let cancel_button = egui::Button::new(egui::RichText::new("Cancel")
-                                            .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))
-                                            .color(egui::Color32::WHITE))
-                                            .fill(egui::Color32::from_rgb(120, 120, 120))
-                                            .stroke(egui::Stroke::new(2.0, egui::Color32::from_rgb(120, 120, 120)))
-                                            .corner_radius(egui::CornerRadius::same(10))
-                                            .min_size(egui::vec2(100.0, 40.0));
-                                        
-                                        if ui.add(cancel_button).clicked() {
-                                            // Clear form and close modal
-                                            form_state.clear();
-                                            self.calendar.selected_day = None;
-                                            self.calendar.active_overlay = None; // Fix: Actually close the overlay!
-                                            
-                                            // TEMPORARY: Sync compatibility field
-                                            // self.selected_day = None; // Removed
-                                        }
-                                    });
-                                    
+
+                                    // Action buttons
+                                    if self.render_money_transaction_buttons(ui, config, form_state) {
+                                        form_submitted = true;
+                                    }
+
                                     ui.add_space(15.0);
                                 });
                             });
@@ -266,5 +215,70 @@ impl AllowanceTrackerApp {
                 .font(egui::FontId::new(12.0, egui::FontFamily::Proportional))
                 .color(egui::Color32::from_rgb(220, 50, 50)));
         }
+    }
+
+    /// Render action buttons for money transaction modal
+    /// Returns true if submit was clicked with valid form
+    fn render_money_transaction_buttons(
+        &mut self,
+        ui: &mut egui::Ui,
+        config: &crate::ui::app_state::MoneyTransactionModalConfig,
+        form_state: &mut crate::ui::app_state::MoneyTransactionFormState,
+    ) -> bool {
+        let mut form_submitted = false;
+
+        ui.horizontal(|ui| {
+            ui.add_space(50.0);
+
+            // Submit button
+            let button_enabled = form_state.is_valid &&
+                !form_state.description.trim().is_empty() &&
+                !form_state.amount.trim().is_empty();
+
+            let button_color = if button_enabled {
+                config.color
+            } else {
+                egui::Color32::from_rgb(180, 180, 180) // Gray when disabled
+            };
+
+            let submit_button = egui::Button::new(egui::RichText::new(config.button_text)
+                .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))
+                .color(egui::Color32::WHITE))
+                .fill(button_color)
+                .stroke(egui::Stroke::new(2.0, button_color))
+                .corner_radius(egui::CornerRadius::same(10))
+                .min_size(egui::vec2(150.0, 40.0));
+
+            let submit_response = ui.add(submit_button);
+
+            if submit_response.clicked() && button_enabled {
+                form_submitted = true;
+            }
+
+            // Show tooltip for disabled button
+            if !button_enabled && submit_response.hovered() {
+                submit_response.on_hover_text("Please fix the errors above to continue");
+            }
+
+            ui.add_space(30.0);
+
+            // Cancel button
+            let cancel_button = egui::Button::new(egui::RichText::new("Cancel")
+                .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))
+                .color(egui::Color32::WHITE))
+                .fill(egui::Color32::from_rgb(120, 120, 120))
+                .stroke(egui::Stroke::new(2.0, egui::Color32::from_rgb(120, 120, 120)))
+                .corner_radius(egui::CornerRadius::same(10))
+                .min_size(egui::vec2(100.0, 40.0));
+
+            if ui.add(cancel_button).clicked() {
+                // Clear form and close modal
+                form_state.clear();
+                self.calendar.selected_day = None;
+                self.calendar.active_overlay = None;
+            }
+        });
+
+        form_submitted
     }
 }
