@@ -204,7 +204,7 @@ impl CalendarChip {
         
         // Determine chip type based on transaction type for regular transactions
         let chip_type = match transaction.transaction_type {
-            shared::TransactionType::Income => CalendarChipType::Income,
+            shared::TransactionType::Allowance | shared::TransactionType::OneOffIncome => CalendarChipType::Income,
             shared::TransactionType::Expense => CalendarChipType::Expense,
             shared::TransactionType::FutureAllowance => CalendarChipType::FutureAllowance,
         };
@@ -248,9 +248,9 @@ impl CalendarChip {
             description: "Click to see more transactions".to_string(),
             date: chrono::Utc::now().with_timezone(&chrono::FixedOffset::east_opt(0).unwrap()),
             balance: 0.0,
-            transaction_type: shared::TransactionType::Income, // Dummy type
+            transaction_type: shared::TransactionType::OneOffIncome, // Dummy type
         };
-        
+
         Self {
             chip_type: CalendarChipType::Ellipsis,
             transaction: dummy_transaction,

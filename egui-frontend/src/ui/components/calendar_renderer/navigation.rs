@@ -130,7 +130,7 @@ impl AllowanceTrackerApp {
                             description: goal.description.clone(), // Just the description for tooltip
                             date: completion_date,
                             balance: backend_day.balance, // Use the day's balance
-                            transaction_type: shared::TransactionType::Income, // Dummy type for goal chip
+                            transaction_type: shared::TransactionType::OneOffIncome, // Dummy type for goal chip
                         };
                         all_transactions.push(goal_transaction);
                     }

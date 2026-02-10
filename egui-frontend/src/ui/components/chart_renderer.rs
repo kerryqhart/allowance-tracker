@@ -298,7 +298,8 @@ impl AllowanceTrackerApp {
                         amount: tx.amount,
                         balance: tx.balance,
                         transaction_type: match tx.transaction_type {
-                            crate::backend::domain::models::transaction::TransactionType::Income => shared::TransactionType::Income,
+                            crate::backend::domain::models::transaction::TransactionType::Allowance => shared::TransactionType::Allowance,
+                            crate::backend::domain::models::transaction::TransactionType::OneOffIncome => shared::TransactionType::OneOffIncome,
                             crate::backend::domain::models::transaction::TransactionType::Expense => shared::TransactionType::Expense,
                             crate::backend::domain::models::transaction::TransactionType::FutureAllowance => shared::TransactionType::FutureAllowance,
                         },

@@ -35,8 +35,10 @@ pub struct Transaction {
 /// Type of transaction for rendering and business logic
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum TransactionType {
-    /// Regular income transaction (money added)
-    Income,
+    /// Automatically-issued allowances
+    Allowance,
+    /// Manually-added positive amounts (was Income)
+    OneOffIncome,
     /// Regular expense transaction (money spent)
     Expense,
     /// Future allowance transaction (not yet received)
@@ -872,7 +874,7 @@ mod tests {
             description: "Test transaction".to_string(),
             amount: 10.0,
             balance: 100.0,
-            transaction_type: TransactionType::Income,
+            transaction_type: TransactionType::OneOffIncome,
         };
 
         assert_eq!(transaction.extract_timestamp().unwrap(), 1702516122000);

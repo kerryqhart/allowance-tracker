@@ -289,7 +289,7 @@ mod tests {
             description: description.to_string(),
             amount,
             balance,
-            transaction_type: if amount >= 0.0 { TransactionType::Income } else { TransactionType::Expense },
+            transaction_type: if amount >= 0.0 { TransactionType::OneOffIncome } else { TransactionType::Expense },
         };
 
         service.transaction_repository.store_transaction(&transaction).unwrap();

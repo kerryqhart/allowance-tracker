@@ -5,7 +5,9 @@
 //! only handle presentation concerns, while all calendar computations
 //! and business rules are handled here.
 
-use shared::{Transaction, TransactionType, CalendarMonth, CalendarDay, CalendarDayType, CurrentDateResponse, CalendarFocusDate};
+use shared::{Transaction, CalendarMonth, CalendarDay, CalendarDayType, CurrentDateResponse, CalendarFocusDate};
+#[cfg(test)]
+use shared::TransactionType;
 use std::collections::HashMap;
 use chrono::{Local, Datelike};
 use std::sync::{Arc, Mutex};
@@ -490,7 +492,7 @@ mod tests {
             description: description.to_string(),
             amount,
             balance,
-            transaction_type: if amount >= 0.0 { TransactionType::Income } else { TransactionType::Expense },
+            transaction_type: if amount >= 0.0 { TransactionType::OneOffIncome } else { TransactionType::Expense },
         }
     }
 
@@ -825,7 +827,7 @@ mod tests {
             description: historical_tx1.description.clone(),
             amount: historical_tx1.amount,
             balance: historical_tx1.balance,
-            transaction_type: crate::backend::domain::models::transaction::TransactionType::Income,
+            transaction_type: crate::backend::domain::models::transaction::TransactionType::OneOffIncome,
         };
         let historical_domain_tx2 = crate::backend::domain::models::transaction::Transaction {
             id: historical_tx2.id.clone(),
@@ -834,7 +836,7 @@ mod tests {
             description: historical_tx2.description.clone(),
             amount: historical_tx2.amount,
             balance: historical_tx2.balance,
-            transaction_type: crate::backend::domain::models::transaction::TransactionType::Income,
+            transaction_type: crate::backend::domain::models::transaction::TransactionType::OneOffIncome,
         };
         transaction_repository.store_transaction(&historical_domain_tx1).unwrap();
         transaction_repository.store_transaction(&historical_domain_tx2).unwrap();
@@ -894,7 +896,7 @@ mod tests {
             description: "Historical allowance".to_string(),
             amount: 15.0,
             balance: 15.0,
-            transaction_type: crate::backend::domain::models::transaction::TransactionType::Income,
+            transaction_type: crate::backend::domain::models::transaction::TransactionType::OneOffIncome,
         };
         transaction_repository.store_transaction(&historical_domain_tx).unwrap();
 
@@ -967,7 +969,7 @@ mod tests {
                     amount: transaction.amount,
                     balance: transaction.balance,
                     transaction_type: if transaction.amount > 0.0 { 
-                        crate::backend::domain::models::transaction::TransactionType::Income 
+                        crate::backend::domain::models::transaction::TransactionType::OneOffIncome 
                     } else { 
                         crate::backend::domain::models::transaction::TransactionType::Expense 
                     },
@@ -1071,7 +1073,7 @@ mod tests {
                     amount: transaction.amount,
                     balance: transaction.balance,
                     transaction_type: if transaction.amount > 0.0 { 
-                        crate::backend::domain::models::transaction::TransactionType::Income 
+                        crate::backend::domain::models::transaction::TransactionType::OneOffIncome 
                     } else { 
                         crate::backend::domain::models::transaction::TransactionType::Expense 
                     },
@@ -1165,7 +1167,7 @@ mod tests {
                     amount: transaction.amount,
                     balance: transaction.balance,
                     transaction_type: if transaction.amount > 0.0 { 
-                        crate::backend::domain::models::transaction::TransactionType::Income 
+                        crate::backend::domain::models::transaction::TransactionType::OneOffIncome 
                     } else { 
                         crate::backend::domain::models::transaction::TransactionType::Expense 
                     },
@@ -1248,7 +1250,7 @@ mod tests {
                     amount: transaction.amount,
                     balance: transaction.balance,
                     transaction_type: if transaction.amount > 0.0 { 
-                        crate::backend::domain::models::transaction::TransactionType::Income 
+                        crate::backend::domain::models::transaction::TransactionType::OneOffIncome 
                     } else { 
                         crate::backend::domain::models::transaction::TransactionType::Expense 
                     },

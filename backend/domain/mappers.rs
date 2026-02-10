@@ -15,7 +15,8 @@ pub fn transaction_to_dto(domain_tx: DomainTransaction) -> Transaction {
         amount: domain_tx.amount,
         balance: domain_tx.balance,
         transaction_type: match domain_tx.transaction_type {
-            DomainTransactionType::Income => TransactionType::Income,
+            DomainTransactionType::Allowance => TransactionType::Allowance,
+            DomainTransactionType::OneOffIncome => TransactionType::OneOffIncome,
             DomainTransactionType::Expense => TransactionType::Expense,
             DomainTransactionType::FutureAllowance => TransactionType::FutureAllowance,
         },

@@ -5,7 +5,8 @@ use chrono::{DateTime, FixedOffset};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum TransactionType {
-    Income,
+    Allowance,
+    OneOffIncome,
     Expense,
     FutureAllowance,
 }

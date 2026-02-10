@@ -52,18 +52,20 @@ impl TransactionRepository {
             let parsed_date = self.parse_date_string(date_str)?;
             
             // Parse CSV record into Transaction
+            let amount = record.get(4).unwrap_or("0").parse::<f64>().unwrap_or(0.0);
+            let description = record.get(3).unwrap_or("");
             let transaction = DomainTransaction {
                 id: record.get(0).unwrap_or("").to_string(),
                 child_id: record.get(1).unwrap_or("").to_string(),
                 date: parsed_date,  // Now uses parsed DateTime object
-                description: record.get(3).unwrap_or("").to_string(),
-                amount: record.get(4).unwrap_or("0").parse::<f64>().unwrap_or(0.0),
+                description: description.to_string(),
+                amount,
                 balance: record.get(5).unwrap_or("0").parse::<f64>().unwrap_or(0.0),
-                transaction_type: if record.get(4).unwrap_or("0").parse::<f64>().unwrap_or(0.0) >= 0.0 { 
-                    DomainTransactionType::Income 
-                } else { 
-                    DomainTransactionType::Expense 
-                },
+                transaction_type: Self::parse_transaction_type(
+                    record.get(6),  // type column (may be None for old data)
+                    description,    // description for fallback
+                    amount,         // amount for fallback
+                ),
             };
             
             transactions.push(transaction);
@@ -72,6 +74,34 @@ impl TransactionRepository {
         Ok(transactions)
     }
     
+    /// Parse transaction type from CSV, with backward compatibility for old data
+    fn parse_transaction_type(
+        type_field: Option<&str>,
+        description: &str,
+        amount: f64,
+    ) -> DomainTransactionType {
+        // If type column exists, use it
+        if let Some(type_str) = type_field {
+            match type_str.to_lowercase().as_str() {
+                "allowance" => return DomainTransactionType::Allowance,
+                "income" | "oneoffincome" => return DomainTransactionType::OneOffIncome,
+                "expense" => return DomainTransactionType::Expense,
+                "future_allowance" | "futureallowance" => return DomainTransactionType::FutureAllowance,
+                _ => {} // Fall through to derivation
+            }
+        }
+
+        // Backward compatibility: derive from description/amount
+        let desc_lower = description.to_lowercase();
+        if desc_lower.contains("allowance") || desc_lower.contains("weekly") {
+            DomainTransactionType::Allowance
+        } else if amount >= 0.0 {
+            DomainTransactionType::OneOffIncome
+        } else {
+            DomainTransactionType::Expense
+        }
+    }
+
     /// NEW: Parse date string into DateTime object - this is where the CSV layer handles date parsing
     fn parse_date_string(&self, date_str: &str) -> Result<chrono::DateTime<chrono::FixedOffset>> {
         use chrono::{DateTime, FixedOffset, NaiveDate};
@@ -108,11 +138,17 @@ impl TransactionRepository {
         let writer = BufWriter::new(file);
         let mut csv_writer = Writer::from_writer(writer);
 
-        // Write header
-        csv_writer.write_record(&["id", "child_id", "date", "description", "amount", "balance"])?;
+        // Write header - includes "type" column for transaction type
+        csv_writer.write_record(&["id", "child_id", "date", "description", "amount", "balance", "type"])?;
 
         // Write transactions
         for transaction in transactions {
+            let type_str = match transaction.transaction_type {
+                DomainTransactionType::Allowance => "allowance",
+                DomainTransactionType::OneOffIncome => "income",
+                DomainTransactionType::Expense => "expense",
+                DomainTransactionType::FutureAllowance => "future_allowance",
+            };
             csv_writer.write_record(&[
                 &transaction.id,
                 &transaction.child_id,
@@ -120,6 +156,7 @@ impl TransactionRepository {
                 &transaction.description,
                 &transaction.amount.to_string(),
                 &transaction.balance.to_string(),
+                type_str,
             ])?;
         }
 
@@ -546,7 +583,7 @@ mod tests {
             description: "Test transaction".to_string(),
             amount: 25.50,
             balance: 25.50,
-            transaction_type: DomainTransactionType::Income,
+            transaction_type: DomainTransactionType::OneOffIncome,
         };
         
         // Store transaction
@@ -577,7 +614,7 @@ mod tests {
                 description: format!("Transaction {}", i),
                 amount: i as f64 * 10.0,
                 balance: (i * (i + 1) / 2) as f64 * 10.0, // Cumulative sum
-                transaction_type: DomainTransactionType::Income,
+                transaction_type: DomainTransactionType::OneOffIncome,
             };
             
             repo.store_transaction(&transaction)?;
@@ -608,7 +645,7 @@ mod tests {
             description: "Test transaction".to_string(),
             amount: 10.0,
             balance: 10.0,
-            transaction_type: DomainTransactionType::Income,
+            transaction_type: DomainTransactionType::OneOffIncome,
         };
 
         // Store and verify
@@ -665,7 +702,7 @@ mod tests {
             description: "Test".to_string(),
             amount: 10.0,
             balance: 10.0,
-            transaction_type: DomainTransactionType::Income,
+            transaction_type: DomainTransactionType::OneOffIncome,
         };
         
         // This test checks that the date field is NOT a string
@@ -698,7 +735,7 @@ mod tests {
             description: "Test isolation".to_string(),
             amount: 50.0,
             balance: 50.0,
-            transaction_type: DomainTransactionType::Income,
+            transaction_type: DomainTransactionType::OneOffIncome,
         };
         
         repo.store_transaction(&transaction)?;
@@ -743,7 +780,7 @@ mod tests {
                 description: format!("Test {}", description),
                 amount: 10.0,
                 balance: 10.0,
-                transaction_type: DomainTransactionType::Income,
+                transaction_type: DomainTransactionType::OneOffIncome,
             };
             
             repo.store_transaction(&transaction)?;
@@ -784,7 +821,7 @@ mod tests {
                 description: format!("Test invalid date: {}", invalid_date),
                 amount: 10.0,
                 balance: 10.0,
-                transaction_type: DomainTransactionType::Income,
+                transaction_type: DomainTransactionType::OneOffIncome,
             };
             
             // Store should either succeed with normalized date or fail gracefully
@@ -824,7 +861,7 @@ mod tests {
             description: "Morning transaction".to_string(),
             amount: 1.00,
             balance: 17.62,
-            transaction_type: DomainTransactionType::Income,
+            transaction_type: DomainTransactionType::OneOffIncome,
         };
         
         let tx2 = DomainTransaction {
@@ -834,7 +871,7 @@ mod tests {
             description: "Afternoon transaction".to_string(),
             amount: 2.00,
             balance: 19.62,
-            transaction_type: DomainTransactionType::Income,
+            transaction_type: DomainTransactionType::OneOffIncome,
         };
         
         // Store transactions

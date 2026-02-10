@@ -14,7 +14,7 @@
 /// Transaction type for money modal configuration
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TransactionType {
-    Income,
+    OneOffIncome,
     Expense,
 }
 
@@ -78,7 +78,7 @@ impl MoneyTransactionModalConfig {
             description_placeholder: "What is this money for?",
             amount_placeholder: "0.00",
             max_description_length: 70,
-            transaction_type: TransactionType::Income,
+            transaction_type: TransactionType::OneOffIncome,
         }
     }
     

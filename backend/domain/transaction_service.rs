@@ -134,7 +134,7 @@ impl TransactionService {
             amount,
             balance: transaction_balance,
             transaction_type: if amount >= 0.0 {
-                DomainTransactionType::Income
+                DomainTransactionType::OneOffIncome
             } else {
                 DomainTransactionType::Expense
             },
@@ -424,7 +424,7 @@ impl TransactionService {
         amount: f64,
     ) -> Result<DomainTransaction> {
         info!("ALLOWANCE DEBUG: create_allowance_transaction() called for child {}, date {}, amount ${:.2}", child_id, date, amount);
-        
+
         // Convert NaiveDate to DateTime at noon Eastern time
         let allowance_datetime = date.and_hms_opt(12, 0, 0).unwrap();
         let utc_datetime = chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(
@@ -435,18 +435,41 @@ impl TransactionService {
         let eastern_datetime = utc_datetime.with_timezone(&eastern_offset);
         info!("ALLOWANCE DEBUG: Transaction date: {}", eastern_datetime.to_rfc3339());
 
-        let result = self.create_transaction_internal(
-            child_id,
-            eastern_datetime,
-            "Weekly allowance".to_string(),
-            amount,
-        );
+        let now_millis = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64;
+        let transaction_id = DomainTransaction::generate_id(amount, now_millis);
 
-        if let Ok(ref transaction) = result {
-            info!("ALLOWANCE DEBUG: create_allowance_transaction() completed for {}", transaction.id);
+        let transaction_balance = self
+            .balance_service
+            .calculate_balance_for_new_transaction(
+                child_id,
+                &eastern_datetime.to_rfc3339(),
+                amount,
+            )?;
+
+        let domain_transaction = DomainTransaction {
+            id: transaction_id,
+            child_id: child_id.to_string(),
+            date: eastern_datetime,
+            description: "Weekly allowance".to_string(),
+            amount,
+            balance: transaction_balance,
+            transaction_type: DomainTransactionType::Allowance,
+        };
+
+        self.transaction_repository
+            .store_transaction(&domain_transaction)?;
+
+        if self
+            .balance_service
+            .requires_balance_recalculation(child_id, &eastern_datetime.to_rfc3339())?
+        {
+            self.balance_service
+                .recalculate_balances_from_date(child_id, &eastern_datetime.to_rfc3339())?;
         }
 
-        result
+        info!("ALLOWANCE DEBUG: create_allowance_transaction() completed for {}", domain_transaction.id);
+
+        Ok(domain_transaction)
     }
 
     pub fn get_active_child(&self) -> Result<DomainChild> {
@@ -525,7 +548,7 @@ mod tests {
         assert_eq!(transaction.amount, 10.0);
         assert_eq!(transaction.description, "Test transaction");
         assert_eq!(transaction.balance, 10.0);
-        assert_eq!(transaction.transaction_type, DomainTransactionType::Income);
+        assert_eq!(transaction.transaction_type, DomainTransactionType::OneOffIncome);
     }
 
     #[test]

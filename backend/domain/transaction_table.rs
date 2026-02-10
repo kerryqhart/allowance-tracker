@@ -313,7 +313,7 @@ mod tests {
             description: description.to_string(),
             amount,
             balance,
-            transaction_type: if amount >= 0.0 { shared::TransactionType::Income } else { shared::TransactionType::Expense },
+            transaction_type: if amount >= 0.0 { shared::TransactionType::OneOffIncome } else { shared::TransactionType::Expense },
         }
     }
 

@@ -39,6 +39,24 @@ impl AllowanceService {
         }
     }
 
+    /// Calculate allowance amount for a given date.
+    /// Handles both fixed amount and age-based amount modes.
+    fn calculate_allowance_amount(
+        config: &AllowanceConfig,
+        child_birthdate: Option<NaiveDate>,
+        target_date: NaiveDate,
+    ) -> f64 {
+        if config.use_age_based_amount {
+            if let Some(birthdate) = child_birthdate {
+                age_on_date(birthdate, target_date) as f64
+            } else {
+                config.amount
+            }
+        } else {
+            config.amount
+        }
+    }
+
     /// Get allowance configuration for a child
     pub fn get_allowance_config(
         &self,
@@ -269,19 +287,7 @@ impl AllowanceService {
             // Check if this date is in the future and matches the allowance day of week
             if current > current_date {
                 if day_of_week == config.day_of_week {
-                    // Calculate the amount based on mode
-                    let amount = if config.use_age_based_amount {
-                        if let Some(birthdate) = child_birthdate {
-                            let age = age_on_date(birthdate, current);
-                            info!("🔮 ALLOWANCE DEBUG: Age-based amount for {} on {}: age {} = ${}",
-                                 child_id, current, age, age);
-                            age as f64
-                        } else {
-                            config.amount
-                        }
-                    } else {
-                        config.amount
-                    };
+                    let amount = Self::calculate_allowance_amount(&config, child_birthdate, current);
 
                     info!("🔮 ALLOWANCE DEBUG: CREATING future allowance for {} on {} - ${:.2}", child_id, current, amount);
 
@@ -359,6 +365,23 @@ impl AllowanceService {
             }
         };
 
+        // If using age-based amount, fetch child's birthdate
+        let child_birthdate = if config.use_age_based_amount {
+            let get_child_command = GetChildCommand { child_id: child_id.to_string() };
+            match self.child_service.get_child(get_child_command)? {
+                result if result.child.is_some() => {
+                    let child = result.child.unwrap();
+                    Some(child.birthdate)
+                }
+                _ => {
+                    warn!("Age-based amount enabled but child not found: {}", child_id);
+                    return Ok(Vec::new());
+                }
+            }
+        } else {
+            None
+        };
+
         let mut pending_dates = Vec::new();
         let current_date = Local::now().date_naive();
 
@@ -366,16 +389,17 @@ impl AllowanceService {
         let mut current = from_date;
         while current <= to_date && current <= current_date {
             let day_of_week = current.weekday().num_days_from_sunday() as u8;
-            
+
             if day_of_week == config.day_of_week {
                 // This is an allowance day - check if allowance already exists
                 if !self.has_allowance_for_date(&config.child_id, current)? {
-                    pending_dates.push((current, config.amount));
-                    info!("Found pending allowance for {} on {} (${:.2})", 
-                          child_id, current, config.amount);
+                    let amount = Self::calculate_allowance_amount(&config, child_birthdate, current);
+                    pending_dates.push((current, amount));
+                    info!("Found pending allowance for {} on {} (${:.2})",
+                          child_id, current, amount);
                 }
             }
-            
+
             // Move to next day
             current = current.succ_opt().unwrap_or(current);
             if current == current.succ_opt().unwrap_or(current) {
@@ -390,49 +414,28 @@ impl AllowanceService {
         Ok(pending_dates)
     }
 
-    /// Check if an allowance already exists for a specific date
-    /// This is used to prevent duplicate allowances
+    /// Check if an allowance already exists for a specific date.
+    /// Uses transaction_type == Allowance for reliable detection.
     fn has_allowance_for_date(&self, child_id: &str, date: NaiveDate) -> Result<bool> {
         info!("ALLOWANCE DEBUG: has_allowance_for_date() called for child {} on date {}", child_id, date);
-        
-        // Get all transactions for the child
+
         let transactions = self.transaction_repository.list_transactions(child_id, None, None)?;
-        info!("ALLOWANCE DEBUG: Retrieved {} total transactions for allowance check", transactions.len());
-        
-        // Format the date as string prefix (YYYY-MM-DD) to match
-        let date_prefix = date.format("%Y-%m-%d").to_string();
-        info!("ALLOWANCE DEBUG: Looking for allowances on date prefix: {}", date_prefix);
-        
-        // Check if any transaction for this date looks like an allowance
-        // We'll be more conservative: look for any positive income on allowance day
-        let mut allowance_count = 0;
-        for transaction in transactions {
-            // Format the transaction date to string for comparison
-            let transaction_date_str = transaction.date.format("%Y-%m-%d").to_string();
-            
-            // Check if transaction is on this date and has positive amount (indicating income/allowance)
-            if transaction_date_str.starts_with(&date_prefix) && transaction.amount > 0.0 {
-                info!("ALLOWANCE DEBUG: Found positive transaction on target date: {} (${:.2}) - {}", 
-                      transaction.id, transaction.amount, transaction.description);
-                // Check if the description suggests it's an allowance
-                let desc_lower = transaction.description.to_lowercase();
-                if desc_lower.contains("allowance") || desc_lower.contains("weekly") {
-                    allowance_count += 1;
-                    info!("ALLOWANCE DEBUG: Found existing allowance {} for {} on {}: {}", 
-                          allowance_count, child_id, date, transaction.description);
-                } else {
-                    info!("ALLOWANCE DEBUG: Positive transaction but not an allowance: {}", transaction.description);
-                }
-            } else if transaction_date_str.starts_with(&date_prefix) {
-                info!("ALLOWANCE DEBUG: Found transaction on target date but not positive: {} (${:.2}) - {}", 
-                      transaction.id, transaction.amount, transaction.description);
+        let date_str = date.format("%Y-%m-%d").to_string();
+
+        let has_allowance = transactions.iter().any(|t| {
+            let tx_date_str = t.date.format("%Y-%m-%d").to_string();
+            let is_allowance_type = t.transaction_type == DomainTransactionType::Allowance;
+            let is_same_date = tx_date_str == date_str;
+
+            if is_same_date {
+                info!("ALLOWANCE DEBUG: Found transaction on {}: type={:?}, desc={}",
+                      date, t.transaction_type, t.description);
             }
-        }
-        
-        let has_allowance = allowance_count > 0;
-        info!("ALLOWANCE DEBUG: has_allowance_for_date() result: {} (found {} allowances)", has_allowance, allowance_count);
-        
-        // Return true if we found at least one allowance for this date
+
+            is_allowance_type && is_same_date
+        });
+
+        info!("ALLOWANCE DEBUG: has_allowance_for_date() result: {}", has_allowance);
         Ok(has_allowance)
     }
 
@@ -894,7 +897,7 @@ mod tests {
             description: "Weekly allowance".to_string(),
             amount: 5.0,
             balance: 5.0,
-            transaction_type: DomainTransactionType::Income,
+            transaction_type: DomainTransactionType::Allowance,
         };
 
         // Store the transaction
@@ -1023,7 +1026,7 @@ mod tests {
             description: "Weekly allowance".to_string(),
             amount: 10.0,
             balance: 10.0,
-            transaction_type: DomainTransactionType::Income,
+            transaction_type: DomainTransactionType::Allowance,
         };
 
         service
@@ -1061,7 +1064,7 @@ mod tests {
             description: "Weekly allowance".to_string(),
             amount: 10.0,
             balance: 10.0,
-            transaction_type: DomainTransactionType::Income,
+            transaction_type: DomainTransactionType::Allowance,
         };
 
         service
@@ -1077,7 +1080,7 @@ mod tests {
             description: "Weekly allowance".to_string(),
             amount: 10.0,
             balance: 20.0,
-            transaction_type: DomainTransactionType::Income,
+            transaction_type: DomainTransactionType::Allowance,
         };
 
         service
@@ -1147,7 +1150,7 @@ mod tests {
             description: "Weekly allowance".to_string(),
             amount: 10.0,
             balance: 10.0,
-            transaction_type: DomainTransactionType::Income,
+            transaction_type: DomainTransactionType::Allowance,
         };
 
         service
@@ -1185,7 +1188,7 @@ mod tests {
             description: "Weekly allowance".to_string(),
             amount: 10.0,
             balance: 10.0,
-            transaction_type: DomainTransactionType::Income,
+            transaction_type: DomainTransactionType::Allowance,
         };
 
         service
@@ -1207,7 +1210,7 @@ mod tests {
             description: "Monthly allowance".to_string(),
             amount: 20.0,
             balance: 30.0,
-            transaction_type: DomainTransactionType::Income,
+            transaction_type: DomainTransactionType::Allowance,
         };
 
         service
@@ -1229,7 +1232,7 @@ mod tests {
             description: "Birthday gift from grandma".to_string(),
             amount: 50.0,
             balance: 80.0,
-            transaction_type: DomainTransactionType::Income,
+            transaction_type: DomainTransactionType::OneOffIncome,
         };
 
         service
