@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "shared",
     "egui-frontend",
+    "sync-service",
 ]
 
 [profile.dev]
