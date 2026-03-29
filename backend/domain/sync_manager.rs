@@ -1,0 +1,468 @@
+use anyhow::Result;
+use shared::sync::*;
+use crate::backend::storage::remote::RemoteStorage;
+use std::sync::Arc;
+use std::collections::HashMap;
+
+/// Messages from the sync background thread to the UI.
+#[derive(Debug, Clone)]
+pub enum SyncMessage {
+    StatusChanged(SyncStatus),
+    EntitiesUpdated { child_id: String, entity_type: EntityType, count: usize },
+    ConflictDetected(SyncConflict),
+    PushFailed { event_id: String, error: String },
+    Error(String),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum SyncStatus {
+    Disabled,
+    Idle,
+    Syncing,
+    Error(String),
+    HasConflicts(usize),
+}
+
+/// Core sync logic. Not tied to threading — can be tested synchronously.
+pub struct SyncEngine {
+    remote: Arc<dyn RemoteStorage>,
+    /// Outbound events that haven't been pushed yet (or failed to push).
+    pending_push: Vec<SyncEvent>,
+    /// Pending conflicts awaiting user resolution.
+    conflicts: Vec<SyncConflict>,
+    /// Per-child watermarks (local cache of what we've processed).
+    watermarks: HashMap<String, u64>,
+}
+
+impl SyncEngine {
+    pub fn new(remote: Arc<dyn RemoteStorage>) -> Self {
+        Self {
+            remote,
+            pending_push: Vec::new(),
+            conflicts: Vec::new(),
+            watermarks: HashMap::new(),
+        }
+    }
+
+    /// Enqueue a local event for pushing to remote.
+    pub fn enqueue_event(&mut self, event: SyncEvent) {
+        self.pending_push.push(event);
+    }
+
+    /// Push all pending events to remote. Returns events that failed.
+    pub fn push_pending(&mut self) -> Vec<(SyncEvent, String)> {
+        let events = std::mem::take(&mut self.pending_push);
+        if events.is_empty() {
+            return Vec::new();
+        }
+
+        match self.remote.push_events(&events) {
+            Ok(_sequences) => Vec::new(),
+            Err(e) => {
+                let error_msg = e.to_string();
+                // All events failed — put them back for retry
+                let failures: Vec<(SyncEvent, String)> = events
+                    .into_iter()
+                    .map(|ev| (ev, error_msg.clone()))
+                    .collect();
+                failures
+            }
+        }
+    }
+
+    /// Poll remote for new events for a child. Returns events to apply locally
+    /// and any conflicts detected.
+    pub fn poll_child(&mut self, child_id: &str) -> Result<PollResult> {
+        // Don't poll if there are pending conflicts for this child
+        if self.conflicts.iter().any(|c| c.child_id == child_id && c.status == ConflictStatus::Pending) {
+            return Ok(PollResult { events_to_apply: Vec::new(), new_conflicts: Vec::new() });
+        }
+
+        let watermark = *self.watermarks.get(child_id).unwrap_or(&0);
+        let remote_events = self.remote.get_events_since(child_id, watermark)?;
+
+        if remote_events.is_empty() {
+            return Ok(PollResult { events_to_apply: Vec::new(), new_conflicts: Vec::new() });
+        }
+
+        let mut to_apply = Vec::new();
+        let mut new_conflicts = Vec::new();
+
+        for remote_event in remote_events {
+            if remote_event.source == SyncSource::Local {
+                // This event originated from us — skip, we already have it locally
+                if let Some(seq) = remote_event.sequence {
+                    self.watermarks.insert(child_id.to_string(), seq);
+                }
+                continue;
+            }
+
+            // Check for conflict: do we have a pending outbound event for the same entity?
+            let conflicting_local = self.pending_push.iter().find(|local| {
+                local.entity_type == remote_event.entity_type
+                    && local.entity_id == remote_event.entity_id
+                    && local.child_id == child_id
+            });
+
+            if let Some(local_event) = conflicting_local {
+                // Both sides deleted? Auto-resolve.
+                if local_event.action == SyncAction::Deleted && remote_event.action == SyncAction::Deleted {
+                    if let Some(seq) = remote_event.sequence {
+                        self.watermarks.insert(child_id.to_string(), seq);
+                    }
+                    continue;
+                }
+
+                let conflict = SyncConflict {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    entity_type: remote_event.entity_type.clone(),
+                    entity_id: remote_event.entity_id.clone(),
+                    child_id: child_id.to_string(),
+                    local_event: local_event.clone(),
+                    remote_event: remote_event.clone(),
+                    status: ConflictStatus::Pending,
+                };
+                new_conflicts.push(conflict.clone());
+                self.conflicts.push(conflict);
+            } else {
+                to_apply.push(remote_event.clone());
+                if let Some(seq) = remote_event.sequence {
+                    self.watermarks.insert(child_id.to_string(), seq);
+                }
+            }
+        }
+
+        Ok(PollResult { events_to_apply: to_apply, new_conflicts })
+    }
+
+    /// Get all pending conflicts.
+    pub fn pending_conflicts(&self) -> &[SyncConflict] {
+        &self.conflicts
+    }
+
+    /// Resolve a conflict. Returns the resolution event to push to remote (if Keep Local or Merged).
+    pub fn resolve_conflict(&mut self, conflict_id: &str, resolution: ConflictStatus) -> Option<SyncEvent> {
+        if let Some(conflict) = self.conflicts.iter_mut().find(|c| c.id == conflict_id) {
+            conflict.status = resolution.clone();
+
+            match resolution {
+                ConflictStatus::ResolvedKeepLocal => {
+                    // Advance watermark past the remote event we're discarding
+                    if let Some(seq) = conflict.remote_event.sequence {
+                        self.watermarks.insert(conflict.child_id.clone(), seq);
+                    }
+                    // Push local state as the winner
+                    Some(SyncEvent::new(
+                        conflict.entity_type.clone(),
+                        conflict.entity_id.clone(),
+                        conflict.child_id.clone(),
+                        conflict.local_event.action.clone(),
+                        SyncSource::Local,
+                    ))
+                }
+                ConflictStatus::ResolvedKeepRemote => {
+                    // Advance watermark
+                    if let Some(seq) = conflict.remote_event.sequence {
+                        self.watermarks.insert(conflict.child_id.clone(), seq);
+                    }
+                    // Remove the local pending event for this entity
+                    self.pending_push.retain(|e| {
+                        !(e.entity_type == conflict.entity_type
+                            && e.entity_id == conflict.entity_id
+                            && e.child_id == conflict.child_id)
+                    });
+                    None // No event to push — remote already has the right state
+                }
+                ConflictStatus::ResolvedMerged => {
+                    if let Some(seq) = conflict.remote_event.sequence {
+                        self.watermarks.insert(conflict.child_id.clone(), seq);
+                    }
+                    // Merged version will be pushed as a new Updated event
+                    Some(SyncEvent::new(
+                        conflict.entity_type.clone(),
+                        conflict.entity_id.clone(),
+                        conflict.child_id.clone(),
+                        SyncAction::Updated,
+                        SyncSource::Local,
+                    ))
+                }
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
+
+    /// Load watermarks from persisted state.
+    pub fn set_watermark(&mut self, child_id: &str, watermark: u64) {
+        self.watermarks.insert(child_id.to_string(), watermark);
+    }
+
+    /// Get the current watermark for a child.
+    pub fn get_watermark(&self, child_id: &str) -> u64 {
+        *self.watermarks.get(child_id).unwrap_or(&0)
+    }
+
+    /// Get the number of pending outbound events.
+    pub fn pending_push_count(&self) -> usize {
+        self.pending_push.len()
+    }
+}
+
+pub struct PollResult {
+    pub events_to_apply: Vec<SyncEvent>,
+    pub new_conflicts: Vec<SyncConflict>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backend::storage::mock_remote::MockRemoteClient;
+
+    fn make_engine() -> SyncEngine {
+        let mock = Arc::new(MockRemoteClient::new());
+        mock.initialize_child("child1").unwrap();
+        SyncEngine::new(mock)
+    }
+
+    fn make_engine_with_mock() -> (SyncEngine, Arc<MockRemoteClient>) {
+        let mock = Arc::new(MockRemoteClient::new());
+        mock.initialize_child("child1").unwrap();
+        let engine = SyncEngine::new(mock.clone());
+        (engine, mock)
+    }
+
+    #[test]
+    fn test_enqueue_and_push() {
+        let mut engine = make_engine();
+
+        let event = SyncEvent::new(
+            EntityType::Transaction, "tx1".to_string(), "child1".to_string(),
+            SyncAction::Created, SyncSource::Local,
+        );
+        engine.enqueue_event(event);
+        assert_eq!(engine.pending_push_count(), 1);
+
+        let failures = engine.push_pending();
+        assert!(failures.is_empty());
+        assert_eq!(engine.pending_push_count(), 0);
+    }
+
+    #[test]
+    fn test_push_failure_returns_events() {
+        let mock = Arc::new(MockRemoteClient::new());
+        mock.force_error("network error");
+        let mut engine = SyncEngine::new(mock);
+
+        let event = SyncEvent::new(
+            EntityType::Transaction, "tx1".to_string(), "child1".to_string(),
+            SyncAction::Created, SyncSource::Local,
+        );
+        engine.enqueue_event(event);
+
+        let failures = engine.push_pending();
+        assert_eq!(failures.len(), 1);
+        assert!(failures[0].1.contains("network error"));
+    }
+
+    #[test]
+    fn test_poll_applies_remote_events() {
+        let (mut engine, mock) = make_engine_with_mock();
+
+        // Simulate a remote event
+        let remote_event = SyncEvent::new(
+            EntityType::Transaction, "tx_remote".to_string(), "child1".to_string(),
+            SyncAction::Created, SyncSource::Remote,
+        );
+        mock.push_events(&[remote_event]).unwrap();
+
+        let result = engine.poll_child("child1").unwrap();
+        assert_eq!(result.events_to_apply.len(), 1);
+        assert_eq!(result.events_to_apply[0].entity_id, "tx_remote");
+        assert!(result.new_conflicts.is_empty());
+        assert_eq!(engine.get_watermark("child1"), 1);
+    }
+
+    #[test]
+    fn test_poll_skips_local_source_events() {
+        let (mut engine, mock) = make_engine_with_mock();
+
+        let local_event = SyncEvent::new(
+            EntityType::Transaction, "tx_local".to_string(), "child1".to_string(),
+            SyncAction::Created, SyncSource::Local,
+        );
+        mock.push_events(&[local_event]).unwrap();
+
+        let result = engine.poll_child("child1").unwrap();
+        assert!(result.events_to_apply.is_empty());
+        assert_eq!(engine.get_watermark("child1"), 1);
+    }
+
+    #[test]
+    fn test_conflict_detected() {
+        let (mut engine, mock) = make_engine_with_mock();
+
+        // Local has a pending event for tx1
+        let local_event = SyncEvent::new(
+            EntityType::Transaction, "tx1".to_string(), "child1".to_string(),
+            SyncAction::Updated, SyncSource::Local,
+        );
+        engine.enqueue_event(local_event);
+
+        // Remote also modified tx1
+        let remote_event = SyncEvent::new(
+            EntityType::Transaction, "tx1".to_string(), "child1".to_string(),
+            SyncAction::Updated, SyncSource::Remote,
+        );
+        mock.push_events(&[remote_event]).unwrap();
+
+        let result = engine.poll_child("child1").unwrap();
+        assert!(result.events_to_apply.is_empty());
+        assert_eq!(result.new_conflicts.len(), 1);
+        assert_eq!(engine.pending_conflicts().len(), 1);
+    }
+
+    #[test]
+    fn test_conflict_both_deleted_auto_resolves() {
+        let (mut engine, mock) = make_engine_with_mock();
+
+        let local_event = SyncEvent::new(
+            EntityType::Transaction, "tx1".to_string(), "child1".to_string(),
+            SyncAction::Deleted, SyncSource::Local,
+        );
+        engine.enqueue_event(local_event);
+
+        let remote_event = SyncEvent::new(
+            EntityType::Transaction, "tx1".to_string(), "child1".to_string(),
+            SyncAction::Deleted, SyncSource::Remote,
+        );
+        mock.push_events(&[remote_event]).unwrap();
+
+        let result = engine.poll_child("child1").unwrap();
+        assert!(result.events_to_apply.is_empty());
+        assert!(result.new_conflicts.is_empty());
+    }
+
+    #[test]
+    fn test_conflict_blocks_further_polls() {
+        let (mut engine, mock) = make_engine_with_mock();
+
+        // Create a conflict
+        let local_event = SyncEvent::new(
+            EntityType::Transaction, "tx1".to_string(), "child1".to_string(),
+            SyncAction::Updated, SyncSource::Local,
+        );
+        engine.enqueue_event(local_event);
+
+        let remote_event = SyncEvent::new(
+            EntityType::Transaction, "tx1".to_string(), "child1".to_string(),
+            SyncAction::Updated, SyncSource::Remote,
+        );
+        mock.push_events(&[remote_event]).unwrap();
+        engine.poll_child("child1").unwrap();
+
+        // Push another remote event
+        let remote_event2 = SyncEvent::new(
+            EntityType::Transaction, "tx2".to_string(), "child1".to_string(),
+            SyncAction::Created, SyncSource::Remote,
+        );
+        mock.push_events(&[remote_event2]).unwrap();
+
+        // Poll should return empty because of pending conflict
+        let result = engine.poll_child("child1").unwrap();
+        assert!(result.events_to_apply.is_empty());
+    }
+
+    #[test]
+    fn test_resolve_conflict_keep_local() {
+        let (mut engine, mock) = make_engine_with_mock();
+
+        let local_event = SyncEvent::new(
+            EntityType::Transaction, "tx1".to_string(), "child1".to_string(),
+            SyncAction::Updated, SyncSource::Local,
+        );
+        engine.enqueue_event(local_event);
+
+        let remote_event = SyncEvent::new(
+            EntityType::Transaction, "tx1".to_string(), "child1".to_string(),
+            SyncAction::Updated, SyncSource::Remote,
+        );
+        mock.push_events(&[remote_event]).unwrap();
+
+        engine.poll_child("child1").unwrap();
+
+        let conflict_id = engine.pending_conflicts()[0].id.clone();
+        let resolution_event = engine.resolve_conflict(&conflict_id, ConflictStatus::ResolvedKeepLocal);
+
+        assert!(resolution_event.is_some());
+        assert_eq!(resolution_event.unwrap().source, SyncSource::Local);
+    }
+
+    #[test]
+    fn test_resolve_conflict_keep_remote() {
+        let (mut engine, mock) = make_engine_with_mock();
+
+        let local_event = SyncEvent::new(
+            EntityType::Transaction, "tx1".to_string(), "child1".to_string(),
+            SyncAction::Updated, SyncSource::Local,
+        );
+        engine.enqueue_event(local_event);
+
+        let remote_event = SyncEvent::new(
+            EntityType::Transaction, "tx1".to_string(), "child1".to_string(),
+            SyncAction::Updated, SyncSource::Remote,
+        );
+        mock.push_events(&[remote_event]).unwrap();
+
+        engine.poll_child("child1").unwrap();
+
+        let conflict_id = engine.pending_conflicts()[0].id.clone();
+        let resolution_event = engine.resolve_conflict(&conflict_id, ConflictStatus::ResolvedKeepRemote);
+
+        assert!(resolution_event.is_none()); // No event to push
+        // The local pending event for tx1 should be removed
+        assert_eq!(engine.pending_push_count(), 0);
+    }
+
+    #[test]
+    fn test_no_conflict_different_entities() {
+        let (mut engine, mock) = make_engine_with_mock();
+
+        let local_event = SyncEvent::new(
+            EntityType::Transaction, "tx_a".to_string(), "child1".to_string(),
+            SyncAction::Updated, SyncSource::Local,
+        );
+        engine.enqueue_event(local_event);
+
+        let remote_event = SyncEvent::new(
+            EntityType::Transaction, "tx_b".to_string(), "child1".to_string(),
+            SyncAction::Created, SyncSource::Remote,
+        );
+        mock.push_events(&[remote_event]).unwrap();
+
+        let result = engine.poll_child("child1").unwrap();
+        assert_eq!(result.events_to_apply.len(), 1);
+        assert!(result.new_conflicts.is_empty());
+    }
+
+    #[test]
+    fn test_no_conflict_different_entity_types() {
+        let (mut engine, mock) = make_engine_with_mock();
+
+        let local_event = SyncEvent::new(
+            EntityType::Transaction, "tx1".to_string(), "child1".to_string(),
+            SyncAction::Updated, SyncSource::Local,
+        );
+        engine.enqueue_event(local_event);
+
+        let remote_event = SyncEvent::new(
+            EntityType::Goal, "tx1".to_string(), "child1".to_string(),
+            SyncAction::Updated, SyncSource::Remote,
+        );
+        mock.push_events(&[remote_event]).unwrap();
+
+        let result = engine.poll_child("child1").unwrap();
+        assert_eq!(result.events_to_apply.len(), 1);
+        assert!(result.new_conflicts.is_empty());
+    }
+}
