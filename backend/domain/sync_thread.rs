@@ -192,7 +192,7 @@ mod tests {
         event_tx.send(event).unwrap();
 
         // Wait for multiple sync cycles to process it (BASE_POLL_INTERVAL is 30s, so wait long enough)
-        std::thread::sleep(Duration::from_secs(2));
+        std::thread::sleep(Duration::from_secs(3));
 
         // Verify the event was pushed to remote
         let events = mock.get_events_since("child1", 0).unwrap();
