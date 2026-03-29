@@ -71,6 +71,7 @@ pub mod email_config_service;
 pub mod mappers;
 pub mod sync_notifier;
 pub mod sync_manager;
+pub mod sync_thread;
 
 pub use transaction_service::*;
 pub use transaction_table::*;
@@ -86,4 +87,5 @@ pub use commands::*;
 pub use email_service::*;
 pub use email_config_service::*;
 pub use sync_notifier::{SyncNotifier, sync_channel};
-pub use sync_manager::{SyncEngine, SyncMessage, SyncStatus, PollResult}; 
+pub use sync_manager::{SyncEngine, SyncMessage, SyncStatus, PollResult};
+pub use sync_thread::SyncThreadHandle; 
