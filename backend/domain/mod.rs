@@ -72,6 +72,7 @@ pub mod mappers;
 pub mod sync_notifier;
 pub mod sync_manager;
 pub mod sync_thread;
+pub mod sync_persistence;
 
 pub use transaction_service::*;
 pub use transaction_table::*;
