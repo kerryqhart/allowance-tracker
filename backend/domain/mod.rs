@@ -69,6 +69,8 @@ pub mod models;
 pub mod email_service;
 pub mod email_config_service;
 pub mod mappers;
+pub mod sync_notifier;
+pub mod sync_manager;
 
 pub use transaction_service::*;
 pub use transaction_table::*;
@@ -82,4 +84,6 @@ pub use data_directory_service::*;
 pub use export_service::*;
 pub use commands::*;
 pub use email_service::*;
-pub use email_config_service::*; 
+pub use email_config_service::*;
+pub use sync_notifier::{SyncNotifier, sync_channel};
+pub use sync_manager::{SyncEngine, SyncMessage, SyncStatus, PollResult}; 
