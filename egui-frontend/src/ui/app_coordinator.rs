@@ -34,7 +34,10 @@ impl eframe::App for AllowanceTrackerApp {
         // log::info!("APP UPDATE called - main render loop"); // Commented out - too verbose
         // Set up kid-friendly styling
         setup_kid_friendly_style(ctx);
-        
+
+        // Poll sync messages from the background sync thread
+        self.sync.poll_messages();
+
         // Handle ESC key to close dropdown
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             self.interaction.child_dropdown.is_open = false;

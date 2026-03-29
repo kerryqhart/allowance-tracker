@@ -37,13 +37,13 @@ pub use crate::ui::state::{MainTab, OverlayType, ParentalControlStage, Protected
 pub use crate::ui::state::form_state::{MoneyTransactionModalConfig, MoneyTransactionFormState};
 
 /// Main application struct for the egui allowance tracker
-/// 
+///
 /// This uses a modular architecture with focused state modules for maintainability.
 pub struct AllowanceTrackerApp {
     // Modular state architecture
     pub core: CoreAppState,           // Backend, child, balance, tab
     pub ui: UIState,                  // Loading, messages
-    pub calendar: CalendarState,      // Calendar navigation, overlays  
+    pub calendar: CalendarState,      // Calendar navigation, overlays
     pub modal: ModalState,            // All modal states
     pub form: FormState,              // Form validation, inputs
     pub interaction: InteractionState, // User selections, dropdowns
@@ -51,6 +51,7 @@ pub struct AllowanceTrackerApp {
     pub chart: ChartState,            // Chart visualization and time periods
     pub goal: GoalUiState,            // Goal management and progress tracking
     pub settings: crate::ui::components::settings::SettingsState, // Settings modals and forms
+    pub sync: SyncUiState,            // Sync status and conflict management
 }
 
 impl AllowanceTrackerApp {
@@ -95,7 +96,8 @@ impl AllowanceTrackerApp {
         let chart = ChartState::new();
         let goal = GoalUiState::new();
         let settings = crate::ui::components::settings::SettingsState::new();
-        
+        let sync = SyncUiState::new();
+
         Ok(Self {
             // Modular state
             core,
@@ -108,6 +110,7 @@ impl AllowanceTrackerApp {
             chart,
             goal,
             settings,
+            sync,
         })
     }
 
