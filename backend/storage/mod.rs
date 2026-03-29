@@ -41,12 +41,17 @@
 pub mod traits;
 pub mod csv;
 pub mod git;
+pub mod remote;
+pub mod mock_remote;
+pub mod http_remote;
 
 // Re-export the main types that other modules need
 pub use csv::CsvConnection;
 pub use traits::{Connection, TransactionStorage, ChildStorage, AllowanceStorage, ParentalControlStorage};
 pub use csv::{GlobalConfig, GlobalConfigStorage};
 pub use git::GitManager;
+pub use remote::RemoteStorage;
+pub use http_remote::HttpRemoteClient;
 
 // SQLite components are available via the sqlite sub-module
 // Example: use crate::backend::storage::sqlite::DbConnection; 
