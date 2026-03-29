@@ -1,4 +1,4 @@
-use sync_service::{create_local_dynamo_client, storage::DynamoStore, routes::build_router};
+use sync_service::{create_local_dynamo_client, storage::{DynamoStore, TableConfig, table_definitions}, routes::build_router};
 use shared::sync::{SyncEvent, SyncAction, SyncSource, EntityType};
 
 const DYNAMO_LOCAL_PORT: u16 = 8000;
@@ -21,11 +21,13 @@ async fn start_test_server() -> Option<String> {
     };
 
     let prefix = format!("test_{}", uuid::Uuid::new_v4());
-    let store = DynamoStore::new(dynamo_client, prefix);
 
-    if store.create_tables().await.is_err() {
+    if table_definitions::create_all_tables(&dynamo_client, &prefix).await.is_err() {
         return None;
     }
+
+    let config = TableConfig::from_prefix(&prefix);
+    let store = DynamoStore::new(dynamo_client, config);
 
     let router = build_router(store);
     let listener = match tokio::net::TcpListener::bind("127.0.0.1:0").await {

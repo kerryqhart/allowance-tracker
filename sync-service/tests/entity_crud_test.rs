@@ -13,7 +13,7 @@ async fn setup() -> Option<(DynamoTestContext, DynamoStore)> {
         return None;
     }
     let ctx = DynamoTestContext::new(DYNAMO_LOCAL_PORT).await;
-    let store = DynamoStore::new(ctx.client.clone(), ctx.table_prefix.clone());
+    let store = DynamoStore::new(ctx.client.clone(), ctx.table_config());
     Some((ctx, store))
 }
 

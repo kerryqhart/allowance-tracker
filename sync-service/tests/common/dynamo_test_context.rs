@@ -1,5 +1,5 @@
 use aws_sdk_dynamodb::Client;
-use sync_service::storage::table_definitions;
+use sync_service::storage::{table_definitions, TableConfig};
 use uuid::Uuid;
 
 pub struct DynamoTestContext {
@@ -28,8 +28,8 @@ impl DynamoTestContext {
         Self { client, table_prefix }
     }
 
-    pub fn table_name(&self, base: &str) -> String {
-        format!("{}{}", self.table_prefix, base)
+    pub fn table_config(&self) -> TableConfig {
+        TableConfig::from_prefix(&self.table_prefix)
     }
 
     pub async fn cleanup(&self) {

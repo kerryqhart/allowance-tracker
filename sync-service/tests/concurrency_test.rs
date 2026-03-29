@@ -14,7 +14,7 @@ async fn setup() -> Option<(DynamoTestContext, Arc<DynamoStore>)> {
         return None;
     }
     let ctx = DynamoTestContext::new(DYNAMO_LOCAL_PORT).await;
-    let store = Arc::new(DynamoStore::new(ctx.client.clone(), ctx.table_prefix.clone()));
+    let store = Arc::new(DynamoStore::new(ctx.client.clone(), ctx.table_config()));
     Some((ctx, store))
 }
 

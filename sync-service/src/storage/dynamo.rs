@@ -1,43 +1,31 @@
 use aws_sdk_dynamodb::Client;
 use aws_sdk_dynamodb::types::AttributeValue;
 use shared::sync::*;
-use super::table_definitions;
+use super::table_config::TableConfig;
 use std::collections::HashMap;
 
 pub struct DynamoStore {
     client: Client,
-    table_prefix: String,
+    config: TableConfig,
 }
 
 impl DynamoStore {
-    pub fn new(client: Client, table_prefix: String) -> Self {
-        Self { client, table_prefix }
-    }
-
-    pub fn table_name(&self, base: &str) -> String {
-        format!("{}{}", self.table_prefix, base)
+    pub fn new(client: Client, config: TableConfig) -> Self {
+        Self { client, config }
     }
 
     pub fn client(&self) -> &Client {
         &self.client
     }
 
-    pub fn table_prefix(&self) -> &str {
-        &self.table_prefix
-    }
-
-    pub async fn create_tables(&self) -> anyhow::Result<()> {
-        table_definitions::create_all_tables(&self.client, &self.table_prefix).await
-    }
-
-    pub async fn delete_tables(&self) -> anyhow::Result<()> {
-        table_definitions::delete_all_tables(&self.client, &self.table_prefix).await
+    pub fn config(&self) -> &TableConfig {
+        &self.config
     }
 
     /// Initialize child metadata with event_sequence=0, local_watermark=0, remote_watermark=0.
     /// Idempotent: uses condition attribute_not_exists(child_id) to prevent overwrites.
     pub async fn initialize_child_metadata(&self, child_id: &str) -> anyhow::Result<()> {
-        let table = self.table_name("sync_metadata");
+        let table = self.config.sync_metadata.clone();
 
         let item = HashMap::from([
             ("child_id".to_string(), AttributeValue::S(child_id.to_string())),
@@ -67,7 +55,7 @@ impl DynamoStore {
         }
 
         // Atomically increment sequence counter
-        let metadata_table = self.table_name("sync_metadata");
+        let metadata_table = self.config.sync_metadata.clone();
         let update_response = self.client
             .update_item()
             .table_name(&metadata_table)
@@ -89,7 +77,7 @@ impl DynamoStore {
             .ok_or_else(|| anyhow::anyhow!("Failed to parse new sequence number"))?;
 
         // Write event to sync_events table with the new sequence
-        let events_table = self.table_name("sync_events");
+        let events_table = self.config.sync_events.clone();
         let event_item = self.event_to_item(event, new_sequence);
 
         self.client
@@ -106,7 +94,7 @@ impl DynamoStore {
 
     /// Find an event by its event_id, returning its sequence number if found.
     pub async fn find_event_by_id(&self, child_id: &str, event_id: &str) -> anyhow::Result<Option<u64>> {
-        let table = self.table_name("sync_events");
+        let table = self.config.sync_events.clone();
 
         let response = self.client
             .query()
@@ -136,7 +124,7 @@ impl DynamoStore {
 
     /// Get all events for a child since a given sequence number (exclusive).
     pub async fn get_events_since(&self, child_id: &str, since_sequence: u64) -> anyhow::Result<Vec<SyncEvent>> {
-        let table = self.table_name("sync_events");
+        let table = self.config.sync_events.clone();
 
         let response = self.client
             .query()
@@ -251,10 +239,9 @@ impl DynamoStore {
     // ============================================================================
 
     /// Upsert an entity (create or update).
-    /// Uses entity_table_info to get table name and sort key, stores entity_json in "data" attribute.
+    /// Uses entity_table_and_sort_key to get table name and sort key, stores entity_json in "data" attribute.
     pub async fn upsert_entity(&self, child_id: &str, entity_type: EntityType, entity_id: &str, entity_json: &str) -> anyhow::Result<()> {
-        let (table_base, sort_key) = self.entity_table_info(&entity_type);
-        let table = self.table_name(table_base);
+        let (table, sort_key) = self.entity_table_and_sort_key(&entity_type);
 
         let mut item = HashMap::from([
             ("child_id".to_string(), AttributeValue::S(child_id.to_string())),
@@ -279,8 +266,7 @@ impl DynamoStore {
     /// Get an entity's JSON data by child_id, entity_type, and entity_id.
     /// Returns None if the entity doesn't exist.
     pub async fn get_entity(&self, child_id: &str, entity_type: EntityType, entity_id: &str) -> anyhow::Result<Option<String>> {
-        let (table_base, sort_key) = self.entity_table_info(&entity_type);
-        let table = self.table_name(table_base);
+        let (table, sort_key) = self.entity_table_and_sort_key(&entity_type);
 
         let mut key_map = HashMap::from([
             ("child_id".to_string(), AttributeValue::S(child_id.to_string())),
@@ -312,8 +298,7 @@ impl DynamoStore {
 
     /// Delete an entity by child_id, entity_type, and entity_id.
     pub async fn delete_entity(&self, child_id: &str, entity_type: EntityType, entity_id: &str) -> anyhow::Result<()> {
-        let (table_base, sort_key) = self.entity_table_info(&entity_type);
-        let table = self.table_name(table_base);
+        let (table, sort_key) = self.entity_table_and_sort_key(&entity_type);
 
         let mut key_map = HashMap::from([
             ("child_id".to_string(), AttributeValue::S(child_id.to_string())),
@@ -335,11 +320,11 @@ impl DynamoStore {
     }
 
     /// Map EntityType to table name and optional sort key name.
-    fn entity_table_info(&self, entity_type: &EntityType) -> (&'static str, Option<&'static str>) {
+    fn entity_table_and_sort_key(&self, entity_type: &EntityType) -> (String, Option<&'static str>) {
         match entity_type {
-            EntityType::Transaction => ("transactions", Some("transaction_id")),
-            EntityType::Goal => ("goals", Some("goal_id")),
-            EntityType::Child => ("children", None),
+            EntityType::Transaction => (self.config.transactions.clone(), Some("transaction_id")),
+            EntityType::Goal => (self.config.goals.clone(), Some("goal_id")),
+            EntityType::Child => (self.config.children.clone(), None),
         }
     }
 
@@ -350,7 +335,7 @@ impl DynamoStore {
     /// Get the checkpoint for a child.
     /// Returns error if child metadata doesn't exist.
     pub async fn get_checkpoint(&self, child_id: &str) -> anyhow::Result<SyncCheckpoint> {
-        let table = self.table_name("sync_metadata");
+        let table = self.config.sync_metadata.clone();
 
         let response = self.client
             .get_item()
@@ -394,7 +379,7 @@ impl DynamoStore {
     /// Returns error if child metadata doesn't exist.
     /// ConditionalCheckFailedException is converted to Ok (watermark already >= value).
     pub async fn update_watermark(&self, child_id: &str, which: &str, value: u64) -> anyhow::Result<()> {
-        let table = self.table_name("sync_metadata");
+        let table = self.config.sync_metadata.clone();
         let watermark_attr = match which {
             "local" => "local_watermark",
             "remote" => "remote_watermark",

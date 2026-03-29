@@ -2,10 +2,11 @@ pub mod storage;
 pub mod routes;
 
 use axum::Router;
+use storage::TableConfig;
 
-pub async fn create_app() -> anyhow::Result<Router> {
+pub async fn create_app(config: TableConfig) -> anyhow::Result<Router> {
     let dynamo_client = create_dynamo_client().await?;
-    let store = storage::DynamoStore::new(dynamo_client, "".to_string());
+    let store = storage::DynamoStore::new(dynamo_client, config);
     let app = routes::build_router(store);
     Ok(app)
 }
