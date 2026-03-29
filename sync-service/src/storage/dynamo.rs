@@ -245,4 +245,185 @@ impl DynamoStore {
             ("source_timestamp".to_string(), AttributeValue::S(event.source_timestamp.to_rfc3339())),
         ])
     }
+
+    // ============================================================================
+    // Entity CRUD Operations
+    // ============================================================================
+
+    /// Upsert an entity (create or update).
+    /// Uses entity_table_info to get table name and sort key, stores entity_json in "data" attribute.
+    pub async fn upsert_entity(&self, child_id: &str, entity_type: EntityType, entity_id: &str, entity_json: &str) -> anyhow::Result<()> {
+        let (table_base, sort_key) = self.entity_table_info(&entity_type);
+        let table = self.table_name(table_base);
+
+        let mut item = HashMap::from([
+            ("child_id".to_string(), AttributeValue::S(child_id.to_string())),
+            ("data".to_string(), AttributeValue::S(entity_json.to_string())),
+        ]);
+
+        if let Some(sk_name) = sort_key {
+            item.insert(sk_name.to_string(), AttributeValue::S(entity_id.to_string()));
+        }
+
+        self.client
+            .put_item()
+            .table_name(&table)
+            .set_item(Some(item))
+            .send()
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to upsert entity: {}", e))?;
+
+        Ok(())
+    }
+
+    /// Get an entity's JSON data by child_id, entity_type, and entity_id.
+    /// Returns None if the entity doesn't exist.
+    pub async fn get_entity(&self, child_id: &str, entity_type: EntityType, entity_id: &str) -> anyhow::Result<Option<String>> {
+        let (table_base, sort_key) = self.entity_table_info(&entity_type);
+        let table = self.table_name(table_base);
+
+        let mut key_map = HashMap::from([
+            ("child_id".to_string(), AttributeValue::S(child_id.to_string())),
+        ]);
+
+        if let Some(sk_name) = sort_key {
+            key_map.insert(sk_name.to_string(), AttributeValue::S(entity_id.to_string()));
+        }
+
+        let response = self.client
+            .get_item()
+            .table_name(&table)
+            .set_key(Some(key_map))
+            .send()
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to get entity: {}", e))?;
+
+        match response.item {
+            Some(item) => {
+                let data = item
+                    .get("data")
+                    .and_then(|v| v.as_s().ok())
+                    .map(|s| s.to_string());
+                Ok(data)
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Delete an entity by child_id, entity_type, and entity_id.
+    pub async fn delete_entity(&self, child_id: &str, entity_type: EntityType, entity_id: &str) -> anyhow::Result<()> {
+        let (table_base, sort_key) = self.entity_table_info(&entity_type);
+        let table = self.table_name(table_base);
+
+        let mut key_map = HashMap::from([
+            ("child_id".to_string(), AttributeValue::S(child_id.to_string())),
+        ]);
+
+        if let Some(sk_name) = sort_key {
+            key_map.insert(sk_name.to_string(), AttributeValue::S(entity_id.to_string()));
+        }
+
+        self.client
+            .delete_item()
+            .table_name(&table)
+            .set_key(Some(key_map))
+            .send()
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to delete entity: {}", e))?;
+
+        Ok(())
+    }
+
+    /// Map EntityType to table name and optional sort key name.
+    fn entity_table_info(&self, entity_type: &EntityType) -> (&'static str, Option<&'static str>) {
+        match entity_type {
+            EntityType::Transaction => ("transactions", Some("transaction_id")),
+            EntityType::Goal => ("goals", Some("goal_id")),
+            EntityType::Child => ("children", None),
+        }
+    }
+
+    // ============================================================================
+    // Checkpoint and Watermark Management
+    // ============================================================================
+
+    /// Get the checkpoint for a child.
+    /// Returns error if child metadata doesn't exist.
+    pub async fn get_checkpoint(&self, child_id: &str) -> anyhow::Result<SyncCheckpoint> {
+        let table = self.table_name("sync_metadata");
+
+        let response = self.client
+            .get_item()
+            .table_name(&table)
+            .key("child_id", AttributeValue::S(child_id.to_string()))
+            .send()
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to get checkpoint: {}", e))?;
+
+        let item = response.item
+            .ok_or_else(|| anyhow::anyhow!("Child metadata not found for child_id: {}", child_id))?;
+
+        let event_sequence = item
+            .get("event_sequence")
+            .and_then(|v| v.as_n().ok())
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(0);
+
+        let local_watermark = item
+            .get("local_watermark")
+            .and_then(|v| v.as_n().ok())
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(0);
+
+        let remote_watermark = item
+            .get("remote_watermark")
+            .and_then(|v| v.as_n().ok())
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(0);
+
+        Ok(SyncCheckpoint {
+            child_id: child_id.to_string(),
+            event_sequence,
+            local_watermark,
+            remote_watermark,
+        })
+    }
+
+    /// Update a watermark (local or remote) for a child.
+    /// Uses conditional write: only updates if the new value is greater than the current value.
+    /// Returns error if child metadata doesn't exist.
+    /// ConditionalCheckFailedException is converted to Ok (watermark already >= value).
+    pub async fn update_watermark(&self, child_id: &str, which: &str, value: u64) -> anyhow::Result<()> {
+        let table = self.table_name("sync_metadata");
+        let watermark_attr = match which {
+            "local" => "local_watermark",
+            "remote" => "remote_watermark",
+            _ => return Err(anyhow::anyhow!("Invalid watermark type: {}", which)),
+        };
+
+        let result = self.client
+            .update_item()
+            .table_name(&table)
+            .key("child_id", AttributeValue::S(child_id.to_string()))
+            .update_expression(format!("SET #{} = :val", watermark_attr))
+            .expression_attribute_names(format!("#{}", watermark_attr), watermark_attr)
+            .expression_attribute_values(":val", AttributeValue::N(value.to_string()))
+            .condition_expression(format!("attribute_exists(child_id) AND #{} < :val", watermark_attr))
+            .send()
+            .await;
+
+        match result {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                // ConditionalCheckFailedException is expected when watermark already >= value
+                if let Some(service_err) = e.as_service_error() {
+                    if service_err.is_conditional_check_failed_exception() {
+                        // Watermark already >= value, which is fine
+                        return Ok(());
+                    }
+                }
+                Err(anyhow::anyhow!("Failed to update watermark: {}", e))
+            }
+        }
+    }
 }
