@@ -1,0 +1,12 @@
+version = 0.1
+
+[default.deploy.parameters]
+stack_name = "allowance-tracker-sync"
+resolve_s3 = true
+s3_prefix = "allowance-tracker-sync"
+region = "us-east-2"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+
+[default.global.parameters]
+region = "us-east-2"

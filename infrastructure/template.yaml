@@ -1,0 +1,208 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Allowance Tracker Sync Service
+
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 128
+    Architectures:
+      - arm64
+    Runtime: provided.al2023
+
+Resources:
+  # --- Cognito ---
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: allowance-tracker-sync
+      AutoVerifiedAttributes:
+        - email
+      UsernameAttributes:
+        - email
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 12
+          RequireUppercase: true
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: false
+
+  UserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      Domain: allowance-tracker-sync
+      UserPoolId: !Ref UserPool
+
+  AppClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref UserPool
+      ClientName: allowance-tracker
+      GenerateSecret: true
+      AllowedOAuthFlows:
+        - code
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthScopes:
+        - openid
+        - email
+        - profile
+      SupportedIdentityProviders:
+        - COGNITO
+      CallbackURLs:
+        - https://claude.ai/api/mcp/auth_callback
+        - https://claude.com/api/mcp/auth_callback
+      ExplicitAuthFlows:
+        - ALLOW_REFRESH_TOKEN_AUTH
+        - ALLOW_USER_SRP_AUTH
+      AccessTokenValidity: 1
+      IdTokenValidity: 1
+      RefreshTokenValidity: 30
+      TokenValidityUnits:
+        AccessToken: hours
+        IdToken: hours
+        RefreshToken: days
+
+  # --- API Gateway ---
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: $default
+      Auth:
+        DefaultAuthorizer: CognitoAuthorizer
+        Authorizers:
+          CognitoAuthorizer:
+            IdentitySource: $request.header.Authorization
+            JwtConfiguration:
+              issuer: !GetAtt UserPool.ProviderURL
+              audience:
+                - !Ref AppClient
+
+  # --- Lambda ---
+  SyncFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: rust-cargolambda
+    Properties:
+      CodeUri: ../sync-service
+      Handler: bootstrap
+      Environment:
+        Variables:
+          CHILDREN_TABLE: !Ref ChildrenTable
+          TRANSACTIONS_TABLE: !Ref TransactionsTable
+          GOALS_TABLE: !Ref GoalsTable
+          SYNC_EVENTS_TABLE: !Ref SyncEventsTable
+          SYNC_METADATA_TABLE: !Ref SyncMetadataTable
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ChildrenTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref TransactionsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref GoalsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SyncEventsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SyncMetadataTable
+      Events:
+        CatchAll:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /{proxy+}
+            Method: ANY
+        Health:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref HttpApi
+            Path: /health
+            Method: GET
+            Auth:
+              Authorizer: NONE
+
+  # --- DynamoDB Tables ---
+  ChildrenTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: allowance-tracker-children
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: child_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: child_id
+          KeyType: HASH
+
+  TransactionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: allowance-tracker-transactions
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: child_id
+          AttributeType: S
+        - AttributeName: transaction_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: child_id
+          KeyType: HASH
+        - AttributeName: transaction_id
+          KeyType: RANGE
+
+  GoalsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: allowance-tracker-goals
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: child_id
+          AttributeType: S
+        - AttributeName: goal_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: child_id
+          KeyType: HASH
+        - AttributeName: goal_id
+          KeyType: RANGE
+
+  SyncEventsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: allowance-tracker-sync-events
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: child_id
+          AttributeType: S
+        - AttributeName: sequence
+          AttributeType: "N"
+      KeySchema:
+        - AttributeName: child_id
+          KeyType: HASH
+        - AttributeName: sequence
+          KeyType: RANGE
+
+  SyncMetadataTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: allowance-tracker-sync-metadata
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: child_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: child_id
+          KeyType: HASH
+
+Outputs:
+  ApiUrl:
+    Description: API Gateway URL
+    Value: !Sub 'https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com'
+  UserPoolId:
+    Description: Cognito User Pool ID
+    Value: !Ref UserPool
+  AppClientId:
+    Description: Cognito App Client ID
+    Value: !Ref AppClient
+  CognitoHostedUiDomain:
+    Description: Cognito hosted UI domain
+    Value: !Sub 'allowance-tracker-sync.auth.${AWS::Region}.amazoncognito.com'
