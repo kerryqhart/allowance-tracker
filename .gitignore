@@ -2,6 +2,9 @@
 target/
 Cargo.lock
 
+# SAM build artifacts
+infrastructure/.aws-sam/
+
 # Database files
 *.db
 *.db-shm
