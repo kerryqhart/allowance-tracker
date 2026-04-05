@@ -1,6 +1,7 @@
 use axum::{
     extract::{State, Path},
     http::StatusCode,
+    Json,
     Router, routing::{get, put, delete},
     body::Body,
 };
@@ -59,8 +60,40 @@ async fn delete_entity(
     }
 }
 
+// GET /entities/child - list all children
+async fn list_children(
+    State(store): State<Arc<DynamoStore>>,
+) -> Result<Json<Vec<String>>, StatusCode> {
+    match store.list_all_entities_in_table(EntityType::Child).await {
+        Ok(entities) => {
+            let json_list: Vec<String> = entities.into_iter().map(|(_, data)| data).collect();
+            Ok(Json(json_list))
+        }
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
+// GET /entities/{entity_type}/{child_id} - list all entities of type for a child
+async fn list_entities(
+    State(store): State<Arc<DynamoStore>>,
+    Path((entity_type_str, child_id)): Path<(String, String)>,
+) -> Result<Json<Vec<String>>, StatusCode> {
+    let entity_type = EntityType::from_str(&entity_type_str)
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
+
+    match store.list_entities_for_child(&child_id, entity_type).await {
+        Ok(entities) => {
+            let json_list: Vec<String> = entities.into_iter().map(|(_, data)| data).collect();
+            Ok(Json(json_list))
+        }
+        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
 pub fn routes() -> Router<Arc<DynamoStore>> {
     Router::new()
+        .route("/entities/child", get(list_children))
+        .route("/entities/{entity_type}/{child_id}", get(list_entities))
         .route("/entities/{entity_type}/{child_id}/{entity_id}", put(upsert_entity))
         .route("/entities/{entity_type}/{child_id}/{entity_id}", get(get_entity))
         .route("/entities/{entity_type}/{child_id}/{entity_id}", delete(delete_entity))

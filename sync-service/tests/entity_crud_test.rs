@@ -251,3 +251,65 @@ async fn test_child_crud() {
 
     ctx.cleanup().await;
 }
+
+#[tokio::test]
+async fn test_list_children() {
+    if !is_dynamo_local_available(DYNAMO_LOCAL_PORT).await {
+        eprintln!("SKIPPING: DynamoDB Local not available");
+        return;
+    }
+
+    let ctx = DynamoTestContext::new(DYNAMO_LOCAL_PORT).await;
+    let store = DynamoStore::new(ctx.client.clone(), ctx.table_config());
+
+    // Insert two children
+    let child1_json = r#"{"id":"child::1","name":"Alice","birthdate":"2018-01-01","created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z"}"#;
+    let child2_json = r#"{"id":"child::2","name":"Bob","birthdate":"2019-06-15","created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z"}"#;
+    store.upsert_entity("child::1", EntityType::Child, "child::1", child1_json).await.unwrap();
+    store.upsert_entity("child::2", EntityType::Child, "child::2", child2_json).await.unwrap();
+
+    // List all children
+    let results = store.list_all_entities_in_table(EntityType::Child).await.unwrap();
+    assert_eq!(results.len(), 2);
+
+    // Verify both children are present (order not guaranteed from scan)
+    let data_strings: Vec<&str> = results.iter().map(|(_, d)| d.as_str()).collect();
+    assert!(data_strings.iter().any(|d| d.contains("Alice")));
+    assert!(data_strings.iter().any(|d| d.contains("Bob")));
+
+    ctx.cleanup().await;
+}
+
+#[tokio::test]
+async fn test_list_entities_for_child() {
+    if !is_dynamo_local_available(DYNAMO_LOCAL_PORT).await {
+        eprintln!("SKIPPING: DynamoDB Local not available");
+        return;
+    }
+
+    let ctx = DynamoTestContext::new(DYNAMO_LOCAL_PORT).await;
+    let store = DynamoStore::new(ctx.client.clone(), ctx.table_config());
+
+    let child_id = "child::100";
+
+    // Insert transactions for this child
+    let tx1 = r#"{"id":"transaction::income::1000","child_id":"child::100","amount":10.0,"balance":10.0,"description":"Allowance","date":"2026-04-01T00:00:00Z","transaction_type":"Allowance"}"#;
+    let tx2 = r#"{"id":"transaction::expense::1001","child_id":"child::100","amount":-3.0,"balance":7.0,"description":"Candy","date":"2026-04-02T00:00:00Z","transaction_type":"Expense"}"#;
+    store.upsert_entity(child_id, EntityType::Transaction, "transaction::income::1000", tx1).await.unwrap();
+    store.upsert_entity(child_id, EntityType::Transaction, "transaction::expense::1001", tx2).await.unwrap();
+
+    // Insert a transaction for a different child (should not appear)
+    let other_tx = r#"{"id":"transaction::income::2000","child_id":"child::200","amount":5.0,"balance":5.0,"description":"Other","date":"2026-04-01T00:00:00Z","transaction_type":"Allowance"}"#;
+    store.upsert_entity("child::200", EntityType::Transaction, "transaction::income::2000", other_tx).await.unwrap();
+
+    // List transactions for child::100
+    let results = store.list_entities_for_child(child_id, EntityType::Transaction).await.unwrap();
+    assert_eq!(results.len(), 2);
+
+    let data_strings: Vec<&str> = results.iter().map(|(_, d)| d.as_str()).collect();
+    assert!(data_strings.iter().any(|d| d.contains("Allowance")));
+    assert!(data_strings.iter().any(|d| d.contains("Candy")));
+    assert!(!data_strings.iter().any(|d| d.contains("Other")));
+
+    ctx.cleanup().await;
+}

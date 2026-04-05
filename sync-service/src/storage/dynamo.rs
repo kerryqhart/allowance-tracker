@@ -319,6 +319,78 @@ impl DynamoStore {
         Ok(())
     }
 
+    /// List all entities in a table (used for children which have no sort key).
+    /// Returns a vec of (entity_id, entity_json) pairs.
+    pub async fn list_all_entities_in_table(&self, entity_type: EntityType) -> anyhow::Result<Vec<(String, String)>> {
+        let (table, _sort_key) = self.entity_table_and_sort_key(&entity_type);
+
+        let response = self.client
+            .scan()
+            .table_name(&table)
+            .send()
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to scan table: {}", e))?;
+
+        let mut results = Vec::new();
+        if let Some(items) = response.items {
+            for item in items {
+                let child_id = item
+                    .get("child_id")
+                    .and_then(|v| v.as_s().ok())
+                    .map(|s| s.to_string())
+                    .unwrap_or_default();
+                let data = item
+                    .get("data")
+                    .and_then(|v| v.as_s().ok())
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| "{}".to_string());
+                results.push((child_id, data));
+            }
+        }
+
+        Ok(results)
+    }
+
+    /// List all entities for a child_id in a table with a sort key.
+    /// Returns a vec of (entity_id, entity_json) pairs.
+    pub async fn list_entities_for_child(&self, child_id: &str, entity_type: EntityType) -> anyhow::Result<Vec<(String, String)>> {
+        let (table, sort_key) = self.entity_table_and_sort_key(&entity_type);
+
+        let response = self.client
+            .query()
+            .table_name(&table)
+            .key_condition_expression("child_id = :cid")
+            .expression_attribute_values(":cid", AttributeValue::S(child_id.to_string()))
+            .send()
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to query table: {}", e))?;
+
+        let mut results = Vec::new();
+        if let Some(items) = response.items {
+            for item in items {
+                let entity_id = if let Some(sk_name) = sort_key {
+                    item.get(sk_name)
+                        .and_then(|v| v.as_s().ok())
+                        .map(|s| s.to_string())
+                        .unwrap_or_default()
+                } else {
+                    item.get("child_id")
+                        .and_then(|v| v.as_s().ok())
+                        .map(|s| s.to_string())
+                        .unwrap_or_default()
+                };
+                let data = item
+                    .get("data")
+                    .and_then(|v| v.as_s().ok())
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| "{}".to_string());
+                results.push((entity_id, data));
+            }
+        }
+
+        Ok(results)
+    }
+
     /// Map EntityType to table name and optional sort key name.
     fn entity_table_and_sort_key(&self, entity_type: &EntityType) -> (String, Option<&'static str>) {
         match entity_type {
