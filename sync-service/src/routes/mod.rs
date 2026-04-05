@@ -8,9 +8,14 @@ use crate::storage::DynamoStore;
 
 pub fn build_router(store: DynamoStore) -> Router {
     let store = Arc::new(store);
-    Router::new()
+
+    let api_routes = Router::new()
         .merge(health::routes())
         .merge(sync::routes())
-        .merge(entities::routes())
+        .merge(entities::routes());
+
+    Router::new()
+        .merge(api_routes.clone())
+        .nest("/internal", api_routes)
         .with_state(store)
 }
