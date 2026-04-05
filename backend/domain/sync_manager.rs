@@ -3,6 +3,10 @@ use shared::sync::*;
 use crate::backend::storage::remote::RemoteStorage;
 use std::sync::Arc;
 use std::collections::HashMap;
+use std::sync::mpsc;
+use crate::backend::domain::models::child::Child;
+use crate::backend::domain::models::transaction::Transaction;
+use crate::backend::domain::models::goal::DomainGoal;
 
 /// Messages from the sync background thread to the UI.
 #[derive(Debug, Clone)]
@@ -12,6 +16,24 @@ pub enum SyncMessage {
     ConflictDetected(SyncConflict),
     PushFailed { event_id: String, error: String },
     Error(String),
+}
+
+/// Progress messages from the backfill operation to the UI.
+#[derive(Debug, Clone)]
+pub enum BackfillProgress {
+    Starting { total_entities: usize },
+    ChildInitialized { child_name: String },
+    EntitiesPushed { count: usize, total: usize },
+    Completed { total_pushed: usize },
+    Failed { error: String, pushed_so_far: usize },
+}
+
+/// Result of a completed backfill operation.
+#[derive(Debug, Clone)]
+pub struct BackfillResult {
+    pub children_synced: usize,
+    pub transactions_synced: usize,
+    pub goals_synced: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -206,6 +228,116 @@ impl SyncEngine {
     /// Get the number of pending outbound events.
     pub fn pending_push_count(&self) -> usize {
         self.pending_push.len()
+    }
+
+    /// Push all local entities to remote. Reports progress via the channel.
+    /// Safe to retry: entity upserts overwrite, sync event dedup prevents duplicate sequences.
+    pub fn backfill(
+        &self,
+        children: Vec<Child>,
+        transactions: HashMap<String, Vec<Transaction>>,
+        goals: HashMap<String, Vec<DomainGoal>>,
+        progress_tx: mpsc::Sender<BackfillProgress>,
+    ) -> Result<BackfillResult> {
+        let total = children.len()
+            + transactions.values().map(|v| v.len()).sum::<usize>()
+            + goals.values().map(|v| v.len()).sum::<usize>();
+
+        let _ = progress_tx.send(BackfillProgress::Starting { total_entities: total });
+
+        let mut pushed = 0usize;
+        let mut children_synced = 0usize;
+        let mut transactions_synced = 0usize;
+        let mut goals_synced = 0usize;
+        let batch_size = 25;
+
+        for child in &children {
+            if let Err(e) = self.remote.initialize_child(&child.id) {
+                let _ = progress_tx.send(BackfillProgress::Failed {
+                    error: format!("Failed to initialize child {}: {}", child.name, e),
+                    pushed_so_far: pushed,
+                });
+                return Err(e);
+            }
+            let _ = progress_tx.send(BackfillProgress::ChildInitialized {
+                child_name: child.name.clone(),
+            });
+
+            let child_json = serde_json::to_string(&child)
+                .map_err(|e| anyhow::anyhow!("Failed to serialize child: {}", e))?;
+            self.remote.upsert_entity(&child.id, EntityType::Child, &child.id, &child_json)?;
+
+            let mut events = vec![SyncEvent::new(
+                EntityType::Child,
+                child.id.clone(),
+                child.id.clone(),
+                SyncAction::Created,
+                SyncSource::Local,
+            )];
+            pushed += 1;
+            children_synced += 1;
+
+            if let Some(txns) = transactions.get(&child.id) {
+                for tx in txns {
+                    let tx_json = serde_json::to_string(&tx)
+                        .map_err(|e| anyhow::anyhow!("Failed to serialize transaction: {}", e))?;
+                    self.remote.upsert_entity(&child.id, EntityType::Transaction, &tx.id, &tx_json)?;
+
+                    events.push(SyncEvent::new(
+                        EntityType::Transaction,
+                        tx.id.clone(),
+                        child.id.clone(),
+                        SyncAction::Created,
+                        SyncSource::Local,
+                    ));
+                    pushed += 1;
+                    transactions_synced += 1;
+
+                    if events.len() >= batch_size {
+                        self.remote.push_events(&events)?;
+                        let _ = progress_tx.send(BackfillProgress::EntitiesPushed { count: pushed, total });
+                        events.clear();
+                    }
+                }
+            }
+
+            if let Some(child_goals) = goals.get(&child.id) {
+                for goal in child_goals {
+                    let goal_json = serde_json::to_string(&goal)
+                        .map_err(|e| anyhow::anyhow!("Failed to serialize goal: {}", e))?;
+                    self.remote.upsert_entity(&child.id, EntityType::Goal, &goal.id, &goal_json)?;
+
+                    events.push(SyncEvent::new(
+                        EntityType::Goal,
+                        goal.id.clone(),
+                        child.id.clone(),
+                        SyncAction::Created,
+                        SyncSource::Local,
+                    ));
+                    pushed += 1;
+                    goals_synced += 1;
+
+                    if events.len() >= batch_size {
+                        self.remote.push_events(&events)?;
+                        let _ = progress_tx.send(BackfillProgress::EntitiesPushed { count: pushed, total });
+                        events.clear();
+                    }
+                }
+            }
+
+            if !events.is_empty() {
+                self.remote.push_events(&events)?;
+                let _ = progress_tx.send(BackfillProgress::EntitiesPushed { count: pushed, total });
+            }
+        }
+
+        let _ = progress_tx.send(BackfillProgress::Completed { total_pushed: pushed });
+
+        Ok(BackfillResult {
+            children_synced,
+            transactions_synced,
+            goals_synced,
+        })
     }
 }
 
@@ -464,5 +596,57 @@ mod tests {
         let result = engine.poll_child("child1").unwrap();
         assert_eq!(result.events_to_apply.len(), 1);
         assert!(result.new_conflicts.is_empty());
+    }
+
+    #[test]
+    fn test_backfill_pushes_all_entities() {
+        let (engine, _mock) = make_engine_with_mock();
+        let (tx, rx) = mpsc::channel();
+
+        let child = super::super::models::child::Child {
+            id: "child1".to_string(),
+            name: "Alice".to_string(),
+            birthdate: chrono::NaiveDate::from_ymd_opt(2018, 1, 1).unwrap(),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+
+        let transaction = super::super::models::transaction::Transaction {
+            id: "tx-1".to_string(),
+            child_id: "child1".to_string(),
+            date: chrono::Utc::now().fixed_offset(),
+            description: "Allowance".to_string(),
+            amount: 10.0,
+            balance: 10.0,
+            transaction_type: super::super::models::transaction::TransactionType::Allowance,
+        };
+
+        let goal = super::super::models::goal::DomainGoal {
+            id: "goal-1".to_string(),
+            child_id: "child1".to_string(),
+            description: "Bicycle".to_string(),
+            target_amount: 100.0,
+            state: super::super::models::goal::DomainGoalState::Active,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+
+        let mut transactions_map = std::collections::HashMap::new();
+        transactions_map.insert("child1".to_string(), vec![transaction]);
+        let mut goals_map = std::collections::HashMap::new();
+        goals_map.insert("child1".to_string(), vec![goal]);
+
+        let result = engine.backfill(vec![child], transactions_map, goals_map, tx).unwrap();
+
+        assert_eq!(result.children_synced, 1);
+        assert_eq!(result.transactions_synced, 1);
+        assert_eq!(result.goals_synced, 1);
+
+        // Verify progress messages
+        let mut messages = Vec::new();
+        while let Ok(msg) = rx.try_recv() {
+            messages.push(msg);
+        }
+        assert!(messages.len() >= 3);
     }
 }
