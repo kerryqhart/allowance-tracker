@@ -354,13 +354,38 @@ impl DynamoStore {
     /// List all entities for a child_id in a table with a sort key.
     /// Returns a vec of (entity_id, entity_json) pairs.
     pub async fn list_entities_for_child(&self, child_id: &str, entity_type: EntityType) -> anyhow::Result<Vec<(String, String)>> {
+        self.list_entities_for_child_with_options(child_id, entity_type, None, None).await
+    }
+
+    /// List entities for a child with optional sort direction and limit.
+    /// sort_direction: "asc" (default) or "desc". Maps to DynamoDB ScanIndexForward.
+    /// limit: max items to return.
+    pub async fn list_entities_for_child_with_options(
+        &self,
+        child_id: &str,
+        entity_type: EntityType,
+        sort_direction: Option<&str>,
+        limit: Option<i32>,
+    ) -> anyhow::Result<Vec<(String, String)>> {
         let (table, sort_key) = self.entity_table_and_sort_key(&entity_type);
 
-        let response = self.client
+        let scan_forward = match sort_direction {
+            Some("desc") => false,
+            _ => true,
+        };
+
+        let mut query = self.client
             .query()
             .table_name(&table)
             .key_condition_expression("child_id = :cid")
             .expression_attribute_values(":cid", AttributeValue::S(child_id.to_string()))
+            .scan_index_forward(scan_forward);
+
+        if let Some(l) = limit {
+            query = query.limit(l);
+        }
+
+        let response = query
             .send()
             .await
             .map_err(|e| anyhow::anyhow!("Failed to query table: {}", e))?;

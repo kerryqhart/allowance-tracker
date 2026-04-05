@@ -1,5 +1,5 @@
 use axum::{
-    extract::{State, Path},
+    extract::{State, Path, Query},
     http::StatusCode,
     Json,
     Router, routing::{get, put, delete},
@@ -73,15 +73,27 @@ async fn list_children(
     }
 }
 
+#[derive(Debug, serde::Deserialize)]
+struct ListEntitiesQuery {
+    sort: Option<String>,
+    limit: Option<i32>,
+}
+
 // GET /entities/{entity_type}/{child_id} - list all entities of type for a child
 async fn list_entities(
     State(store): State<Arc<DynamoStore>>,
     Path((entity_type_str, child_id)): Path<(String, String)>,
+    Query(params): Query<ListEntitiesQuery>,
 ) -> Result<Json<Vec<String>>, StatusCode> {
     let entity_type = EntityType::from_str(&entity_type_str)
         .map_err(|_| StatusCode::BAD_REQUEST)?;
 
-    match store.list_entities_for_child(&child_id, entity_type).await {
+    match store.list_entities_for_child_with_options(
+        &child_id,
+        entity_type,
+        params.sort.as_deref(),
+        params.limit,
+    ).await {
         Ok(entities) => {
             let json_list: Vec<String> = entities.into_iter().map(|(_, data)| data).collect();
             Ok(Json(json_list))

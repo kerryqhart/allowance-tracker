@@ -313,3 +313,41 @@ async fn test_list_entities_for_child() {
 
     ctx.cleanup().await;
 }
+
+#[tokio::test]
+async fn test_list_entities_with_sort_and_limit() {
+    if !is_dynamo_local_available(DYNAMO_LOCAL_PORT).await {
+        eprintln!("SKIPPING: DynamoDB Local not available");
+        return;
+    }
+
+    let ctx = DynamoTestContext::new(DYNAMO_LOCAL_PORT).await;
+    let store = DynamoStore::new(ctx.client.clone(), ctx.table_config());
+
+    let child_id = "child::sort-test";
+
+    // Insert 3 transactions with sort keys that have natural ordering
+    let tx1 = r#"{"id":"tx-aaa","child_id":"child::sort-test","amount":10.0}"#;
+    let tx2 = r#"{"id":"tx-bbb","child_id":"child::sort-test","amount":20.0}"#;
+    let tx3 = r#"{"id":"tx-ccc","child_id":"child::sort-test","amount":30.0}"#;
+    store.upsert_entity(child_id, EntityType::Transaction, "tx-aaa", tx1).await.unwrap();
+    store.upsert_entity(child_id, EntityType::Transaction, "tx-bbb", tx2).await.unwrap();
+    store.upsert_entity(child_id, EntityType::Transaction, "tx-ccc", tx3).await.unwrap();
+
+    // Test descending sort
+    let results = store.list_entities_for_child_with_options(child_id, EntityType::Transaction, Some("desc"), None).await.unwrap();
+    assert_eq!(results.len(), 3);
+    assert_eq!(results[0].0, "tx-ccc");
+    assert_eq!(results[2].0, "tx-aaa");
+
+    // Test limit
+    let results = store.list_entities_for_child_with_options(child_id, EntityType::Transaction, None, Some(2)).await.unwrap();
+    assert_eq!(results.len(), 2);
+
+    // Test desc + limit=1 (most recent)
+    let results = store.list_entities_for_child_with_options(child_id, EntityType::Transaction, Some("desc"), Some(1)).await.unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].0, "tx-ccc");
+
+    ctx.cleanup().await;
+}
