@@ -1,7 +1,102 @@
 use egui::{Align2, Area, Color32, Frame, Id, Order, RichText, Vec2};
 use crate::ui::app_state::AllowanceTrackerApp;
 
+// TODO: Move to user-facing config once settings UI supports it
+const DEFAULT_SYNC_SERVICE_URL: &str = "https://i99kq799kd.execute-api.us-east-2.amazonaws.com";
+
 impl AllowanceTrackerApp {
+    /// Open the backfill modal and pre-load entity counts for display
+    pub fn open_backfill_modal(&mut self) {
+        log::info!("Initial sync action - opening modal");
+        self.settings.show_backfill_modal = true;
+        self.settings.backfill_form.clear();
+
+        // Pre-compute entity counts
+        if let Ok(children_result) = self.backend().child_service.list_children() {
+            let children = &children_result.children;
+            self.settings.backfill_form.child_count = children.len();
+
+            let mut tx_count = 0;
+            let mut goal_count = 0;
+            for child in children {
+                match self.backend().transaction_service.list_all_transactions_for_child(&child.id) {
+                    Ok(txs) => { tx_count += txs.len(); }
+                    Err(e) => log::warn!("Failed to load transactions for child {}: {}", child.id, e),
+                }
+                match self.backend().goal_service.list_all_goals_for_child(&child.id) {
+                    Ok(goals) => { goal_count += goals.len(); }
+                    Err(e) => log::warn!("Failed to load goals for child {}: {}", child.id, e),
+                }
+            }
+            self.settings.backfill_form.transaction_count = tx_count;
+            self.settings.backfill_form.goal_count = goal_count;
+            self.settings.backfill_form.total_entities =
+                self.settings.backfill_form.child_count + tx_count + goal_count;
+        }
+    }
+
+    /// Start a backfill operation on a background thread
+    pub fn start_backfill(&mut self) {
+        use std::sync::mpsc;
+        use std::thread;
+
+        // TODO: Move to user-facing config once settings UI supports it
+        let remote_url = std::env::var("SYNC_SERVICE_URL")
+            .unwrap_or_else(|_| DEFAULT_SYNC_SERVICE_URL.to_string());
+
+        self.settings.backfill_form.is_running = true;
+        self.settings.backfill_form.result_message = None;
+        self.settings.backfill_form.error_message = None;
+        self.settings.backfill_form.entities_pushed = 0;
+
+        let (progress_tx, progress_rx) = mpsc::channel();
+        self.settings.backfill_form.progress_rx = Some(progress_rx);
+
+        // Load all local data
+        let children = match self.backend().child_service.list_children() {
+            Ok(result) => result.children,
+            Err(e) => {
+                self.settings.backfill_form.is_running = false;
+                self.settings.backfill_form.error_message = Some(format!("Failed to load children: {}", e));
+                return;
+            }
+        };
+
+        let mut transactions = std::collections::HashMap::new();
+        let mut goals = std::collections::HashMap::new();
+
+        for child in &children {
+            match self.backend().transaction_service.list_all_transactions_for_child(&child.id) {
+                Ok(txs) => { transactions.insert(child.id.clone(), txs); }
+                Err(e) => log::warn!("Failed to load transactions for child {}: {}", child.id, e),
+            }
+            match self.backend().goal_service.list_all_goals_for_child(&child.id) {
+                Ok(child_goals) => { goals.insert(child.id.clone(), child_goals); }
+                Err(e) => log::warn!("Failed to load goals for child {}: {}", child.id, e),
+            }
+        }
+
+        let remote: std::sync::Arc<dyn crate::backend::storage::remote::RemoteStorage> =
+            std::sync::Arc::new(crate::backend::storage::http_remote::HttpRemoteClient::new(
+                remote_url,
+            ));
+
+        thread::spawn(move || {
+            let engine = crate::backend::domain::sync_manager::SyncEngine::new(remote);
+            match engine.backfill(children, transactions, goals, progress_tx.clone()) {
+                Ok(_) => {}
+                Err(e) => {
+                    let _ = progress_tx.send(
+                        crate::backend::domain::sync_manager::BackfillProgress::Failed {
+                            error: e.to_string(),
+                            pushed_so_far: 0,
+                        },
+                    );
+                }
+            }
+        });
+    }
+
     pub fn render_backfill_modal(&mut self, ctx: &egui::Context) {
         if !self.settings.show_backfill_modal {
             return;
