@@ -483,6 +483,15 @@ impl TransactionService {
     pub fn create_balance_service(&self) -> &BalanceService {
         &self.balance_service
     }
+
+    /// List all transactions for a specific child_id (used by backfill)
+    pub fn list_all_transactions_for_child(
+        &self,
+        child_id: &str,
+    ) -> Result<Vec<crate::backend::domain::models::transaction::Transaction>> {
+        self.transaction_repository
+            .list_transactions_chronological(child_id, None, None)
+    }
 }
 
 #[cfg(test)]

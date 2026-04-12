@@ -31,5 +31,6 @@ impl AllowanceTrackerApp {
         self.render_export_modal(ctx); // Export data modal from settings
         self.render_data_directory_modal(ctx); // Data directory modal from settings
         self.render_allowance_config_modal(ctx); // Allowance config modal from settings
+        self.render_backfill_modal(ctx); // Initial sync backfill modal
     }
 } 

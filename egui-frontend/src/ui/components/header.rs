@@ -286,6 +286,12 @@ impl AllowanceTrackerApp {
                 is_current: false,
                 is_enabled: true,
             },
+            DropdownMenuItem {
+                label: "Initial sync".to_string(),
+                icon: Some("🔄".to_string()),
+                is_current: false,
+                is_enabled: true,
+            },
         ];
         
         let menu_config = DropdownMenuConfig {
@@ -317,6 +323,7 @@ impl AllowanceTrackerApp {
                 3 => crate::ui::state::modal_state::SettingsAction::DeleteTransactions,
                 4 => crate::ui::state::modal_state::SettingsAction::ExportData,
                 5 => crate::ui::state::modal_state::SettingsAction::DataDirectory,
+                6 => crate::ui::state::modal_state::SettingsAction::InitialSync,
                 _ => {
                     log::warn!("🚨 Unknown settings menu item clicked: {}", index);
                     return;

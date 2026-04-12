@@ -564,6 +564,14 @@ impl GoalService {
             None => Ok(0.0),
         }
     }
+
+    /// List all goals for a specific child_id (used by backfill)
+    pub fn list_all_goals_for_child(
+        &self,
+        child_id: &str,
+    ) -> Result<Vec<crate::backend::domain::models::goal::DomainGoal>> {
+        self.goal_repository.list_goals(child_id, None)
+    }
 }
 
 #[cfg(test)]

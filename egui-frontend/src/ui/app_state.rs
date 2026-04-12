@@ -404,9 +404,35 @@ impl AllowanceTrackerApp {
             SettingsAction::DataDirectory => {
                 info!("Data directory action - opening modal");
                 self.settings.show_data_directory_modal = true;
-                
+
                 // Clear form state when opening modal
                 self.settings.data_directory_form.clear();
+            }
+            SettingsAction::InitialSync => {
+                info!("Initial sync action - opening modal");
+                self.settings.show_backfill_modal = true;
+                self.settings.backfill_form.clear();
+
+                // Pre-compute entity counts
+                if let Ok(children_result) = self.backend().child_service.list_children() {
+                    let children = &children_result.children;
+                    self.settings.backfill_form.child_count = children.len();
+
+                    let mut tx_count = 0;
+                    let mut goal_count = 0;
+                    for child in children {
+                        if let Ok(txs) = self.backend().transaction_service.list_all_transactions_for_child(&child.id) {
+                            tx_count += txs.len();
+                        }
+                        if let Ok(goals) = self.backend().goal_service.list_all_goals_for_child(&child.id) {
+                            goal_count += goals.len();
+                        }
+                    }
+                    self.settings.backfill_form.transaction_count = tx_count;
+                    self.settings.backfill_form.goal_count = goal_count;
+                    self.settings.backfill_form.total_entities =
+                        self.settings.backfill_form.child_count + tx_count + goal_count;
+                }
             }
         }
     }
@@ -657,6 +683,65 @@ impl AllowanceTrackerApp {
                 false
             }
         }
+    }
+
+    /// Start a backfill operation on a background thread
+    pub fn start_backfill(&mut self) {
+        use std::sync::mpsc;
+        use std::thread;
+
+        // TODO: Make this configurable rather than hardcoded
+        const SYNC_SERVICE_URL: &str = "https://i99kq799kd.execute-api.us-east-2.amazonaws.com";
+
+        self.settings.backfill_form.is_running = true;
+        self.settings.backfill_form.result_message = None;
+        self.settings.backfill_form.error_message = None;
+        self.settings.backfill_form.entities_pushed = 0;
+
+        let (progress_tx, progress_rx) = mpsc::channel();
+        self.settings.backfill_form.progress_rx = Some(progress_rx);
+
+        // Load all local data
+        let children = match self.backend().child_service.list_children() {
+            Ok(result) => result.children,
+            Err(e) => {
+                self.settings.backfill_form.is_running = false;
+                self.settings.backfill_form.error_message = Some(format!("Failed to load children: {}", e));
+                return;
+            }
+        };
+
+        let mut transactions = std::collections::HashMap::new();
+        let mut goals = std::collections::HashMap::new();
+
+        for child in &children {
+            if let Ok(txs) = self.backend().transaction_service.list_all_transactions_for_child(&child.id) {
+                transactions.insert(child.id.clone(), txs);
+            }
+            if let Ok(child_goals) = self.backend().goal_service.list_all_goals_for_child(&child.id) {
+                goals.insert(child.id.clone(), child_goals);
+            }
+        }
+
+        let remote: std::sync::Arc<dyn crate::backend::storage::remote::RemoteStorage> =
+            std::sync::Arc::new(crate::backend::storage::http_remote::HttpRemoteClient::new(
+                SYNC_SERVICE_URL.to_string(),
+            ));
+
+        thread::spawn(move || {
+            let engine = crate::backend::domain::sync_manager::SyncEngine::new(remote);
+            match engine.backfill(children, transactions, goals, progress_tx.clone()) {
+                Ok(_) => {}
+                Err(e) => {
+                    let _ = progress_tx.send(
+                        crate::backend::domain::sync_manager::BackfillProgress::Failed {
+                            error: e.to_string(),
+                            pushed_so_far: 0,
+                        },
+                    );
+                }
+            }
+        });
     }
 
     pub fn submit_expense_transaction(&mut self) -> bool {

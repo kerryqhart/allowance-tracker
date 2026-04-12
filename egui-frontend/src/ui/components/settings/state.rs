@@ -13,6 +13,9 @@
 //! This centralizes all settings-related state management, making it easier to
 //! maintain consistent form behavior and validation across settings features.
 
+use std::sync::mpsc;
+use crate::backend::domain::sync_manager::BackfillProgress;
+
 /// Export type selection for export modal
 #[derive(Debug, Clone, PartialEq)]
 pub enum ExportType {
@@ -439,6 +442,83 @@ impl AllowanceConfigFormState {
     }
 }
 
+/// Form state for the initial sync / backfill modal
+#[derive(Debug)]
+pub struct BackfillFormState {
+    pub is_running: bool,
+    pub progress_rx: Option<mpsc::Receiver<BackfillProgress>>,
+    pub entities_pushed: usize,
+    pub total_entities: usize,
+    pub result_message: Option<String>,
+    pub error_message: Option<String>,
+    pub child_count: usize,
+    pub transaction_count: usize,
+    pub goal_count: usize,
+}
+
+impl BackfillFormState {
+    pub fn new() -> Self {
+        Self {
+            is_running: false,
+            progress_rx: None,
+            entities_pushed: 0,
+            total_entities: 0,
+            result_message: None,
+            error_message: None,
+            child_count: 0,
+            transaction_count: 0,
+            goal_count: 0,
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.is_running = false;
+        self.progress_rx = None;
+        self.entities_pushed = 0;
+        self.total_entities = 0;
+        self.result_message = None;
+        self.error_message = None;
+        self.child_count = 0;
+        self.transaction_count = 0;
+        self.goal_count = 0;
+    }
+
+    /// Poll progress messages from the background thread. Call each frame.
+    pub fn poll_progress(&mut self) {
+        let Some(rx) = &self.progress_rx else { return };
+
+        while let Ok(msg) = rx.try_recv() {
+            match msg {
+                BackfillProgress::Starting { total_entities } => {
+                    self.total_entities = total_entities;
+                    self.entities_pushed = 0;
+                }
+                BackfillProgress::ChildInitialized { .. } => {}
+                BackfillProgress::EntitiesPushed { count, total } => {
+                    self.entities_pushed = count;
+                    self.total_entities = total;
+                }
+                BackfillProgress::Completed { total_pushed } => {
+                    self.is_running = false;
+                    self.entities_pushed = total_pushed;
+                    self.result_message = Some(format!("Synced {} entities successfully", total_pushed));
+                }
+                BackfillProgress::Failed { error, pushed_so_far } => {
+                    self.is_running = false;
+                    self.entities_pushed = pushed_so_far;
+                    self.error_message = Some(error);
+                }
+            }
+        }
+    }
+}
+
+impl Default for BackfillFormState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// All settings-related state for the application
 #[derive(Debug)]
 pub struct SettingsState {
@@ -471,6 +551,12 @@ pub struct SettingsState {
 
     /// Allowance config form state
     pub allowance_config_form: AllowanceConfigFormState,
+
+    /// Whether the backfill modal is visible
+    pub show_backfill_modal: bool,
+
+    /// Backfill form state
+    pub backfill_form: BackfillFormState,
 }
 
 impl SettingsState {
@@ -487,6 +573,8 @@ impl SettingsState {
             data_directory_form: DataDirectoryFormState::new(),
             show_allowance_config_modal: false,
             allowance_config_form: AllowanceConfigFormState::new(),
+            show_backfill_modal: false,
+            backfill_form: BackfillFormState::new(),
         }
     }
 
@@ -497,6 +585,7 @@ impl SettingsState {
         self.show_export_modal = false;
         self.show_data_directory_modal = false;
         self.show_allowance_config_modal = false;
+        self.show_backfill_modal = false;
     }
 
     /// Reset all form states
@@ -506,6 +595,7 @@ impl SettingsState {
         self.export_form.clear();
         self.data_directory_form.clear();
         self.allowance_config_form.clear();
+        self.backfill_form.clear();
     }
 }
 
