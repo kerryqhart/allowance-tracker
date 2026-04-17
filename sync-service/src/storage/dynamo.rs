@@ -379,6 +379,7 @@ impl DynamoStore {
     /// List entities for a child with optional sort direction and limit.
     /// sort_direction: "asc" (default) or "desc". Maps to DynamoDB ScanIndexForward.
     /// limit: max items to return.
+    /// For Transaction entity type with a sort direction, uses DateSortIndex GSI to sort by date.
     pub async fn list_entities_for_child_with_options(
         &self,
         child_id: &str,
@@ -393,12 +394,19 @@ impl DynamoStore {
             _ => true,
         };
 
+        // Use DateSortIndex GSI for transactions when sort is requested
+        let use_gsi = matches!(entity_type, EntityType::Transaction) && sort_direction.is_some();
+
         let mut query = self.client
             .query()
             .table_name(&table)
             .key_condition_expression("child_id = :cid")
             .expression_attribute_values(":cid", AttributeValue::S(child_id.to_string()))
             .scan_index_forward(scan_forward);
+
+        if use_gsi {
+            query = query.index_name("DateSortIndex");
+        }
 
         if let Some(l) = limit {
             query = query.limit(l);

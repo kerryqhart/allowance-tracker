@@ -409,9 +409,10 @@ async fn test_list_entities_with_sort_and_limit() {
     let child_id = "child::sort-test";
 
     // Insert 3 transactions with sort keys that have natural ordering
-    let tx1 = r#"{"id":"tx-aaa","child_id":"child::sort-test","amount":10.0}"#;
-    let tx2 = r#"{"id":"tx-bbb","child_id":"child::sort-test","amount":20.0}"#;
-    let tx3 = r#"{"id":"tx-ccc","child_id":"child::sort-test","amount":30.0}"#;
+    // date fields ensure GSI ordering matches the alphabetical tx-aaa/tx-bbb/tx-ccc order
+    let tx1 = r#"{"id":"tx-aaa","child_id":"child::sort-test","amount":10.0,"date":"2026-01-01T00:00:00Z"}"#;
+    let tx2 = r#"{"id":"tx-bbb","child_id":"child::sort-test","amount":20.0,"date":"2026-02-01T00:00:00Z"}"#;
+    let tx3 = r#"{"id":"tx-ccc","child_id":"child::sort-test","amount":30.0,"date":"2026-03-01T00:00:00Z"}"#;
     store.upsert_entity(child_id, EntityType::Transaction, "tx-aaa", tx1).await.unwrap();
     store.upsert_entity(child_id, EntityType::Transaction, "tx-bbb", tx2).await.unwrap();
     store.upsert_entity(child_id, EntityType::Transaction, "tx-ccc", tx3).await.unwrap();
@@ -430,6 +431,46 @@ async fn test_list_entities_with_sort_and_limit() {
     let results = store.list_entities_for_child_with_options(child_id, EntityType::Transaction, Some("desc"), Some(1)).await.unwrap();
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].0, "tx-ccc");
+
+    ctx.cleanup().await;
+}
+
+#[tokio::test]
+async fn test_list_transactions_sorted_by_date() {
+    if !is_dynamo_local_available(DYNAMO_LOCAL_PORT).await {
+        eprintln!("SKIPPING: DynamoDB Local not available");
+        return;
+    }
+
+    let ctx = DynamoTestContext::new(DYNAMO_LOCAL_PORT).await;
+    let store = DynamoStore::new(ctx.client.clone(), ctx.table_config());
+
+    let child_id = "child::date-sort-test";
+
+    // Insert transactions where transaction_id order != date order
+    // expense sorts before income alphabetically, but the expense is newer
+    let tx1 = r#"{"id":"transaction::income::1000","child_id":"child::date-sort-test","amount":10.0,"balance":10.0,"description":"Old allowance","date":"2026-01-01T00:00:00Z","transaction_type":"Allowance"}"#;
+    let tx2 = r#"{"id":"transaction::expense::2000","child_id":"child::date-sort-test","amount":-5.0,"balance":5.0,"description":"Recent purchase","date":"2026-04-15T00:00:00Z","transaction_type":"Expense"}"#;
+
+    store.upsert_entity(child_id, EntityType::Transaction, "transaction::income::1000", tx1).await.unwrap();
+    store.upsert_entity(child_id, EntityType::Transaction, "transaction::expense::2000", tx2).await.unwrap();
+
+    // sort=desc should return the expense first (April 15) even though
+    // "transaction::expense" < "transaction::income" alphabetically
+    let results = store.list_entities_for_child_with_options(
+        child_id, EntityType::Transaction, Some("desc"), None
+    ).await.unwrap();
+
+    assert_eq!(results.len(), 2);
+    assert!(results[0].1.contains("Recent purchase"), "First result should be the newer expense");
+    assert!(results[1].1.contains("Old allowance"), "Second result should be the older income");
+
+    // sort=desc, limit=1 should return only the expense
+    let results = store.list_entities_for_child_with_options(
+        child_id, EntityType::Transaction, Some("desc"), Some(1)
+    ).await.unwrap();
+    assert_eq!(results.len(), 1);
+    assert!(results[0].1.contains("Recent purchase"));
 
     ctx.cleanup().await;
 }
