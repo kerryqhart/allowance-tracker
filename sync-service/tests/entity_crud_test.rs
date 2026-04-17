@@ -100,6 +100,43 @@ async fn test_get_nonexistent_entity_returns_none() {
 }
 
 #[tokio::test]
+async fn test_upsert_transaction_stores_sort_date() {
+    if !is_dynamo_local_available(DYNAMO_LOCAL_PORT).await {
+        eprintln!("SKIPPING: DynamoDB Local not available");
+        return;
+    }
+
+    let ctx = DynamoTestContext::new(DYNAMO_LOCAL_PORT).await;
+    let store = DynamoStore::new(ctx.client.clone(), ctx.table_config());
+
+    let child_id = "child::sort-date-test";
+    let tx_id = "transaction::income::1000";
+    let tx_data = r#"{"id":"transaction::income::1000","child_id":"child::sort-date-test","amount":10.0,"balance":10.0,"description":"Allowance","date":"2026-04-10T00:00:00Z","transaction_type":"Allowance"}"#;
+
+    store.upsert_entity(child_id, EntityType::Transaction, tx_id, tx_data).await.unwrap();
+
+    // Read the raw DynamoDB item to verify sort_date was stored
+    let response = ctx.client
+        .get_item()
+        .table_name(&ctx.table_config().transactions)
+        .key("child_id", aws_sdk_dynamodb::types::AttributeValue::S(child_id.to_string()))
+        .key("transaction_id", aws_sdk_dynamodb::types::AttributeValue::S(tx_id.to_string()))
+        .send()
+        .await
+        .unwrap();
+
+    let item = response.item.expect("Item should exist");
+    let sort_date = item.get("sort_date")
+        .expect("sort_date attribute should exist")
+        .as_s()
+        .expect("sort_date should be a string");
+
+    assert_eq!(sort_date, "2026-04-10T00:00:00Z");
+
+    ctx.cleanup().await;
+}
+
+#[tokio::test]
 async fn test_delete_entity() {
     let Some((ctx, store)) = setup().await else {
         return;

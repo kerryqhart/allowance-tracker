@@ -262,6 +262,15 @@ impl DynamoStore {
             item.insert(sk_name.to_string(), AttributeValue::S(entity_id.to_string()));
         }
 
+        // For transactions, extract date from JSON and store as sort_date for GSI
+        if matches!(entity_type, EntityType::Transaction) {
+            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(entity_json) {
+                if let Some(date_str) = parsed.get("date").and_then(|v| v.as_str()) {
+                    item.insert("sort_date".to_string(), AttributeValue::S(date_str.to_string()));
+                }
+            }
+        }
+
         self.client
             .put_item()
             .table_name(&table)
