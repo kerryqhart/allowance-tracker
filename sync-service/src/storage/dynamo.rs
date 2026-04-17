@@ -34,16 +34,25 @@ impl DynamoStore {
             ("remote_watermark".to_string(), AttributeValue::N("0".to_string())),
         ]);
 
-        self.client
+        let result = self.client
             .put_item()
             .table_name(&table)
             .set_item(Some(item))
             .condition_expression("attribute_not_exists(child_id)")
             .send()
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to initialize child metadata: {}", e))?;
+            .await;
 
-        Ok(())
+        match result {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                if let Some(service_err) = e.as_service_error() {
+                    if service_err.is_conditional_check_failed_exception() {
+                        return Ok(());
+                    }
+                }
+                Err(anyhow::anyhow!("Failed to initialize child metadata: {}", aws_sdk_dynamodb::error::DisplayErrorContext(&e)))
+            }
+        }
     }
 
     /// Push a sync event: check for duplicates, increment sequence counter atomically,
@@ -84,10 +93,11 @@ impl DynamoStore {
             .put_item()
             .table_name(&events_table)
             .set_item(Some(event_item))
-            .condition_expression("attribute_not_exists(sequence)")
+            .condition_expression("attribute_not_exists(#seq)")
+            .expression_attribute_names("#seq", "sequence")
             .send()
             .await
-            .map_err(|e| anyhow::anyhow!("Failed to write event: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to write event: {}", aws_sdk_dynamodb::error::DisplayErrorContext(&e)))?;
 
         Ok(new_sequence)
     }

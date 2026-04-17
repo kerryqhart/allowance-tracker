@@ -15,11 +15,13 @@ impl HttpRemoteClient {
         }
     }
 
-    fn check_status(&self, status: u16) -> Result<()> {
-        if !status.to_string().starts_with('2') {
-            return Err(anyhow!("HTTP error: {}", status));
+    fn check_response(&self, url: &str, response: reqwest::blocking::Response) -> Result<reqwest::blocking::Response> {
+        let status = response.status().as_u16();
+        if status < 200 || status >= 300 {
+            let body = response.text().unwrap_or_default();
+            return Err(anyhow!("HTTP {} from {}: {}", status, url, body));
         }
-        Ok(())
+        Ok(response)
     }
 }
 
@@ -43,7 +45,7 @@ impl RemoteStorage for HttpRemoteClient {
             .json(&PushRequest { events })
             .send()?;
 
-        self.check_status(response.status().as_u16())?;
+        let response = self.check_response(&url, response)?;
         let parsed: PushResponse = response.json()?;
         Ok(parsed.sequences)
     }
@@ -55,7 +57,7 @@ impl RemoteStorage for HttpRemoteClient {
         );
         let response = self.client.get(&url).send()?;
 
-        self.check_status(response.status().as_u16())?;
+        let response = self.check_response(&url, response)?;
         let events: Vec<SyncEvent> = response.json()?;
         Ok(events)
     }
@@ -80,7 +82,7 @@ impl RemoteStorage for HttpRemoteClient {
             .body(entity_json.to_string())
             .send()?;
 
-        self.check_status(response.status().as_u16())?;
+        self.check_response(&url, response)?;
         Ok(())
     }
 
@@ -96,11 +98,14 @@ impl RemoteStorage for HttpRemoteClient {
 
         match response.status().as_u16() {
             404 => Ok(None),
-            status if status.to_string().starts_with('2') => {
+            status if (200..300).contains(&status) => {
                 let body = response.text()?;
                 Ok(Some(body))
             }
-            status => Err(anyhow!("HTTP error: {}", status)),
+            status => {
+                let body = response.text().unwrap_or_default();
+                Err(anyhow!("HTTP {} from {}: {}", status, url, body))
+            }
         }
     }
 
@@ -114,7 +119,7 @@ impl RemoteStorage for HttpRemoteClient {
         );
         let response = self.client.delete(&url).send()?;
 
-        self.check_status(response.status().as_u16())?;
+        self.check_response(&url, response)?;
         Ok(())
     }
 
@@ -122,7 +127,7 @@ impl RemoteStorage for HttpRemoteClient {
         let url = format!("{}/sync/checkpoint/{}", self.base_url, child_id);
         let response = self.client.get(&url).send()?;
 
-        self.check_status(response.status().as_u16())?;
+        let response = self.check_response(&url, response)?;
         let checkpoint: SyncCheckpoint = response.json()?;
         Ok(checkpoint)
     }
@@ -139,7 +144,7 @@ impl RemoteStorage for HttpRemoteClient {
             .json(&payload)
             .send()?;
 
-        self.check_status(response.status().as_u16())?;
+        self.check_response(&url, response)?;
         Ok(())
     }
 
@@ -147,7 +152,7 @@ impl RemoteStorage for HttpRemoteClient {
         let url = format!("{}/sync/initialize/{}", self.base_url, child_id);
         let response = self.client.post(&url).send()?;
 
-        self.check_status(response.status().as_u16())?;
+        self.check_response(&url, response)?;
         Ok(())
     }
 

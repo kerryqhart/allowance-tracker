@@ -1,4 +1,4 @@
-use egui::{Align2, Area, Color32, Frame, Id, Order, RichText, Vec2};
+use egui::{Align2, Area, Color32, CornerRadius, Frame, Id, Order, Rect, RichText, UiBuilder, Vec2};
 use crate::ui::app_state::AllowanceTrackerApp;
 
 // TODO: Move to user-facing config once settings UI supports it
@@ -10,6 +10,7 @@ impl AllowanceTrackerApp {
         log::info!("Initial sync action - opening modal");
         self.settings.show_backfill_modal = true;
         self.settings.backfill_form.clear();
+        self.settings.backfill_form.just_opened = true;
 
         // Pre-compute entity counts
         if let Ok(children_result) = self.backend().child_service.list_children() {
@@ -40,9 +41,14 @@ impl AllowanceTrackerApp {
         use std::sync::mpsc;
         use std::thread;
 
-        // TODO: Move to user-facing config once settings UI supports it
-        let remote_url = std::env::var("SYNC_SERVICE_URL")
-            .unwrap_or_else(|_| DEFAULT_SYNC_SERVICE_URL.to_string());
+        // TODO: Move to user-facing config once settings UI supports it.
+        // The `/internal` prefix hits the unauthenticated route group on the sync-service
+        // API Gateway — matches how the MCP server accesses the same data.
+        let remote_url = format!(
+            "{}/internal",
+            std::env::var("SYNC_SERVICE_URL")
+                .unwrap_or_else(|_| DEFAULT_SYNC_SERVICE_URL.to_string())
+        );
 
         self.settings.backfill_form.is_running = true;
         self.settings.backfill_form.result_message = None;
@@ -110,34 +116,27 @@ impl AllowanceTrackerApp {
             ctx.request_repaint();
         }
 
-        // Dark backdrop
-        let screen_rect = ctx.screen_rect();
-        Area::new(Id::new("backfill_backdrop"))
-            .fixed_pos(screen_rect.min)
+        let modal_size = Vec2::new(390.0, 260.0);
+
+        Area::new(Id::new("backfill_modal_overlay"))
             .order(Order::Foreground)
+            .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
             .show(ctx, |ui| {
-                let response = ui.allocate_rect(screen_rect, egui::Sense::click());
+                let screen_rect = ctx.screen_rect();
                 ui.painter().rect_filled(
                     screen_rect,
-                    0.0,
-                    Color32::from_black_alpha(128),
+                    CornerRadius::ZERO,
+                    Color32::from_rgba_unmultiplied(0, 0, 0, 128),
                 );
-                // Click backdrop to close (only if not running)
-                if response.clicked() && !self.settings.backfill_form.is_running {
-                    self.settings.show_backfill_modal = false;
-                }
-            });
 
-        // Modal content
-        Area::new(Id::new("backfill_modal"))
-            .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
-            .order(Order::Foreground)
-            .show(ctx, |ui| {
-                Frame::window(ui.style())
-                    .inner_margin(20.0)
-                    .show(ui, |ui| {
-                        ui.set_width(350.0);
-                        ui.heading("Initial Sync");
+                ui.allocate_new_ui(UiBuilder::new().max_rect(screen_rect), |ui| {
+                    ui.centered_and_justified(|ui| {
+                        Frame::window(ui.style())
+                            .inner_margin(20.0)
+                            .show(ui, |ui| {
+                                ui.set_min_size(modal_size);
+                                ui.set_max_size(modal_size);
+                                ui.heading("Initial Sync");
                         ui.add_space(10.0);
 
                         let form = &self.settings.backfill_form;
@@ -197,7 +196,26 @@ impl AllowanceTrackerApp {
                                 }
                             });
                         }
+                            });
                     });
+                });
+
+                // Backdrop click-to-close (only if not running) — check pointer
+                // position vs modal rect. Skip on the frame the modal opened so
+                // the menu-item click that triggered opening doesn't close it.
+                if self.settings.backfill_form.just_opened {
+                    self.settings.backfill_form.just_opened = false;
+                } else if !self.settings.backfill_form.is_running
+                    && ui.ctx().input(|i| i.pointer.any_click())
+                {
+                    if let Some(pos) = ui.ctx().input(|i| i.pointer.latest_pos()) {
+                        let modal_rect =
+                            Rect::from_center_size(ctx.screen_rect().center(), modal_size);
+                        if !modal_rect.contains(pos) {
+                            self.settings.show_backfill_modal = false;
+                        }
+                    }
+                }
             });
     }
 }

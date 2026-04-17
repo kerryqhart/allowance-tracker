@@ -27,7 +27,10 @@ async fn upsert_entity(
 
     match store.upsert_entity(&child_id, entity_type, &entity_id, &entity_json).await {
         Ok(_) => Ok(StatusCode::OK),
-        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+        Err(e) => {
+            eprintln!("upsert_entity failed for {}/{}: {:?}", child_id, entity_id, e);
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
     }
 }
 
@@ -42,7 +45,10 @@ async fn get_entity(
     match store.get_entity(&child_id, entity_type, &entity_id).await {
         Ok(Some(json)) => Ok(json),
         Ok(None) => Err(StatusCode::NOT_FOUND),
-        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+        Err(e) => {
+            eprintln!("get_entity failed for {}/{}: {:?}", child_id, entity_id, e);
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
     }
 }
 
@@ -56,7 +62,10 @@ async fn delete_entity(
 
     match store.delete_entity(&child_id, entity_type, &entity_id).await {
         Ok(_) => Ok(StatusCode::NO_CONTENT),
-        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+        Err(e) => {
+            eprintln!("delete_entity failed for {}/{}: {:?}", child_id, entity_id, e);
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
     }
 }
 
@@ -69,7 +78,10 @@ async fn list_children(
             let json_list: Vec<String> = entities.into_iter().map(|(_, data)| data).collect();
             Ok(Json(json_list))
         }
-        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+        Err(e) => {
+            eprintln!("list_children failed: {:?}", e);
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
     }
 }
 
@@ -98,7 +110,10 @@ async fn list_entities(
             let json_list: Vec<String> = entities.into_iter().map(|(_, data)| data).collect();
             Ok(Json(json_list))
         }
-        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+        Err(e) => {
+            eprintln!("list_entities failed for {}/{}: {:?}", entity_type_str, child_id, e);
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
     }
 }
 

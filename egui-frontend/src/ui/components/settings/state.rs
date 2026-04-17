@@ -454,6 +454,9 @@ pub struct BackfillFormState {
     pub child_count: usize,
     pub transaction_count: usize,
     pub goal_count: usize,
+    /// True on the frame the modal opens — used to ignore the click release
+    /// that triggered opening from the settings menu.
+    pub just_opened: bool,
 }
 
 impl BackfillFormState {
@@ -468,6 +471,7 @@ impl BackfillFormState {
             child_count: 0,
             transaction_count: 0,
             goal_count: 0,
+            just_opened: false,
         }
     }
 
@@ -481,6 +485,7 @@ impl BackfillFormState {
         self.child_count = 0;
         self.transaction_count = 0;
         self.goal_count = 0;
+        self.just_opened = false;
     }
 
     /// Poll progress messages from the background thread. Call each frame.

@@ -45,7 +45,10 @@ async fn push_events(
     for event in req.events {
         match store.push_event(&event).await {
             Ok(seq) => sequences.push(seq),
-            Err(_) => return Err(StatusCode::INTERNAL_SERVER_ERROR),
+            Err(e) => {
+                eprintln!("push_event failed: {:?}", e);
+                return Err(StatusCode::INTERNAL_SERVER_ERROR);
+            }
         }
     }
     Ok((StatusCode::CREATED, Json(PushEventsResponse { sequences })))
@@ -59,7 +62,10 @@ async fn get_events(
     let since = params.since.unwrap_or(0);
     match store.get_events_since(&params.child_id, since).await {
         Ok(events) => Ok(Json(GetEventsResponse { events })),
-        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+        Err(e) => {
+            eprintln!("get_events failed: {:?}", e);
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
     }
 }
 
@@ -70,7 +76,10 @@ async fn initialize_child(
 ) -> Result<StatusCode, StatusCode> {
     match store.initialize_child_metadata(&child_id).await {
         Ok(_) => Ok(StatusCode::CREATED),
-        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+        Err(e) => {
+            eprintln!("initialize_child failed for {}: {:?}", child_id, e);
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
     }
 }
 
@@ -81,7 +90,10 @@ async fn get_checkpoint(
 ) -> Result<Json<SyncCheckpoint>, StatusCode> {
     match store.get_checkpoint(&child_id).await {
         Ok(checkpoint) => Ok(Json(checkpoint)),
-        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+        Err(e) => {
+            eprintln!("get_checkpoint failed for {}: {:?}", child_id, e);
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
     }
 }
 
@@ -93,7 +105,10 @@ async fn update_checkpoint(
 ) -> Result<StatusCode, StatusCode> {
     match store.update_watermark(&child_id, &req.which, req.value).await {
         Ok(_) => Ok(StatusCode::OK),
-        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+        Err(e) => {
+            eprintln!("update_checkpoint failed for {}: {:?}", child_id, e);
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
     }
 }
 
