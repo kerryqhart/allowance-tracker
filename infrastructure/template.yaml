@@ -151,11 +151,22 @@ Resources:
           AttributeType: S
         - AttributeName: transaction_id
           AttributeType: S
+        - AttributeName: sort_date
+          AttributeType: S
       KeySchema:
         - AttributeName: child_id
           KeyType: HASH
         - AttributeName: transaction_id
           KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: DateSortIndex
+          KeySchema:
+            - AttributeName: child_id
+              KeyType: HASH
+            - AttributeName: sort_date
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
 
   GoalsTable:
     Type: AWS::DynamoDB::Table

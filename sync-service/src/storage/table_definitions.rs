@@ -1,6 +1,7 @@
 use aws_sdk_dynamodb::Client;
 use aws_sdk_dynamodb::types::{
-    AttributeDefinition, KeySchemaElement, ScalarAttributeType,
+    AttributeDefinition, GlobalSecondaryIndex, KeySchemaElement, Projection,
+    ProjectionType, ScalarAttributeType,
 };
 
 const CHILDREN_TABLE: &str = "children";
@@ -40,7 +41,39 @@ pub async fn create_all_tables(client: &Client, prefix: &str) -> anyhow::Result<
     )
     .await?;
 
-    create_table_if_not_exists(
+    // Build DateSortIndex GSI
+    let date_sort_index = GlobalSecondaryIndex::builder()
+        .index_name("DateSortIndex")
+        .key_schema(
+            KeySchemaElement::builder()
+                .attribute_name("child_id")
+                .key_type(aws_sdk_dynamodb::types::KeyType::Hash)
+                .build()
+                .map_err(|e| anyhow::anyhow!("Failed to build KeySchemaElement: {}", e))?,
+        )
+        .key_schema(
+            KeySchemaElement::builder()
+                .attribute_name("sort_date")
+                .key_type(aws_sdk_dynamodb::types::KeyType::Range)
+                .build()
+                .map_err(|e| anyhow::anyhow!("Failed to build KeySchemaElement: {}", e))?,
+        )
+        .projection(
+            Projection::builder()
+                .projection_type(ProjectionType::All)
+                .build(),
+        )
+        .provisioned_throughput(
+            aws_sdk_dynamodb::types::ProvisionedThroughput::builder()
+                .read_capacity_units(5)
+                .write_capacity_units(5)
+                .build()
+                .map_err(|e| anyhow::anyhow!("Failed to build ProvisionedThroughput: {}", e))?,
+        )
+        .build()
+        .map_err(|e| anyhow::anyhow!("Failed to build GlobalSecondaryIndex: {}", e))?;
+
+    create_table_with_gsi(
         client,
         &format!("{}{}", prefix, TRANSACTIONS_TABLE),
         vec![
@@ -66,7 +99,13 @@ pub async fn create_all_tables(client: &Client, prefix: &str) -> anyhow::Result<
                 .attribute_type(ScalarAttributeType::S)
                 .build()
                 .map_err(|e| anyhow::anyhow!("Failed to build AttributeDefinition: {}", e))?,
+            AttributeDefinition::builder()
+                .attribute_name("sort_date")
+                .attribute_type(ScalarAttributeType::S)
+                .build()
+                .map_err(|e| anyhow::anyhow!("Failed to build AttributeDefinition: {}", e))?,
         ],
+        date_sort_index,
     )
     .await?;
 
@@ -182,6 +221,57 @@ async fn create_table_if_not_exists(
     for attr in attributes {
         create_table_builder = create_table_builder.attribute_definitions(attr);
     }
+
+    let result = create_table_builder.send().await;
+
+    match result {
+        Ok(_) => Ok(()),
+        Err(e) => {
+            // Check if the error is ResourceInUseException (table already exists)
+            if let Some(service_err) = e.as_service_error() {
+                if service_err.is_resource_in_use_exception() {
+                    // Table already exists, which is fine
+                    return Ok(());
+                }
+            }
+            Err(anyhow::anyhow!("Failed to create table {}: {}", table_name, e))
+        }
+    }
+}
+
+/// Create a single DynamoDB table with a GSI if it doesn't already exist.
+///
+/// Similar to `create_table_if_not_exists` but also accepts a GlobalSecondaryIndex.
+/// Handles ResourceInUseException gracefully by returning success if the table
+/// already exists.
+async fn create_table_with_gsi(
+    client: &Client,
+    table_name: &str,
+    key_schema: Vec<KeySchemaElement>,
+    attributes: Vec<AttributeDefinition>,
+    gsi: GlobalSecondaryIndex,
+) -> anyhow::Result<()> {
+    let mut create_table_builder = client
+        .create_table()
+        .table_name(table_name)
+        .billing_mode(aws_sdk_dynamodb::types::BillingMode::Provisioned)
+        .provisioned_throughput(
+            aws_sdk_dynamodb::types::ProvisionedThroughput::builder()
+                .read_capacity_units(5)
+                .write_capacity_units(5)
+                .build()
+                .map_err(|e| anyhow::anyhow!("Failed to build ProvisionedThroughput: {}", e))?,
+        );
+
+    for ks in key_schema {
+        create_table_builder = create_table_builder.key_schema(ks);
+    }
+
+    for attr in attributes {
+        create_table_builder = create_table_builder.attribute_definitions(attr);
+    }
+
+    create_table_builder = create_table_builder.global_secondary_indexes(gsi);
 
     let result = create_table_builder.send().await;
 
