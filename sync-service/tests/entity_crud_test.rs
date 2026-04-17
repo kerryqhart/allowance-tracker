@@ -352,6 +352,51 @@ async fn test_list_entities_for_child() {
 }
 
 #[tokio::test]
+async fn test_get_latest_balance() {
+    if !is_dynamo_local_available(DYNAMO_LOCAL_PORT).await {
+        eprintln!("SKIPPING: DynamoDB Local not available");
+        return;
+    }
+
+    let ctx = DynamoTestContext::new(DYNAMO_LOCAL_PORT).await;
+    let store = DynamoStore::new(ctx.client.clone(), ctx.table_config());
+
+    let child_id = "child::balance-test";
+
+    // Insert transactions with different dates — note the entity IDs mix expense/income
+    // so sorting by transaction_id would NOT give date order
+    let tx1 = r#"{"id":"transaction::income::1000","child_id":"child::balance-test","amount":10.0,"balance":10.0,"description":"Allowance","date":"2026-04-01T00:00:00Z","transaction_type":"Allowance"}"#;
+    let tx2 = r#"{"id":"transaction::expense::1001","child_id":"child::balance-test","amount":-3.0,"balance":7.0,"description":"Candy","date":"2026-04-05T00:00:00Z","transaction_type":"Expense"}"#;
+    let tx3 = r#"{"id":"transaction::income::1002","child_id":"child::balance-test","amount":10.0,"balance":17.0,"description":"Allowance 2","date":"2026-04-08T00:00:00Z","transaction_type":"Allowance"}"#;
+
+    store.upsert_entity(child_id, EntityType::Transaction, "transaction::income::1000", tx1).await.unwrap();
+    store.upsert_entity(child_id, EntityType::Transaction, "transaction::expense::1001", tx2).await.unwrap();
+    store.upsert_entity(child_id, EntityType::Transaction, "transaction::income::1002", tx3).await.unwrap();
+
+    // Get latest balance — should be 17.0 from the April 8 transaction
+    let balance = store.get_latest_balance(child_id).await.unwrap();
+    assert_eq!(balance, Some(17.0));
+
+    ctx.cleanup().await;
+}
+
+#[tokio::test]
+async fn test_get_latest_balance_no_transactions() {
+    if !is_dynamo_local_available(DYNAMO_LOCAL_PORT).await {
+        eprintln!("SKIPPING: DynamoDB Local not available");
+        return;
+    }
+
+    let ctx = DynamoTestContext::new(DYNAMO_LOCAL_PORT).await;
+    let store = DynamoStore::new(ctx.client.clone(), ctx.table_config());
+
+    let balance = store.get_latest_balance("child::nonexistent").await.unwrap();
+    assert_eq!(balance, None);
+
+    ctx.cleanup().await;
+}
+
+#[tokio::test]
 async fn test_list_entities_with_sort_and_limit() {
     if !is_dynamo_local_available(DYNAMO_LOCAL_PORT).await {
         eprintln!("SKIPPING: DynamoDB Local not available");

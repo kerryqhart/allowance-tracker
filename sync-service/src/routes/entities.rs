@@ -5,6 +5,7 @@ use axum::{
     Router, routing::{get, put, delete},
     body::Body,
 };
+use serde_json;
 use std::sync::Arc;
 use shared::sync::EntityType;
 use crate::storage::DynamoStore;
@@ -117,6 +118,24 @@ async fn list_entities(
     }
 }
 
+// GET /balance/{child_id} - get current balance for a child
+async fn get_balance(
+    State(store): State<Arc<DynamoStore>>,
+    Path(child_id): Path<String>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    match store.get_latest_balance(&child_id).await {
+        Ok(Some(balance)) => Ok(Json(serde_json::json!({
+            "child_id": child_id,
+            "balance": balance,
+        }))),
+        Ok(None) => Err(StatusCode::NOT_FOUND),
+        Err(e) => {
+            eprintln!("get_balance failed for {}: {:?}", child_id, e);
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
+}
+
 pub fn routes() -> Router<Arc<DynamoStore>> {
     Router::new()
         .route("/entities/child", get(list_children))
@@ -124,4 +143,5 @@ pub fn routes() -> Router<Arc<DynamoStore>> {
         .route("/entities/{entity_type}/{child_id}/{entity_id}", put(upsert_entity))
         .route("/entities/{entity_type}/{child_id}/{entity_id}", get(get_entity))
         .route("/entities/{entity_type}/{child_id}/{entity_id}", delete(delete_entity))
+        .route("/balance/{child_id}", get(get_balance))
 }

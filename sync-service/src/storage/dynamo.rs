@@ -435,6 +435,33 @@ impl DynamoStore {
         Ok(results)
     }
 
+    /// Get the balance from the most recent transaction for a child.
+    /// Queries the DateSortIndex GSI (child_id + sort_date) in descending order, limit 1.
+    /// Returns None if no transactions exist.
+    pub async fn get_latest_balance(&self, child_id: &str) -> anyhow::Result<Option<f64>> {
+        let table = self.config.transactions.clone();
+
+        let response = self.client
+            .query()
+            .table_name(&table)
+            .index_name("DateSortIndex")
+            .key_condition_expression("child_id = :cid")
+            .expression_attribute_values(":cid", AttributeValue::S(child_id.to_string()))
+            .scan_index_forward(false)
+            .limit(1)
+            .send()
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to query DateSortIndex: {}", e))?;
+
+        let balance = response.items
+            .and_then(|items| items.into_iter().next())
+            .and_then(|item| item.get("data").and_then(|v| v.as_s().ok()).map(|s| s.to_string()))
+            .and_then(|json_str| serde_json::from_str::<serde_json::Value>(&json_str).ok())
+            .and_then(|val| val.get("balance").and_then(|b| b.as_f64()));
+
+        Ok(balance)
+    }
+
     /// Map EntityType to table name and optional sort key name.
     fn entity_table_and_sort_key(&self, entity_type: &EntityType) -> (String, Option<&'static str>) {
         match entity_type {
