@@ -203,12 +203,14 @@ fn push_event(
     event: &SyncEvent,
     message_tx: &mpsc::Sender<SyncMessage>,
 ) -> Result<(), String> {
-    // Deletes don't need entity data
+    // Deletes don't need entity data. Delete the entity body first so that a
+    // crash between the two calls leaves a dangling event to retry rather than
+    // letting other clients see a delete-event referencing a still-present body.
     if event.action == SyncAction::Deleted {
-        remote.push_events(std::slice::from_ref(event))
-            .map_err(|e| format!("push_events failed: {e}"))?;
         remote.delete_entity(&event.child_id, event.entity_type.clone(), &event.entity_id)
             .map_err(|e| format!("delete_entity failed: {e}"))?;
+        remote.push_events(std::slice::from_ref(event))
+            .map_err(|e| format!("push_events failed: {e}"))?;
         return Ok(());
     }
 
@@ -221,10 +223,20 @@ fn push_event(
         response_tx,
     }).map_err(|e| format!("failed to request entity from UI: {e}"))?;
 
-    let entity_json = response_rx
-        .recv_timeout(std::time::Duration::from_secs(5))
-        .map_err(|e| format!("timeout waiting for entity read: {e}"))?
-        .ok_or_else(|| "entity not found locally".to_string())?;
+    let entity_json = match response_rx.recv_timeout(std::time::Duration::from_secs(5)) {
+        Ok(Some(json)) => json,
+        Ok(None) => {
+            // Entity is gone locally (likely deleted after this event was queued).
+            // The subsequent Deleted event will handle remote cleanup; discard
+            // this event rather than retrying it forever.
+            log::warn!(
+                "Discarding sync event {} for missing entity {:?}/{}",
+                event.event_id, event.entity_type, event.entity_id
+            );
+            return Ok(());
+        }
+        Err(e) => return Err(format!("timeout waiting for entity read: {e}")),
+    };
 
     // Upsert entity first, then the event record
     remote.upsert_entity(&event.child_id, event.entity_type.clone(), &event.entity_id, &entity_json)
@@ -386,11 +398,16 @@ mod tests {
         );
         event_tx.send(event).unwrap();
 
-        // Give the sync thread time to process
-        std::thread::sleep(Duration::from_millis(400));
-
-        // Verify the event was pushed to remote
-        let events = mock.get_events_since("child1", 0).unwrap();
+        // Poll the mock until the event arrives or we hit a generous deadline.
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let mut events = Vec::new();
+        while std::time::Instant::now() < deadline {
+            events = mock.get_events_since("child1", 0).unwrap();
+            if !events.is_empty() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
         assert_eq!(events.len(), 1, "Expected event pushed to remote");
 
         handle.shutdown();
@@ -431,20 +448,21 @@ mod tests {
             dir.path().to_path_buf(),
         );
 
-        // Give the thread a moment to start, then send PollNow
-        std::thread::sleep(Duration::from_millis(100));
         command_tx.send(SyncCommand::PollNow).unwrap();
 
-        // Wait for the poll to be processed
-        std::thread::sleep(Duration::from_millis(400));
-
-        // Drain messages looking for ApplyRemoteEntity for tx_remote
+        // Block on the message channel until the expected ApplyRemoteEntity
+        // arrives. Uses recv_timeout so a slow machine doesn't flake.
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
         let mut found = false;
-        while let Ok(msg) = message_rx.try_recv() {
-            if let SyncMessage::ApplyRemoteEntity { entity_id, .. } = &msg {
-                if entity_id == "tx_remote" {
+        while std::time::Instant::now() < deadline {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            match message_rx.recv_timeout(remaining) {
+                Ok(SyncMessage::ApplyRemoteEntity { entity_id, .. }) if entity_id == "tx_remote" => {
                     found = true;
+                    break;
                 }
+                Ok(_) => continue,
+                Err(_) => break,
             }
         }
         assert!(found, "Expected ApplyRemoteEntity for tx_remote");
