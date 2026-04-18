@@ -405,6 +405,7 @@ impl AllowanceTrackerApp {
     /// This must live in app_coordinator (not SyncUiState) because several message
     /// variants require backend access to read/write local repositories.
     fn handle_sync_messages(&mut self) {
+        let mut local_state_dirty = false;
         while let Some(msg) = self.sync.try_recv_message() {
             match msg {
                 SyncMessage::ReadEntityRequest { child_id, entity_type, entity_id, response_tx } => {
@@ -413,9 +414,11 @@ impl AllowanceTrackerApp {
                 }
                 SyncMessage::ApplyRemoteEntity { child_id, entity_type, entity_id, entity_json, event_id } => {
                     self.apply_remote_entity(&child_id, &entity_type, &entity_id, &entity_json, &event_id);
+                    local_state_dirty = true;
                 }
                 SyncMessage::DeleteLocalEntity { child_id, entity_type, entity_id, event_id } => {
                     self.delete_local_entity(&child_id, &entity_type, &entity_id, &event_id);
+                    local_state_dirty = true;
                 }
                 SyncMessage::StatusChanged(status) => {
                     self.sync.status = status;
@@ -436,6 +439,10 @@ impl AllowanceTrackerApp {
                     self.sync.status = SyncStatus::HasConflicts(self.sync.pending_conflict_count());
                 }
             }
+        }
+        // Refresh UI once after draining, rather than per-entity during bulk sync.
+        if local_state_dirty {
+            self.load_initial_data();
         }
     }
 
@@ -569,9 +576,6 @@ impl AllowanceTrackerApp {
                 }
             }
         }
-
-        // Refresh UI so the newly synced data is visible
-        self.load_initial_data();
     }
 
     /// Delete a local entity that was deleted on the remote. Does NOT fire SyncNotifier.
@@ -601,9 +605,6 @@ impl AllowanceTrackerApp {
                 }
             }
         }
-
-        // Refresh UI so the deletion is reflected
-        self.load_initial_data();
     }
 
     /// Refresh pending allowances if enough time has passed since last check

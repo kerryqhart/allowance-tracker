@@ -60,6 +60,8 @@ pub struct AllowanceTrackerApp {
     /// Handle to the sync background thread. None when sync is disabled.
     pub sync_thread: Option<SyncThreadHandle>,
     /// Tracks whether the window was focused on the previous frame, for edge-detection.
+    /// Initialised to `true` so the first frame doesn't spuriously trigger a `PollNow`
+    /// — Task 6 can do an explicit startup poll if one is desired.
     pub was_focused: bool,
 }
 
@@ -123,7 +125,7 @@ impl AllowanceTrackerApp {
             // Sync thread handles — populated by Task 6 wiring
             sync_command_tx: None,
             sync_thread: None,
-            was_focused: false,
+            was_focused: true,
         })
     }
 
@@ -723,7 +725,9 @@ impl AllowanceTrackerApp {
 
 impl Drop for AllowanceTrackerApp {
     fn drop(&mut self) {
-        // Shut down the sync thread cleanly when the app closes
+        // Shut down the sync thread cleanly when the app closes.
+        // SyncThreadHandle's own Drop is a no-op after this because
+        // shutdown() uses Option::take on its internal join handle.
         if let Some(ref mut thread) = self.sync_thread {
             thread.shutdown();
         }

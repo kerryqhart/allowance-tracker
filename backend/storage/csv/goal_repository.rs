@@ -187,6 +187,18 @@ impl GoalRepository {
         }
     }
 
+    /// Remove a goal record by id. Returns true if a row was removed.
+    pub fn delete_goal_by_id(&self, child_id: &str, goal_id: &str) -> Result<bool> {
+        let mut goals = self.read_goals(child_id)?;
+        let before = goals.len();
+        goals.retain(|g| g.id != goal_id);
+        if goals.len() == before {
+            return Ok(false);
+        }
+        self.write_goals(child_id, &goals)?;
+        Ok(true)
+    }
+
     /// Check if a child has an active goal
     pub fn has_active_goal(&self, child_id: &str) -> Result<bool> {
         let goals = self.read_goals(child_id)?;

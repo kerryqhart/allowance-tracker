@@ -626,20 +626,12 @@ impl GoalService {
     }
 
     /// Delete a goal by ID without firing the sync notifier.
-    /// Used to apply remote deletes locally.
+    /// Used to apply remote deletes locally. Idempotent: a remote delete for a
+    /// goal that doesn't exist locally is not an error.
     pub fn delete_goal_by_id(&self, child_id: &str, goal_id: &str) -> Result<()> {
-        // GoalRepository has no direct delete; rebuild list without the target goal.
-        // We achieve this via update_goal — but that requires the goal to exist.
-        // The simplest approach: read, filter, write.  We do this via store_goal
-        // (append) — but there is no delete_goal API on the repository yet.
-        //
-        // Rather than add a repository method here, we use a workaround: mark the
-        // goal as Cancelled so it's effectively inactive.  A true delete would
-        // require a new repository method; leaving that for a follow-up if needed.
-        let goals = self.goal_repository.list_goals(child_id, None)?;
-        if let Some(mut goal) = goals.into_iter().find(|g| g.id == goal_id) {
-            goal.state = DomainGoalState::Cancelled;
-            self.goal_repository.update_goal(&goal)?;
+        let removed = self.goal_repository.delete_goal_by_id(child_id, goal_id)?;
+        if !removed {
+            log::debug!("delete_goal_by_id: {goal_id} not found for {child_id}; skipping");
         }
         Ok(())
     }
