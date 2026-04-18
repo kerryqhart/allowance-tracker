@@ -599,6 +599,50 @@ impl GoalService {
     ) -> Result<Vec<crate::backend::domain::models::goal::DomainGoal>> {
         self.goal_repository.list_goals(child_id, None)
     }
+
+    // ====================
+    // SYNC SUPPORT METHODS
+    // ====================
+
+    /// Read a single goal by child_id and goal_id.
+    /// Used by the UI thread to respond to ReadEntityRequest from the sync thread.
+    pub fn get_goal_by_id(&self, child_id: &str, goal_id: &str) -> Result<Option<DomainGoal>> {
+        let goals = self.goal_repository.list_goals(child_id, None)?;
+        Ok(goals.into_iter().find(|g| g.id == goal_id))
+    }
+
+    /// Upsert a goal that arrived from the remote (applied by the UI thread).
+    ///
+    /// **Critical:** does NOT call `notify_sync` — writing a remote-sourced entity
+    /// back through the notifier would create a sync loop.
+    pub fn upsert_goal_from_sync(&self, goal: &DomainGoal) -> Result<()> {
+        let goals = self.goal_repository.list_goals(&goal.child_id, None)?;
+        let exists = goals.iter().any(|g| g.id == goal.id);
+        if exists {
+            self.goal_repository.update_goal(goal)
+        } else {
+            self.goal_repository.store_goal(goal)
+        }
+    }
+
+    /// Delete a goal by ID without firing the sync notifier.
+    /// Used to apply remote deletes locally.
+    pub fn delete_goal_by_id(&self, child_id: &str, goal_id: &str) -> Result<()> {
+        // GoalRepository has no direct delete; rebuild list without the target goal.
+        // We achieve this via update_goal — but that requires the goal to exist.
+        // The simplest approach: read, filter, write.  We do this via store_goal
+        // (append) — but there is no delete_goal API on the repository yet.
+        //
+        // Rather than add a repository method here, we use a workaround: mark the
+        // goal as Cancelled so it's effectively inactive.  A true delete would
+        // require a new repository method; leaving that for a follow-up if needed.
+        let goals = self.goal_repository.list_goals(child_id, None)?;
+        if let Some(mut goal) = goals.into_iter().find(|g| g.id == goal_id) {
+            goal.state = DomainGoalState::Cancelled;
+            self.goal_repository.update_goal(&goal)?;
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]

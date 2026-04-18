@@ -28,6 +28,7 @@ use log::{info, warn};
 use chrono::{Datelike, TimeZone};
 use shared::*;
 use crate::backend::Backend;
+use crate::backend::domain::{SyncCommand, SyncThreadHandle};
 
 // Import all state modules
 use crate::ui::state::*;
@@ -52,6 +53,14 @@ pub struct AllowanceTrackerApp {
     pub goal: GoalUiState,            // Goal management and progress tracking
     pub settings: crate::ui::components::settings::SettingsState, // Settings modals and forms
     pub sync: SyncUiState,            // Sync status and conflict management
+
+    // Sync thread handles — None until Task 6 wires them at startup
+    /// Sender to control the sync thread (PollNow, Shutdown). None when sync is disabled.
+    pub sync_command_tx: Option<std::sync::mpsc::Sender<SyncCommand>>,
+    /// Handle to the sync background thread. None when sync is disabled.
+    pub sync_thread: Option<SyncThreadHandle>,
+    /// Tracks whether the window was focused on the previous frame, for edge-detection.
+    pub was_focused: bool,
 }
 
 impl AllowanceTrackerApp {
@@ -111,6 +120,10 @@ impl AllowanceTrackerApp {
             goal,
             settings,
             sync,
+            // Sync thread handles — populated by Task 6 wiring
+            sync_command_tx: None,
+            sync_thread: None,
+            was_focused: false,
         })
     }
 
@@ -706,4 +719,13 @@ impl AllowanceTrackerApp {
             }
         }
     }
-} 
+}
+
+impl Drop for AllowanceTrackerApp {
+    fn drop(&mut self) {
+        // Shut down the sync thread cleanly when the app closes
+        if let Some(ref mut thread) = self.sync_thread {
+            thread.shutdown();
+        }
+    }
+}

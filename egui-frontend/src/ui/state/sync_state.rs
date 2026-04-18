@@ -47,35 +47,11 @@ impl SyncUiState {
         }
     }
 
-    /// Drain sync messages from the background thread. Call each frame.
-    pub fn poll_messages(&mut self) {
-        let Some(rx) = &self.message_rx else { return };
-
-        while let Ok(msg) = rx.try_recv() {
-            match msg {
-                SyncMessage::StatusChanged(status) => {
-                    self.status = status;
-                }
-                SyncMessage::ConflictDetected(conflict) => {
-                    self.conflicts.push(conflict);
-                    self.status = SyncStatus::HasConflicts(self.pending_conflict_count());
-                }
-                SyncMessage::EntitiesUpdated { .. } => {
-                    // TODO: trigger data reload for the affected child
-                }
-                SyncMessage::PushFailed { event_id, error } => {
-                    log::warn!("Sync push failed for event {}: {}", event_id, error);
-                }
-                SyncMessage::Error(error) => {
-                    log::error!("Sync error: {}", error);
-                    self.status = SyncStatus::Error(error);
-                }
-                // New variants handled in later tasks (Task 5: UI thread sync handler)
-                SyncMessage::ReadEntityRequest { .. } => {}
-                SyncMessage::ApplyRemoteEntity { .. } => {}
-                SyncMessage::DeleteLocalEntity { .. } => {}
-            }
-        }
+    /// Try to receive the next sync message from the background thread.
+    /// Returns None if there are no pending messages or no receiver is set.
+    /// Used by `app_coordinator::handle_sync_messages` to drain the channel.
+    pub fn try_recv_message(&self) -> Option<SyncMessage> {
+        self.message_rx.as_ref()?.try_recv().ok()
     }
 
     /// Count the number of pending conflicts (not yet resolved)

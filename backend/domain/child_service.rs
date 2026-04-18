@@ -236,6 +236,28 @@ impl ChildService {
         Ok(())
     }
 
+    // ====================
+    // SYNC SUPPORT METHODS
+    // ====================
+
+    /// Upsert a child that arrived from the remote (applied by the UI thread).
+    ///
+    /// **Critical:** does NOT call `notify_sync` — writing a remote-sourced entity
+    /// back through the notifier would create a sync loop.
+    pub fn upsert_child_from_sync(&self, child: &DomainChild) -> Result<()> {
+        // Check if child already exists; update or create accordingly.
+        match self.child_repository.get_child(&child.id)? {
+            Some(_) => self.child_repository.update_child(child),
+            None => self.child_repository.store_child(child),
+        }
+    }
+
+    /// Delete a child by ID without firing the sync notifier.
+    /// Used to apply remote deletes locally.
+    pub fn delete_child_by_id(&self, child_id: &str) -> Result<()> {
+        self.child_repository.delete_child(child_id)
+    }
+
     /// Validate birthdate format
     fn validate_birthdate(&self, birthdate: &str) -> Result<()> {
         let date_parts: Vec<&str> = birthdate.split('-').collect();

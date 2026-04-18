@@ -517,6 +517,35 @@ impl TransactionService {
         self.transaction_repository
             .list_transactions_chronological(child_id, None, None)
     }
+
+    // ====================
+    // SYNC SUPPORT METHODS
+    // ====================
+
+    /// Read a single transaction by child_id and transaction_id.
+    /// Used by the UI thread to respond to ReadEntityRequest from the sync thread.
+    pub fn get_transaction_by_id(
+        &self,
+        child_id: &str,
+        transaction_id: &str,
+    ) -> Result<Option<DomainTransaction>> {
+        self.transaction_repository.get_transaction(child_id, transaction_id)
+    }
+
+    /// Upsert a transaction that arrived from the remote (applied by the UI thread).
+    ///
+    /// **Critical:** does NOT call `notify_sync` — writing a remote-sourced entity
+    /// back through the notifier would create a sync loop.
+    pub fn upsert_transaction_from_sync(&self, transaction: &DomainTransaction) -> Result<()> {
+        self.transaction_repository.store_transaction(transaction)
+    }
+
+    /// Delete a transaction by ID without firing the sync notifier.
+    /// Used to apply remote deletes locally.
+    pub fn delete_transaction_by_id(&self, child_id: &str, transaction_id: &str) -> Result<()> {
+        self.transaction_repository.delete_transaction(child_id, transaction_id)?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
