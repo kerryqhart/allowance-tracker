@@ -70,6 +70,10 @@ impl SyncUiState {
                     log::error!("Sync error: {}", error);
                     self.status = SyncStatus::Error(error);
                 }
+                // New variants handled in later tasks (Task 5: UI thread sync handler)
+                SyncMessage::ReadEntityRequest { .. } => {}
+                SyncMessage::ApplyRemoteEntity { .. } => {}
+                SyncMessage::DeleteLocalEntity { .. } => {}
             }
         }
     }

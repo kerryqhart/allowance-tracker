@@ -8,14 +8,89 @@ use crate::backend::domain::models::child::Child;
 use crate::backend::domain::models::transaction::Transaction;
 use crate::backend::domain::models::goal::DomainGoal;
 
+/// Control signals from UI thread to sync thread
+#[derive(Debug)]
+pub enum SyncCommand {
+    /// App gained focus — poll remote immediately
+    PollNow,
+    /// App closing — flush pending work and exit
+    Shutdown,
+}
+
 /// Messages from the sync background thread to the UI.
-#[derive(Debug, Clone)]
 pub enum SyncMessage {
     StatusChanged(SyncStatus),
     EntitiesUpdated { child_id: String, entity_type: EntityType, count: usize },
     ConflictDetected(SyncConflict),
     PushFailed { event_id: String, error: String },
     Error(String),
+
+    // New — sync thread needs entity data for pushing to remote
+    ReadEntityRequest {
+        child_id: String,
+        entity_type: EntityType,
+        entity_id: String,
+        response_tx: std::sync::mpsc::Sender<Option<String>>,
+    },
+
+    // New — sync thread pulled a remote entity, UI thread should apply it
+    ApplyRemoteEntity {
+        child_id: String,
+        entity_type: EntityType,
+        entity_id: String,
+        entity_json: String,
+        event_id: String,
+    },
+
+    // New — sync thread pulled a remote delete
+    DeleteLocalEntity {
+        child_id: String,
+        entity_type: EntityType,
+        entity_id: String,
+        event_id: String,
+    },
+}
+
+impl std::fmt::Debug for SyncMessage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SyncMessage::StatusChanged(s) => f.debug_tuple("StatusChanged").field(s).finish(),
+            SyncMessage::EntitiesUpdated { child_id, entity_type, count } => f
+                .debug_struct("EntitiesUpdated")
+                .field("child_id", child_id)
+                .field("entity_type", entity_type)
+                .field("count", count)
+                .finish(),
+            SyncMessage::ConflictDetected(c) => f.debug_tuple("ConflictDetected").field(c).finish(),
+            SyncMessage::PushFailed { event_id, error } => f
+                .debug_struct("PushFailed")
+                .field("event_id", event_id)
+                .field("error", error)
+                .finish(),
+            SyncMessage::Error(e) => f.debug_tuple("Error").field(e).finish(),
+            SyncMessage::ReadEntityRequest { child_id, entity_type, entity_id, .. } => f
+                .debug_struct("ReadEntityRequest")
+                .field("child_id", child_id)
+                .field("entity_type", entity_type)
+                .field("entity_id", entity_id)
+                .finish(),
+            SyncMessage::ApplyRemoteEntity { child_id, entity_type, entity_id, entity_json, event_id } => f
+                .debug_struct("ApplyRemoteEntity")
+                .field("child_id", child_id)
+                .field("entity_type", entity_type)
+                .field("entity_id", entity_id)
+                .field("entity_json", entity_json)
+                .field("event_id", event_id)
+                .finish(),
+            SyncMessage::DeleteLocalEntity { child_id, entity_type, entity_id, event_id } => f
+                .debug_struct("DeleteLocalEntity")
+                .field("child_id", child_id)
+                .field("entity_type", entity_type)
+                .field("entity_id", entity_id)
+                .field("event_id", event_id)
+                .finish(),
+        }
+    }
 }
 
 /// Progress messages from the backfill operation to the UI.

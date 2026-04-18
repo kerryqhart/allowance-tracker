@@ -88,5 +88,5 @@ pub use commands::*;
 pub use email_service::*;
 pub use email_config_service::*;
 pub use sync_notifier::{SyncNotifier, sync_channel};
-pub use sync_manager::{SyncEngine, SyncMessage, SyncStatus, PollResult};
+pub use sync_manager::{SyncEngine, SyncMessage, SyncStatus, SyncCommand, PollResult};
 pub use sync_thread::SyncThreadHandle; 
