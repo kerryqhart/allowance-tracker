@@ -80,9 +80,43 @@ impl AllowanceTrackerApp {
         // Install image loaders for background support
         egui_extras::install_image_loaders(&cc.egui_ctx);
         
-        // Create SyncNotifier before Backend so the notifier is wired in from the start.
-        let (sync_notifier, event_rx) = sync_channel();
-        let backend = crate::backend::Backend::new(Some(sync_notifier))?;
+        // ── Sync startup wiring ───────────────────────────────────────────────
+        //
+        // Load persisted sync state BEFORE constructing Backend so we can decide
+        // whether to wire a live SyncNotifier. If sync is disabled or misconfigured,
+        // we pass `None` to Backend so domain writes don't spam warn-logs trying to
+        // send events to a dropped receiver.
+        //
+        // To enable sync manually (until a settings UI exists), create the
+        // file `sync_state.yaml` in ~/Documents/Allowance Tracker:
+        //
+        //   enabled: true
+        //   remote_url: "https://<your-api-gateway>.execute-api.<region>.amazonaws.com/internal"
+        //   watermarks: {}
+        let data_dir = crate::backend::Backend::default_data_dir()?;
+        // `load` returns Ok(default) when the file is absent, so an Err here means
+        // the file exists but failed to parse — surface it as a warning rather than
+        // silently resetting, so a typo'd manual config is diagnosable.
+        let sync_state = SyncState::load(&sync_state_path(&data_dir)).unwrap_or_else(|e| {
+            warn!("Failed to parse sync_state.yaml ({}); starting with sync disabled", e);
+            SyncState::default()
+        });
+        let retry_queue = RetryQueue::load(&retry_queue_path(&data_dir)).unwrap_or_else(|e| {
+            warn!("Failed to parse retry_queue.yaml ({}); starting with empty retry queue", e);
+            RetryQueue::default()
+        });
+
+        let will_spawn_sync = sync_state.enabled
+            && sync_state.remote_url.as_ref().map_or(false, |u| is_valid_http_url(u));
+
+        let (sync_notifier, event_rx) = if will_spawn_sync {
+            let (n, rx) = sync_channel();
+            (Some(n), Some(rx))
+        } else {
+            (None, None)
+        };
+
+        let backend = crate::backend::Backend::new(sync_notifier)?;
 
         // Check for pending allowances on app startup
         match backend.transaction_service.as_ref().check_and_issue_pending_allowances() {
@@ -102,54 +136,42 @@ impl AllowanceTrackerApp {
         let _current_month = now.month();
         let _current_year = now.year();
 
-        // ── Sync startup wiring ───────────────────────────────────────────────
-        //
-        // Load persisted sync state from the data directory.  If the file
-        // doesn't exist yet the types default to "disabled / no URL", so the
-        // app starts normally with sync off.
-        //
-        // To enable sync manually (until a settings UI exists), create the
-        // file `sync_state.yaml` in ~/Documents/Allowance Tracker:
-        //
-        //   enabled: true
-        //   remote_url: "https://<your-api-gateway>.execute-api.<region>.amazonaws.com/internal"
-        //   watermarks: {}
-        let data_dir = backend.data_dir.clone();
-        let sync_state = SyncState::load(&sync_state_path(&data_dir)).unwrap_or_default();
-        let retry_queue = RetryQueue::load(&retry_queue_path(&data_dir)).unwrap_or_default();
+        // Spawn the sync thread if (and only if) sync is enabled with a valid URL.
+        // When sync is off, `event_rx` is already None and the Backend was given
+        // `None` for the notifier, so no events are emitted and no warn-spam occurs.
+        let (sync, sync_command_tx, sync_thread) = if will_spawn_sync {
+            let url = sync_state.remote_url.as_ref().expect("checked by will_spawn_sync");
+            let rx = event_rx.expect("created with will_spawn_sync");
+            info!("Sync enabled — connecting to remote: {}", url);
+            let remote: Arc<dyn crate::backend::storage::RemoteStorage> =
+                Arc::new(HttpRemoteClient::new(url.clone()));
+            let (message_tx, message_rx) = std::sync::mpsc::channel();
+            let (cmd_tx, cmd_rx) = std::sync::mpsc::channel::<SyncCommand>();
 
-        let (sync, sync_command_tx, sync_thread) =
-            if sync_state.enabled {
-                if let Some(ref url) = sync_state.remote_url {
-                    info!("Sync enabled — connecting to remote: {}", url);
-                    let remote: Arc<dyn crate::backend::storage::RemoteStorage> =
-                        Arc::new(HttpRemoteClient::new(url.clone()));
-                    let (message_tx, message_rx) = std::sync::mpsc::channel();
-                    let (cmd_tx, cmd_rx) = std::sync::mpsc::channel::<SyncCommand>();
+            let handle = SyncThreadHandle::spawn(
+                remote,
+                rx,
+                cmd_rx,
+                message_tx,
+                sync_state.watermarks.clone(),
+                retry_queue.events.clone(),
+                data_dir.clone(),
+            );
 
-                    let handle = SyncThreadHandle::spawn(
-                        remote,
-                        event_rx,
-                        cmd_rx,
-                        message_tx,
-                        sync_state.watermarks.clone(),
-                        retry_queue.events.clone(),
-                        data_dir.clone(),
-                    );
-
-                    (SyncUiState::with_receiver(message_rx), Some(cmd_tx), Some(handle))
-                } else {
-                    info!("Sync config has enabled=true but no remote_url — sync disabled");
-                    // event_rx is dropped here; the SyncNotifier in Backend will log
-                    // a warning on the first send but writes will not fail.
-                    (SyncUiState::new(), None, None)
-                }
+            (SyncUiState::with_receiver(message_rx), Some(cmd_tx), Some(handle))
+        } else {
+            if sync_state.enabled && sync_state.remote_url.is_some() {
+                warn!(
+                    "Sync enabled but remote_url {:?} is not a valid http(s) URL — sync disabled",
+                    sync_state.remote_url
+                );
+            } else if sync_state.enabled {
+                warn!("Sync enabled but remote_url is missing — sync disabled");
             } else {
                 info!("Sync disabled (no sync_state.yaml or enabled=false)");
-                // Discard the event receiver — notifier sends are best-effort no-ops.
-                drop(event_rx);
-                (SyncUiState::new(), None, None)
-            };
+            }
+            (SyncUiState::new(), None, None)
+        };
         // ─────────────────────────────────────────────────────────────────────
 
         // Initialize modular state components
@@ -775,6 +797,15 @@ impl AllowanceTrackerApp {
             }
         }
     }
+}
+
+/// Quick sanity check on the remote URL so an obvious misconfiguration (wrong
+/// scheme, empty string) is caught at startup rather than producing obscure
+/// HTTP errors later.
+fn is_valid_http_url(url: &str) -> bool {
+    let trimmed = url.trim();
+    (trimmed.starts_with("http://") || trimmed.starts_with("https://"))
+        && trimmed.len() > "https://".len()
 }
 
 impl Drop for AllowanceTrackerApp {

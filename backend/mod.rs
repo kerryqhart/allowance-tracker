@@ -34,11 +34,18 @@ pub struct Backend {
 }
 
 impl Backend {
+    /// Resolve the default data directory (`~/Documents/Allowance Tracker`).
+    /// Exposed so startup code can load sync persistence before constructing
+    /// Backend (which lets us decide whether to pass `Some(SyncNotifier)` at all).
+    pub fn default_data_dir() -> Result<std::path::PathBuf> {
+        let home_dir = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Could not find home directory"))?;
+        Ok(home_dir.join("Documents").join("Allowance Tracker"))
+    }
+
     /// Create a new backend instance with all services
     pub fn new(sync_notifier: Option<SyncNotifier>) -> Result<Self> {
         // Use the real data directory in ~/Documents/Allowance Tracker
-        let home_dir = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Could not find home directory"))?;
-        let data_path = home_dir.join("Documents").join("Allowance Tracker");
+        let data_path = Self::default_data_dir()?;
 
         // Load email config path before moving data_path
         let email_config_path = data_path.join("email_config.toml");
