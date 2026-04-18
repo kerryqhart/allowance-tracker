@@ -79,7 +79,7 @@ impl std::fmt::Debug for SyncMessage {
                 .field("child_id", child_id)
                 .field("entity_type", entity_type)
                 .field("entity_id", entity_id)
-                .field("entity_json", entity_json)
+                .field("entity_json", &format_args!("<{} bytes>", entity_json.len()))
                 .field("event_id", event_id)
                 .finish(),
             SyncMessage::DeleteLocalEntity { child_id, entity_type, entity_id, event_id } => f
