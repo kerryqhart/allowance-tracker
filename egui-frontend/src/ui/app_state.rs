@@ -65,7 +65,7 @@ impl AllowanceTrackerApp {
         // Install image loaders for background support
         egui_extras::install_image_loaders(&cc.egui_ctx);
         
-        let backend = crate::backend::Backend::new()?;
+        let backend = crate::backend::Backend::new(None)?;
         
         // Check for pending allowances on app startup
         match backend.transaction_service.as_ref().check_and_issue_pending_allowances() {

@@ -585,7 +585,7 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let connection = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
         let balance_service = BalanceService::new(connection.clone());
-        let child_service = ChildService::new(connection.clone());
+        let child_service = ChildService::new(connection.clone(), None);
         
         // Create a test child
         let child_result = child_service.create_child(CreateChildCommand {
@@ -718,7 +718,7 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let connection = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
         let balance_service = BalanceService::new(connection.clone());
-        let child_service = ChildService::new(connection.clone());
+        let child_service = ChildService::new(connection.clone(), None);
         
         // Create a test child
         let child_result = child_service.create_child(CreateChildCommand {
@@ -805,7 +805,7 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let connection = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
         let balance_service = BalanceService::new(connection.clone());
-        let child_service = ChildService::new(connection.clone());
+        let child_service = ChildService::new(connection.clone(), None);
         
         // Create a test child
         let child_result = child_service.create_child(CreateChildCommand {
@@ -878,7 +878,7 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let connection = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
         let balance_service = BalanceService::new(connection.clone());
-        let child_service = ChildService::new(connection.clone());
+        let child_service = ChildService::new(connection.clone(), None);
         
         // Create a test child
         let child_result = child_service.create_child(CreateChildCommand {
@@ -938,7 +938,7 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let connection = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
         let balance_service = BalanceService::new(connection.clone());
-        let child_service = ChildService::new(connection.clone());
+        let child_service = ChildService::new(connection.clone(), None);
         
         // Create a test child
         let child_result = child_service.create_child(CreateChildCommand {
@@ -1038,7 +1038,7 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let connection = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
         let balance_service = BalanceService::new(connection.clone());
-        let child_service = ChildService::new(connection.clone());
+        let child_service = ChildService::new(connection.clone(), None);
         
         // Create a test child
         let child_result = child_service.create_child(CreateChildCommand {
@@ -1137,7 +1137,7 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let connection = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
         let balance_service = BalanceService::new(connection.clone());
-        let child_service = ChildService::new(connection.clone());
+        let child_service = ChildService::new(connection.clone(), None);
         
         // Create a test child
         let child_result = child_service.create_child(CreateChildCommand {
@@ -1221,7 +1221,7 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let connection = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
         let balance_service = BalanceService::new(connection.clone());
-        let child_service = ChildService::new(connection.clone());
+        let child_service = ChildService::new(connection.clone(), None);
         
         // Create a test child
         let child_result = child_service.create_child(CreateChildCommand {
@@ -1297,7 +1297,7 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let connection = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
         let balance_service = BalanceService::new(connection.clone());
-        let child_service = ChildService::new(connection.clone());
+        let child_service = ChildService::new(connection.clone(), None);
         
         // Create a test child
         let child_result = child_service.create_child(CreateChildCommand {

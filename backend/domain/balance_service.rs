@@ -303,7 +303,7 @@ mod tests {
         // Create a child first
         let temp_dir = tempfile::tempdir().unwrap();
         let db = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
-        let child_service = crate::backend::domain::child_service::ChildService::new(db);
+        let child_service = crate::backend::domain::child_service::ChildService::new(db, None);
         let child_result = child_service.create_child(CreateChildCommand {
             name: "Test Child".to_string(),
             birthdate: "2015-01-01".to_string(),
@@ -324,7 +324,7 @@ mod tests {
         // Create a child first
         let temp_dir = tempfile::tempdir().unwrap();
         let db = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
-        let child_service = crate::backend::domain::child_service::ChildService::new(db);
+        let child_service = crate::backend::domain::child_service::ChildService::new(db, None);
         let child_result = child_service.create_child(CreateChildCommand {
             name: "Test Child".to_string(),
             birthdate: "2015-01-01".to_string(),
@@ -342,7 +342,7 @@ mod tests {
         // Create a child first
         let temp_dir = tempfile::tempdir().unwrap();
         let db = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
-        let child_service = crate::backend::domain::child_service::ChildService::new(db);
+        let child_service = crate::backend::domain::child_service::ChildService::new(db, None);
         let child_result = child_service.create_child(CreateChildCommand {
             name: "Test Child".to_string(),
             birthdate: "2015-01-01".to_string(),
@@ -366,7 +366,7 @@ mod tests {
         let balance_service = BalanceService::new(connection.clone());
         
         // Create a child for testing
-        let child_service = crate::backend::domain::child_service::ChildService::new(connection.clone());
+        let child_service = crate::backend::domain::child_service::ChildService::new(connection.clone(), None);
         let child_result = child_service.create_child(CreateChildCommand {
             name: "Test Child".to_string(),
             birthdate: "2015-01-01".to_string(),
@@ -417,7 +417,7 @@ mod tests {
         // Create a child first
         let temp_dir = tempfile::tempdir().unwrap();
         let db = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
-        let child_service = crate::backend::domain::child_service::ChildService::new(db);
+        let child_service = crate::backend::domain::child_service::ChildService::new(db, None);
         let child_result = child_service.create_child(CreateChildCommand {
             name: "Test Child".to_string(),
             birthdate: "2015-01-01".to_string(),
@@ -443,7 +443,7 @@ mod tests {
         // Create a child first
         let temp_dir = tempfile::tempdir().unwrap();
         let db = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
-        let child_service = crate::backend::domain::child_service::ChildService::new(db);
+        let child_service = crate::backend::domain::child_service::ChildService::new(db, None);
         let child_result = child_service.create_child(CreateChildCommand {
             name: "Test Child".to_string(),
             birthdate: "2015-01-01".to_string(),
@@ -468,7 +468,7 @@ mod tests {
         // Create a child first
         let temp_dir = tempfile::tempdir().unwrap();
         let db = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
-        let child_service = crate::backend::domain::child_service::ChildService::new(db);
+        let child_service = crate::backend::domain::child_service::ChildService::new(db, None);
         let child_result = child_service.create_child(CreateChildCommand {
             name: "Test Child".to_string(),
             birthdate: "2015-01-01".to_string(),
@@ -493,7 +493,7 @@ mod tests {
         // Create a child first
         let temp_dir = tempfile::tempdir().unwrap();
         let db = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
-        let child_service = crate::backend::domain::child_service::ChildService::new(db);
+        let child_service = crate::backend::domain::child_service::ChildService::new(db, None);
         let child_result = child_service.create_child(CreateChildCommand {
             name: "Test Child".to_string(),
             birthdate: "2015-01-01".to_string(),
@@ -515,7 +515,7 @@ mod tests {
         // Create a child first
         let temp_dir = tempfile::tempdir().unwrap();
         let db = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
-        let child_service = crate::backend::domain::child_service::ChildService::new(db);
+        let child_service = crate::backend::domain::child_service::ChildService::new(db, None);
         let child_result = child_service.create_child(CreateChildCommand {
             name: "Test Child".to_string(),
             birthdate: "2015-01-01".to_string(),
@@ -541,7 +541,7 @@ mod tests {
         // Create a child first
         let temp_dir = tempfile::tempdir().unwrap();
         let db = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
-        let child_service = crate::backend::domain::child_service::ChildService::new(db);
+        let child_service = crate::backend::domain::child_service::ChildService::new(db, None);
         let child_result = child_service.create_child(CreateChildCommand {
             name: "Test Child".to_string(),
             birthdate: "2015-01-01".to_string(),
@@ -568,7 +568,7 @@ mod tests {
         // Create a child first
         let temp_dir = tempfile::tempdir().unwrap();
         let db = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
-        let child_service = crate::backend::domain::child_service::ChildService::new(db);
+        let child_service = crate::backend::domain::child_service::ChildService::new(db, None);
         let child_result = child_service.create_child(CreateChildCommand {
             name: "Test Child".to_string(),
             birthdate: "2015-01-01".to_string(),
@@ -596,7 +596,7 @@ mod tests {
         // Create a child first
         let temp_dir = tempfile::tempdir().unwrap();
         let db = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
-        let child_service = crate::backend::domain::child_service::ChildService::new(db);
+        let child_service = crate::backend::domain::child_service::ChildService::new(db, None);
         let child_result = child_service.create_child(CreateChildCommand {
             name: "Test Child".to_string(),
             birthdate: "2015-01-01".to_string(),

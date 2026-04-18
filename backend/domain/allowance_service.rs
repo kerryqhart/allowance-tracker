@@ -31,7 +31,7 @@ impl AllowanceService {
     pub fn new(csv_conn: Arc<CsvConnection>) -> Self {
         let allowance_repository = AllowanceRepository::new((*csv_conn).clone());
         let transaction_repository = TransactionRepository::new((*csv_conn).clone());
-        let child_service = ChildService::new(csv_conn);
+        let child_service = ChildService::new(csv_conn, None);
         Self {
             allowance_repository,
             transaction_repository,

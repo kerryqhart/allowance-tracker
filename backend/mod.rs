@@ -9,6 +9,7 @@
 
 use anyhow::Result;
 use std::sync::Arc;
+use crate::backend::domain::SyncNotifier;
 
 // Domain modules
 pub mod domain;
@@ -32,7 +33,7 @@ pub struct Backend {
 
 impl Backend {
     /// Create a new backend instance with all services
-    pub fn new() -> Result<Self> {
+    pub fn new(sync_notifier: Option<SyncNotifier>) -> Result<Self> {
         // Use the real data directory in ~/Documents/Allowance Tracker
         let home_dir = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Could not find home directory"))?;
         let data_path = home_dir.join("Documents").join("Allowance Tracker");
@@ -45,30 +46,32 @@ impl Backend {
         let csv_connection = Arc::new(CsvConnection::new(data_path)?);
 
         // Create services using the Arc<CsvConnection> pattern
-        let child_service = domain::child_service::ChildService::new(csv_connection.clone());
+        let child_service = domain::child_service::ChildService::new(csv_connection.clone(), sync_notifier.clone());
         let allowance_service = domain::AllowanceService::new(csv_connection.clone());
         let balance_service = domain::BalanceService::new(csv_connection.clone());
 
         // Load email config and create TransactionService with email support
         let email_config = domain::EmailConfigService::load_config_or_default(&email_config_path);
         log::info!("Email config loaded: SMTP server = {}", email_config.smtp_server);
-        
+
         let transaction_service = Arc::new(domain::TransactionService::with_email_service(
             csv_connection.clone(),
             child_service.clone(),
             allowance_service.clone(),
             balance_service.clone(),
             email_config,
+            sync_notifier.clone(),
         )?);
-        
+
         let calendar_service = domain::CalendarService::new();
-        
+
         let goal_service = domain::GoalService::new(
             csv_connection.clone(),
             child_service.clone(),
             allowance_service.clone(),
             transaction_service.clone(), // Pass Arc
             balance_service.clone(),
+            sync_notifier.clone(),
         );
         
         let parental_control_service = domain::ParentalControlService::new(csv_connection.clone());

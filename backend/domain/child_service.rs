@@ -11,18 +11,33 @@ use crate::backend::domain::commands::child::{
 };
 use crate::backend::storage::csv::{CsvConnection, ChildRepository};
 use crate::backend::storage::traits::ChildStorage;
+use shared::sync::{SyncEvent, SyncAction, SyncSource, EntityType};
+use crate::backend::domain::SyncNotifier;
 
 /// Service for managing children in the allowance tracking system
 #[derive(Clone)]
 pub struct ChildService {
     child_repository: ChildRepository,
+    sync_notifier: Option<SyncNotifier>,
 }
 
 impl ChildService {
     /// Create a new ChildService
-    pub fn new(csv_conn: Arc<CsvConnection>) -> Self {
+    pub fn new(csv_conn: Arc<CsvConnection>, sync_notifier: Option<SyncNotifier>) -> Self {
         let child_repository = ChildRepository::new(csv_conn);
-        Self { child_repository }
+        Self { child_repository, sync_notifier }
+    }
+
+    fn notify_sync(&self, entity_type: EntityType, entity_id: &str, child_id: &str, action: SyncAction) {
+        if let Some(ref notifier) = self.sync_notifier {
+            notifier.notify(SyncEvent::new(
+                entity_type,
+                entity_id.to_string(),
+                child_id.to_string(),
+                action,
+                SyncSource::Local,
+            ));
+        }
     }
 
     /// Create a new child
@@ -53,6 +68,8 @@ impl ChildService {
 
         // Store in database
         self.child_repository.store_child(&child)?;
+
+        self.notify_sync(EntityType::Child, &child.id, &child.id, SyncAction::Created);
 
         info!("Created child: {} with ID: {}", child.name, child.id);
 
@@ -111,6 +128,8 @@ impl ChildService {
         // Store updated child
         self.child_repository.update_child(&child)?;
 
+        self.notify_sync(EntityType::Child, &child.id, &child.id, SyncAction::Updated);
+
         info!("Updated child: {} with ID: {}", child.name, child.id);
 
         Ok(UpdateChildResult { child })
@@ -126,6 +145,8 @@ impl ChildService {
 
         // Delete from database
         self.child_repository.delete_child(&command.child_id)?;
+
+        self.notify_sync(EntityType::Child, &child.id, &child.id, SyncAction::Deleted);
 
         info!("Deleted child: {} with ID: {}", child.name, child.id);
 
@@ -256,7 +277,7 @@ mod tests {
     fn setup_test() -> ChildService {
         let temp_dir = tempdir().unwrap();
         let conn = CsvConnection::new(temp_dir.path().to_path_buf()).unwrap();
-        ChildService::new(Arc::new(conn))
+        ChildService::new(Arc::new(conn), None)
     }
 
     #[test]
