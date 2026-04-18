@@ -29,6 +29,10 @@ use chrono::{Datelike, TimeZone};
 use shared::*;
 use crate::backend::Backend;
 use crate::backend::domain::{SyncCommand, SyncThreadHandle};
+use crate::backend::domain::sync_notifier::sync_channel;
+use crate::backend::domain::sync_persistence::{SyncState, RetryQueue, sync_state_path, retry_queue_path};
+use crate::backend::storage::HttpRemoteClient;
+use std::sync::Arc;
 
 // Import all state modules
 use crate::ui::state::*;
@@ -76,8 +80,10 @@ impl AllowanceTrackerApp {
         // Install image loaders for background support
         egui_extras::install_image_loaders(&cc.egui_ctx);
         
-        let backend = crate::backend::Backend::new(None)?;
-        
+        // Create SyncNotifier before Backend so the notifier is wired in from the start.
+        let (sync_notifier, event_rx) = sync_channel();
+        let backend = crate::backend::Backend::new(Some(sync_notifier))?;
+
         // Check for pending allowances on app startup
         match backend.transaction_service.as_ref().check_and_issue_pending_allowances() {
             Ok(count) => {
@@ -95,7 +101,57 @@ impl AllowanceTrackerApp {
         let now = chrono::Local::now();
         let _current_month = now.month();
         let _current_year = now.year();
-        
+
+        // ── Sync startup wiring ───────────────────────────────────────────────
+        //
+        // Load persisted sync state from the data directory.  If the file
+        // doesn't exist yet the types default to "disabled / no URL", so the
+        // app starts normally with sync off.
+        //
+        // To enable sync manually (until a settings UI exists), create the
+        // file `sync_state.yaml` in ~/Documents/Allowance Tracker:
+        //
+        //   enabled: true
+        //   remote_url: "https://<your-api-gateway>.execute-api.<region>.amazonaws.com/internal"
+        //   watermarks: {}
+        let data_dir = backend.data_dir.clone();
+        let sync_state = SyncState::load(&sync_state_path(&data_dir)).unwrap_or_default();
+        let retry_queue = RetryQueue::load(&retry_queue_path(&data_dir)).unwrap_or_default();
+
+        let (sync, sync_command_tx, sync_thread) =
+            if sync_state.enabled {
+                if let Some(ref url) = sync_state.remote_url {
+                    info!("Sync enabled — connecting to remote: {}", url);
+                    let remote: Arc<dyn crate::backend::storage::RemoteStorage> =
+                        Arc::new(HttpRemoteClient::new(url.clone()));
+                    let (message_tx, message_rx) = std::sync::mpsc::channel();
+                    let (cmd_tx, cmd_rx) = std::sync::mpsc::channel::<SyncCommand>();
+
+                    let handle = SyncThreadHandle::spawn(
+                        remote,
+                        event_rx,
+                        cmd_rx,
+                        message_tx,
+                        sync_state.watermarks.clone(),
+                        retry_queue.events.clone(),
+                        data_dir.clone(),
+                    );
+
+                    (SyncUiState::with_receiver(message_rx), Some(cmd_tx), Some(handle))
+                } else {
+                    info!("Sync config has enabled=true but no remote_url — sync disabled");
+                    // event_rx is dropped here; the SyncNotifier in Backend will log
+                    // a warning on the first send but writes will not fail.
+                    (SyncUiState::new(), None, None)
+                }
+            } else {
+                info!("Sync disabled (no sync_state.yaml or enabled=false)");
+                // Discard the event receiver — notifier sends are best-effort no-ops.
+                drop(event_rx);
+                (SyncUiState::new(), None, None)
+            };
+        // ─────────────────────────────────────────────────────────────────────
+
         // Initialize modular state components
         let core = CoreAppState::new(backend);
         let ui = UIState::new();
@@ -107,7 +163,6 @@ impl AllowanceTrackerApp {
         let chart = ChartState::new();
         let goal = GoalUiState::new();
         let settings = crate::ui::components::settings::SettingsState::new();
-        let sync = SyncUiState::new();
 
         Ok(Self {
             // Modular state
@@ -122,9 +177,8 @@ impl AllowanceTrackerApp {
             goal,
             settings,
             sync,
-            // Sync thread handles — populated by Task 6 wiring
-            sync_command_tx: None,
-            sync_thread: None,
+            sync_command_tx,
+            sync_thread,
             was_focused: true,
         })
     }

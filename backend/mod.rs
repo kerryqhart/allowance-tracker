@@ -29,6 +29,8 @@ pub struct Backend {
     pub balance_service: domain::BalanceService,
     pub data_directory_service: domain::DataDirectoryService,
     pub export_service: domain::ExportService,
+    /// Base data directory (e.g. ~/Documents/Allowance Tracker)
+    pub data_dir: std::path::PathBuf,
 }
 
 impl Backend {
@@ -43,7 +45,7 @@ impl Backend {
 
         // Create the CSV connection with the real data directory
         log::info!("Backend::new() using real data path: {:?}", data_path);
-        let csv_connection = Arc::new(CsvConnection::new(data_path)?);
+        let csv_connection = Arc::new(CsvConnection::new(data_path.clone())?);
 
         // Create services using the Arc<CsvConnection> pattern
         let child_service = domain::child_service::ChildService::new(csv_connection.clone(), sync_notifier.clone());
@@ -93,6 +95,7 @@ impl Backend {
             balance_service,
             data_directory_service,
             export_service,
+            data_dir: data_path,
         })
     }
 } 
