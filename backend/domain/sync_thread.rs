@@ -2,7 +2,6 @@ use shared::sync::*;
 use crate::backend::storage::remote::RemoteStorage;
 use super::sync_manager::{SyncEngine, SyncMessage, SyncStatus, SyncCommand};
 use super::sync_persistence::{self, SyncState, RetryQueue};
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, mpsc, atomic::{AtomicBool, Ordering}};
 
@@ -26,7 +25,7 @@ impl SyncThreadHandle {
         event_rx: mpsc::Receiver<SyncEvent>,
         command_rx: mpsc::Receiver<SyncCommand>,
         message_tx: mpsc::Sender<SyncMessage>,
-        initial_watermarks: HashMap<String, u64>,
+        initial_sync_state: SyncState,
         initial_retry_queue: Vec<SyncEvent>,
         data_dir: PathBuf,
     ) -> Self {
@@ -34,10 +33,15 @@ impl SyncThreadHandle {
         let shutdown_flag = shutdown.clone();
 
         let mut engine = SyncEngine::new(remote.clone());
-        for (child_id, watermark) in &initial_watermarks {
+        for (child_id, watermark) in &initial_sync_state.watermarks {
             engine.set_watermark(child_id, *watermark);
         }
         let retry_queue = RetryQueue { events: initial_retry_queue };
+
+        // Preserve the non-watermark fields of SyncState (enabled, remote_url) so
+        // that the persistence writes below don't clobber user configuration.
+        let sync_enabled = initial_sync_state.enabled;
+        let sync_remote_url = initial_sync_state.remote_url.clone();
 
         let thread = std::thread::Builder::new()
             .name("sync-thread".to_string())
@@ -50,6 +54,8 @@ impl SyncThreadHandle {
                     engine,
                     retry_queue,
                     data_dir,
+                    sync_enabled,
+                    sync_remote_url,
                     shutdown_flag,
                 );
             })
@@ -76,6 +82,7 @@ impl Drop for SyncThreadHandle {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn sync_loop(
     remote: Arc<dyn RemoteStorage>,
     event_rx: mpsc::Receiver<SyncEvent>,
@@ -84,6 +91,8 @@ fn sync_loop(
     mut engine: SyncEngine,
     mut retry_queue: RetryQueue,
     data_dir: PathBuf,
+    sync_enabled: bool,
+    sync_remote_url: Option<String>,
     shutdown: Arc<AtomicBool>,
 ) {
     loop {
@@ -145,11 +154,12 @@ fn sync_loop(
             let _ = message_tx.send(SyncMessage::StatusChanged(SyncStatus::Idle));
         }
 
-        // 4. Persist state every loop iteration
+        // 4. Persist state every loop iteration. Preserve enabled/remote_url from
+        // the config we were spawned with so that a save doesn't clobber user config.
         let sync_state = SyncState {
             watermarks: engine.watermarks_snapshot(),
-            enabled: true,
-            remote_url: None,
+            enabled: sync_enabled,
+            remote_url: sync_remote_url.clone(),
         };
         let _ = sync_state.save(&sync_persistence::sync_state_path(&data_dir));
         let _ = retry_queue.save(&sync_persistence::retry_queue_path(&data_dir));
@@ -316,6 +326,7 @@ fn poll_remote(
 mod tests {
     use super::*;
     use crate::backend::storage::mock_remote::MockRemoteClient;
+    use std::collections::HashMap;
     use std::time::Duration;
     use tempfile::TempDir;
 
@@ -331,7 +342,7 @@ mod tests {
             event_rx,
             command_rx,
             message_tx,
-            HashMap::new(),
+            SyncState::default(),
             vec![],
             data_dir.to_path_buf(),
         )
@@ -369,7 +380,7 @@ mod tests {
             event_rx,
             command_rx,
             message_tx,
-            HashMap::new(),
+            SyncState::default(),
             vec![],
             dir.path().to_path_buf(),
         );
@@ -437,13 +448,18 @@ mod tests {
         // Initialize with child1 watermark = 0 so it gets polled
         let mut initial_watermarks = HashMap::new();
         initial_watermarks.insert("child1".to_string(), 0u64);
+        let initial_state = SyncState {
+            watermarks: initial_watermarks,
+            enabled: true,
+            remote_url: None,
+        };
 
         let mut handle = SyncThreadHandle::spawn(
             mock.clone(),
             event_rx,
             command_rx,
             message_tx,
-            initial_watermarks,
+            initial_state,
             vec![],
             dir.path().to_path_buf(),
         );

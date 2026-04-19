@@ -153,7 +153,7 @@ impl AllowanceTrackerApp {
                 rx,
                 cmd_rx,
                 message_tx,
-                sync_state.watermarks.clone(),
+                sync_state.clone(),
                 retry_queue.events.clone(),
                 data_dir.clone(),
             );
