@@ -708,6 +708,24 @@ impl AllowanceTrackerApp {
     // BACKEND INTEGRATION METHODS
     // ====================
     
+    /// Return the true current balance after a transaction. `money_management`
+    /// reports the just-inserted row's balance column, which is wrong for
+    /// backdated transactions (it's the historical running total at that
+    /// earlier date). Fall back to that value only if the live lookup fails.
+    fn current_balance_after_transaction(&self, fallback: f64) -> f64 {
+        match self.backend().child_service.get_active_child() {
+            Ok(resp) => match resp.active_child.child {
+                Some(child) => self
+                    .backend()
+                    .balance_service
+                    .get_current_balance(&child.id)
+                    .unwrap_or(fallback),
+                None => fallback,
+            },
+            Err(_) => fallback,
+        }
+    }
+
     pub fn submit_income_transaction(&mut self) -> bool {
         use crate::backend::domain::money_management::MoneyManagementService;
         use chrono::Timelike;
@@ -741,7 +759,7 @@ impl AllowanceTrackerApp {
         ) {
             Ok(response) => {
                 info!("Income transaction successful: {}", response.success_message);
-                self.core.current_balance = response.new_balance;
+                self.core.current_balance = self.current_balance_after_transaction(response.new_balance);
                 self.load_calendar_data();
                 true
             }
@@ -786,7 +804,7 @@ impl AllowanceTrackerApp {
         ) {
             Ok(response) => {
                 info!("Expense transaction successful: {}", response.success_message);
-                self.core.current_balance = response.new_balance;
+                self.core.current_balance = self.current_balance_after_transaction(response.new_balance);
                 self.load_calendar_data();
                 true
             }
