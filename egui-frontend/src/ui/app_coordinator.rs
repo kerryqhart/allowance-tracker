@@ -625,7 +625,7 @@ impl AllowanceTrackerApp {
     pub fn refresh_allowances(&mut self) {
         // Check if it's time to refresh allowances (throttled to avoid excessive calls)
         if self.ui.should_refresh_allowances() {
-            log::info!("Performing periodic allowance refresh check");
+            log::debug!("Performing periodic allowance refresh check");
             
             // Use the existing backend method to check and issue pending allowances
             match self.core.backend.transaction_service.as_ref().check_and_issue_pending_allowances() {

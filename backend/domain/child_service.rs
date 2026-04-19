@@ -78,12 +78,12 @@ impl ChildService {
 
     /// Get a child by ID
     pub fn get_child(&self, command: GetChildCommand) -> Result<GetChildResult> {
-        info!("Getting child: {}", command.child_id);
+        debug!("Getting child: {}", command.child_id);
 
         let child = self.child_repository.get_child(&command.child_id)?;
 
         if child.is_some() {
-            info!("Found child: {}", command.child_id);
+            debug!("Found child: {}", command.child_id);
         } else {
             warn!("Child not found: {}", command.child_id);
         }

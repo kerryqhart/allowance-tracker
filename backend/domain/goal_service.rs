@@ -22,7 +22,7 @@
 
 use anyhow::Result;
 use chrono::{Utc, Duration, Local, Datelike};
-use log::{info, warn};
+use log::{info, warn, debug};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -162,7 +162,7 @@ impl GoalService {
 
     /// Get current active goal with calculations
     pub fn get_current_goal(&self, command: GetCurrentGoalCommand) -> Result<GetCurrentGoalResult> {
-        info!("Getting current goal: {:?}", command);
+        debug!("Getting current goal: {:?}", command);
 
         // Get child ID
         let child_id = match command.child_id {

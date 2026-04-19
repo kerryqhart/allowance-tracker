@@ -1,6 +1,6 @@
 use anyhow::Result;
 use chrono::{Utc, NaiveDate, Datelike, Local, FixedOffset};
-use log::{info, warn};
+use log::{info, warn, debug};
 use std::sync::Arc;
 
 use crate::backend::storage::csv::{CsvConnection, AllowanceRepository, TransactionRepository};
@@ -225,26 +225,26 @@ impl AllowanceService {
         start_date: NaiveDate,
         end_date: NaiveDate,
     ) -> Result<Vec<DomainTransaction>> {
-        info!("🔮 ALLOWANCE DEBUG: Generating future allowances for child {} from {} to {}", 
+        debug!("🔮 ALLOWANCE DEBUG: Generating future allowances for child {} from {} to {}", 
              child_id, start_date, end_date);
 
         // Get allowance config for the child
         let allowance_config = self.allowance_repository.get_allowance_config(child_id)?;
         
-        info!("🔮 ALLOWANCE DEBUG: Retrieved allowance config: {:?}", allowance_config);
+        debug!("🔮 ALLOWANCE DEBUG: Retrieved allowance config: {:?}", allowance_config);
         
         let config = match allowance_config {
             Some(config) if config.is_active => {
-                info!("🔮 ALLOWANCE DEBUG: Found active config - amount: ${:.2}, day_of_week: {} ({}), use_age_based: {}",
+                debug!("🔮 ALLOWANCE DEBUG: Found active config - amount: ${:.2}, day_of_week: {} ({}), use_age_based: {}",
                      config.amount, config.day_of_week, config.day_name(), config.use_age_based_amount);
                 config
             },
             Some(_config) => {
-                info!("🔮 ALLOWANCE DEBUG: Found inactive allowance config for child: {}", child_id);
+                debug!("🔮 ALLOWANCE DEBUG: Found inactive allowance config for child: {}", child_id);
                 return Ok(Vec::new());
             },
             None => {
-                info!("🔮 ALLOWANCE DEBUG: No allowance config found for child: {}", child_id);
+                debug!("🔮 ALLOWANCE DEBUG: No allowance config found for child: {}", child_id);
                 return Ok(Vec::new());
             }
         };
@@ -255,7 +255,7 @@ impl AllowanceService {
             match self.child_service.get_child(get_child_command)? {
                 result if result.child.is_some() => {
                     let child = result.child.unwrap();
-                    info!("🔮 ALLOWANCE DEBUG: Age-based mode - child birthdate: {}", child.birthdate);
+                    debug!("🔮 ALLOWANCE DEBUG: Age-based mode - child birthdate: {}", child.birthdate);
                     Some(child.birthdate)
                 }
                 _ => {
@@ -270,7 +270,7 @@ impl AllowanceService {
         let mut future_allowances = Vec::new();
         let current_date = Local::now().date_naive();
 
-        info!("🔮 ALLOWANCE DEBUG: Current date: {}", current_date);
+        debug!("🔮 ALLOWANCE DEBUG: Current date: {}", current_date);
 
         // Iterate through each date in the range
         let mut current = start_date;
@@ -281,7 +281,7 @@ impl AllowanceService {
             let is_future = current > current_date;
             let matches_allowance_day = day_of_week == config.day_of_week;
             
-            info!("🔮 ALLOWANCE DEBUG: Checking date {} - day_of_week: {} ({}), is_future: {}, matches_allowance_day: {}", 
+            debug!("🔮 ALLOWANCE DEBUG: Checking date {} - day_of_week: {} ({}), is_future: {}, matches_allowance_day: {}", 
                  current, day_of_week, current.weekday(), is_future, matches_allowance_day);
             
             // Check if this date is in the future and matches the allowance day of week
@@ -289,7 +289,7 @@ impl AllowanceService {
                 if day_of_week == config.day_of_week {
                     let amount = Self::calculate_allowance_amount(&config, child_birthdate, current);
 
-                    info!("🔮 ALLOWANCE DEBUG: CREATING future allowance for {} on {} - ${:.2}", child_id, current, amount);
+                    debug!("🔮 ALLOWANCE DEBUG: CREATING future allowance for {} on {} - ${:.2}", child_id, current, amount);
 
                     // This is a future allowance day!
                     // Create DateTime at 12:00 UTC for the date
@@ -310,14 +310,14 @@ impl AllowanceService {
                     };
 
                     future_allowances.push(allowance_transaction);
-                    info!("🔮 ALLOWANCE DEBUG: Generated future allowance for {} on {} (day_of_week: {}, expected: {}, datetime: {}, amount: ${:.2})",
+                    debug!("🔮 ALLOWANCE DEBUG: Generated future allowance for {} on {} (day_of_week: {}, expected: {}, datetime: {}, amount: ${:.2})",
                           child_id, current, day_of_week, config.day_of_week, transaction_datetime, amount);
                 } else {
-                    info!("🔮 ALLOWANCE DEBUG: Future date {} doesn't match allowance day (got {}, need {})", 
+                    debug!("🔮 ALLOWANCE DEBUG: Future date {} doesn't match allowance day (got {}, need {})", 
                          current, day_of_week, config.day_of_week);
                 }
             } else {
-                info!("🔮 ALLOWANCE DEBUG: Date {} is not in the future (current: {})", current, current_date);
+                debug!("🔮 ALLOWANCE DEBUG: Date {} is not in the future (current: {})", current, current_date);
             }
             
             // Move to next day
@@ -328,13 +328,13 @@ impl AllowanceService {
             }
         }
 
-        info!("🔮 ALLOWANCE DEBUG: Checked {} days total, generated {} future allowance transactions for child: {}", 
+        debug!("🔮 ALLOWANCE DEBUG: Checked {} days total, generated {} future allowance transactions for child: {}", 
               checked_days, future_allowances.len(), child_id);
 
         if future_allowances.is_empty() {
-            info!("🔮 ALLOWANCE DEBUG: NO FUTURE ALLOWANCES GENERATED! Check the configuration and date range.");
+            debug!("🔮 ALLOWANCE DEBUG: NO FUTURE ALLOWANCES GENERATED! Check the configuration and date range.");
         } else {
-            info!("🔮 ALLOWANCE DEBUG: Generated future allowances:");
+            debug!("🔮 ALLOWANCE DEBUG: Generated future allowances:");
             for allowance in &future_allowances {
                 info!("  - {} on {}: ${:.2}", allowance.id, allowance.date.format("%Y-%m-%d"), allowance.amount);
             }
@@ -351,7 +351,7 @@ impl AllowanceService {
         from_date: NaiveDate,
         to_date: NaiveDate,
     ) -> Result<Vec<(NaiveDate, f64)>> {
-        info!("Checking for pending allowances for child: {} from {} to {}", 
+        debug!("Checking for pending allowances for child: {} from {} to {}",
               child_id, from_date, to_date);
 
         // Get allowance config for the child
@@ -360,7 +360,7 @@ impl AllowanceService {
         let config = match allowance_config {
             Some(config) if config.is_active => config,
             _ => {
-                info!("No active allowance config found for child: {}", child_id);
+                debug!("No active allowance config found for child: {}", child_id);
                 return Ok(Vec::new());
             }
         };
@@ -408,7 +408,7 @@ impl AllowanceService {
             }
         }
 
-        info!("Found {} pending allowances for child: {}", 
+        debug!("Found {} pending allowances for child: {}",
               pending_dates.len(), child_id);
 
         Ok(pending_dates)
@@ -417,7 +417,7 @@ impl AllowanceService {
     /// Check if an allowance already exists for a specific date.
     /// Uses transaction_type == Allowance for reliable detection.
     fn has_allowance_for_date(&self, child_id: &str, date: NaiveDate) -> Result<bool> {
-        info!("ALLOWANCE DEBUG: has_allowance_for_date() called for child {} on date {}", child_id, date);
+        debug!("ALLOWANCE DEBUG: has_allowance_for_date() called for child {} on date {}", child_id, date);
 
         let transactions = self.transaction_repository.list_transactions(child_id, None, None)?;
         let date_str = date.format("%Y-%m-%d").to_string();
@@ -428,14 +428,14 @@ impl AllowanceService {
             let is_same_date = tx_date_str == date_str;
 
             if is_same_date {
-                info!("ALLOWANCE DEBUG: Found transaction on {}: type={:?}, desc={}",
+                debug!("ALLOWANCE DEBUG: Found transaction on {}: type={:?}, desc={}",
                       date, t.transaction_type, t.description);
             }
 
             is_allowance_type && is_same_date
         });
 
-        info!("ALLOWANCE DEBUG: has_allowance_for_date() result: {}", has_allowance);
+        debug!("ALLOWANCE DEBUG: has_allowance_for_date() result: {}", has_allowance);
         Ok(has_allowance)
     }
 

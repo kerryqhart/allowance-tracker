@@ -11,7 +11,7 @@ use shared::TransactionType;
 use std::collections::HashMap;
 use chrono::{Local, Datelike};
 use std::sync::{Arc, Mutex};
-use log::{self, info};
+use log::{self, debug};
 
 use crate::backend::domain::transaction_service::TransactionService;
 use crate::backend::domain::commands::transactions::CalendarTransactionsQuery;
@@ -42,14 +42,14 @@ impl CalendarService {
         year: u32,
         transaction_service: &TransactionService,
     ) -> Result<CalendarMonth> {
-        info!("🗓️ CALENDAR: Getting calendar month with transactions for {}/{}", month, year);
+        debug!("🗓️ CALENDAR: Getting calendar month with transactions for {}/{}", month, year);
 
         // Step 1: Get transactions for calendar (including future allowances)
         let query = CalendarTransactionsQuery { month, year };
         
         let result = transaction_service.list_transactions_for_calendar(query)?;
         
-        info!("🗓️ CALENDAR: Domain service returned {} transactions for calendar", result.transactions.len());
+        debug!("🗓️ CALENDAR: Domain service returned {} transactions for calendar", result.transactions.len());
 
         // Step 2: Convert domain transactions to DTOs for calendar service
         let dto_transactions: Vec<Transaction> = result
@@ -58,9 +58,9 @@ impl CalendarService {
             .map(transaction_to_dto)
             .collect();
         
-        info!("🗓️ CALENDAR: Total transactions for calendar: {} transactions", dto_transactions.len());
+        debug!("🗓️ CALENDAR: Total transactions for calendar: {} transactions", dto_transactions.len());
         for (i, tx) in dto_transactions.iter().enumerate().take(5) {
-            info!("🗓️ CALENDAR: DTO Transaction {}: id={}, date={}, amount={}, description={} balance={}", 
+            debug!("🗓️ CALENDAR: DTO Transaction {}: id={}, date={}, amount={}, description={} balance={}", 
                  i + 1, tx.id, tx.date, tx.amount, tx.description, tx.balance);
         }
 
@@ -79,11 +79,11 @@ impl CalendarService {
             &active_child.id
         );
         
-        info!("🗓️ CALENDAR: Generated calendar with {} days using projected balances", calendar_month.days.len());
+        debug!("🗓️ CALENDAR: Generated calendar with {} days using projected balances", calendar_month.days.len());
         let total_transaction_count: usize = calendar_month.days.iter()
             .map(|day| day.transactions.len())
             .sum();
-        info!("🗓️ CALENDAR: Total transactions in calendar days: {}", total_transaction_count);
+        debug!("🗓️ CALENDAR: Total transactions in calendar days: {}", total_transaction_count);
 
         Ok(calendar_month)
     }
@@ -224,7 +224,7 @@ impl CalendarService {
                 // Find the last normal transaction (non-NaN balance) in chronological order
                 if let Some(final_normal_transaction) = sorted_day_transactions.iter().rev().find(|tx| !tx.balance.is_nan()) {
                     day_final_balance = final_normal_transaction.balance;
-                    log::info!("BACKEND BALANCE DEBUG: Day {}: Using final normal transaction balance ${:.2} from transaction {} (had {} transactions)", 
+                    log::debug!("BACKEND BALANCE DEBUG: Day {}: Using final normal transaction balance ${:.2} from transaction {} (had {} transactions)", 
                               day, final_normal_transaction.balance, final_normal_transaction.id, sorted_day_transactions.len());
                 }
                 

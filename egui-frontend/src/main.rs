@@ -20,7 +20,6 @@ fn load_app_icon() -> Result<egui::IconData, Box<dyn std::error::Error>> {
 }
 
 fn main() -> Result<(), eframe::Error> {
-    // Default to info-level logging; override with RUST_LOG env var if desired.
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
     info!("ALLOWANCE TRACKER STARTING UP! 🚀🚀🚀");

@@ -16,7 +16,7 @@
 //! create goals and track their progress toward completion.
 
 use eframe::egui;
-use log::info;
+use log::{info, debug};
 use crate::ui::app_state::AllowanceTrackerApp;
 use crate::ui::components::styling::colors;
 
@@ -58,13 +58,13 @@ impl SectionHeaderStyle {
 impl AllowanceTrackerApp {
     /// Draw the main goal section using the centralized layout system
     pub fn draw_goal_section(&mut self, ui: &mut egui::Ui, available_rect: egui::Rect) {
-        log::info!("GOAL_SECTION: Received {}w x {}h from tab manager", available_rect.width(), available_rect.height());
+        log::debug!("GOAL_SECTION: Received {}w x {}h from tab manager", available_rect.width(), available_rect.height());
         
         let layout = GoalLayout::new();
         
         // Check if we should use 3-section layout
         if self.goal.has_active_goal() && self.should_use_three_section_layout() {
-            log::info!("Using NEW 3-section layout with direct rendering");
+            log::debug!("Using NEW 3-section layout with direct rendering");
             self.ensure_goal_components_loaded();
             self.draw_three_section_goal_card_direct(ui, available_rect);
         } else {
@@ -77,7 +77,7 @@ impl AllowanceTrackerApp {
                     layout.content_spacing(ui, GoalContentType::ErrorState);
                     self.draw_goal_error_state(ui, error);
                 } else if self.goal.has_active_goal() {
-                    log::info!("📄 Using legacy layout");
+                    log::debug!("📄 Using legacy layout");
                     self.draw_current_goal_card_with_layout(ui, &layout);
                 } else {
                     layout.content_spacing(ui, GoalContentType::CreateGoal);
@@ -104,8 +104,8 @@ impl AllowanceTrackerApp {
         let goal = if let Some(ref g) = self.goal.current_goal { g.clone() } else { return; };
         let calculation = if let Some(ref c) = self.goal.goal_calculation { c.clone() } else { return; };
         
-        log::info!("🎨 Drawing DIRECT 3-section goal card");
-        log::info!("Direct available space: {}w x {}h", available_rect.width(), available_rect.height());
+        log::debug!("🎨 Drawing DIRECT 3-section goal card");
+        log::debug!("Direct available space: {}w x {}h", available_rect.width(), available_rect.height());
         
         // Calculate margins and sections with DIRECT rectangle calculations
         let card_margin = 20.0;
@@ -162,15 +162,15 @@ impl AllowanceTrackerApp {
             egui::vec2(bottom_right_width, bottom_height)
         );
         
-        log::info!("📐 DIRECT Section rectangles:");
-        log::info!("   Top: [{:.1} {:.1}] - [{:.1} {:.1}]", top_rect.min.x, top_rect.min.y, top_rect.max.x, top_rect.max.y);
-        log::info!("   Bottom-left: [{:.1} {:.1}] - [{:.1} {:.1}]", bottom_left_rect.min.x, bottom_left_rect.min.y, bottom_left_rect.max.x, bottom_left_rect.max.y);
-        log::info!("   Bottom-right: [{:.1} {:.1}] - [{:.1} {:.1}]", bottom_right_rect.min.x, bottom_right_rect.min.y, bottom_right_rect.max.x, bottom_right_rect.max.y);
-        log::info!("   📍 Bottom sections should start at same Y: left={:.1}, right={:.1}", bottom_left_rect.min.y, bottom_right_rect.min.y);
+        log::debug!("📐 DIRECT Section rectangles:");
+        log::debug!("   Top: [{:.1} {:.1}] - [{:.1} {:.1}]", top_rect.min.x, top_rect.min.y, top_rect.max.x, top_rect.max.y);
+        log::debug!("   Bottom-left: [{:.1} {:.1}] - [{:.1} {:.1}]", bottom_left_rect.min.x, bottom_left_rect.min.y, bottom_left_rect.max.x, bottom_left_rect.max.y);
+        log::debug!("   Bottom-right: [{:.1} {:.1}] - [{:.1} {:.1}]", bottom_right_rect.min.x, bottom_right_rect.min.y, bottom_right_rect.max.x, bottom_right_rect.max.y);
+        log::debug!("   📍 Bottom sections should start at same Y: left={:.1}, right={:.1}", bottom_left_rect.min.y, bottom_right_rect.min.y);
         
         // TOP SECTION: Progress bar (DIRECT rendering)
         ui.allocate_new_ui(egui::UiBuilder::new().max_rect(top_rect), |ui| {
-            log::info!("Rendering progress bar in top section");
+            log::debug!("Rendering progress bar in top section");
             
             let header_style = SectionHeaderStyle::default();
             
@@ -201,7 +201,7 @@ impl AllowanceTrackerApp {
         });
         
         // BOTTOM-LEFT SECTION: Goal progress graph (with margins)
-        log::info!("Bottom-left section rendering goal progression graph");
+        log::debug!("Bottom-left section rendering goal progression graph");
         
         // Load graph data if needed using our helper method
         self.load_goal_component_data_if_needed(&goal);
@@ -216,7 +216,7 @@ impl AllowanceTrackerApp {
             ),
         );
         
-        log::info!("Graph rect (with margins): [{:.1} {:.1}] - [{:.1} {:.1}]", 
+        log::debug!("Graph rect (with margins): [{:.1} {:.1}] - [{:.1} {:.1}]", 
                    graph_rect.min.x, graph_rect.min.y, graph_rect.max.x, graph_rect.max.y);
 
         
@@ -259,7 +259,7 @@ impl AllowanceTrackerApp {
         });
         
         // BOTTOM-RIGHT SECTION: Circular progress component (centered)
-        log::info!("Bottom-right section rendering circular progress component");
+        log::debug!("Bottom-right section rendering circular progress component");
         
         // Apply same margins to the right section for consistent alignment
         let right_margin = 15.0; // Match the graph_margin
@@ -536,7 +536,7 @@ impl AllowanceTrackerApp {
 impl AllowanceTrackerApp {
     /// Load current goal data from backend
     pub fn load_goal_data(&mut self) {
-        info!("Loading goal data from backend");
+        debug!("Loading goal data from backend");
         self.goal.start_loading();
         
         // Create command for getting current goal
@@ -547,7 +547,7 @@ impl AllowanceTrackerApp {
         // Call backend service
         match self.backend().goal_service.get_current_goal(command) {
             Ok(result) => {
-                info!("Successfully loaded goal data");
+                debug!("Successfully loaded goal data");
                 self.goal.set_goal_data(result.goal, result.calculation);
             }
             Err(error) => {
