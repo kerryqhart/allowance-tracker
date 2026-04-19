@@ -57,7 +57,8 @@ impl Backend {
         // Create services using the Arc<CsvConnection> pattern
         let child_service = domain::child_service::ChildService::new(csv_connection.clone(), sync_notifier.clone());
         let allowance_service = domain::AllowanceService::new(csv_connection.clone());
-        let balance_service = domain::BalanceService::new(csv_connection.clone());
+        let balance_service = domain::BalanceService::new(csv_connection.clone())
+            .with_sync_notifier(sync_notifier.clone());
 
         // Load email config and create TransactionService with email support
         let email_config = domain::EmailConfigService::load_config_or_default(&email_config_path);

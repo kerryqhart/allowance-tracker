@@ -9,17 +9,26 @@ use log::{info, warn};
 use std::sync::Arc;
 use crate::backend::storage::csv::{CsvConnection, TransactionRepository};
 use crate::backend::storage::traits::TransactionStorage;
+use crate::backend::domain::SyncNotifier;
+use shared::sync::{EntityType, SyncAction, SyncEvent, SyncSource};
 
 /// Service responsible for balance calculations and recalculations
 #[derive(Clone)]
 pub struct BalanceService {
     transaction_repository: TransactionRepository,
+    sync_notifier: Option<SyncNotifier>,
 }
 
 impl BalanceService {
     pub fn new(connection: Arc<CsvConnection>) -> Self {
         let transaction_repository = TransactionRepository::new((*connection).clone());
-        Self { transaction_repository }
+        Self { transaction_repository, sync_notifier: None }
+    }
+
+    /// Attach a sync notifier so recalculated rows emit Updated events.
+    pub fn with_sync_notifier(mut self, notifier: Option<SyncNotifier>) -> Self {
+        self.sync_notifier = notifier;
+        self
     }
 
     /// Recalculate all balances from a specific date forward
@@ -66,6 +75,21 @@ impl BalanceService {
         // Update all balances atomically
         self.transaction_repository
             .update_transaction_balances(&balance_updates)?;
+
+        // Emit Updated sync events for each recalculated row so the remote
+        // keeps the correct balance field. Without this, backdated inserts
+        // leave later rows' balance fields stale on the remote.
+        if let Some(ref notifier) = self.sync_notifier {
+            for (tx_id, _) in &balance_updates {
+                notifier.notify(SyncEvent::new(
+                    EntityType::Transaction,
+                    tx_id.clone(),
+                    child_id.to_string(),
+                    SyncAction::Updated,
+                    SyncSource::Local,
+                ));
+            }
+        }
 
         info!("Successfully recalculated {} transaction balances", balance_updates.len());
         Ok(balance_updates.len())
