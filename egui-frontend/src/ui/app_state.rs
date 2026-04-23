@@ -148,11 +148,20 @@ impl AllowanceTrackerApp {
             let (message_tx, message_rx) = std::sync::mpsc::channel();
             let (cmd_tx, cmd_rx) = std::sync::mpsc::channel::<SyncCommand>();
 
+            // Wake the UI (request a repaint) whenever the sync thread sends
+            // a message. Without this the egui UI only draws on input events,
+            // so request/response messages like ReadEntityRequest and
+            // GetChildIdsRequest can time out while the app is unfocused.
+            let ctx_for_wake = cc.egui_ctx.clone();
+            let wake_ui: crate::backend::domain::WakeUi =
+                std::sync::Arc::new(move || ctx_for_wake.request_repaint());
+
             let handle = SyncThreadHandle::spawn(
                 remote,
                 rx,
                 cmd_rx,
                 message_tx,
+                wake_ui,
                 sync_state.clone(),
                 retry_queue.events.clone(),
                 data_dir.clone(),

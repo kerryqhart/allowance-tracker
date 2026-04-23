@@ -1,6 +1,6 @@
 use shared::sync::*;
 use crate::backend::storage::remote::RemoteStorage;
-use super::sync_manager::{SyncEngine, SyncMessage, SyncStatus, SyncCommand};
+use super::sync_manager::{SyncEngine, SyncMessage, SyncStatus, SyncCommand, UiMessenger, WakeUi};
 use super::sync_persistence::{self, SyncState, RetryQueue};
 use std::path::PathBuf;
 use std::sync::{Arc, mpsc, atomic::{AtomicBool, Ordering}};
@@ -25,6 +25,7 @@ impl SyncThreadHandle {
         event_rx: mpsc::Receiver<SyncEvent>,
         command_rx: mpsc::Receiver<SyncCommand>,
         message_tx: mpsc::Sender<SyncMessage>,
+        wake_ui: WakeUi,
         initial_sync_state: SyncState,
         initial_retry_queue: Vec<SyncEvent>,
         data_dir: PathBuf,
@@ -43,6 +44,8 @@ impl SyncThreadHandle {
         let sync_enabled = initial_sync_state.enabled;
         let sync_remote_url = initial_sync_state.remote_url.clone();
 
+        let messenger = UiMessenger::new(message_tx, wake_ui);
+
         let thread = std::thread::Builder::new()
             .name("sync-thread".to_string())
             .spawn(move || {
@@ -50,7 +53,7 @@ impl SyncThreadHandle {
                     remote,
                     event_rx,
                     command_rx,
-                    message_tx,
+                    messenger,
                     engine,
                     retry_queue,
                     data_dir,
@@ -87,7 +90,7 @@ fn sync_loop(
     remote: Arc<dyn RemoteStorage>,
     event_rx: mpsc::Receiver<SyncEvent>,
     command_rx: mpsc::Receiver<SyncCommand>,
-    message_tx: mpsc::Sender<SyncMessage>,
+    messenger: UiMessenger,
     mut engine: SyncEngine,
     mut retry_queue: RetryQueue,
     data_dir: PathBuf,
@@ -107,13 +110,13 @@ fn sync_loop(
         }
         let mut remaining_retries = Vec::new();
         for event in retry_queue.events.drain(..) {
-            match push_event(&remote, &event, &message_tx) {
+            match push_event(&remote, &event, &messenger) {
                 Ok(()) => {
                     log::info!("SYNC: retry drained event {}", event.event_id);
                 }
                 Err(err) => {
                     log::warn!("SYNC: retry still failing for event {}: {}", event.event_id, err);
-                    let _ = message_tx.send(SyncMessage::PushFailed {
+                    let _ = messenger.send(SyncMessage::PushFailed {
                         event_id: event.event_id.clone(),
                         error: err,
                     });
@@ -125,11 +128,11 @@ fn sync_loop(
 
         // 2. Drain new local events
         while let Ok(event) = event_rx.try_recv() {
-            match push_event(&remote, &event, &message_tx) {
+            match push_event(&remote, &event, &messenger) {
                 Ok(()) => {}
                 Err(err) => {
                     log::warn!("SYNC: push failed, queuing for retry: event {} ({})", event.event_id, err);
-                    let _ = message_tx.send(SyncMessage::PushFailed {
+                    let _ = messenger.send(SyncMessage::PushFailed {
                         event_id: event.event_id.clone(),
                         error: err,
                     });
@@ -161,9 +164,9 @@ fn sync_loop(
         }
 
         if should_poll {
-            let _ = message_tx.send(SyncMessage::StatusChanged(SyncStatus::Syncing));
-            poll_remote(&remote, &mut engine, &message_tx);
-            let _ = message_tx.send(SyncMessage::StatusChanged(SyncStatus::Idle));
+            let _ = messenger.send(SyncMessage::StatusChanged(SyncStatus::Syncing));
+            poll_remote(&remote, &mut engine, &messenger);
+            let _ = messenger.send(SyncMessage::StatusChanged(SyncStatus::Idle));
         }
 
         // 4. Persist state every loop iteration. Preserve enabled/remote_url from
@@ -188,11 +191,11 @@ fn sync_loop(
 
             // Drain any new local events that arrived during the sleep
             while let Ok(event) = event_rx.try_recv() {
-                match push_event(&remote, &event, &message_tx) {
+                match push_event(&remote, &event, &messenger) {
                     Ok(()) => {}
                     Err(err) => {
                         log::warn!("SYNC: push failed, queuing for retry: event {} ({})", event.event_id, err);
-                        let _ = message_tx.send(SyncMessage::PushFailed {
+                        let _ = messenger.send(SyncMessage::PushFailed {
                             event_id: event.event_id.clone(),
                             error: err,
                         });
@@ -205,9 +208,9 @@ fn sync_loop(
             match command_rx.try_recv() {
                 Ok(SyncCommand::PollNow) => {
                     log::info!("SYNC: PollNow received in sleep loop — polling remote now");
-                    let _ = message_tx.send(SyncMessage::StatusChanged(SyncStatus::Syncing));
-                    poll_remote(&remote, &mut engine, &message_tx);
-                    let _ = message_tx.send(SyncMessage::StatusChanged(SyncStatus::Idle));
+                    let _ = messenger.send(SyncMessage::StatusChanged(SyncStatus::Syncing));
+                    poll_remote(&remote, &mut engine, &messenger);
+                    let _ = messenger.send(SyncMessage::StatusChanged(SyncStatus::Idle));
                     break 'sleep;
                 }
                 Ok(SyncCommand::Shutdown) => {
@@ -225,7 +228,7 @@ fn sync_loop(
 fn push_event(
     remote: &Arc<dyn RemoteStorage>,
     event: &SyncEvent,
-    message_tx: &mpsc::Sender<SyncMessage>,
+    messenger: &UiMessenger,
 ) -> Result<(), String> {
     // Deletes don't need entity data. Delete the entity body first so that a
     // crash between the two calls leaves a dangling event to retry rather than
@@ -240,7 +243,7 @@ fn push_event(
 
     // Request entity data from UI thread
     let (response_tx, response_rx) = mpsc::channel();
-    message_tx.send(SyncMessage::ReadEntityRequest {
+    messenger.send(SyncMessage::ReadEntityRequest {
         child_id: event.child_id.clone(),
         entity_type: event.entity_type.clone(),
         entity_id: event.entity_id.clone(),
@@ -275,7 +278,7 @@ fn push_event(
 fn poll_remote(
     remote: &Arc<dyn RemoteStorage>,
     engine: &mut SyncEngine,
-    message_tx: &mpsc::Sender<SyncMessage>,
+    messenger: &UiMessenger,
 ) {
     // Ask the UI thread for the current list of local child IDs. Deriving it
     // from watermarks would be a bootstrap trap: a fresh install (or a blown-
@@ -283,7 +286,7 @@ fn poll_remote(
     // polled. Fall back to watermark-derived IDs only if the UI thread fails
     // to respond within the timeout.
     let (response_tx, response_rx) = mpsc::channel();
-    let _ = message_tx.send(SyncMessage::GetChildIdsRequest { response_tx });
+    let _ = messenger.send(SyncMessage::GetChildIdsRequest { response_tx });
     let child_ids: Vec<String> = match response_rx.recv_timeout(std::time::Duration::from_secs(5)) {
         Ok(ids) => ids,
         Err(_) => {
@@ -298,7 +301,7 @@ fn poll_remote(
                 for event in poll_result.events_to_apply {
                     match event.action {
                         SyncAction::Deleted => {
-                            let _ = message_tx.send(SyncMessage::DeleteLocalEntity {
+                            let _ = messenger.send(SyncMessage::DeleteLocalEntity {
                                 child_id: event.child_id.clone(),
                                 entity_type: event.entity_type.clone(),
                                 entity_id: event.entity_id.clone(),
@@ -312,7 +315,7 @@ fn poll_remote(
                                 &event.entity_id,
                             ) {
                                 Ok(Some(json)) => {
-                                    let _ = message_tx.send(SyncMessage::ApplyRemoteEntity {
+                                    let _ = messenger.send(SyncMessage::ApplyRemoteEntity {
                                         child_id: event.child_id.clone(),
                                         entity_type: event.entity_type.clone(),
                                         entity_id: event.entity_id.clone(),
@@ -324,7 +327,7 @@ fn poll_remote(
                                     // Entity deleted between event and fetch — skip
                                 }
                                 Err(e) => {
-                                    let _ = message_tx.send(SyncMessage::Error(
+                                    let _ = messenger.send(SyncMessage::Error(
                                         format!("Failed to fetch entity: {e}"),
                                     ));
                                 }
@@ -337,7 +340,7 @@ fn poll_remote(
                 let _ = remote.update_watermark(child_id, "remote", new_watermark);
             }
             Err(e) => {
-                let _ = message_tx.send(SyncMessage::Error(
+                let _ = messenger.send(SyncMessage::Error(
                     format!("Poll failed for {child_id}: {e}"),
                 ));
             }
@@ -353,6 +356,10 @@ mod tests {
     use std::time::Duration;
     use tempfile::TempDir;
 
+    fn noop_wake() -> WakeUi {
+        Arc::new(|| {})
+    }
+
     fn empty_spawn(
         mock: Arc<MockRemoteClient>,
         event_rx: mpsc::Receiver<SyncEvent>,
@@ -365,6 +372,7 @@ mod tests {
             event_rx,
             command_rx,
             message_tx,
+            noop_wake(),
             SyncState::default(),
             vec![],
             data_dir.to_path_buf(),
@@ -403,6 +411,7 @@ mod tests {
             event_rx,
             command_rx,
             message_tx,
+            noop_wake(),
             SyncState::default(),
             vec![],
             dir.path().to_path_buf(),
@@ -482,6 +491,7 @@ mod tests {
             event_rx,
             command_rx,
             message_tx,
+            noop_wake(),
             initial_state,
             vec![],
             dir.path().to_path_buf(),

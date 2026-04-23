@@ -103,6 +103,33 @@ impl std::fmt::Debug for SyncMessage {
     }
 }
 
+/// Callback invoked whenever the sync thread sends a message to the UI.
+/// Used to wake the egui UI thread (via `ctx.request_repaint()`) so that
+/// pending `SyncMessage`s are drained promptly even while the window is
+/// unfocused — without this the UI only repaints on input events and
+/// request/response messages (`ReadEntityRequest`, `GetChildIdsRequest`)
+/// time out while the app is backgrounded.
+pub type WakeUi = Arc<dyn Fn() + Send + Sync>;
+
+/// Wraps the `SyncMessage` sender with a wake-UI callback so every send
+/// is paired with a repaint request.
+pub struct UiMessenger {
+    tx: mpsc::Sender<SyncMessage>,
+    wake: WakeUi,
+}
+
+impl UiMessenger {
+    pub fn new(tx: mpsc::Sender<SyncMessage>, wake: WakeUi) -> Self {
+        Self { tx, wake }
+    }
+
+    pub fn send(&self, msg: SyncMessage) -> Result<(), mpsc::SendError<SyncMessage>> {
+        let result = self.tx.send(msg);
+        (self.wake)();
+        result
+    }
+}
+
 /// Progress messages from the backfill operation to the UI.
 #[derive(Debug, Clone)]
 pub enum BackfillProgress {
