@@ -135,6 +135,7 @@ fn sync_loop(
         while let Ok(cmd) = command_rx.try_recv() {
             match cmd {
                 SyncCommand::PollNow => {
+                    log::info!("SYNC: PollNow received at outer loop");
                     should_poll = true;
                 }
                 SyncCommand::Shutdown => {
@@ -191,6 +192,7 @@ fn sync_loop(
             // Check for a command
             match command_rx.try_recv() {
                 Ok(SyncCommand::PollNow) => {
+                    log::info!("SYNC: PollNow received in sleep loop — polling remote now");
                     let _ = message_tx.send(SyncMessage::StatusChanged(SyncStatus::Syncing));
                     poll_remote(&remote, &mut engine, &message_tx);
                     let _ = message_tx.send(SyncMessage::StatusChanged(SyncStatus::Idle));
@@ -263,11 +265,20 @@ fn poll_remote(
     engine: &mut SyncEngine,
     message_tx: &mpsc::Sender<SyncMessage>,
 ) {
-    // Derive child list from watermark entries. Children with writes have
-    // watermark entries; brand-new children without any sync history won't
-    // be polled, but that's acceptable — once they get a write the watermark
-    // is created.
-    let child_ids: Vec<String> = engine.watermarks_snapshot().keys().cloned().collect();
+    // Ask the UI thread for the current list of local child IDs. Deriving it
+    // from watermarks would be a bootstrap trap: a fresh install (or a blown-
+    // away sync_state) has no watermarks yet, so nothing would ever get
+    // polled. Fall back to watermark-derived IDs only if the UI thread fails
+    // to respond within the timeout.
+    let (response_tx, response_rx) = mpsc::channel();
+    let _ = message_tx.send(SyncMessage::GetChildIdsRequest { response_tx });
+    let child_ids: Vec<String> = match response_rx.recv_timeout(std::time::Duration::from_secs(5)) {
+        Ok(ids) => ids,
+        Err(_) => {
+            log::warn!("SYNC: GetChildIdsRequest timed out — falling back to watermark keys");
+            engine.watermarks_snapshot().keys().cloned().collect()
+        }
+    };
 
     for child_id in &child_ids {
         match engine.poll_child(child_id) {

@@ -33,6 +33,13 @@ pub enum SyncMessage {
         response_tx: std::sync::mpsc::Sender<Option<String>>,
     },
 
+    // New — sync thread needs the current list of local child IDs to know
+    // which children to poll for remote events. Populated from ChildService
+    // on the UI thread (architecture: UI owns all repo I/O).
+    GetChildIdsRequest {
+        response_tx: std::sync::mpsc::Sender<Vec<String>>,
+    },
+
     // New — sync thread pulled a remote entity, UI thread should apply it
     ApplyRemoteEntity {
         child_id: String,
@@ -73,6 +80,9 @@ impl std::fmt::Debug for SyncMessage {
                 .field("child_id", child_id)
                 .field("entity_type", entity_type)
                 .field("entity_id", entity_id)
+                .finish(),
+            SyncMessage::GetChildIdsRequest { .. } => f
+                .debug_struct("GetChildIdsRequest")
                 .finish(),
             SyncMessage::ApplyRemoteEntity { child_id, entity_type, entity_id, entity_json, event_id } => f
                 .debug_struct("ApplyRemoteEntity")

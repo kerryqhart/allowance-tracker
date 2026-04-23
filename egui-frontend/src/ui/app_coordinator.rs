@@ -43,6 +43,7 @@ impl eframe::App for AllowanceTrackerApp {
         // Detect app focus changes and trigger an immediate sync poll on focus-gain
         let is_focused = ctx.input(|i| i.focused);
         if is_focused && !self.was_focused {
+            log::info!("SYNC: app gained focus — sending PollNow");
             if let Some(ref tx) = self.sync_command_tx {
                 let _ = tx.send(SyncCommand::PollNow);
             }
@@ -411,6 +412,16 @@ impl AllowanceTrackerApp {
                 SyncMessage::ReadEntityRequest { child_id, entity_type, entity_id, response_tx } => {
                     let json = self.read_entity_for_sync(&child_id, &entity_type, &entity_id);
                     let _ = response_tx.send(json);
+                }
+                SyncMessage::GetChildIdsRequest { response_tx } => {
+                    let ids = match self.backend().child_service.list_children() {
+                        Ok(result) => result.children.into_iter().map(|c| c.id).collect(),
+                        Err(e) => {
+                            log::warn!("SYNC: list_children failed: {e}");
+                            Vec::new()
+                        }
+                    };
+                    let _ = response_tx.send(ids);
                 }
                 SyncMessage::ApplyRemoteEntity { child_id, entity_type, entity_id, entity_json, event_id } => {
                     self.apply_remote_entity(&child_id, &entity_type, &entity_id, &entity_json, &event_id);
