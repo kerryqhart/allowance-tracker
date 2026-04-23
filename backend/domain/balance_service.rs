@@ -60,15 +60,24 @@ impl BalanceService {
         let starting_balance = self.calculate_starting_balance(child_id, from_date)?;
         info!("Starting balance for recalculation: ${:.2}", starting_balance);
 
-        // Recalculate balances for all transactions
+        // Recalculate balances for all transactions. Track which rows actually
+        // changed so we only emit Updated sync events for real diffs — the
+        // common path (a current-date insert) recomputes the just-inserted
+        // row to the same balance it was stored with, and we don't want to
+        // emit a redundant Updated on top of the Created event.
         let mut running_balance = starting_balance;
         let mut balance_updates = Vec::new();
+        let mut changed_ids: Vec<String> = Vec::new();
 
         for transaction in &transactions {
             running_balance += transaction.amount;
             balance_updates.push((transaction.id.clone(), running_balance));
-            
-            info!("Transaction {}: amount={:.2}, new_balance={:.2}", 
+
+            if (transaction.balance - running_balance).abs() > 0.001 {
+                changed_ids.push(transaction.id.clone());
+            }
+
+            info!("Transaction {}: amount={:.2}, new_balance={:.2}",
                   transaction.id, transaction.amount, running_balance);
         }
 
@@ -76,11 +85,9 @@ impl BalanceService {
         self.transaction_repository
             .update_transaction_balances(&balance_updates)?;
 
-        // Emit Updated sync events for each recalculated row so the remote
-        // keeps the correct balance field. Without this, backdated inserts
-        // leave later rows' balance fields stale on the remote.
+        // Emit Updated sync events only for rows whose balance actually changed.
         if let Some(ref notifier) = self.sync_notifier {
-            for (tx_id, _) in &balance_updates {
+            for tx_id in &changed_ids {
                 notifier.notify(SyncEvent::new(
                     EntityType::Transaction,
                     tx_id.clone(),
