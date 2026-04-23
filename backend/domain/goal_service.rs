@@ -22,7 +22,7 @@
 
 use anyhow::Result;
 use chrono::{Utc, Duration, Local, Datelike};
-use log::{info, warn};
+use log::{info, warn, debug};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -36,6 +36,8 @@ use crate::backend::domain::commands::goal::{
 use crate::backend::domain::commands::transactions::{TransactionListQuery};
 
 use shared::GoalCalculation;
+use shared::sync::{SyncEvent, SyncAction, SyncSource, EntityType};
+use crate::backend::domain::SyncNotifier;
 
 /// Service for managing goals and goal-related calculations
 pub struct GoalService {
@@ -45,6 +47,7 @@ pub struct GoalService {
     transaction_service: Arc<TransactionService>, // Use Arc for shared ownership
     #[allow(dead_code)]
     balance_service: BalanceService,
+    sync_notifier: Option<SyncNotifier>,
 }
 
 impl GoalService {
@@ -55,6 +58,7 @@ impl GoalService {
         allowance_service: AllowanceService,
         transaction_service: Arc<TransactionService>, // Accept Arc
         balance_service: BalanceService,
+        sync_notifier: Option<SyncNotifier>,
     ) -> Self {
         let goal_repository = GoalRepository::new((*csv_conn).clone());
         Self {
@@ -63,6 +67,19 @@ impl GoalService {
             allowance_service,
             transaction_service, // Store Arc
             balance_service,
+            sync_notifier,
+        }
+    }
+
+    fn notify_sync(&self, entity_type: EntityType, entity_id: &str, child_id: &str, action: SyncAction) {
+        if let Some(ref notifier) = self.sync_notifier {
+            notifier.notify(SyncEvent::new(
+                entity_type,
+                entity_id.to_string(),
+                child_id.to_string(),
+                action,
+                SyncSource::Local,
+            ));
         }
     }
 
@@ -129,6 +146,8 @@ impl GoalService {
         // Store goal directly as domain model
         self.goal_repository.store_goal(&domain_goal)?;
 
+        self.notify_sync(EntityType::Goal, &domain_goal.id, &child_id, SyncAction::Created);
+
         // Calculate completion projection
         let calculation = self.calculate_goal_completion(&child_id, command.target_amount)?;
 
@@ -143,7 +162,7 @@ impl GoalService {
 
     /// Get current active goal with calculations
     pub fn get_current_goal(&self, command: GetCurrentGoalCommand) -> Result<GetCurrentGoalResult> {
-        info!("Getting current goal: {:?}", command);
+        debug!("Getting current goal: {:?}", command);
 
         // Get child ID
         let child_id = match command.child_id {
@@ -235,6 +254,8 @@ impl GoalService {
         // Store updated goal (append-only)
         self.goal_repository.update_goal(&current_goal_domain)?;
 
+        self.notify_sync(EntityType::Goal, &current_goal_domain.id, &child_id, SyncAction::Updated);
+
         // Calculate new completion projection
         let calculation = self.calculate_goal_completion(&child_id, current_goal_domain.target_amount)?;
 
@@ -269,6 +290,8 @@ impl GoalService {
             Some(goal) => goal,
             None => return Err(anyhow::anyhow!("No active goal found to cancel")),
         };
+
+        self.notify_sync(EntityType::Goal, &cancelled_goal_domain.id, &child_id, SyncAction::Updated);
 
         info!("Successfully cancelled goal: {}", cancelled_goal_domain.id);
 
@@ -324,12 +347,16 @@ impl GoalService {
 
         // Check if goal is completed
         if current_balance >= current_goal_domain.target_amount {
-            info!("Goal {} completed! Current balance: ${:.2}, Target: ${:.2}", 
+            info!("Goal {} completed! Current balance: ${:.2}, Target: ${:.2}",
                   current_goal_domain.id, current_balance, current_goal_domain.target_amount);
-            
+
             // Mark goal as completed (returns domain Goal)
             let completed_goal_domain = self.goal_repository.complete_current_goal(child_id)?;
-            
+
+            if let Some(ref completed_goal) = completed_goal_domain {
+                self.notify_sync(EntityType::Goal, &completed_goal.id, child_id, SyncAction::Updated);
+            }
+
             return Ok(completed_goal_domain);
         }
 
@@ -572,6 +599,42 @@ impl GoalService {
     ) -> Result<Vec<crate::backend::domain::models::goal::DomainGoal>> {
         self.goal_repository.list_goals(child_id, None)
     }
+
+    // ====================
+    // SYNC SUPPORT METHODS
+    // ====================
+
+    /// Read a single goal by child_id and goal_id.
+    /// Used by the UI thread to respond to ReadEntityRequest from the sync thread.
+    pub fn get_goal_by_id(&self, child_id: &str, goal_id: &str) -> Result<Option<DomainGoal>> {
+        let goals = self.goal_repository.list_goals(child_id, None)?;
+        Ok(goals.into_iter().find(|g| g.id == goal_id))
+    }
+
+    /// Upsert a goal that arrived from the remote (applied by the UI thread).
+    ///
+    /// **Critical:** does NOT call `notify_sync` — writing a remote-sourced entity
+    /// back through the notifier would create a sync loop.
+    pub fn upsert_goal_from_sync(&self, goal: &DomainGoal) -> Result<()> {
+        let goals = self.goal_repository.list_goals(&goal.child_id, None)?;
+        let exists = goals.iter().any(|g| g.id == goal.id);
+        if exists {
+            self.goal_repository.update_goal(goal)
+        } else {
+            self.goal_repository.store_goal(goal)
+        }
+    }
+
+    /// Delete a goal by ID without firing the sync notifier.
+    /// Used to apply remote deletes locally. Idempotent: a remote delete for a
+    /// goal that doesn't exist locally is not an error.
+    pub fn delete_goal_by_id(&self, child_id: &str, goal_id: &str) -> Result<()> {
+        let removed = self.goal_repository.delete_goal_by_id(child_id, goal_id)?;
+        if !removed {
+            log::debug!("delete_goal_by_id: {goal_id} not found for {child_id}; skipping");
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -594,14 +657,14 @@ mod tests {
     fn create_test_service() -> GoalService {
         let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
         let db = Arc::new(CsvConnection::new(temp_dir.path()).expect("Failed to init test DB"));
-        
+
         // Create required service dependencies
-        let child_service = ChildService::new(db.clone());
+        let child_service = ChildService::new(db.clone(), None);
         let allowance_service = AllowanceService::new(db.clone());
         let balance_service = BalanceService::new(db.clone());
-        let transaction_service = Arc::new(TransactionService::new(db.clone(), child_service.clone(), allowance_service.clone(), balance_service.clone()));
-        
-        GoalService::new(db, child_service, allowance_service, transaction_service, balance_service)
+        let transaction_service = Arc::new(TransactionService::new(db.clone(), child_service.clone(), allowance_service.clone(), balance_service.clone(), None));
+
+        GoalService::new(db, child_service, allowance_service, transaction_service, balance_service, None)
     }
 
     fn create_test_child_and_allowance(service: &GoalService) -> String {

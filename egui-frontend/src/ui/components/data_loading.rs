@@ -26,7 +26,7 @@
 //!
 //! This module ensures the UI always has the most current data available.
 
-use log::{info, warn};
+use log::{info, warn, debug};
 use chrono::Datelike;
 use crate::ui::app_state::AllowanceTrackerApp;
 use crate::ui::mappers::to_dto;
@@ -74,7 +74,7 @@ impl AllowanceTrackerApp {
     
     /// Reset table state when switching to a new child
     pub fn reset_table_for_new_child(&mut self) {
-        log::info!("Resetting table state for new child");
+        log::debug!("Resetting table state for new child");
         
         // Clear all table state
         self.table.reset();
@@ -87,7 +87,7 @@ impl AllowanceTrackerApp {
     pub fn load_balance(&mut self) {
         let current_child = self.get_current_child_from_backend().clone();
         if let Some(child) = &current_child {
-            info!("Loading balance for child: {} (ID: {})", child.name, child.id);
+            debug!("Loading balance for child: {} (ID: {})", child.name, child.id);
             
             // Get the most recent transaction to get the current balance
             let query = TransactionListQuery {
@@ -97,20 +97,20 @@ impl AllowanceTrackerApp {
                 end_date: None,
             };
             
-            info!("DEBUG: About to call list_transactions_domain with query: {:?}", query);
+            debug!("DEBUG: About to call list_transactions_domain with query: {:?}", query);
             
             match self.backend().transaction_service.as_ref().list_transactions_domain(query) {
                 Ok(result) => {
-                    info!("DEBUG: list_transactions_domain returned {} transactions", result.transactions.len());
+                    debug!("DEBUG: list_transactions_domain returned {} transactions", result.transactions.len());
                     
                     if let Some(latest_transaction) = result.transactions.first() {
                         self.core.current_balance = latest_transaction.balance;
-                        log::info!("Updated balance from latest transaction {}: ${:.2}", 
+                        log::debug!("Updated balance from latest transaction {}: ${:.2}", 
                                   latest_transaction.id, self.core.current_balance);
                     } else {
                         // No transactions found - set balance to 0
                         self.core.current_balance = 0.0;
-                        log::info!("No transactions found, setting balance to $0.00");
+                        log::debug!("No transactions found, setting balance to $0.00");
                     }
                 }
                 Err(e) => {
@@ -125,12 +125,12 @@ impl AllowanceTrackerApp {
             self.core.current_balance = 0.0;
         }
         
-        log::info!("Balance update complete - Final balance: ${:.2}", self.core.current_balance);
+        log::debug!("Balance update complete - Final balance: ${:.2}", self.core.current_balance);
     }
     
     /// Load calendar data for the selected month/year
     pub fn load_calendar_data(&mut self) {
-        log::info!("Loading calendar data for {}/{}", self.calendar.selected_month, self.calendar.selected_year);
+        log::debug!("Loading calendar data for {}/{}", self.calendar.selected_month, self.calendar.selected_year);
         
         // Calculate the start and end dates for the selected month
         let start_date = match chrono::NaiveDate::from_ymd_opt(self.calendar.selected_year, self.calendar.selected_month, 1) {
@@ -148,7 +148,7 @@ impl AllowanceTrackerApp {
             chrono::NaiveDate::from_ymd_opt(self.calendar.selected_year, self.calendar.selected_month + 1, 1).unwrap()
         } - chrono::Duration::days(1);
         
-        log::info!("🗓️  Querying transactions from {} to {}", start_date, end_date);
+        log::debug!("🗓️  Querying transactions from {} to {}", start_date, end_date);
         
         // Use calendar service instead of transaction service directly
         // This ensures proper cross-month balance forwarding
@@ -158,16 +158,16 @@ impl AllowanceTrackerApp {
             &self.backend().transaction_service,
         ) {
             Ok(calendar_month) => {
-                log::info!("Successfully loaded calendar month with {} days for {}/{}", 
+                log::debug!("Successfully loaded calendar month with {} days for {}/{}", 
                           calendar_month.days.len(), self.calendar.selected_month, self.calendar.selected_year);
                 
                 // DEBUG: Log July 21st specifically
                 if self.calendar.selected_month == 7 && self.calendar.selected_year == 2025 {
                     if let Some(july_21) = calendar_month.days.iter().find(|d| d.day == 21) {
-                        log::info!("FRONTEND DEBUG: July 21st from backend - balance: ${:.2}, transactions: {}", 
+                        log::debug!("FRONTEND DEBUG: July 21st from backend - balance: ${:.2}, transactions: {}", 
                                   july_21.balance, july_21.transactions.len());
                         for (i, tx) in july_21.transactions.iter().enumerate() {
-                            log::info!("FRONTEND DEBUG: July 21st transaction {}: {} at {} = balance ${:.2}", 
+                            log::debug!("FRONTEND DEBUG: July 21st transaction {}: {} at {} = balance ${:.2}", 
                                       i + 1, tx.description, tx.date.format("%H:%M:%S"), tx.balance);
                         }
                     }
@@ -188,7 +188,7 @@ impl AllowanceTrackerApp {
                 // TEMPORARY: Sync compatibility field
                 // self.calendar_transactions = all_transactions; // Removed
                 
-                log::info!("Converted to {} DTO transactions", self.calendar.calendar_transactions.len());
+                log::debug!("Converted to {} DTO transactions", self.calendar.calendar_transactions.len());
                 
                 // Debug first few transactions to verify conversion
                 for (i, transaction) in self.calendar.calendar_transactions.iter().enumerate() {
@@ -204,9 +204,9 @@ impl AllowanceTrackerApp {
                     })
                     .collect();
                 
-                log::info!("🗓️  Found {} June {} transactions", june_transactions.len(), self.calendar.selected_year);
+                log::debug!("🗓️  Found {} June {} transactions", june_transactions.len(), self.calendar.selected_year);
                 for transaction in june_transactions {
-                    log::info!("  - June transaction: {} on {} (amount: ${})", 
+                    log::debug!("  - June transaction: {} on {} (amount: ${})", 
                               transaction.description, transaction.date, transaction.amount);
                 }
             }
@@ -227,7 +227,7 @@ impl AllowanceTrackerApp {
     
     /// Load initial transactions for the table view
     pub fn load_initial_table_transactions(&mut self) {
-        log::info!("Loading initial transactions for table view");
+        log::debug!("Loading initial transactions for table view");
         
         // Reset table state for fresh load
         self.table.reset();
@@ -242,11 +242,11 @@ impl AllowanceTrackerApp {
         if let Some(child) = &current_child {
             // Check if we can load more
             if !self.table.can_load_more() {
-                log::info!("Cannot load more transactions: already loading or no more available");
+                log::debug!("Cannot load more transactions: already loading or no more available");
                 return;
             }
             
-            log::info!("Loading more transactions for child: {} (cursor: {:?})", 
+            log::debug!("Loading more transactions for child: {} (cursor: {:?})", 
                       child.name, self.table.next_cursor);
             
             // Mark as loading
@@ -259,11 +259,11 @@ impl AllowanceTrackerApp {
                 end_date: None,
             };
             
-            log::info!("Making pagination request with query: {:?}", query);
+            log::debug!("Making pagination request with query: {:?}", query);
             
             match self.backend().transaction_service.as_ref().list_transactions_domain(query) {
                 Ok(result) => {
-                    log::info!("Successfully loaded {} more transactions (has_more: {})", 
+                    log::debug!("Successfully loaded {} more transactions (has_more: {})", 
                               result.transactions.len(), result.pagination.has_more);
                     
                     // Convert domain transactions to DTOs
@@ -281,7 +281,7 @@ impl AllowanceTrackerApp {
                         result.pagination.next_cursor,
                     );
                     
-                    log::info!("Table now has {} total transactions", self.table.transaction_count());
+                    log::debug!("Table now has {} total transactions", self.table.transaction_count());
                 }
                 Err(e) => {
                     log::error!("Failed to load more transactions: {}", e);

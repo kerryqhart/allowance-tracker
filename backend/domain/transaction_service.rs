@@ -16,9 +16,10 @@ use crate::backend::{
 use crate::backend::domain::commands::transactions::{CreateTransactionCommand, TransactionListQuery, TransactionListResult, DeleteTransactionsCommand, DeleteTransactionsResult, PaginationInfo as DomainPagination, CalendarTransactionsQuery, CalendarTransactionsResult};
 use anyhow::{anyhow, Result};
 use chrono::{Local, NaiveDate};
-use log::{error, info};
+use log::{error, info, debug};
 use std::sync::Arc;
-
+use shared::sync::{SyncEvent, SyncAction, SyncSource, EntityType};
+use crate::backend::domain::SyncNotifier;
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -28,6 +29,7 @@ pub struct TransactionService {
     allowance_service: AllowanceService,
     balance_service: BalanceService,
     email_service: Option<EmailServiceWrapper>,
+    sync_notifier: Option<SyncNotifier>,
 }
 
 impl TransactionService {
@@ -36,6 +38,7 @@ impl TransactionService {
         child_service: ChildService,
         allowance_service: AllowanceService,
         balance_service: BalanceService,
+        sync_notifier: Option<SyncNotifier>,
     ) -> Self {
         let transaction_repository = TransactionRepository::new((*connection).clone());
         Self {
@@ -44,6 +47,7 @@ impl TransactionService {
             allowance_service,
             balance_service,
             email_service: None,
+            sync_notifier,
         }
     }
 
@@ -53,6 +57,7 @@ impl TransactionService {
         allowance_service: AllowanceService,
         balance_service: BalanceService,
         email_config: EmailConfig,
+        sync_notifier: Option<SyncNotifier>,
     ) -> Result<Self> {
         let transaction_repository = TransactionRepository::new((*connection).clone());
         let email_service = EmailServiceWrapper::new(email_config)?;
@@ -62,7 +67,20 @@ impl TransactionService {
             allowance_service,
             balance_service,
             email_service: Some(email_service),
+            sync_notifier,
         })
+    }
+
+    fn notify_sync(&self, entity_type: EntityType, entity_id: &str, child_id: &str, action: SyncAction) {
+        if let Some(ref notifier) = self.sync_notifier {
+            notifier.notify(SyncEvent::new(
+                entity_type,
+                entity_id.to_string(),
+                child_id.to_string(),
+                action,
+                SyncSource::Local,
+            ));
+        }
     }
 
     pub fn create_transaction_domain(
@@ -142,6 +160,8 @@ impl TransactionService {
 
         self.transaction_repository
             .store_transaction(&domain_transaction)?;
+
+        self.notify_sync(EntityType::Transaction, &domain_transaction.id, child_id, SyncAction::Created);
 
         if self
             .balance_service
@@ -228,7 +248,7 @@ impl TransactionService {
         &self,
         query: CalendarTransactionsQuery,
     ) -> Result<CalendarTransactionsResult> {
-        info!("🗓️ Getting transactions for calendar: month={}, year={}", query.month, query.year);
+        debug!("🗓️ Getting transactions for calendar: month={}, year={}", query.month, query.year);
 
         // Get the active child
         let active_child = self.get_active_child()?;
@@ -251,7 +271,7 @@ impl TransactionService {
 
         // Get historical transactions up to the end of the requested month
         let end_date = format!("{:04}-{:02}-{:02}T23:59:59Z", query.year, query.month, days_in_month);
-        info!("🗓️ Fetching historical transactions up to: {}", end_date);
+        debug!("🗓️ Fetching historical transactions up to: {}", end_date);
 
         let transaction_query = TransactionListQuery {
             after: None,
@@ -263,7 +283,7 @@ impl TransactionService {
         let transaction_result = self.list_transactions_domain(transaction_query)?;
         let mut all_transactions = transaction_result.transactions;
         
-        info!("🗓️ Found {} historical transactions", all_transactions.len());
+        debug!("🗓️ Found {} historical transactions", all_transactions.len());
 
         // Generate future allowances for the requested month
         let start_date = match NaiveDate::from_ymd_opt(query.year as i32, query.month, 1) {
@@ -276,18 +296,18 @@ impl TransactionService {
             None => return Err(anyhow!("Invalid end date: {}/{}/{}", query.month, days_in_month, query.year)),
         };
 
-        info!("🗓️ Generating future allowances for child {} from {} to {}", 
+        debug!("🗓️ Generating future allowances for child {} from {} to {}", 
               active_child.id, start_date, end_date);
 
         match self.allowance_service.generate_future_allowance_transactions(&active_child.id, start_date, end_date) {
             Ok(future_allowances) => {
-                info!("🗓️ Generated {} future allowances", future_allowances.len());
+                debug!("🗓️ Generated {} future allowances", future_allowances.len());
                 for (i, allowance) in future_allowances.iter().enumerate().take(3) {
-                    info!("🗓️ Future allowance {}: id={}, date={}, amount={}", 
+                    debug!("🗓️ Future allowance {}: id={}, date={}, amount={}", 
                          i + 1, allowance.id, allowance.date, allowance.amount);
                 }
                 if future_allowances.len() > 3 {
-                    info!("🗓️ ... and {} more future allowances", future_allowances.len() - 3);
+                    debug!("🗓️ ... and {} more future allowances", future_allowances.len() - 3);
                 }
                 all_transactions.extend(future_allowances);
             },
@@ -297,7 +317,7 @@ impl TransactionService {
             }
         }
 
-        info!("🗓️ Total transactions for calendar: {}", all_transactions.len());
+        debug!("🗓️ Total transactions for calendar: {}", all_transactions.len());
 
         Ok(CalendarTransactionsResult {
             transactions: all_transactions,
@@ -337,6 +357,9 @@ impl TransactionService {
         if deleted_count > 0 {
             self.balance_service
                 .recalculate_balances_from_date(&active_child.id, "1970-01-01T00:00:00Z")?;
+            for id in &existing_ids {
+                self.notify_sync(EntityType::Transaction, id, &active_child.id, SyncAction::Deleted);
+            }
         }
 
         // Send email notifications for deleted transactions
@@ -372,12 +395,12 @@ impl TransactionService {
     /// Check for and issue any pending allowances
     /// This should be called on app startup or on a scheduled basis
     pub fn check_and_issue_pending_allowances(&self) -> Result<u32> {
-        info!("ALLOWANCE DEBUG: check_and_issue_pending_allowances() called");
+        debug!("ALLOWANCE DEBUG: check_and_issue_pending_allowances() called");
         if let Ok(active_child) = self.get_active_child() {
-            info!("ALLOWANCE DEBUG: Found active child: {}", active_child.id);
+            debug!("ALLOWANCE DEBUG: Found active child: {}", active_child.id);
             let current_date = Local::now().naive_local().date();
             let check_from_date = current_date - chrono::Duration::days(90);
-            info!("ALLOWANCE DEBUG: Checking allowances from {} to {}", check_from_date, current_date);
+            debug!("ALLOWANCE DEBUG: Checking allowances from {} to {}", check_from_date, current_date);
 
             let pending_allowances = match self.allowance_service.get_pending_allowance_dates(&active_child.id, check_from_date, current_date) {
                 Ok(dates) => dates,
@@ -386,11 +409,11 @@ impl TransactionService {
                     return Ok(0);
                 }
             };
-            info!("ALLOWANCE DEBUG: Found {} pending allowances", pending_allowances.len());
+            debug!("ALLOWANCE DEBUG: Found {} pending allowances", pending_allowances.len());
             
             let mut issued_count = 0;
             for (allowance_date, amount) in pending_allowances {
-                info!("ALLOWANCE DEBUG: About to create allowance for {} (${:.2})", allowance_date, amount);
+                debug!("ALLOWANCE DEBUG: About to create allowance for {} (${:.2})", allowance_date, amount);
                 match self
                     .create_allowance_transaction(&active_child.id, allowance_date, amount)
                 {
@@ -409,10 +432,10 @@ impl TransactionService {
                     }
                 }
             }
-            info!("ALLOWANCE DEBUG: Total allowances issued: {}", issued_count);
+            debug!("ALLOWANCE DEBUG: Total allowances issued: {}", issued_count);
             return Ok(issued_count);
         } else {
-            info!("ALLOWANCE DEBUG: No active child found");
+            debug!("ALLOWANCE DEBUG: No active child found");
         }
         Ok(0)
     }
@@ -423,7 +446,7 @@ impl TransactionService {
         date: NaiveDate,
         amount: f64,
     ) -> Result<DomainTransaction> {
-        info!("ALLOWANCE DEBUG: create_allowance_transaction() called for child {}, date {}, amount ${:.2}", child_id, date, amount);
+        debug!("ALLOWANCE DEBUG: create_allowance_transaction() called for child {}, date {}, amount ${:.2}", child_id, date, amount);
 
         // Convert NaiveDate to DateTime at noon Eastern time
         let allowance_datetime = date.and_hms_opt(12, 0, 0).unwrap();
@@ -433,7 +456,7 @@ impl TransactionService {
         );
         let eastern_offset = chrono::FixedOffset::west_opt(5 * 3600).unwrap();
         let eastern_datetime = utc_datetime.with_timezone(&eastern_offset);
-        info!("ALLOWANCE DEBUG: Transaction date: {}", eastern_datetime.to_rfc3339());
+        debug!("ALLOWANCE DEBUG: Transaction date: {}", eastern_datetime.to_rfc3339());
 
         let now_millis = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64;
         let transaction_id = DomainTransaction::generate_id(amount, now_millis);
@@ -459,6 +482,8 @@ impl TransactionService {
         self.transaction_repository
             .store_transaction(&domain_transaction)?;
 
+        self.notify_sync(EntityType::Transaction, &domain_transaction.id, child_id, SyncAction::Created);
+
         if self
             .balance_service
             .requires_balance_recalculation(child_id, &eastern_datetime.to_rfc3339())?
@@ -467,7 +492,7 @@ impl TransactionService {
                 .recalculate_balances_from_date(child_id, &eastern_datetime.to_rfc3339())?;
         }
 
-        info!("ALLOWANCE DEBUG: create_allowance_transaction() completed for {}", domain_transaction.id);
+        debug!("ALLOWANCE DEBUG: create_allowance_transaction() completed for {}", domain_transaction.id);
 
         Ok(domain_transaction)
     }
@@ -492,6 +517,39 @@ impl TransactionService {
         self.transaction_repository
             .list_transactions_chronological(child_id, None, None)
     }
+
+    // ====================
+    // SYNC SUPPORT METHODS
+    // ====================
+
+    /// Read a single transaction by child_id and transaction_id.
+    /// Used by the UI thread to respond to ReadEntityRequest from the sync thread.
+    pub fn get_transaction_by_id(
+        &self,
+        child_id: &str,
+        transaction_id: &str,
+    ) -> Result<Option<DomainTransaction>> {
+        self.transaction_repository.get_transaction(child_id, transaction_id)
+    }
+
+    /// Upsert a transaction that arrived from the remote (applied by the UI thread).
+    ///
+    /// **Critical:** does NOT call `notify_sync` — writing a remote-sourced entity
+    /// back through the notifier would create a sync loop.
+    pub fn upsert_transaction_from_sync(&self, transaction: &DomainTransaction) -> Result<()> {
+        self.transaction_repository.store_transaction(transaction)
+    }
+
+    /// Delete a transaction by ID without firing the sync notifier.
+    /// Used to apply remote deletes locally. Idempotent: a remote delete for a
+    /// transaction that doesn't exist locally is logged but not an error.
+    pub fn delete_transaction_by_id(&self, child_id: &str, transaction_id: &str) -> Result<()> {
+        let removed = self.transaction_repository.delete_transaction(child_id, transaction_id)?;
+        if !removed {
+            log::debug!("delete_transaction_by_id: {transaction_id} not found for {child_id}; skipping");
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -511,7 +569,7 @@ mod tests {
     fn create_test_service() -> (TransactionService, Arc<CsvConnection>, tempfile::TempDir) {
         let temp_dir = tempfile::TempDir::new().unwrap();
         let connection = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
-        let child_service = ChildService::new(connection.clone());
+        let child_service = ChildService::new(connection.clone(), None);
         let allowance_service = AllowanceService::new(connection.clone());
         let balance_service = BalanceService::new(connection.clone());
         let transaction_service = TransactionService::new(
@@ -519,6 +577,7 @@ mod tests {
             child_service,
             allowance_service,
             balance_service,
+            None,
         );
         (transaction_service, connection, temp_dir)
     }

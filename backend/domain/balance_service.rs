@@ -9,17 +9,26 @@ use log::{info, warn};
 use std::sync::Arc;
 use crate::backend::storage::csv::{CsvConnection, TransactionRepository};
 use crate::backend::storage::traits::TransactionStorage;
+use crate::backend::domain::SyncNotifier;
+use shared::sync::{EntityType, SyncAction, SyncEvent, SyncSource};
 
 /// Service responsible for balance calculations and recalculations
 #[derive(Clone)]
 pub struct BalanceService {
     transaction_repository: TransactionRepository,
+    sync_notifier: Option<SyncNotifier>,
 }
 
 impl BalanceService {
     pub fn new(connection: Arc<CsvConnection>) -> Self {
         let transaction_repository = TransactionRepository::new((*connection).clone());
-        Self { transaction_repository }
+        Self { transaction_repository, sync_notifier: None }
+    }
+
+    /// Attach a sync notifier so recalculated rows emit Updated events.
+    pub fn with_sync_notifier(mut self, notifier: Option<SyncNotifier>) -> Self {
+        self.sync_notifier = notifier;
+        self
     }
 
     /// Recalculate all balances from a specific date forward
@@ -51,21 +60,43 @@ impl BalanceService {
         let starting_balance = self.calculate_starting_balance(child_id, from_date)?;
         info!("Starting balance for recalculation: ${:.2}", starting_balance);
 
-        // Recalculate balances for all transactions
+        // Recalculate balances for all transactions. Track which rows actually
+        // changed so we only emit Updated sync events for real diffs — the
+        // common path (a current-date insert) recomputes the just-inserted
+        // row to the same balance it was stored with, and we don't want to
+        // emit a redundant Updated on top of the Created event.
         let mut running_balance = starting_balance;
         let mut balance_updates = Vec::new();
+        let mut changed_ids: Vec<String> = Vec::new();
 
         for transaction in &transactions {
             running_balance += transaction.amount;
             balance_updates.push((transaction.id.clone(), running_balance));
-            
-            info!("Transaction {}: amount={:.2}, new_balance={:.2}", 
+
+            if (transaction.balance - running_balance).abs() > 0.001 {
+                changed_ids.push(transaction.id.clone());
+            }
+
+            info!("Transaction {}: amount={:.2}, new_balance={:.2}",
                   transaction.id, transaction.amount, running_balance);
         }
 
         // Update all balances atomically
         self.transaction_repository
             .update_transaction_balances(&balance_updates)?;
+
+        // Emit Updated sync events only for rows whose balance actually changed.
+        if let Some(ref notifier) = self.sync_notifier {
+            for tx_id in &changed_ids {
+                notifier.notify(SyncEvent::new(
+                    EntityType::Transaction,
+                    tx_id.clone(),
+                    child_id.to_string(),
+                    SyncAction::Updated,
+                    SyncSource::Local,
+                ));
+            }
+        }
 
         info!("Successfully recalculated {} transaction balances", balance_updates.len());
         Ok(balance_updates.len())
@@ -303,7 +334,7 @@ mod tests {
         // Create a child first
         let temp_dir = tempfile::tempdir().unwrap();
         let db = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
-        let child_service = crate::backend::domain::child_service::ChildService::new(db);
+        let child_service = crate::backend::domain::child_service::ChildService::new(db, None);
         let child_result = child_service.create_child(CreateChildCommand {
             name: "Test Child".to_string(),
             birthdate: "2015-01-01".to_string(),
@@ -324,7 +355,7 @@ mod tests {
         // Create a child first
         let temp_dir = tempfile::tempdir().unwrap();
         let db = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
-        let child_service = crate::backend::domain::child_service::ChildService::new(db);
+        let child_service = crate::backend::domain::child_service::ChildService::new(db, None);
         let child_result = child_service.create_child(CreateChildCommand {
             name: "Test Child".to_string(),
             birthdate: "2015-01-01".to_string(),
@@ -342,7 +373,7 @@ mod tests {
         // Create a child first
         let temp_dir = tempfile::tempdir().unwrap();
         let db = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
-        let child_service = crate::backend::domain::child_service::ChildService::new(db);
+        let child_service = crate::backend::domain::child_service::ChildService::new(db, None);
         let child_result = child_service.create_child(CreateChildCommand {
             name: "Test Child".to_string(),
             birthdate: "2015-01-01".to_string(),
@@ -366,7 +397,7 @@ mod tests {
         let balance_service = BalanceService::new(connection.clone());
         
         // Create a child for testing
-        let child_service = crate::backend::domain::child_service::ChildService::new(connection.clone());
+        let child_service = crate::backend::domain::child_service::ChildService::new(connection.clone(), None);
         let child_result = child_service.create_child(CreateChildCommand {
             name: "Test Child".to_string(),
             birthdate: "2015-01-01".to_string(),
@@ -417,7 +448,7 @@ mod tests {
         // Create a child first
         let temp_dir = tempfile::tempdir().unwrap();
         let db = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
-        let child_service = crate::backend::domain::child_service::ChildService::new(db);
+        let child_service = crate::backend::domain::child_service::ChildService::new(db, None);
         let child_result = child_service.create_child(CreateChildCommand {
             name: "Test Child".to_string(),
             birthdate: "2015-01-01".to_string(),
@@ -443,7 +474,7 @@ mod tests {
         // Create a child first
         let temp_dir = tempfile::tempdir().unwrap();
         let db = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
-        let child_service = crate::backend::domain::child_service::ChildService::new(db);
+        let child_service = crate::backend::domain::child_service::ChildService::new(db, None);
         let child_result = child_service.create_child(CreateChildCommand {
             name: "Test Child".to_string(),
             birthdate: "2015-01-01".to_string(),
@@ -468,7 +499,7 @@ mod tests {
         // Create a child first
         let temp_dir = tempfile::tempdir().unwrap();
         let db = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
-        let child_service = crate::backend::domain::child_service::ChildService::new(db);
+        let child_service = crate::backend::domain::child_service::ChildService::new(db, None);
         let child_result = child_service.create_child(CreateChildCommand {
             name: "Test Child".to_string(),
             birthdate: "2015-01-01".to_string(),
@@ -493,7 +524,7 @@ mod tests {
         // Create a child first
         let temp_dir = tempfile::tempdir().unwrap();
         let db = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
-        let child_service = crate::backend::domain::child_service::ChildService::new(db);
+        let child_service = crate::backend::domain::child_service::ChildService::new(db, None);
         let child_result = child_service.create_child(CreateChildCommand {
             name: "Test Child".to_string(),
             birthdate: "2015-01-01".to_string(),
@@ -515,7 +546,7 @@ mod tests {
         // Create a child first
         let temp_dir = tempfile::tempdir().unwrap();
         let db = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
-        let child_service = crate::backend::domain::child_service::ChildService::new(db);
+        let child_service = crate::backend::domain::child_service::ChildService::new(db, None);
         let child_result = child_service.create_child(CreateChildCommand {
             name: "Test Child".to_string(),
             birthdate: "2015-01-01".to_string(),
@@ -541,7 +572,7 @@ mod tests {
         // Create a child first
         let temp_dir = tempfile::tempdir().unwrap();
         let db = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
-        let child_service = crate::backend::domain::child_service::ChildService::new(db);
+        let child_service = crate::backend::domain::child_service::ChildService::new(db, None);
         let child_result = child_service.create_child(CreateChildCommand {
             name: "Test Child".to_string(),
             birthdate: "2015-01-01".to_string(),
@@ -568,7 +599,7 @@ mod tests {
         // Create a child first
         let temp_dir = tempfile::tempdir().unwrap();
         let db = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
-        let child_service = crate::backend::domain::child_service::ChildService::new(db);
+        let child_service = crate::backend::domain::child_service::ChildService::new(db, None);
         let child_result = child_service.create_child(CreateChildCommand {
             name: "Test Child".to_string(),
             birthdate: "2015-01-01".to_string(),
@@ -596,7 +627,7 @@ mod tests {
         // Create a child first
         let temp_dir = tempfile::tempdir().unwrap();
         let db = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
-        let child_service = crate::backend::domain::child_service::ChildService::new(db);
+        let child_service = crate::backend::domain::child_service::ChildService::new(db, None);
         let child_result = child_service.create_child(CreateChildCommand {
             name: "Test Child".to_string(),
             birthdate: "2015-01-01".to_string(),

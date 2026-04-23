@@ -28,6 +28,8 @@
 use eframe::egui;
 use crate::ui::app_state::AllowanceTrackerApp;
 use crate::ui::components::styling::{setup_kid_friendly_style, draw_image_background};
+use crate::backend::domain::{SyncCommand, SyncMessage, SyncStatus};
+use shared::sync::EntityType;
 
 impl eframe::App for AllowanceTrackerApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
@@ -35,8 +37,18 @@ impl eframe::App for AllowanceTrackerApp {
         // Set up kid-friendly styling
         setup_kid_friendly_style(ctx);
 
-        // Poll sync messages from the background sync thread
-        self.sync.poll_messages();
+        // Handle sync messages from the background sync thread (needs backend access)
+        self.handle_sync_messages();
+
+        // Detect app focus changes and trigger an immediate sync poll on focus-gain
+        let is_focused = ctx.input(|i| i.focused);
+        if is_focused && !self.was_focused {
+            log::info!("SYNC: app gained focus — sending PollNow");
+            if let Some(ref tx) = self.sync_command_tx {
+                let _ = tx.send(SyncCommand::PollNow);
+            }
+        }
+        self.was_focused = is_focused;
 
         // Handle ESC key to close dropdown
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
@@ -385,6 +397,227 @@ impl AllowanceTrackerApp {
         });
     }
     
+    // ====================
+    // SYNC MESSAGE HANDLING
+    // ====================
+
+    /// Drain all pending sync messages from the background thread. Called each frame.
+    ///
+    /// This must live in app_coordinator (not SyncUiState) because several message
+    /// variants require backend access to read/write local repositories.
+    fn handle_sync_messages(&mut self) {
+        let mut local_state_dirty = false;
+        while let Some(msg) = self.sync.try_recv_message() {
+            match msg {
+                SyncMessage::ReadEntityRequest { child_id, entity_type, entity_id, response_tx } => {
+                    let json = self.read_entity_for_sync(&child_id, &entity_type, &entity_id);
+                    let _ = response_tx.send(json);
+                }
+                SyncMessage::GetChildIdsRequest { response_tx } => {
+                    let ids = match self.backend().child_service.list_children() {
+                        Ok(result) => result.children.into_iter().map(|c| c.id).collect(),
+                        Err(e) => {
+                            log::warn!("SYNC: list_children failed: {e}");
+                            Vec::new()
+                        }
+                    };
+                    let _ = response_tx.send(ids);
+                }
+                SyncMessage::ApplyRemoteEntity { child_id, entity_type, entity_id, entity_json, event_id } => {
+                    self.apply_remote_entity(&child_id, &entity_type, &entity_id, &entity_json, &event_id);
+                    local_state_dirty = true;
+                }
+                SyncMessage::DeleteLocalEntity { child_id, entity_type, entity_id, event_id } => {
+                    self.delete_local_entity(&child_id, &entity_type, &entity_id, &event_id);
+                    local_state_dirty = true;
+                }
+                SyncMessage::StatusChanged(status) => {
+                    self.sync.status = status;
+                }
+                SyncMessage::Error(error) => {
+                    log::error!("Sync error: {}", error);
+                    self.sync.status = SyncStatus::Error(error);
+                }
+                SyncMessage::PushFailed { event_id, error } => {
+                    log::warn!("Sync push failed for event {}: {}", event_id, error);
+                }
+                SyncMessage::EntitiesUpdated { .. } => {
+                    // Entity updates are applied inline via ApplyRemoteEntity; this is
+                    // just a count notification — no additional action required.
+                }
+                SyncMessage::ConflictDetected(conflict) => {
+                    self.sync.conflicts.push(conflict);
+                    self.sync.status = SyncStatus::HasConflicts(self.sync.pending_conflict_count());
+                }
+            }
+        }
+        // Refresh UI once after draining, rather than per-entity during bulk sync.
+        if local_state_dirty {
+            self.load_initial_data();
+        }
+    }
+
+    /// Read a local entity by ID and serialize it to JSON for the sync thread.
+    ///
+    /// Returns `Some(json)` if the entity exists, `None` if not found or on error.
+    fn read_entity_for_sync(&self, child_id: &str, entity_type: &EntityType, entity_id: &str) -> Option<String> {
+        match entity_type {
+            EntityType::Transaction => {
+                match self.core.backend.transaction_service
+                    .get_transaction_by_id(child_id, entity_id)
+                {
+                    Ok(Some(tx)) => {
+                        match serde_json::to_string(&tx) {
+                            Ok(json) => Some(json),
+                            Err(e) => {
+                                log::warn!("Failed to serialize transaction {}: {}", entity_id, e);
+                                None
+                            }
+                        }
+                    }
+                    Ok(None) => {
+                        log::warn!("Transaction {} not found for child {}", entity_id, child_id);
+                        None
+                    }
+                    Err(e) => {
+                        log::warn!("Error reading transaction {} for child {}: {}", entity_id, child_id, e);
+                        None
+                    }
+                }
+            }
+            EntityType::Goal => {
+                match self.core.backend.goal_service.get_goal_by_id(child_id, entity_id) {
+                    Ok(Some(goal)) => {
+                        match serde_json::to_string(&goal) {
+                            Ok(json) => Some(json),
+                            Err(e) => {
+                                log::warn!("Failed to serialize goal {}: {}", entity_id, e);
+                                None
+                            }
+                        }
+                    }
+                    Ok(None) => {
+                        log::warn!("Goal {} not found for child {}", entity_id, child_id);
+                        None
+                    }
+                    Err(e) => {
+                        log::warn!("Error reading goal {} for child {}: {}", entity_id, child_id, e);
+                        None
+                    }
+                }
+            }
+            EntityType::Child => {
+                use crate::backend::domain::commands::child::GetChildCommand;
+                match self.core.backend.child_service.get_child(GetChildCommand { child_id: child_id.to_string() }) {
+                    Ok(result) => {
+                        match result.child {
+                            Some(child) => {
+                                match serde_json::to_string(&child) {
+                                    Ok(json) => Some(json),
+                                    Err(e) => {
+                                        log::warn!("Failed to serialize child {}: {}", child_id, e);
+                                        None
+                                    }
+                                }
+                            }
+                            None => {
+                                log::warn!("Child {} not found", child_id);
+                                None
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        log::warn!("Error reading child {}: {}", child_id, e);
+                        None
+                    }
+                }
+            }
+        }
+    }
+
+    /// Apply a remote entity to local storage. Called when the sync thread pulls a
+    /// remote change. Does NOT fire SyncNotifier (Option A — prevents sync loops).
+    fn apply_remote_entity(
+        &mut self,
+        child_id: &str,
+        entity_type: &EntityType,
+        entity_id: &str,
+        entity_json: &str,
+        _event_id: &str,
+    ) {
+        use crate::backend::domain::models::transaction::Transaction as DomainTransaction;
+        use crate::backend::domain::models::goal::DomainGoal;
+        use crate::backend::domain::models::child::Child as DomainChild;
+
+        match entity_type {
+            EntityType::Transaction => {
+                match serde_json::from_str::<DomainTransaction>(entity_json) {
+                    Ok(transaction) => {
+                        if let Err(e) = self.core.backend.transaction_service.upsert_transaction_from_sync(&transaction) {
+                            log::error!("Failed to apply remote transaction {}: {}", entity_id, e);
+                        }
+                    }
+                    Err(e) => {
+                        log::error!("Failed to deserialize remote transaction {}: {}", entity_id, e);
+                    }
+                }
+            }
+            EntityType::Goal => {
+                match serde_json::from_str::<DomainGoal>(entity_json) {
+                    Ok(goal) => {
+                        if let Err(e) = self.core.backend.goal_service.upsert_goal_from_sync(&goal) {
+                            log::error!("Failed to apply remote goal {}: {}", entity_id, e);
+                        }
+                    }
+                    Err(e) => {
+                        log::error!("Failed to deserialize remote goal {}: {}", entity_id, e);
+                    }
+                }
+            }
+            EntityType::Child => {
+                match serde_json::from_str::<DomainChild>(entity_json) {
+                    Ok(child) => {
+                        if let Err(e) = self.core.backend.child_service.upsert_child_from_sync(&child) {
+                            log::error!("Failed to apply remote child {}: {}", child_id, e);
+                        }
+                    }
+                    Err(e) => {
+                        log::error!("Failed to deserialize remote child {}: {}", child_id, e);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Delete a local entity that was deleted on the remote. Does NOT fire SyncNotifier.
+    fn delete_local_entity(
+        &mut self,
+        child_id: &str,
+        entity_type: &EntityType,
+        entity_id: &str,
+        _event_id: &str,
+    ) {
+        match entity_type {
+            EntityType::Transaction => {
+                if let Err(e) = self.core.backend.transaction_service
+                    .delete_transaction_by_id(child_id, entity_id)
+                {
+                    log::error!("Failed to delete local transaction {}: {}", entity_id, e);
+                }
+            }
+            EntityType::Goal => {
+                if let Err(e) = self.core.backend.goal_service.delete_goal_by_id(child_id, entity_id) {
+                    log::error!("Failed to delete local goal {}: {}", entity_id, e);
+                }
+            }
+            EntityType::Child => {
+                if let Err(e) = self.core.backend.child_service.delete_child_by_id(child_id) {
+                    log::error!("Failed to delete local child {}: {}", child_id, e);
+                }
+            }
+        }
+    }
+
     /// Refresh pending allowances if enough time has passed since last check
     /// 
     /// This method implements periodic allowance checking without overwhelming the system.
@@ -403,7 +636,7 @@ impl AllowanceTrackerApp {
     pub fn refresh_allowances(&mut self) {
         // Check if it's time to refresh allowances (throttled to avoid excessive calls)
         if self.ui.should_refresh_allowances() {
-            log::info!("Performing periodic allowance refresh check");
+            log::debug!("Performing periodic allowance refresh check");
             
             // Use the existing backend method to check and issue pending allowances
             match self.core.backend.transaction_service.as_ref().check_and_issue_pending_allowances() {

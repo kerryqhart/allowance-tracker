@@ -58,8 +58,14 @@ impl RemoteStorage for HttpRemoteClient {
         let response = self.client.get(&url).send()?;
 
         let response = self.check_response(&url, response)?;
-        let events: Vec<SyncEvent> = response.json()?;
-        Ok(events)
+
+        #[derive(serde::Deserialize)]
+        struct EventsResponse {
+            events: Vec<SyncEvent>,
+        }
+
+        let parsed: EventsResponse = response.json()?;
+        Ok(parsed.events)
     }
 
     fn upsert_entity(

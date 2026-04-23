@@ -28,6 +28,11 @@ use log::{info, warn};
 use chrono::{Datelike, TimeZone};
 use shared::*;
 use crate::backend::Backend;
+use crate::backend::domain::{SyncCommand, SyncThreadHandle};
+use crate::backend::domain::sync_notifier::sync_channel;
+use crate::backend::domain::sync_persistence::{SyncState, RetryQueue, sync_state_path, retry_queue_path};
+use crate::backend::storage::HttpRemoteClient;
+use std::sync::Arc;
 
 // Import all state modules
 use crate::ui::state::*;
@@ -52,6 +57,16 @@ pub struct AllowanceTrackerApp {
     pub goal: GoalUiState,            // Goal management and progress tracking
     pub settings: crate::ui::components::settings::SettingsState, // Settings modals and forms
     pub sync: SyncUiState,            // Sync status and conflict management
+
+    // Sync thread handles — None until Task 6 wires them at startup
+    /// Sender to control the sync thread (PollNow, Shutdown). None when sync is disabled.
+    pub sync_command_tx: Option<std::sync::mpsc::Sender<SyncCommand>>,
+    /// Handle to the sync background thread. None when sync is disabled.
+    pub sync_thread: Option<SyncThreadHandle>,
+    /// Tracks whether the window was focused on the previous frame, for edge-detection.
+    /// Initialised to `true` so the first frame doesn't spuriously trigger a `PollNow`
+    /// — Task 6 can do an explicit startup poll if one is desired.
+    pub was_focused: bool,
 }
 
 impl AllowanceTrackerApp {
@@ -65,8 +80,44 @@ impl AllowanceTrackerApp {
         // Install image loaders for background support
         egui_extras::install_image_loaders(&cc.egui_ctx);
         
-        let backend = crate::backend::Backend::new()?;
-        
+        // ── Sync startup wiring ───────────────────────────────────────────────
+        //
+        // Load persisted sync state BEFORE constructing Backend so we can decide
+        // whether to wire a live SyncNotifier. If sync is disabled or misconfigured,
+        // we pass `None` to Backend so domain writes don't spam warn-logs trying to
+        // send events to a dropped receiver.
+        //
+        // To enable sync manually (until a settings UI exists), create the
+        // file `sync_state.yaml` in ~/Documents/Allowance Tracker:
+        //
+        //   enabled: true
+        //   remote_url: "https://<your-api-gateway>.execute-api.<region>.amazonaws.com/internal"
+        //   watermarks: {}
+        let data_dir = crate::backend::Backend::default_data_dir()?;
+        // `load` returns Ok(default) when the file is absent, so an Err here means
+        // the file exists but failed to parse — surface it as a warning rather than
+        // silently resetting, so a typo'd manual config is diagnosable.
+        let sync_state = SyncState::load(&sync_state_path(&data_dir)).unwrap_or_else(|e| {
+            warn!("Failed to parse sync_state.yaml ({}); starting with sync disabled", e);
+            SyncState::default()
+        });
+        let retry_queue = RetryQueue::load(&retry_queue_path(&data_dir)).unwrap_or_else(|e| {
+            warn!("Failed to parse retry_queue.yaml ({}); starting with empty retry queue", e);
+            RetryQueue::default()
+        });
+
+        let will_spawn_sync = sync_state.enabled
+            && sync_state.remote_url.as_ref().map_or(false, |u| is_valid_http_url(u));
+
+        let (sync_notifier, event_rx) = if will_spawn_sync {
+            let (n, rx) = sync_channel();
+            (Some(n), Some(rx))
+        } else {
+            (None, None)
+        };
+
+        let backend = crate::backend::Backend::new(sync_notifier)?;
+
         // Check for pending allowances on app startup
         match backend.transaction_service.as_ref().check_and_issue_pending_allowances() {
             Ok(count) => {
@@ -84,7 +135,54 @@ impl AllowanceTrackerApp {
         let now = chrono::Local::now();
         let _current_month = now.month();
         let _current_year = now.year();
-        
+
+        // Spawn the sync thread if (and only if) sync is enabled with a valid URL.
+        // When sync is off, `event_rx` is already None and the Backend was given
+        // `None` for the notifier, so no events are emitted and no warn-spam occurs.
+        let (sync, sync_command_tx, sync_thread) = if will_spawn_sync {
+            let url = sync_state.remote_url.as_ref().expect("checked by will_spawn_sync");
+            let rx = event_rx.expect("created with will_spawn_sync");
+            info!("Sync enabled — connecting to remote: {}", url);
+            let remote: Arc<dyn crate::backend::storage::RemoteStorage> =
+                Arc::new(HttpRemoteClient::new(url.clone()));
+            let (message_tx, message_rx) = std::sync::mpsc::channel();
+            let (cmd_tx, cmd_rx) = std::sync::mpsc::channel::<SyncCommand>();
+
+            // Wake the UI (request a repaint) whenever the sync thread sends
+            // a message. Without this the egui UI only draws on input events,
+            // so request/response messages like ReadEntityRequest and
+            // GetChildIdsRequest can time out while the app is unfocused.
+            let ctx_for_wake = cc.egui_ctx.clone();
+            let wake_ui: crate::backend::domain::WakeUi =
+                std::sync::Arc::new(move || ctx_for_wake.request_repaint());
+
+            let handle = SyncThreadHandle::spawn(
+                remote,
+                rx,
+                cmd_rx,
+                message_tx,
+                wake_ui,
+                sync_state.clone(),
+                retry_queue.events.clone(),
+                data_dir.clone(),
+            );
+
+            (SyncUiState::with_receiver(message_rx), Some(cmd_tx), Some(handle))
+        } else {
+            if sync_state.enabled && sync_state.remote_url.is_some() {
+                warn!(
+                    "Sync enabled but remote_url {:?} is not a valid http(s) URL — sync disabled",
+                    sync_state.remote_url
+                );
+            } else if sync_state.enabled {
+                warn!("Sync enabled but remote_url is missing — sync disabled");
+            } else {
+                info!("Sync disabled (no sync_state.yaml or enabled=false)");
+            }
+            (SyncUiState::new(), None, None)
+        };
+        // ─────────────────────────────────────────────────────────────────────
+
         // Initialize modular state components
         let core = CoreAppState::new(backend);
         let ui = UIState::new();
@@ -96,7 +194,6 @@ impl AllowanceTrackerApp {
         let chart = ChartState::new();
         let goal = GoalUiState::new();
         let settings = crate::ui::components::settings::SettingsState::new();
-        let sync = SyncUiState::new();
 
         Ok(Self {
             // Modular state
@@ -111,6 +208,9 @@ impl AllowanceTrackerApp {
             goal,
             settings,
             sync,
+            sync_command_tx,
+            sync_thread,
+            was_focused: true,
         })
     }
 
@@ -617,6 +717,24 @@ impl AllowanceTrackerApp {
     // BACKEND INTEGRATION METHODS
     // ====================
     
+    /// Return the true current balance after a transaction. `money_management`
+    /// reports the just-inserted row's balance column, which is wrong for
+    /// backdated transactions (it's the historical running total at that
+    /// earlier date). Fall back to that value only if the live lookup fails.
+    fn current_balance_after_transaction(&self, fallback: f64) -> f64 {
+        match self.backend().child_service.get_active_child() {
+            Ok(resp) => match resp.active_child.child {
+                Some(child) => self
+                    .backend()
+                    .balance_service
+                    .get_current_balance(&child.id)
+                    .unwrap_or(fallback),
+                None => fallback,
+            },
+            Err(_) => fallback,
+        }
+    }
+
     pub fn submit_income_transaction(&mut self) -> bool {
         use crate::backend::domain::money_management::MoneyManagementService;
         use chrono::Timelike;
@@ -650,7 +768,7 @@ impl AllowanceTrackerApp {
         ) {
             Ok(response) => {
                 info!("Income transaction successful: {}", response.success_message);
-                self.core.current_balance = response.new_balance;
+                self.core.current_balance = self.current_balance_after_transaction(response.new_balance);
                 self.load_calendar_data();
                 true
             }
@@ -695,7 +813,7 @@ impl AllowanceTrackerApp {
         ) {
             Ok(response) => {
                 info!("Expense transaction successful: {}", response.success_message);
-                self.core.current_balance = response.new_balance;
+                self.core.current_balance = self.current_balance_after_transaction(response.new_balance);
                 self.load_calendar_data();
                 true
             }
@@ -706,4 +824,24 @@ impl AllowanceTrackerApp {
             }
         }
     }
-} 
+}
+
+/// Quick sanity check on the remote URL so an obvious misconfiguration (wrong
+/// scheme, empty string) is caught at startup rather than producing obscure
+/// HTTP errors later.
+fn is_valid_http_url(url: &str) -> bool {
+    let trimmed = url.trim();
+    (trimmed.starts_with("http://") || trimmed.starts_with("https://"))
+        && trimmed.len() > "https://".len()
+}
+
+impl Drop for AllowanceTrackerApp {
+    fn drop(&mut self) {
+        // Shut down the sync thread cleanly when the app closes.
+        // SyncThreadHandle's own Drop is a no-op after this because
+        // shutdown() uses Option::take on its internal join handle.
+        if let Some(ref mut thread) = self.sync_thread {
+            thread.shutdown();
+        }
+    }
+}

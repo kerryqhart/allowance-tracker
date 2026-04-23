@@ -11,18 +11,33 @@ use crate::backend::domain::commands::child::{
 };
 use crate::backend::storage::csv::{CsvConnection, ChildRepository};
 use crate::backend::storage::traits::ChildStorage;
+use shared::sync::{SyncEvent, SyncAction, SyncSource, EntityType};
+use crate::backend::domain::SyncNotifier;
 
 /// Service for managing children in the allowance tracking system
 #[derive(Clone)]
 pub struct ChildService {
     child_repository: ChildRepository,
+    sync_notifier: Option<SyncNotifier>,
 }
 
 impl ChildService {
     /// Create a new ChildService
-    pub fn new(csv_conn: Arc<CsvConnection>) -> Self {
+    pub fn new(csv_conn: Arc<CsvConnection>, sync_notifier: Option<SyncNotifier>) -> Self {
         let child_repository = ChildRepository::new(csv_conn);
-        Self { child_repository }
+        Self { child_repository, sync_notifier }
+    }
+
+    fn notify_sync(&self, entity_type: EntityType, entity_id: &str, child_id: &str, action: SyncAction) {
+        if let Some(ref notifier) = self.sync_notifier {
+            notifier.notify(SyncEvent::new(
+                entity_type,
+                entity_id.to_string(),
+                child_id.to_string(),
+                action,
+                SyncSource::Local,
+            ));
+        }
     }
 
     /// Create a new child
@@ -54,6 +69,8 @@ impl ChildService {
         // Store in database
         self.child_repository.store_child(&child)?;
 
+        self.notify_sync(EntityType::Child, &child.id, &child.id, SyncAction::Created);
+
         info!("Created child: {} with ID: {}", child.name, child.id);
 
         Ok(CreateChildResult { child })
@@ -61,12 +78,12 @@ impl ChildService {
 
     /// Get a child by ID
     pub fn get_child(&self, command: GetChildCommand) -> Result<GetChildResult> {
-        info!("Getting child: {}", command.child_id);
+        debug!("Getting child: {}", command.child_id);
 
         let child = self.child_repository.get_child(&command.child_id)?;
 
         if child.is_some() {
-            info!("Found child: {}", command.child_id);
+            debug!("Found child: {}", command.child_id);
         } else {
             warn!("Child not found: {}", command.child_id);
         }
@@ -111,6 +128,8 @@ impl ChildService {
         // Store updated child
         self.child_repository.update_child(&child)?;
 
+        self.notify_sync(EntityType::Child, &child.id, &child.id, SyncAction::Updated);
+
         info!("Updated child: {} with ID: {}", child.name, child.id);
 
         Ok(UpdateChildResult { child })
@@ -126,6 +145,8 @@ impl ChildService {
 
         // Delete from database
         self.child_repository.delete_child(&command.child_id)?;
+
+        self.notify_sync(EntityType::Child, &child.id, &child.id, SyncAction::Deleted);
 
         info!("Deleted child: {} with ID: {}", child.name, child.id);
 
@@ -215,6 +236,28 @@ impl ChildService {
         Ok(())
     }
 
+    // ====================
+    // SYNC SUPPORT METHODS
+    // ====================
+
+    /// Upsert a child that arrived from the remote (applied by the UI thread).
+    ///
+    /// **Critical:** does NOT call `notify_sync` — writing a remote-sourced entity
+    /// back through the notifier would create a sync loop.
+    pub fn upsert_child_from_sync(&self, child: &DomainChild) -> Result<()> {
+        // Check if child already exists; update or create accordingly.
+        match self.child_repository.get_child(&child.id)? {
+            Some(_) => self.child_repository.update_child(child),
+            None => self.child_repository.store_child(child),
+        }
+    }
+
+    /// Delete a child by ID without firing the sync notifier.
+    /// Used to apply remote deletes locally.
+    pub fn delete_child_by_id(&self, child_id: &str) -> Result<()> {
+        self.child_repository.delete_child(child_id)
+    }
+
     /// Validate birthdate format
     fn validate_birthdate(&self, birthdate: &str) -> Result<()> {
         let date_parts: Vec<&str> = birthdate.split('-').collect();
@@ -256,7 +299,7 @@ mod tests {
     fn setup_test() -> ChildService {
         let temp_dir = tempdir().unwrap();
         let conn = CsvConnection::new(temp_dir.path().to_path_buf()).unwrap();
-        ChildService::new(Arc::new(conn))
+        ChildService::new(Arc::new(conn), None)
     }
 
     #[test]
