@@ -101,11 +101,18 @@ fn sync_loop(
         }
 
         // 1. Drain retry queue first — these are prior failures, push them again
+        let retry_count_before = retry_queue.events.len();
+        if retry_count_before > 0 {
+            log::info!("SYNC: retrying {} queued event(s)", retry_count_before);
+        }
         let mut remaining_retries = Vec::new();
         for event in retry_queue.events.drain(..) {
             match push_event(&remote, &event, &message_tx) {
-                Ok(()) => {}
+                Ok(()) => {
+                    log::info!("SYNC: retry drained event {}", event.event_id);
+                }
                 Err(err) => {
+                    log::warn!("SYNC: retry still failing for event {}: {}", event.event_id, err);
                     let _ = message_tx.send(SyncMessage::PushFailed {
                         event_id: event.event_id.clone(),
                         error: err,
@@ -121,6 +128,7 @@ fn sync_loop(
             match push_event(&remote, &event, &message_tx) {
                 Ok(()) => {}
                 Err(err) => {
+                    log::warn!("SYNC: push failed, queuing for retry: event {} ({})", event.event_id, err);
                     let _ = message_tx.send(SyncMessage::PushFailed {
                         event_id: event.event_id.clone(),
                         error: err,
@@ -130,8 +138,11 @@ fn sync_loop(
             }
         }
 
-        // 3. Process commands — PollNow triggers a poll, Shutdown sets flag
-        let mut should_poll = false;
+        // 3. Process commands — PollNow triggers a poll, Shutdown sets flag.
+        // Poll unconditionally every outer iteration (~every 30s) as a safety
+        // net so sync works even if focus detection is flaky or disabled.
+        // PollNow still lets us poll sooner by breaking out of the sleep.
+        let mut should_poll = true;
         while let Ok(cmd) = command_rx.try_recv() {
             match cmd {
                 SyncCommand::PollNow => {
@@ -180,6 +191,7 @@ fn sync_loop(
                 match push_event(&remote, &event, &message_tx) {
                     Ok(()) => {}
                     Err(err) => {
+                        log::warn!("SYNC: push failed, queuing for retry: event {} ({})", event.event_id, err);
                         let _ = message_tx.send(SyncMessage::PushFailed {
                             event_id: event.event_id.clone(),
                             error: err,
