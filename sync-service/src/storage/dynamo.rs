@@ -102,6 +102,32 @@ impl DynamoStore {
         Ok(new_sequence)
     }
 
+    /// Atomically allocate the next event sequence number for a child.
+    /// Wasted on transaction rollback; sequences are monotonic, not contiguous.
+    async fn allocate_event_sequence(&self, child_id: &str) -> anyhow::Result<u64> {
+        let metadata_table = self.config.sync_metadata.clone();
+        let update_response = self.client
+            .update_item()
+            .table_name(&metadata_table)
+            .key("child_id", AttributeValue::S(child_id.to_string()))
+            .update_expression("SET event_sequence = event_sequence + :inc")
+            .expression_attribute_values(":inc", AttributeValue::N("1".to_string()))
+            .condition_expression("attribute_exists(event_sequence)")
+            .return_values(aws_sdk_dynamodb::types::ReturnValue::AllNew)
+            .send()
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to increment sequence: {}", e))?;
+
+        let new_sequence = update_response
+            .attributes()
+            .and_then(|attrs| attrs.get("event_sequence"))
+            .and_then(|attr| attr.as_n().ok())
+            .and_then(|s| s.parse::<u64>().ok())
+            .ok_or_else(|| anyhow::anyhow!("Failed to parse new sequence number"))?;
+
+        Ok(new_sequence)
+    }
+
     /// Find an event by its event_id, returning its sequence number if found.
     pub async fn find_event_by_id(&self, child_id: &str, event_id: &str) -> anyhow::Result<Option<u64>> {
         let table = self.config.sync_events.clone();
@@ -278,6 +304,103 @@ impl DynamoStore {
             .send()
             .await
             .map_err(|e| anyhow::anyhow!("Failed to upsert entity: {}", e))?;
+
+        Ok(())
+    }
+
+    /// Upsert an entity AND emit a sync event atomically via DynamoDB TransactWriteItems.
+    /// Idempotent on retry: identical content (string-equal entity_json) is detected
+    /// before any write and short-circuits to Ok(()) with no event emitted.
+    pub async fn upsert_entity_with_event(
+        &self,
+        child_id: &str,
+        entity_type: EntityType,
+        entity_id: &str,
+        entity_json: &str,
+        source: SyncSource,
+    ) -> anyhow::Result<()> {
+        use aws_sdk_dynamodb::types::{Put, TransactWriteItem};
+        use chrono::Utc;
+        use crate::storage::event_id::event_id_for;
+
+        // 1. Read prior entity to determine action and short-circuit on identical retry.
+        let prior_json = self.get_entity(child_id, entity_type.clone(), entity_id).await?;
+        if let Some(ref prior) = prior_json {
+            if prior == entity_json {
+                // Same content already present — retry no-op.
+                return Ok(());
+            }
+        }
+
+        let action = if prior_json.is_none() {
+            SyncAction::Created
+        } else {
+            SyncAction::Updated
+        };
+
+        let event_id = event_id_for(&action, entity_id, entity_json);
+
+        // 2. Allocate sequence (wasted if the transaction below fails — acceptable).
+        let new_sequence = self.allocate_event_sequence(child_id).await?;
+
+        let event = SyncEvent {
+            event_id,
+            entity_type: entity_type.clone(),
+            entity_id: entity_id.to_string(),
+            child_id: child_id.to_string(),
+            action,
+            source,
+            source_timestamp: Utc::now(),
+            sequence: Some(new_sequence),
+        };
+
+        // 3. Build entity item.
+        let (entity_table, sort_key) = self.entity_table_and_sort_key(&entity_type);
+
+        let mut entity_item = HashMap::from([
+            ("child_id".to_string(), AttributeValue::S(child_id.to_string())),
+            ("data".to_string(), AttributeValue::S(entity_json.to_string())),
+        ]);
+        if let Some(sk_name) = sort_key {
+            entity_item.insert(sk_name.to_string(), AttributeValue::S(entity_id.to_string()));
+        }
+        if matches!(entity_type, EntityType::Transaction) {
+            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(entity_json) {
+                if let Some(date_str) = parsed.get("date").and_then(|v| v.as_str()) {
+                    entity_item.insert("sort_date".to_string(), AttributeValue::S(date_str.to_string()));
+                }
+            }
+        }
+
+        // 4. Build event item.
+        let event_item = self.event_to_item(&event, new_sequence);
+
+        let entity_put = Put::builder()
+            .table_name(&entity_table)
+            .set_item(Some(entity_item))
+            .build()
+            .map_err(|e| anyhow::anyhow!("Failed to build entity Put: {}", e))?;
+
+        let event_put = Put::builder()
+            .table_name(&self.config.sync_events)
+            .set_item(Some(event_item))
+            .condition_expression("attribute_not_exists(#seq)")
+            .expression_attribute_names("#seq", "sequence")
+            .build()
+            .map_err(|e| anyhow::anyhow!("Failed to build event Put: {}", e))?;
+
+        // 5. Atomic write.
+        self.client
+            .transact_write_items()
+            .transact_items(TransactWriteItem::builder().put(entity_put).build())
+            .transact_items(TransactWriteItem::builder().put(event_put).build())
+            .send()
+            .await
+            .map_err(|e| anyhow::anyhow!(
+                "TransactWriteItems failed for {}/{}: {}",
+                entity_type.as_str(), entity_id,
+                aws_sdk_dynamodb::error::DisplayErrorContext(&e)
+            ))?;
 
         Ok(())
     }
