@@ -10,10 +10,11 @@ use std::sync::Arc;
 use shared::sync::EntityType;
 use crate::storage::DynamoStore;
 
-// PUT /entities/{entity_type}/{child_id}/{entity_id} - upsert entity
+// PUT /entities/{entity_type}/{child_id}/{entity_id} - upsert entity and emit event atomically
 async fn upsert_entity(
     State(store): State<Arc<DynamoStore>>,
     Path((entity_type_str, child_id, entity_id)): Path<(String, String, String)>,
+    headers: axum::http::HeaderMap,
     body: Body,
 ) -> Result<StatusCode, StatusCode> {
     let entity_type = EntityType::from_str(&entity_type_str)
@@ -26,10 +27,15 @@ async fn upsert_entity(
     let entity_json = String::from_utf8(bytes.to_vec())
         .map_err(|_| StatusCode::BAD_REQUEST)?;
 
-    match store.upsert_entity(&child_id, entity_type, &entity_id, &entity_json).await {
+    let source = match headers.get("x-sync-source").and_then(|v| v.to_str().ok()) {
+        Some("local") => shared::sync::SyncSource::Local,
+        _ => shared::sync::SyncSource::Remote,  // default for absent or any other value
+    };
+
+    match store.upsert_entity_with_event(&child_id, entity_type, &entity_id, &entity_json, source).await {
         Ok(_) => Ok(StatusCode::OK),
         Err(e) => {
-            eprintln!("upsert_entity failed for {}/{}: {:?}", child_id, entity_id, e);
+            eprintln!("upsert_entity_with_event failed for {}/{}: {:?}", child_id, entity_id, e);
             Err(StatusCode::INTERNAL_SERVER_ERROR)
         }
     }
