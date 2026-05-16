@@ -81,36 +81,6 @@ impl DynamoStore {
         Ok(new_sequence)
     }
 
-    /// Find an event by its event_id, returning its sequence number if found.
-    pub async fn find_event_by_id(&self, child_id: &str, event_id: &str) -> anyhow::Result<Option<u64>> {
-        let table = self.config.sync_events.clone();
-
-        let response = self.client
-            .query()
-            .table_name(&table)
-            .key_condition_expression("child_id = :cid")
-            .expression_attribute_values(":cid", AttributeValue::S(child_id.to_string()))
-            .filter_expression("event_id = :eid")
-            .expression_attribute_values(":eid", AttributeValue::S(event_id.to_string()))
-            .send()
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to query for event: {}", e))?;
-
-        if let Some(mut items) = response.items {
-            if let Some(item) = items.pop() {
-                if let Some(seq_attr) = item.get("sequence") {
-                    if let Ok(seq_str) = seq_attr.as_n() {
-                        if let Ok(seq) = seq_str.parse::<u64>() {
-                            return Ok(Some(seq));
-                        }
-                    }
-                }
-            }
-        }
-
-        Ok(None)
-    }
-
     /// Get all events for a child since a given sequence number (exclusive).
     pub async fn get_events_since(&self, child_id: &str, since_sequence: u64) -> anyhow::Result<Vec<SyncEvent>> {
         let table = self.config.sync_events.clone();

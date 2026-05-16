@@ -9,7 +9,6 @@ use std::sync::Arc;
 use shared::sync::{SyncEvent, SyncCheckpoint};
 use crate::storage::DynamoStore;
 
-
 #[derive(Debug, Deserialize)]
 pub struct GetEventsQuery {
     pub child_id: String,
