@@ -59,18 +59,24 @@ async fn get_entity(
     }
 }
 
-// DELETE /entities/{entity_type}/{child_id}/{entity_id} - delete entity
+// DELETE /entities/{entity_type}/{child_id}/{entity_id} - delete entity and emit event atomically
 async fn delete_entity(
     State(store): State<Arc<DynamoStore>>,
     Path((entity_type_str, child_id, entity_id)): Path<(String, String, String)>,
+    headers: axum::http::HeaderMap,
 ) -> Result<StatusCode, StatusCode> {
     let entity_type = EntityType::from_str(&entity_type_str)
         .map_err(|_| StatusCode::BAD_REQUEST)?;
 
-    match store.delete_entity(&child_id, entity_type, &entity_id).await {
+    let source = match headers.get("x-sync-source").and_then(|v| v.to_str().ok()) {
+        Some("local") => shared::sync::SyncSource::Local,
+        _ => shared::sync::SyncSource::Remote,  // default for absent or any other value
+    };
+
+    match store.delete_entity_with_event(&child_id, entity_type, &entity_id, source).await {
         Ok(_) => Ok(StatusCode::NO_CONTENT),
         Err(e) => {
-            eprintln!("delete_entity failed for {}/{}: {:?}", child_id, entity_id, e);
+            eprintln!("delete_entity_with_event failed for {}/{}: {:?}", child_id, entity_id, e);
             Err(StatusCode::INTERNAL_SERVER_ERROR)
         }
     }
