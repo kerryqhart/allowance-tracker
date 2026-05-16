@@ -40,12 +40,7 @@ impl MockRemoteClient {
         Ok(())
     }
 
-    /// Test-only helper: insert a `SyncEvent` directly into the mock's event log,
-    /// bypassing the trait surface. Used by tests that need to seed remote-origin
-    /// or local-origin events without going through upsert/delete. Assigns a
-    /// monotonic sequence the same way `push_events` does, and dedups by event_id.
-    #[cfg(test)]
-    pub fn seed_event(&self, event: SyncEvent) -> u64 {
+    fn append_event_internal(&self, event: SyncEvent) -> u64 {
         let mut event_dedup = self.event_dedup.lock().unwrap();
         let mut stored_events = self.events.lock().unwrap();
         let mut next_seq = self.next_sequence.lock().unwrap();
@@ -62,6 +57,14 @@ impl MockRemoteClient {
         event_dedup.insert(id, seq);
         seq
     }
+
+    /// Test-only helper: insert a `SyncEvent` directly into the mock's event log,
+    /// bypassing the trait surface. Used by tests that need to seed remote-origin
+    /// or local-origin events without going through upsert/delete.
+    #[cfg(test)]
+    pub fn seed_event(&self, event: SyncEvent) -> u64 {
+        self.append_event_internal(event)
+    }
 }
 
 impl Default for MockRemoteClient {
@@ -71,34 +74,6 @@ impl Default for MockRemoteClient {
 }
 
 impl RemoteStorage for MockRemoteClient {
-    fn push_events(&self, events: &[SyncEvent]) -> Result<Vec<u64>> {
-        self.check_error()?;
-
-        let mut sequences = Vec::new();
-        let mut event_dedup = self.event_dedup.lock().unwrap();
-        let mut stored_events = self.events.lock().unwrap();
-        let mut next_seq = self.next_sequence.lock().unwrap();
-
-        for event in events {
-            // Check if we've already seen this event_id
-            if let Some(&existing_seq) = event_dedup.get(&event.event_id) {
-                sequences.push(existing_seq);
-            } else {
-                // Assign new sequence
-                let seq = *next_seq;
-                *next_seq += 1;
-
-                let mut new_event = event.clone();
-                new_event.sequence = Some(seq);
-                stored_events.push(new_event);
-                event_dedup.insert(event.event_id.clone(), seq);
-                sequences.push(seq);
-            }
-        }
-
-        Ok(sequences)
-    }
-
     fn get_events_since(&self, child_id: &str, since_sequence: u64) -> Result<Vec<SyncEvent>> {
         self.check_error()?;
 
@@ -158,8 +133,8 @@ impl RemoteStorage for MockRemoteClient {
             source_timestamp: chrono::Utc::now(),
             sequence: None,
         };
-        // Append via the same path push_events uses (dedup, sequence assignment).
-        let _ = self.push_events(std::slice::from_ref(&event))?;
+        // Append via the infallible internal helper (dedup, sequence assignment).
+        self.append_event_internal(event);
         Ok(())
     }
 
@@ -194,7 +169,7 @@ impl RemoteStorage for MockRemoteClient {
             source_timestamp: chrono::Utc::now(),
             sequence: None,
         };
-        let _ = self.push_events(std::slice::from_ref(&event))?;
+        self.append_event_internal(event);
         Ok(())
     }
 
@@ -252,7 +227,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_push_and_get_events() {
+    fn test_seed_and_get_events() {
         let client = MockRemoteClient::new();
         let event = SyncEvent::new(
             EntityType::Transaction,
@@ -262,9 +237,8 @@ mod tests {
             SyncSource::Local,
         );
 
-        let sequences = client.push_events(&[event.clone()]).unwrap();
-        assert_eq!(sequences.len(), 1);
-        assert_eq!(sequences[0], 1);
+        let seq = client.seed_event(event);
+        assert_eq!(seq, 1);
 
         let retrieved = client.get_events_since("child1", 0).unwrap();
         assert_eq!(retrieved.len(), 1);
@@ -272,7 +246,7 @@ mod tests {
     }
 
     #[test]
-    fn test_deduplication() {
+    fn test_seed_event_dedup() {
         let client = MockRemoteClient::new();
         let event = SyncEvent::new(
             EntityType::Transaction,
@@ -282,12 +256,12 @@ mod tests {
             SyncSource::Local,
         );
 
-        let seq1 = client.push_events(&[event.clone()]).unwrap();
-        let seq2 = client.push_events(&[event.clone()]).unwrap();
+        let seq1 = client.seed_event(event.clone());
+        let seq2 = client.seed_event(event);
+        assert_eq!(seq1, seq2);
 
-        assert_eq!(seq1[0], seq2[0]); // Same event_id returns same sequence
         let events = client.get_events_since("child1", 0).unwrap();
-        assert_eq!(events.len(), 1); // Only stored once
+        assert_eq!(events.len(), 1);
     }
 
     #[test]
@@ -342,7 +316,7 @@ mod tests {
         let client = MockRemoteClient::new();
         client.force_error("Test error");
 
-        assert!(client.push_events(&[]).is_err());
+        assert!(client.upsert_entity("child1", EntityType::Goal, "goal1", "{}").is_err());
         assert!(client.get_entity("child1", EntityType::Goal, "goal1").is_err());
         assert!(client.health_check().is_err());
 

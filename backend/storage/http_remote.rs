@@ -26,30 +26,6 @@ impl HttpRemoteClient {
 }
 
 impl RemoteStorage for HttpRemoteClient {
-    fn push_events(&self, events: &[SyncEvent]) -> Result<Vec<u64>> {
-        let url = format!("{}/sync/events", self.base_url);
-
-        #[derive(serde::Serialize)]
-        struct PushRequest<'a> {
-            events: &'a [SyncEvent],
-        }
-
-        #[derive(serde::Deserialize)]
-        struct PushResponse {
-            sequences: Vec<u64>,
-        }
-
-        let response = self
-            .client
-            .post(&url)
-            .json(&PushRequest { events })
-            .send()?;
-
-        let response = self.check_response(&url, response)?;
-        let parsed: PushResponse = response.json()?;
-        Ok(parsed.sequences)
-    }
-
     fn get_events_since(&self, child_id: &str, since_sequence: u64) -> Result<Vec<SyncEvent>> {
         let url = format!(
             "{}/sync/events?child_id={}&since={}",
