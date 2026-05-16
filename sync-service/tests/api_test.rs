@@ -1,5 +1,4 @@
 use sync_service::{create_local_dynamo_client, storage::{DynamoStore, TableConfig, table_definitions}, routes::build_router};
-use shared::sync::{SyncEvent, SyncAction, SyncSource, EntityType};
 
 const DYNAMO_LOCAL_PORT: u16 = 8000;
 

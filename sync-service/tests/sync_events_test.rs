@@ -116,7 +116,7 @@ async fn test_push_event_stores_correct_attributes() {
     // First write to an entity is always Created under the new API
     assert_eq!(retrieved.action, SyncAction::Created);
     assert_eq!(retrieved.source, SyncSource::Remote);
-    // source_timestamp is server-assigned; verify it is present (Some) and not epoch
+    assert!(retrieved.source_timestamp.timestamp() > 0, "source_timestamp should be set, not epoch");
     assert!(retrieved.sequence.is_some(), "Event should have a sequence");
     let seq = retrieved.sequence.unwrap();
     assert_eq!(seq, 1, "Only event should have sequence 1");
