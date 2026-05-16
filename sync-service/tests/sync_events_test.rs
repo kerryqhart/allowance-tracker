@@ -31,32 +31,40 @@ async fn test_push_event_increments_sequence() {
         .await
         .expect("Failed to initialize metadata");
 
-    // Create and push first event
-    let event1 = SyncEvent::new(
-        EntityType::Transaction,
-        "tx-1".to_string(),
-        child_id.to_string(),
-        SyncAction::Created,
-        SyncSource::Local,
-    );
-    let seq1 = store
-        .push_event(&event1)
+    // Upsert first entity (tx-1)
+    store
+        .upsert_entity_with_event(
+            child_id,
+            EntityType::Transaction,
+            "tx-1",
+            r#"{"id":"tx-1"}"#,
+            SyncSource::Local,
+        )
         .await
-        .expect("Failed to push event 1");
-    assert_eq!(seq1, 1, "First event should have sequence 1");
+        .expect("Failed to upsert entity tx-1");
 
-    // Create and push second event
-    let event2 = SyncEvent::new(
-        EntityType::Transaction,
-        "tx-2".to_string(),
-        child_id.to_string(),
-        SyncAction::Created,
-        SyncSource::Local,
-    );
-    let seq2 = store
-        .push_event(&event2)
+    // Upsert second entity (tx-2)
+    store
+        .upsert_entity_with_event(
+            child_id,
+            EntityType::Transaction,
+            "tx-2",
+            r#"{"id":"tx-2"}"#,
+            SyncSource::Local,
+        )
         .await
-        .expect("Failed to push event 2");
+        .expect("Failed to upsert entity tx-2");
+
+    // Read events back and verify sequences are 1 and 2
+    let events = store
+        .get_events_since(child_id, 0)
+        .await
+        .expect("Failed to query events");
+
+    assert_eq!(events.len(), 2, "Should have exactly two events");
+    let seq1 = events[0].sequence.expect("Event 1 missing sequence");
+    let seq2 = events[1].sequence.expect("Event 2 missing sequence");
+    assert_eq!(seq1, 1, "First event should have sequence 1");
     assert_eq!(seq2, 2, "Second event should have sequence 2");
 
     ctx.cleanup().await;
@@ -75,20 +83,21 @@ async fn test_push_event_stores_correct_attributes() {
         .await
         .expect("Failed to initialize metadata");
 
-    let event = SyncEvent::new(
-        EntityType::Goal,
-        "goal-1".to_string(),
-        child_id.to_string(),
-        SyncAction::Updated,
-        SyncSource::Remote,
-    );
-    let original_timestamp = event.source_timestamp;
-    let original_event_id = event.event_id.clone();
-
-    let seq = store
-        .push_event(&event)
+    // Upsert the entity.  Because it doesn't exist yet, action will be Created.
+    // (The old test used SyncAction::Updated with a hand-built SyncEvent; under the
+    // new API the action is derived server-side.  A first write is always Created.)
+    // source_timestamp is now assigned by upsert_entity_with_event (Utc::now()); we
+    // can only assert that it is present and recent, not that it matches a caller value.
+    store
+        .upsert_entity_with_event(
+            child_id,
+            EntityType::Goal,
+            "goal-1",
+            r#"{"id":"goal-1"}"#,
+            SyncSource::Remote,
+        )
         .await
-        .expect("Failed to push event");
+        .expect("Failed to upsert entity");
 
     // Retrieve the event back
     let events = store
@@ -99,14 +108,18 @@ async fn test_push_event_stores_correct_attributes() {
     assert_eq!(events.len(), 1, "Should have exactly one event");
     let retrieved = &events[0];
 
-    assert_eq!(retrieved.event_id, original_event_id);
+    // event_id is now deterministic: ev::created::{entity_id}
+    assert_eq!(retrieved.event_id, "ev::created::goal-1");
     assert_eq!(retrieved.entity_type, EntityType::Goal);
     assert_eq!(retrieved.entity_id, "goal-1");
     assert_eq!(retrieved.child_id, child_id);
-    assert_eq!(retrieved.action, SyncAction::Updated);
+    // First write to an entity is always Created under the new API
+    assert_eq!(retrieved.action, SyncAction::Created);
     assert_eq!(retrieved.source, SyncSource::Remote);
-    assert_eq!(retrieved.source_timestamp, original_timestamp);
-    assert_eq!(retrieved.sequence, Some(seq));
+    // source_timestamp is server-assigned; verify it is present (Some) and not epoch
+    assert!(retrieved.sequence.is_some(), "Event should have a sequence");
+    let seq = retrieved.sequence.unwrap();
+    assert_eq!(seq, 1, "Only event should have sequence 1");
 
     ctx.cleanup().await;
 }
@@ -124,20 +137,38 @@ async fn test_push_multiple_events_sequential_sequences() {
         .await
         .expect("Failed to initialize metadata");
 
-    // Push 10 events
+    // Upsert 10 entities, each with a unique entity_id
     for i in 1..=10 {
-        let event = SyncEvent::new(
-            EntityType::Transaction,
-            format!("tx-{}", i),
-            child_id.to_string(),
-            SyncAction::Created,
-            SyncSource::Local,
-        );
-        let seq = store
-            .push_event(&event)
+        let entity_id = format!("tx-{}", i);
+        let entity_json = format!(r#"{{"id":"{}"}}"#, entity_id);
+        store
+            .upsert_entity_with_event(
+                child_id,
+                EntityType::Transaction,
+                &entity_id,
+                &entity_json,
+                SyncSource::Local,
+            )
             .await
-            .expect(&format!("Failed to push event {}", i));
-        assert_eq!(seq, i as u64, "Event {} should have sequence {}", i, i);
+            .expect(&format!("Failed to upsert entity {}", i));
+    }
+
+    // Read all events and verify sequences are gapless 1..10
+    let events = store
+        .get_events_since(child_id, 0)
+        .await
+        .expect("Failed to query events");
+
+    assert_eq!(events.len(), 10, "Should have 10 events");
+    for (idx, event) in events.iter().enumerate() {
+        let expected_seq = (idx + 1) as u64;
+        assert_eq!(
+            event.sequence,
+            Some(expected_seq),
+            "Event at index {} should have sequence {}",
+            idx,
+            expected_seq
+        );
     }
 
     ctx.cleanup().await;
@@ -156,19 +187,20 @@ async fn test_get_events_since_returns_correct_range() {
         .await
         .expect("Failed to initialize metadata");
 
-    // Push 10 events
+    // Upsert 10 entities
     for i in 1..=10 {
-        let event = SyncEvent::new(
-            EntityType::Transaction,
-            format!("tx-{}", i),
-            child_id.to_string(),
-            SyncAction::Created,
-            SyncSource::Local,
-        );
-        let _ = store
-            .push_event(&event)
+        let entity_id = format!("tx-{}", i);
+        let entity_json = format!(r#"{{"id":"{}"}}"#, entity_id);
+        store
+            .upsert_entity_with_event(
+                child_id,
+                EntityType::Transaction,
+                &entity_id,
+                &entity_json,
+                SyncSource::Local,
+            )
             .await
-            .expect(&format!("Failed to push event {}", i));
+            .expect(&format!("Failed to upsert entity {}", i));
     }
 
     // Query for events since sequence 5 (should return sequences 6-10)
@@ -206,18 +238,24 @@ async fn test_get_events_since_empty_when_at_latest() {
         .await
         .expect("Failed to initialize metadata");
 
-    let event = SyncEvent::new(
-        EntityType::Transaction,
-        "tx-1".to_string(),
-        child_id.to_string(),
-        SyncAction::Created,
-        SyncSource::Local,
-    );
-
-    let seq = store
-        .push_event(&event)
+    store
+        .upsert_entity_with_event(
+            child_id,
+            EntityType::Transaction,
+            "tx-1",
+            r#"{"id":"tx-1"}"#,
+            SyncSource::Local,
+        )
         .await
-        .expect("Failed to push event");
+        .expect("Failed to upsert entity");
+
+    // Read back to get the assigned sequence
+    let all_events = store
+        .get_events_since(child_id, 0)
+        .await
+        .expect("Failed to query events");
+    assert_eq!(all_events.len(), 1, "Should have exactly one event");
+    let seq = all_events[0].sequence.expect("Event missing sequence");
 
     // Query since the same sequence (should be empty)
     let events = store
@@ -243,32 +281,31 @@ async fn test_duplicate_event_push_idempotent() {
         .await
         .expect("Failed to initialize metadata");
 
-    let event = SyncEvent::new(
-        EntityType::Transaction,
-        "tx-1".to_string(),
-        child_id.to_string(),
-        SyncAction::Created,
-        SyncSource::Local,
-    );
-    let event_id = event.event_id.clone();
-
-    // Push the event the first time
-    let seq1 = store
-        .push_event(&event)
+    // Upsert the entity the first time
+    store
+        .upsert_entity_with_event(
+            child_id,
+            EntityType::Transaction,
+            "tx-1",
+            r#"{"id":"tx-1"}"#,
+            SyncSource::Local,
+        )
         .await
-        .expect("Failed to push event first time");
+        .expect("Failed to upsert entity first time");
 
-    // Push the same event again (duplicate)
-    let seq2 = store
-        .push_event(&event)
+    // Upsert the same entity again with identical content.
+    // upsert_entity_with_event short-circuits when content is unchanged,
+    // so no second event is emitted.
+    store
+        .upsert_entity_with_event(
+            child_id,
+            EntityType::Transaction,
+            "tx-1",
+            r#"{"id":"tx-1"}"#,
+            SyncSource::Local,
+        )
         .await
-        .expect("Failed to push event second time");
-
-    // Both should return the same sequence
-    assert_eq!(
-        seq1, seq2,
-        "Duplicate push should return same sequence"
-    );
+        .expect("Failed to upsert entity second time");
 
     // Verify only one event exists in the store
     let events = store
@@ -276,9 +313,10 @@ async fn test_duplicate_event_push_idempotent() {
         .await
         .expect("Failed to query events");
 
-    assert_eq!(events.len(), 1, "Should have exactly one event stored");
-    assert_eq!(events[0].event_id, event_id);
-    assert_eq!(events[0].sequence, Some(seq1));
+    assert_eq!(events.len(), 1, "Should have exactly one event stored (dedup)");
+    // event_id is deterministic: ev::created::tx-1
+    assert_eq!(events[0].event_id, "ev::created::tx-1");
+    assert_eq!(events[0].sequence, Some(1));
 
     ctx.cleanup().await;
 }

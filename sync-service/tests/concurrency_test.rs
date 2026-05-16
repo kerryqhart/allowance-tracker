@@ -32,8 +32,8 @@ fn assert_gapless_sequence(sequences: &[u64]) {
 }
 
 /// Test concurrent push from multiple tasks for the same child.
-/// 10 tokio tasks, each pushing 10 events for "child1".
-/// Verify all 100 sequences are gapless 1-100.
+/// 10 tokio tasks, each upserting 10 entities for "child1".
+/// Verify all 100 resulting sequences are gapless 1-100.
 #[tokio::test]
 async fn test_concurrent_sequence_increment_no_duplicates() {
     let Some((ctx, store)) = setup().await else {
@@ -48,44 +48,48 @@ async fn test_concurrent_sequence_increment_no_duplicates() {
         .await
         .expect("Failed to initialize metadata");
 
-    // Spawn 10 concurrent tasks, each pushing 10 events
+    // Spawn 10 concurrent tasks, each upserting 10 entities
     let mut handles = vec![];
     for task_id in 0..10 {
         let store_clone = Arc::clone(&store);
         let handle = tokio::spawn(async move {
-            let mut sequences = vec![];
             for event_num in 0..10 {
-                let event = SyncEvent::new(
-                    EntityType::Transaction,
-                    format!("tx-task{}-evt{}", task_id, event_num),
-                    child_id.to_string(),
-                    SyncAction::Created,
-                    SyncSource::Local,
-                );
-                match store_clone.push_event(&event).await {
-                    Ok(seq) => sequences.push(seq),
-                    Err(e) => panic!("Task {} failed to push event: {}", task_id, e),
-                }
+                let entity_id = format!("tx-task{}-evt{}", task_id, event_num);
+                let entity_json = format!(r#"{{"id":"{}"}}"#, entity_id);
+                store_clone
+                    .upsert_entity_with_event(
+                        child_id,
+                        EntityType::Transaction,
+                        &entity_id,
+                        &entity_json,
+                        SyncSource::Local,
+                    )
+                    .await
+                    .unwrap_or_else(|e| panic!("Task {} failed to upsert entity: {}", task_id, e));
             }
-            sequences
         });
         handles.push(handle);
     }
 
-    // Collect all sequences from all tasks
-    let mut all_sequences = vec![];
+    // Wait for all tasks to complete
     for handle in handles {
-        match handle.await {
-            Ok(sequences) => all_sequences.extend(sequences),
-            Err(e) => panic!("Task join error: {}", e),
-        }
+        handle.await.expect("Task join error");
     }
 
+    // Collect all sequences after all writes
+    let all_events = store
+        .get_events_since(child_id, 0)
+        .await
+        .expect("Failed to query events");
+
     assert_eq!(
-        all_sequences.len(),
+        all_events.len(),
         100,
-        "Should have 100 sequences from 10 tasks * 10 events"
+        "Should have 100 events from 10 tasks * 10 entities"
     );
+
+    let all_sequences: Vec<u64> = all_events.iter().filter_map(|e| e.sequence).collect();
+    assert_eq!(all_sequences.len(), 100, "All events should have sequences");
 
     // Verify all sequences are gapless 1-100
     assert_gapless_sequence(&all_sequences);
@@ -94,7 +98,7 @@ async fn test_concurrent_sequence_increment_no_duplicates() {
 }
 
 /// Test concurrent push for different children is independent.
-/// 5 children, 20 events each pushed concurrently.
+/// 5 children, 20 entities each upserted concurrently.
 /// Verify each child has gapless 1-20 sequences independently.
 #[tokio::test]
 async fn test_concurrent_push_different_children_independent() {
@@ -112,52 +116,54 @@ async fn test_concurrent_push_different_children_independent() {
             .expect("Failed to initialize metadata");
     }
 
-    // Spawn one task per child, each pushing 20 events
+    // Spawn one task per child, each upserting 20 entities
     let mut handles = vec![];
     for child_id in children.iter() {
         let store_clone = Arc::clone(&store);
         let child_id_copy = child_id.to_string();
         let handle = tokio::spawn(async move {
-            let mut sequences = vec![];
             for event_num in 0..20 {
-                let event = SyncEvent::new(
-                    EntityType::Goal,
-                    format!("goal-{}-{}", child_id_copy, event_num),
-                    child_id_copy.clone(),
-                    SyncAction::Created,
-                    SyncSource::Local,
-                );
-                match store_clone.push_event(&event).await {
-                    Ok(seq) => sequences.push(seq),
-                    Err(e) => panic!("Child {} event {} failed: {}", child_id_copy, event_num, e),
-                }
+                let entity_id = format!("goal-{}-{}", child_id_copy, event_num);
+                let entity_json = format!(r#"{{"id":"{}"}}"#, entity_id);
+                store_clone
+                    .upsert_entity_with_event(
+                        &child_id_copy,
+                        EntityType::Goal,
+                        &entity_id,
+                        &entity_json,
+                        SyncSource::Local,
+                    )
+                    .await
+                    .unwrap_or_else(|e| panic!("Child {} event {} failed: {}", child_id_copy, event_num, e));
             }
-            (child_id_copy, sequences)
+            child_id_copy
         });
         handles.push(handle);
     }
 
-    // Collect results per child
+    // Collect results per child and verify sequences
     for handle in handles {
-        match handle.await {
-            Ok((child_id, sequences)) => {
-                assert_eq!(
-                    sequences.len(),
-                    20,
-                    "Child {} should have 20 sequences",
-                    child_id
-                );
-                assert_gapless_sequence(&sequences);
-            }
-            Err(e) => panic!("Task join error: {}", e),
-        }
+        let child_id = handle.await.expect("Task join error");
+        let events = store
+            .get_events_since(&child_id, 0)
+            .await
+            .expect("Failed to query events");
+        assert_eq!(
+            events.len(),
+            20,
+            "Child {} should have 20 events",
+            child_id
+        );
+        let sequences: Vec<u64> = events.iter().filter_map(|e| e.sequence).collect();
+        assert_eq!(sequences.len(), 20, "All events for child {} should have sequences", child_id);
+        assert_gapless_sequence(&sequences);
     }
 
     ctx.cleanup().await;
 }
 
-/// Test push and poll concurrently.
-/// One task pushes 50 events, another polls repeatedly with get_events_since.
+/// Test write and poll concurrently.
+/// One task upserts 50 entities, another polls repeatedly with get_events_since.
 /// Poller verifies no gaps in sequences across multiple polls.
 #[tokio::test]
 async fn test_client_a_pushes_while_client_b_polls() {
@@ -175,20 +181,21 @@ async fn test_client_a_pushes_while_client_b_polls() {
     let store_clone = Arc::clone(&store);
     let child_id_copy = child_id.to_string();
 
-    // Task A: Push 50 events with small delays
+    // Task A: Upsert 50 entities with small delays
     let pusher = tokio::spawn(async move {
         for i in 0..50 {
-            let event = SyncEvent::new(
-                EntityType::Transaction,
-                format!("tx-{}", i),
-                child_id_copy.clone(),
-                SyncAction::Created,
-                SyncSource::Local,
-            );
-            let _ = store_clone
-                .push_event(&event)
+            let entity_id = format!("tx-{}", i);
+            let entity_json = format!(r#"{{"id":"{}"}}"#, entity_id);
+            store_clone
+                .upsert_entity_with_event(
+                    &child_id_copy,
+                    EntityType::Transaction,
+                    &entity_id,
+                    &entity_json,
+                    SyncSource::Local,
+                )
                 .await
-                .expect("Failed to push event");
+                .expect("Failed to upsert entity");
             tokio::time::sleep(tokio::time::Duration::from_millis(5)).await;
         }
     });
@@ -295,7 +302,7 @@ async fn test_watermark_update_race() {
 }
 
 /// Test offline client syncing.
-/// Push 500 events, advance remote watermark to 500, leave local at 0.
+/// Upsert 500 entities, advance remote watermark to 500, leave local at 0.
 /// Then poll from 0 and verify all 500 events returned in order.
 #[tokio::test]
 async fn test_client_offline_then_syncs() {
@@ -310,19 +317,20 @@ async fn test_client_offline_then_syncs() {
         .await
         .expect("Failed to initialize metadata");
 
-    // Push 500 events
+    // Upsert 500 entities
     for i in 0..500 {
-        let event = SyncEvent::new(
-            EntityType::Transaction,
-            format!("tx-{}", i),
-            child_id.to_string(),
-            SyncAction::Created,
-            SyncSource::Remote,
-        );
-        let _ = store
-            .push_event(&event)
+        let entity_id = format!("tx-{}", i);
+        let entity_json = format!(r#"{{"id":"{}"}}"#, entity_id);
+        store
+            .upsert_entity_with_event(
+                child_id,
+                EntityType::Transaction,
+                &entity_id,
+                &entity_json,
+                SyncSource::Remote,
+            )
             .await
-            .expect("Failed to push event");
+            .expect("Failed to upsert entity");
     }
 
     // Advance remote watermark to 500

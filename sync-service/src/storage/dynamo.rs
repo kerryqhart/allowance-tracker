@@ -55,53 +55,6 @@ impl DynamoStore {
         }
     }
 
-    /// Push a sync event: check for duplicates, increment sequence counter atomically,
-    /// and write event. Returns the assigned sequence number.
-    pub async fn push_event(&self, event: &SyncEvent) -> anyhow::Result<u64> {
-        // Check for duplicate
-        if let Some(existing_seq) = self.find_event_by_id(&event.child_id, &event.event_id).await? {
-            return Ok(existing_seq);
-        }
-
-        // Atomically increment sequence counter
-        let metadata_table = self.config.sync_metadata.clone();
-        let update_response = self.client
-            .update_item()
-            .table_name(&metadata_table)
-            .key("child_id", AttributeValue::S(event.child_id.clone()))
-            .update_expression("SET event_sequence = event_sequence + :inc")
-            .expression_attribute_values(":inc", AttributeValue::N("1".to_string()))
-            .condition_expression("attribute_exists(event_sequence)")
-            .return_values(aws_sdk_dynamodb::types::ReturnValue::AllNew)
-            .send()
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to increment sequence: {}", e))?;
-
-        // Extract the new sequence number
-        let new_sequence = update_response
-            .attributes()
-            .and_then(|attrs| attrs.get("event_sequence"))
-            .and_then(|attr| attr.as_n().ok())
-            .and_then(|s| s.parse::<u64>().ok())
-            .ok_or_else(|| anyhow::anyhow!("Failed to parse new sequence number"))?;
-
-        // Write event to sync_events table with the new sequence
-        let events_table = self.config.sync_events.clone();
-        let event_item = self.event_to_item(event, new_sequence);
-
-        self.client
-            .put_item()
-            .table_name(&events_table)
-            .set_item(Some(event_item))
-            .condition_expression("attribute_not_exists(#seq)")
-            .expression_attribute_names("#seq", "sequence")
-            .send()
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to write event: {}", aws_sdk_dynamodb::error::DisplayErrorContext(&e)))?;
-
-        Ok(new_sequence)
-    }
-
     /// Atomically allocate the next event sequence number for a child.
     /// Wasted on transaction rollback; sequences are monotonic, not contiguous.
     async fn allocate_event_sequence(&self, child_id: &str) -> anyhow::Result<u64> {

@@ -9,15 +9,6 @@ use std::sync::Arc;
 use shared::sync::{SyncEvent, SyncCheckpoint};
 use crate::storage::DynamoStore;
 
-#[derive(Debug, Deserialize)]
-pub struct PushEventsRequest {
-    pub events: Vec<SyncEvent>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct PushEventsResponse {
-    pub sequences: Vec<u64>,
-}
 
 #[derive(Debug, Deserialize)]
 pub struct GetEventsQuery {
@@ -34,24 +25,6 @@ pub struct GetEventsResponse {
 pub struct UpdateWatermarkRequest {
     pub which: String,
     pub value: u64,
-}
-
-// POST /sync/events - push events, returns 201 with sequences
-async fn push_events(
-    State(store): State<Arc<DynamoStore>>,
-    Json(req): Json<PushEventsRequest>,
-) -> Result<(StatusCode, Json<PushEventsResponse>), StatusCode> {
-    let mut sequences = Vec::new();
-    for event in req.events {
-        match store.push_event(&event).await {
-            Ok(seq) => sequences.push(seq),
-            Err(e) => {
-                eprintln!("push_event failed: {:?}", e);
-                return Err(StatusCode::INTERNAL_SERVER_ERROR);
-            }
-        }
-    }
-    Ok((StatusCode::CREATED, Json(PushEventsResponse { sequences })))
 }
 
 // GET /sync/events?child_id=X&since=N - get events since sequence
@@ -114,7 +87,6 @@ async fn update_checkpoint(
 
 pub fn routes() -> Router<Arc<DynamoStore>> {
     Router::new()
-        .route("/sync/events", post(push_events))
         .route("/sync/events", get(get_events))
         .route("/sync/initialize/{child_id}", post(initialize_child))
         .route("/sync/checkpoint/{child_id}", get(get_checkpoint))

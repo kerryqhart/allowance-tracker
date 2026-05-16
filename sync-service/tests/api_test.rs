@@ -68,57 +68,6 @@ async fn test_health_endpoint() {
 }
 
 #[tokio::test]
-async fn test_push_events_endpoint() {
-    let Some(base_url) = start_test_server().await else {
-        println!("DynamoDB Local not available, skipping test");
-        return;
-    };
-
-    let client = reqwest::Client::new();
-
-    // Initialize child
-    let res = client
-        .post(format!("{}/sync/initialize/child1", base_url))
-        .send()
-        .await
-        .expect("Failed to initialize child");
-    assert_eq!(res.status(), 201);
-
-    // Push events
-    let event = SyncEvent::new(
-        EntityType::Transaction,
-        "tx1".to_string(),
-        "child1".to_string(),
-        SyncAction::Created,
-        SyncSource::Local,
-    );
-
-    let res = client
-        .post(format!("{}/sync/events", base_url))
-        .json(&serde_json::json!({ "events": vec![event.clone()] }))
-        .send()
-        .await
-        .expect("Failed to push events");
-
-    assert_eq!(res.status(), 201);
-    let body: serde_json::Value = res.json().await.unwrap();
-    assert!(body["sequences"].is_array());
-    assert_eq!(body["sequences"].as_array().unwrap().len(), 1);
-
-    // Get events
-    let res = client
-        .get(format!("{}/sync/events?child_id=child1&since=0", base_url))
-        .send()
-        .await
-        .expect("Failed to get events");
-
-    assert_eq!(res.status(), 200);
-    let body: serde_json::Value = res.json().await.unwrap();
-    assert!(body["events"].is_array());
-    assert!(body["events"].as_array().unwrap().len() > 0);
-}
-
-#[tokio::test]
 async fn test_entity_crud_endpoints() {
     let Some(base_url) = start_test_server().await else {
         println!("DynamoDB Local not available, skipping test");
