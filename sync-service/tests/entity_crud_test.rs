@@ -162,7 +162,7 @@ async fn test_delete_entity() {
 
     // Delete it
     store
-        .delete_entity(child_id, EntityType::Transaction, tx_id)
+        .delete_entity_with_event(child_id, EntityType::Transaction, tx_id, SyncSource::Remote)
         .await
         .expect("Failed to delete transaction");
 
@@ -219,7 +219,7 @@ async fn test_goal_crud() {
 
     // Delete it
     store
-        .delete_entity(child_id, EntityType::Goal, goal_id)
+        .delete_entity_with_event(child_id, EntityType::Goal, goal_id, SyncSource::Remote)
         .await
         .expect("Failed to delete goal");
 
@@ -275,7 +275,7 @@ async fn test_child_crud() {
 
     // Delete it
     store
-        .delete_entity(child_id, EntityType::Child, "")
+        .delete_entity_with_event(child_id, EntityType::Child, "", SyncSource::Remote)
         .await
         .expect("Failed to delete child");
 

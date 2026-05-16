@@ -515,29 +515,6 @@ impl DynamoStore {
         }
     }
 
-    /// Delete an entity by child_id, entity_type, and entity_id.
-    pub async fn delete_entity(&self, child_id: &str, entity_type: EntityType, entity_id: &str) -> anyhow::Result<()> {
-        let (table, sort_key) = self.entity_table_and_sort_key(&entity_type);
-
-        let mut key_map = HashMap::from([
-            ("child_id".to_string(), AttributeValue::S(child_id.to_string())),
-        ]);
-
-        if let Some(sk_name) = sort_key {
-            key_map.insert(sk_name.to_string(), AttributeValue::S(entity_id.to_string()));
-        }
-
-        self.client
-            .delete_item()
-            .table_name(&table)
-            .set_key(Some(key_map))
-            .send()
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to delete entity: {}", e))?;
-
-        Ok(())
-    }
-
     /// List all entities in a table (used for children which have no sort key).
     /// Returns a vec of (entity_id, entity_json) pairs.
     pub async fn list_all_entities_in_table(&self, entity_type: EntityType) -> anyhow::Result<Vec<(String, String)>> {
