@@ -160,8 +160,6 @@ pub enum SyncStatus {
 /// Core sync logic. Not tied to threading — can be tested synchronously.
 pub struct SyncEngine {
     remote: Arc<dyn RemoteStorage>,
-    /// Outbound events that haven't been pushed yet (or failed to push).
-    pending_push: Vec<SyncEvent>,
     /// Per-child watermarks (local cache of what we've processed).
     watermarks: HashMap<String, u64>,
 }
@@ -170,34 +168,7 @@ impl SyncEngine {
     pub fn new(remote: Arc<dyn RemoteStorage>) -> Self {
         Self {
             remote,
-            pending_push: Vec::new(),
             watermarks: HashMap::new(),
-        }
-    }
-
-    /// Enqueue a local event for pushing to remote.
-    pub fn enqueue_event(&mut self, event: SyncEvent) {
-        self.pending_push.push(event);
-    }
-
-    /// Push all pending events to remote. Returns events that failed.
-    pub fn push_pending(&mut self) -> Vec<(SyncEvent, String)> {
-        let events = std::mem::take(&mut self.pending_push);
-        if events.is_empty() {
-            return Vec::new();
-        }
-
-        match self.remote.push_events(&events) {
-            Ok(_sequences) => Vec::new(),
-            Err(e) => {
-                let error_msg = e.to_string();
-                // All events failed — put them back for retry
-                let failures: Vec<(SyncEvent, String)> = events
-                    .into_iter()
-                    .map(|ev| (ev, error_msg.clone()))
-                    .collect();
-                failures
-            }
         }
     }
 
@@ -242,11 +213,6 @@ impl SyncEngine {
     /// Get the current watermark for a child.
     pub fn get_watermark(&self, child_id: &str) -> u64 {
         *self.watermarks.get(child_id).unwrap_or(&0)
-    }
-
-    /// Get the number of pending outbound events.
-    pub fn pending_push_count(&self) -> usize {
-        self.pending_push.len()
     }
 
     /// Push all local entities to remote. Reports progress via the channel.
@@ -383,39 +349,6 @@ mod tests {
     }
 
     #[test]
-    fn test_enqueue_and_push() {
-        let mut engine = make_engine();
-
-        let event = SyncEvent::new(
-            EntityType::Transaction, "tx1".to_string(), "child1".to_string(),
-            SyncAction::Created, SyncSource::Local,
-        );
-        engine.enqueue_event(event);
-        assert_eq!(engine.pending_push_count(), 1);
-
-        let failures = engine.push_pending();
-        assert!(failures.is_empty());
-        assert_eq!(engine.pending_push_count(), 0);
-    }
-
-    #[test]
-    fn test_push_failure_returns_events() {
-        let mock = Arc::new(MockRemoteClient::new());
-        mock.force_error("network error");
-        let mut engine = SyncEngine::new(mock);
-
-        let event = SyncEvent::new(
-            EntityType::Transaction, "tx1".to_string(), "child1".to_string(),
-            SyncAction::Created, SyncSource::Local,
-        );
-        engine.enqueue_event(event);
-
-        let failures = engine.push_pending();
-        assert_eq!(failures.len(), 1);
-        assert!(failures[0].1.contains("network error"));
-    }
-
-    #[test]
     fn test_poll_applies_remote_events() {
         let (mut engine, mock) = make_engine_with_mock();
 
@@ -451,12 +384,6 @@ mod tests {
     fn test_poll_returns_all_non_local_events_different_entities() {
         let (mut engine, mock) = make_engine_with_mock();
 
-        let local_event = SyncEvent::new(
-            EntityType::Transaction, "tx_a".to_string(), "child1".to_string(),
-            SyncAction::Updated, SyncSource::Local,
-        );
-        engine.enqueue_event(local_event);
-
         let remote_event = SyncEvent::new(
             EntityType::Transaction, "tx_b".to_string(), "child1".to_string(),
             SyncAction::Created, SyncSource::Remote,
@@ -472,12 +399,6 @@ mod tests {
     fn test_poll_returns_all_non_local_events_different_entity_types() {
         let (mut engine, mock) = make_engine_with_mock();
 
-        let local_event = SyncEvent::new(
-            EntityType::Transaction, "tx1".to_string(), "child1".to_string(),
-            SyncAction::Updated, SyncSource::Local,
-        );
-        engine.enqueue_event(local_event);
-
         let remote_event = SyncEvent::new(
             EntityType::Goal, "tx1".to_string(), "child1".to_string(),
             SyncAction::Updated, SyncSource::Remote,
@@ -492,14 +413,7 @@ mod tests {
     fn test_last_write_wins_no_conflict_detection() {
         let (mut engine, mock) = make_engine_with_mock();
 
-        // Local has a pending event for tx1
-        let local_event = SyncEvent::new(
-            EntityType::Transaction, "tx1".to_string(), "child1".to_string(),
-            SyncAction::Updated, SyncSource::Local,
-        );
-        engine.enqueue_event(local_event);
-
-        // Remote also modified tx1 — under last-write-wins, this should just be applied
+        // Remote modified tx1
         let remote_event = SyncEvent::new(
             EntityType::Transaction, "tx1".to_string(), "child1".to_string(),
             SyncAction::Updated, SyncSource::Remote,
@@ -509,8 +423,6 @@ mod tests {
         let result = engine.poll_child("child1").unwrap();
         // Remote event is returned to apply — no conflict
         assert_eq!(result.events_to_apply.len(), 1);
-        // Local pending push is unchanged — it'll still get pushed next
-        assert_eq!(engine.pending_push_count(), 1);
     }
 
     #[test]
