@@ -471,7 +471,7 @@ mod tests {
             SyncAction::Created,
             SyncSource::Remote,
         );
-        mock.push_events(&[remote_event]).unwrap();
+        mock.seed_event(remote_event);
 
         let (_event_tx, event_rx) = mpsc::channel::<SyncEvent>();
         let (command_tx, command_rx) = mpsc::channel::<SyncCommand>();

@@ -39,6 +39,29 @@ impl MockRemoteClient {
         }
         Ok(())
     }
+
+    /// Test-only helper: insert a `SyncEvent` directly into the mock's event log,
+    /// bypassing the trait surface. Used by tests that need to seed remote-origin
+    /// or local-origin events without going through upsert/delete. Assigns a
+    /// monotonic sequence the same way `push_events` does, and dedups by event_id.
+    #[cfg(test)]
+    pub fn seed_event(&self, event: SyncEvent) -> u64 {
+        let mut event_dedup = self.event_dedup.lock().unwrap();
+        let mut stored_events = self.events.lock().unwrap();
+        let mut next_seq = self.next_sequence.lock().unwrap();
+
+        if let Some(&existing_seq) = event_dedup.get(&event.event_id) {
+            return existing_seq;
+        }
+        let seq = *next_seq;
+        *next_seq += 1;
+        let mut new_event = event;
+        new_event.sequence = Some(seq);
+        let id = new_event.event_id.clone();
+        stored_events.push(new_event);
+        event_dedup.insert(id, seq);
+        seq
+    }
 }
 
 impl Default for MockRemoteClient {

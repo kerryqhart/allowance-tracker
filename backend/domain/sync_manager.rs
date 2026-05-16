@@ -424,7 +424,7 @@ mod tests {
             EntityType::Transaction, "tx_remote".to_string(), "child1".to_string(),
             SyncAction::Created, SyncSource::Remote,
         );
-        mock.push_events(&[remote_event]).unwrap();
+        mock.seed_event(remote_event);
 
         let result = engine.poll_child("child1").unwrap();
         assert_eq!(result.events_to_apply.len(), 1);
@@ -440,7 +440,7 @@ mod tests {
             EntityType::Transaction, "tx_local".to_string(), "child1".to_string(),
             SyncAction::Created, SyncSource::Local,
         );
-        mock.push_events(&[local_event]).unwrap();
+        mock.seed_event(local_event);
 
         let result = engine.poll_child("child1").unwrap();
         assert!(result.events_to_apply.is_empty());
@@ -461,7 +461,7 @@ mod tests {
             EntityType::Transaction, "tx_b".to_string(), "child1".to_string(),
             SyncAction::Created, SyncSource::Remote,
         );
-        mock.push_events(&[remote_event]).unwrap();
+        mock.seed_event(remote_event);
 
         let result = engine.poll_child("child1").unwrap();
         assert_eq!(result.events_to_apply.len(), 1);
@@ -482,7 +482,7 @@ mod tests {
             EntityType::Goal, "tx1".to_string(), "child1".to_string(),
             SyncAction::Updated, SyncSource::Remote,
         );
-        mock.push_events(&[remote_event]).unwrap();
+        mock.seed_event(remote_event);
 
         let result = engine.poll_child("child1").unwrap();
         assert_eq!(result.events_to_apply.len(), 1);
@@ -504,7 +504,7 @@ mod tests {
             EntityType::Transaction, "tx1".to_string(), "child1".to_string(),
             SyncAction::Updated, SyncSource::Remote,
         );
-        mock.push_events(&[remote_event]).unwrap();
+        mock.seed_event(remote_event);
 
         let result = engine.poll_child("child1").unwrap();
         // Remote event is returned to apply — no conflict
