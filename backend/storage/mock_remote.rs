@@ -125,7 +125,41 @@ impl RemoteStorage for MockRemoteClient {
             entity_type.as_str().to_string(),
             entity_id.to_string(),
         );
-        self.entities.lock().unwrap().insert(key, entity_json.to_string());
+
+        let mut entities = self.entities.lock().unwrap();
+        let prior = entities.get(&key).cloned();
+        if prior.as_deref() == Some(entity_json) {
+            // Identical content — no event, no-op. Mirrors server short-circuit.
+            return Ok(());
+        }
+        let action = if prior.is_none() {
+            SyncAction::Created
+        } else {
+            SyncAction::Updated
+        };
+        entities.insert(key, entity_json.to_string());
+        drop(entities);
+
+        // Emit event with deterministic id, source=Local (mirrors what the deployed
+        // server will produce given an X-Sync-Source: local request — which is what
+        // the http client now sends).
+        let event_id = match action {
+            SyncAction::Created => format!("ev::created::{entity_id}"),
+            SyncAction::Updated => format!("ev::updated::{entity_id}::mock"),
+            SyncAction::Deleted => unreachable!(),
+        };
+        let event = SyncEvent {
+            event_id,
+            entity_type,
+            entity_id: entity_id.to_string(),
+            child_id: child_id.to_string(),
+            action,
+            source: SyncSource::Local,
+            source_timestamp: chrono::Utc::now(),
+            sequence: None,
+        };
+        // Append via the same path push_events uses (dedup, sequence assignment).
+        let _ = self.push_events(std::slice::from_ref(&event))?;
         Ok(())
     }
 
@@ -149,6 +183,18 @@ impl RemoteStorage for MockRemoteClient {
             entity_id.to_string(),
         );
         self.entities.lock().unwrap().remove(&key);
+
+        let event = SyncEvent {
+            event_id: format!("ev::deleted::{entity_id}"),
+            entity_type,
+            entity_id: entity_id.to_string(),
+            child_id: child_id.to_string(),
+            action: SyncAction::Deleted,
+            source: SyncSource::Local,
+            source_timestamp: chrono::Utc::now(),
+            sequence: None,
+        };
+        let _ = self.push_events(std::slice::from_ref(&event))?;
         Ok(())
     }
 

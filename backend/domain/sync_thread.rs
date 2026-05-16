@@ -224,20 +224,17 @@ fn sync_loop(
 }
 
 /// Push a single local event to the remote. For non-delete events, first
-/// requests the entity JSON from the UI thread via message_tx.
+/// requests the entity JSON from the UI thread via message_tx. The server's
+/// PUT/DELETE on /entities emits the sync event atomically; this function no
+/// longer calls a separate /sync/events endpoint.
 fn push_event(
     remote: &Arc<dyn RemoteStorage>,
     event: &SyncEvent,
     messenger: &UiMessenger,
 ) -> Result<(), String> {
-    // Deletes don't need entity data. Delete the entity body first so that a
-    // crash between the two calls leaves a dangling event to retry rather than
-    // letting other clients see a delete-event referencing a still-present body.
     if event.action == SyncAction::Deleted {
         remote.delete_entity(&event.child_id, event.entity_type.clone(), &event.entity_id)
             .map_err(|e| format!("delete_entity failed: {e}"))?;
-        remote.push_events(std::slice::from_ref(event))
-            .map_err(|e| format!("push_events failed: {e}"))?;
         return Ok(());
     }
 
@@ -265,11 +262,8 @@ fn push_event(
         Err(e) => return Err(format!("timeout waiting for entity read: {e}")),
     };
 
-    // Upsert entity first, then the event record
     remote.upsert_entity(&event.child_id, event.entity_type.clone(), &event.entity_id, &entity_json)
         .map_err(|e| format!("upsert_entity failed: {e}"))?;
-    remote.push_events(std::slice::from_ref(event))
-        .map_err(|e| format!("push_events failed: {e}"))?;
 
     Ok(())
 }
