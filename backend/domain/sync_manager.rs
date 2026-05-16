@@ -216,7 +216,8 @@ impl SyncEngine {
     }
 
     /// Push all local entities to remote. Reports progress via the channel.
-    /// Safe to retry: entity upserts overwrite, sync event dedup prevents duplicate sequences.
+    /// Safe to retry: entity upserts are idempotent server-side (identical content
+    /// short-circuits to no-op; the server emits sync events atomically with each PUT).
     pub fn backfill(
         &self,
         children: Vec<Child>,
@@ -234,7 +235,7 @@ impl SyncEngine {
         let mut children_synced = 0usize;
         let mut transactions_synced = 0usize;
         let mut goals_synced = 0usize;
-        let batch_size = 25;
+        let progress_every = 25usize;
 
         for child in &children {
             if let Err(e) = self.remote.initialize_child(&child.id) {
@@ -251,37 +252,21 @@ impl SyncEngine {
             let child_json = serde_json::to_string(&child)
                 .map_err(|e| anyhow::anyhow!("Failed to serialize child: {}", e))?;
             self.remote.upsert_entity(&child.id, EntityType::Child, &child.id, &child_json)?;
-
-            let mut events = vec![SyncEvent::new(
-                EntityType::Child,
-                child.id.clone(),
-                child.id.clone(),
-                SyncAction::Created,
-                SyncSource::Local,
-            )];
             pushed += 1;
             children_synced += 1;
+            if pushed % progress_every == 0 {
+                let _ = progress_tx.send(BackfillProgress::EntitiesPushed { count: pushed, total });
+            }
 
             if let Some(txns) = transactions.get(&child.id) {
                 for tx in txns {
                     let tx_json = serde_json::to_string(&tx)
                         .map_err(|e| anyhow::anyhow!("Failed to serialize transaction: {}", e))?;
                     self.remote.upsert_entity(&child.id, EntityType::Transaction, &tx.id, &tx_json)?;
-
-                    events.push(SyncEvent::new(
-                        EntityType::Transaction,
-                        tx.id.clone(),
-                        child.id.clone(),
-                        SyncAction::Created,
-                        SyncSource::Local,
-                    ));
                     pushed += 1;
                     transactions_synced += 1;
-
-                    if events.len() >= batch_size {
-                        self.remote.push_events(&events)?;
+                    if pushed % progress_every == 0 {
                         let _ = progress_tx.send(BackfillProgress::EntitiesPushed { count: pushed, total });
-                        events.clear();
                     }
                 }
             }
@@ -291,29 +276,16 @@ impl SyncEngine {
                     let goal_json = serde_json::to_string(&goal)
                         .map_err(|e| anyhow::anyhow!("Failed to serialize goal: {}", e))?;
                     self.remote.upsert_entity(&child.id, EntityType::Goal, &goal.id, &goal_json)?;
-
-                    events.push(SyncEvent::new(
-                        EntityType::Goal,
-                        goal.id.clone(),
-                        child.id.clone(),
-                        SyncAction::Created,
-                        SyncSource::Local,
-                    ));
                     pushed += 1;
                     goals_synced += 1;
-
-                    if events.len() >= batch_size {
-                        self.remote.push_events(&events)?;
+                    if pushed % progress_every == 0 {
                         let _ = progress_tx.send(BackfillProgress::EntitiesPushed { count: pushed, total });
-                        events.clear();
                     }
                 }
             }
 
-            if !events.is_empty() {
-                self.remote.push_events(&events)?;
-                let _ = progress_tx.send(BackfillProgress::EntitiesPushed { count: pushed, total });
-            }
+            // Final progress for this child (covers tail under the every-25 threshold).
+            let _ = progress_tx.send(BackfillProgress::EntitiesPushed { count: pushed, total });
         }
 
         let _ = progress_tx.send(BackfillProgress::Completed { total_pushed: pushed });
