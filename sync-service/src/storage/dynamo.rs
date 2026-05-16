@@ -438,6 +438,83 @@ impl DynamoStore {
         }
     }
 
+    /// Delete an entity AND emit a Deleted sync event atomically via TransactWriteItems.
+    /// Idempotent on retry: if the event already exists (same event_id), swallow the
+    /// ConditionalCheckFailed and return Ok. The entity Delete inside the failed
+    /// transaction is rolled back, but if it ran successfully on a prior call the
+    /// entity is already gone — which is what we want.
+    pub async fn delete_entity_with_event(
+        &self,
+        child_id: &str,
+        entity_type: EntityType,
+        entity_id: &str,
+        source: SyncSource,
+    ) -> anyhow::Result<()> {
+        use aws_sdk_dynamodb::types::{Delete, Put, TransactWriteItem};
+        use chrono::Utc;
+        use crate::storage::event_id::event_id_for;
+
+        let event_id = event_id_for(&SyncAction::Deleted, entity_id, "");
+        let new_sequence = self.allocate_event_sequence(child_id).await?;
+
+        let event = SyncEvent {
+            event_id,
+            entity_type: entity_type.clone(),
+            entity_id: entity_id.to_string(),
+            child_id: child_id.to_string(),
+            action: SyncAction::Deleted,
+            source,
+            source_timestamp: Utc::now(),
+            sequence: Some(new_sequence),
+        };
+
+        let (entity_table, sort_key) = self.entity_table_and_sort_key(&entity_type);
+        let mut entity_key = HashMap::from([
+            ("child_id".to_string(), AttributeValue::S(child_id.to_string())),
+        ]);
+        if let Some(sk_name) = sort_key {
+            entity_key.insert(sk_name.to_string(), AttributeValue::S(entity_id.to_string()));
+        }
+
+        let entity_delete = Delete::builder()
+            .table_name(&entity_table)
+            .set_key(Some(entity_key))
+            .build()
+            .map_err(|e| anyhow::anyhow!("Failed to build entity Delete: {}", e))?;
+
+        let event_item = self.event_to_item(&event, new_sequence);
+        let event_put = Put::builder()
+            .table_name(&self.config.sync_events)
+            .set_item(Some(event_item))
+            .condition_expression("attribute_not_exists(#seq)")
+            .expression_attribute_names("#seq", "sequence")
+            .build()
+            .map_err(|e| anyhow::anyhow!("Failed to build event Put: {}", e))?;
+
+        let result = self.client
+            .transact_write_items()
+            .transact_items(TransactWriteItem::builder().delete(entity_delete).build())
+            .transact_items(TransactWriteItem::builder().put(event_put).build())
+            .send()
+            .await;
+
+        match result {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                let msg = format!("{}", aws_sdk_dynamodb::error::DisplayErrorContext(&e));
+                if msg.contains("ConditionalCheckFailed") {
+                    // Event already recorded by a prior call — treat as idempotent success.
+                    Ok(())
+                } else {
+                    Err(anyhow::anyhow!(
+                        "TransactWriteItems (delete) failed for {}/{}: {}",
+                        entity_type.as_str(), entity_id, msg
+                    ))
+                }
+            }
+        }
+    }
+
     /// Delete an entity by child_id, entity_type, and entity_id.
     pub async fn delete_entity(&self, child_id: &str, entity_type: EntityType, entity_id: &str) -> anyhow::Result<()> {
         let (table, sort_key) = self.entity_table_and_sort_key(&entity_type);

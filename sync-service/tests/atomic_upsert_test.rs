@@ -74,3 +74,74 @@ async fn entity_data_matches_request_body_after_write() {
 
     ctx.cleanup().await;
 }
+
+#[tokio::test]
+async fn delete_emits_deleted_event_atomically() {
+    let Some((ctx, store)) = setup().await else { return; };
+    let child_id = "atomic-child-4";
+    store.initialize_child_metadata(child_id).await.unwrap();
+
+    let tx_json = r#"{"id":"tx4","child_id":"atomic-child-4","amount":-3.0,"date":"2026-05-14T00:00:00+00:00","description":"to delete","balance":97.0,"transaction_type":"Expense"}"#;
+    store.upsert_entity_with_event(
+        child_id, EntityType::Transaction, "tx4", tx_json, SyncSource::Remote,
+    ).await.unwrap();
+
+    store.delete_entity_with_event(
+        child_id, EntityType::Transaction, "tx4", SyncSource::Local,
+    ).await.unwrap();
+
+    let events = store.get_events_since(child_id, 0).await.unwrap();
+    assert_eq!(events.len(), 2, "expected created + deleted events");
+    assert_eq!(events[1].action, SyncAction::Deleted);
+    assert_eq!(events[1].event_id, "ev::deleted::tx4");
+    assert_eq!(events[1].source, SyncSource::Local);
+
+    let entity = store.get_entity(child_id, EntityType::Transaction, "tx4").await.unwrap();
+    assert_eq!(entity, None, "entity should be gone after delete");
+
+    ctx.cleanup().await;
+}
+
+#[tokio::test]
+async fn delete_is_idempotent_on_retry() {
+    let Some((ctx, store)) = setup().await else { return; };
+    let child_id = "atomic-child-5";
+    store.initialize_child_metadata(child_id).await.unwrap();
+
+    let tx_json = r#"{"id":"tx5","child_id":"atomic-child-5","amount":-1.0,"date":"2026-05-14T00:00:00+00:00","description":"d","balance":99.0,"transaction_type":"Expense"}"#;
+    store.upsert_entity_with_event(
+        child_id, EntityType::Transaction, "tx5", tx_json, SyncSource::Remote,
+    ).await.unwrap();
+
+    store.delete_entity_with_event(
+        child_id, EntityType::Transaction, "tx5", SyncSource::Remote,
+    ).await.unwrap();
+    // Retry: must succeed and not write a duplicate event.
+    store.delete_entity_with_event(
+        child_id, EntityType::Transaction, "tx5", SyncSource::Remote,
+    ).await.unwrap();
+
+    let events = store.get_events_since(child_id, 0).await.unwrap();
+    let deleted_count = events.iter().filter(|e| e.action == SyncAction::Deleted).count();
+    assert_eq!(deleted_count, 1, "retry should not produce a duplicate deleted event");
+
+    ctx.cleanup().await;
+}
+
+#[tokio::test]
+async fn delete_of_nonexistent_entity_still_emits_event() {
+    let Some((ctx, store)) = setup().await else { return; };
+    let child_id = "atomic-child-6";
+    store.initialize_child_metadata(child_id).await.unwrap();
+
+    store.delete_entity_with_event(
+        child_id, EntityType::Transaction, "ghost", SyncSource::Local,
+    ).await.unwrap();
+
+    let events = store.get_events_since(child_id, 0).await.unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].action, SyncAction::Deleted);
+    assert_eq!(events[0].event_id, "ev::deleted::ghost");
+
+    ctx.cleanup().await;
+}
