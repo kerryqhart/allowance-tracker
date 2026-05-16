@@ -85,6 +85,7 @@ impl RemoteStorage for HttpRemoteClient {
         let response = self
             .client
             .put(&url)
+            .header("X-Sync-Source", "local")
             .body(entity_json.to_string())
             .send()?;
 
@@ -123,7 +124,9 @@ impl RemoteStorage for HttpRemoteClient {
             child_id,
             entity_id
         );
-        let response = self.client.delete(&url).send()?;
+        let response = self.client.delete(&url)
+            .header("X-Sync-Source", "local")
+            .send()?;
 
         self.check_response(&url, response)?;
         Ok(())
