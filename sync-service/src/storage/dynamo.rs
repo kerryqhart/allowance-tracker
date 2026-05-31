@@ -4,6 +4,26 @@ use shared::sync::*;
 use super::table_config::TableConfig;
 use std::collections::HashMap;
 
+/// Normalize a transaction `date` string into a canonical, lexicographically-sortable
+/// UTC key for the `DateSortIndex` GSI.
+///
+/// Raw RFC3339 strings are NOT safe to sort as strings: writers use mixed offsets
+/// (the desktop app stamps `-04:00`/`-05:00`, the MCP stamps `Z`) and variable
+/// fractional-second widths, so lexicographic order diverges from chronological
+/// order. Converting every value to fixed-width UTC nanoseconds (`...Z`) makes
+/// string order == chronological order.
+///
+/// Falls back to the raw string if the date cannot be parsed, so a malformed date
+/// never drops the row out of the GSI entirely.
+fn normalize_sort_date(date_str: &str) -> String {
+    match chrono::DateTime::parse_from_rfc3339(date_str) {
+        Ok(dt) => dt
+            .with_timezone(&chrono::Utc)
+            .to_rfc3339_opts(chrono::SecondsFormat::Nanos, true),
+        Err(_) => date_str.to_string(),
+    }
+}
+
 pub struct DynamoStore {
     client: Client,
     config: TableConfig,
@@ -211,11 +231,12 @@ impl DynamoStore {
             item.insert(sk_name.to_string(), AttributeValue::S(entity_id.to_string()));
         }
 
-        // For transactions, extract date from JSON and store as sort_date for GSI
+        // For transactions, extract date from JSON and store a normalized UTC
+        // sort_date for the DateSortIndex GSI (see normalize_sort_date).
         if matches!(entity_type, EntityType::Transaction) {
             if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(entity_json) {
                 if let Some(date_str) = parsed.get("date").and_then(|v| v.as_str()) {
-                    item.insert("sort_date".to_string(), AttributeValue::S(date_str.to_string()));
+                    item.insert("sort_date".to_string(), AttributeValue::S(normalize_sort_date(date_str)));
                 }
             }
         }
@@ -290,7 +311,7 @@ impl DynamoStore {
         if matches!(entity_type, EntityType::Transaction) {
             if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(entity_json) {
                 if let Some(date_str) = parsed.get("date").and_then(|v| v.as_str()) {
-                    entity_item.insert("sort_date".to_string(), AttributeValue::S(date_str.to_string()));
+                    entity_item.insert("sort_date".to_string(), AttributeValue::S(normalize_sort_date(date_str)));
                 }
             }
         }
@@ -661,5 +682,68 @@ impl DynamoStore {
                 Err(anyhow::anyhow!("Failed to update watermark: {}", e))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_sort_date;
+
+    /// The normalized key for any input must be fixed-width UTC ending in `Z`.
+    #[test]
+    fn normalizes_mixed_offsets_to_utc_z() {
+        assert_eq!(
+            normalize_sort_date("2026-05-16T12:00:00-04:00"),
+            "2026-05-16T16:00:00.000000000Z"
+        );
+        assert_eq!(
+            normalize_sort_date("2026-05-26T00:44:48.660447575Z"),
+            "2026-05-26T00:44:48.660447575Z"
+        );
+    }
+
+    /// Regression: raw RFC3339 strings with mixed offsets sort wrong; normalized keys
+    /// sort chronologically. The desktop app stamps Eastern offsets while the MCP
+    /// stamps UTC `Z`, which is what let a stale row be treated as "latest".
+    #[test]
+    fn normalized_keys_sort_chronologically() {
+        // True chronological order (earliest -> latest):
+        //   A = 2026-05-16T12:00 -04:00  == 16:00Z
+        //   B = 2026-05-25T08:00 -05:00  == 13:00Z (2026-05-25)
+        //   C = 2026-05-26T00:44Z
+        let a = "2026-05-16T12:00:00-04:00";
+        let b = "2026-05-25T08:00:57-05:00";
+        let c = "2026-05-26T00:44:48.660447575Z";
+
+        let mut norm = vec![
+            normalize_sort_date(c),
+            normalize_sort_date(a),
+            normalize_sort_date(b),
+        ];
+        norm.sort(); // lexicographic
+        assert_eq!(
+            norm,
+            vec![
+                normalize_sort_date(a),
+                normalize_sort_date(b),
+                normalize_sort_date(c)
+            ],
+            "normalized keys must sort in true chronological order"
+        );
+    }
+
+    /// Same wall-clock instant expressed in different zones must produce equal keys,
+    /// so offset choice never changes ordering.
+    #[test]
+    fn same_instant_different_zones_are_equal() {
+        assert_eq!(
+            normalize_sort_date("2026-05-16T12:00:00-04:00"),
+            normalize_sort_date("2026-05-16T16:00:00+00:00"),
+        );
+    }
+
+    #[test]
+    fn unparseable_date_falls_back_to_raw() {
+        assert_eq!(normalize_sort_date("not-a-date"), "not-a-date");
     }
 }
