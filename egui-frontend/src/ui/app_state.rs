@@ -214,6 +214,30 @@ impl AllowanceTrackerApp {
         })
     }
 
+    /// Construct an app instance directly from a `Backend`, bypassing the
+    /// eframe `CreationContext` (fonts, image loaders, sync-thread wiring)
+    /// that `new` requires. For tests that exercise app-level logic without a
+    /// live egui context. Sync is disabled.
+    #[cfg(test)]
+    pub fn new_for_test(backend: Backend) -> Self {
+        Self {
+            core: CoreAppState::new(backend),
+            ui: UIState::new(),
+            calendar: CalendarState::new(),
+            modal: ModalState::new(),
+            form: FormState::new(),
+            interaction: InteractionState::new(),
+            table: TableState::new(),
+            chart: ChartState::new(),
+            goal: GoalUiState::new(),
+            settings: crate::ui::components::settings::SettingsState::new(),
+            sync: SyncUiState::new(),
+            sync_command_tx: None,
+            sync_thread: None,
+            was_focused: true,
+        }
+    }
+
     // TEMPORARY: Getter methods for backward compatibility
     pub fn backend(&self) -> &Backend {
         &self.core.backend

@@ -46,7 +46,18 @@ impl Backend {
     pub fn new(sync_notifier: Option<SyncNotifier>) -> Result<Self> {
         // Use the real data directory in ~/Documents/Allowance Tracker
         let data_path = Self::default_data_dir()?;
+        Self::with_data_dir(data_path, sync_notifier)
+    }
 
+    /// Create a backend rooted at a specific data directory.
+    ///
+    /// [`Backend::new`] delegates here with the default
+    /// `~/Documents/Allowance Tracker` path. Tests use it to run against a
+    /// temporary directory instead of touching real user data.
+    pub fn with_data_dir(
+        data_path: std::path::PathBuf,
+        sync_notifier: Option<SyncNotifier>,
+    ) -> Result<Self> {
         // Load email config path before moving data_path
         let email_config_path = data_path.join("email_config.toml");
 

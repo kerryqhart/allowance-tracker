@@ -643,12 +643,19 @@ impl AllowanceTrackerApp {
                 Ok(count) => {
                     if count > 0 {
                         log::info!("Periodic refresh: Issued {} pending allowances", count);
-                        
-                        // Reload calendar data to show the new allowance transactions immediately
-                        // This ensures the calendar view updates without requiring manual navigation
-                        log::info!("Reloading calendar data to show new allowances");
+
+                        // Reload every transaction-derived view so the new
+                        // allowance transactions show up immediately without a
+                        // restart: the header balance, the calendar, the goal
+                        // progress, and the chart. (Deliberately not the table —
+                        // reloading it would reset the user's scroll position and
+                        // pagination mid-session.)
+                        log::info!("Reloading balance, calendar, goal, and chart to show new allowances");
+                        self.load_balance();
                         self.load_calendar_data();
-                        
+                        self.load_goal_data();
+                        self.load_chart_data();
+
                         // Optionally show a success message to the user
                         // self.ui.set_success_message(format!("Issued {} allowances!", count));
                     } else {
@@ -664,5 +671,84 @@ impl AllowanceTrackerApp {
             // Mark that we just performed a refresh (updates the timestamp)
             self.ui.mark_allowance_refresh();
         }
+    }
+}
+
+#[cfg(test)]
+mod refresh_allowance_tests {
+    use crate::ui::app_state::AllowanceTrackerApp;
+    use crate::backend::Backend;
+    use crate::backend::domain::commands::child::{CreateChildCommand, SetActiveChildCommand};
+    use crate::backend::domain::commands::allowance::UpdateAllowanceConfigCommand;
+    use chrono::Datelike;
+
+    /// Regression test: when the periodic allowance refresh issues new
+    /// allowance transactions, the header balance (`current_balance`) must be
+    /// reloaded — not left stale until the next app restart.
+    ///
+    /// Reproduces the bug where `refresh_allowances` reloaded the calendar but
+    /// not the balance, so the top-of-screen balance stayed stale after a
+    /// background allowance was issued.
+    #[test]
+    fn refresh_allowances_reloads_stale_header_balance() {
+        let temp = tempfile::TempDir::new().expect("temp dir");
+        let backend = Backend::with_data_dir(temp.path().to_path_buf(), None)
+            .expect("backend on temp dir");
+
+        // Seed a child and make it active.
+        let child = backend
+            .child_service
+            .create_child(CreateChildCommand {
+                name: "Test Kid".to_string(),
+                birthdate: "2015-01-01".to_string(),
+            })
+            .expect("create child")
+            .child;
+        backend
+            .child_service
+            .set_active_child(SetActiveChildCommand { child_id: child.id.clone() })
+            .expect("set active child");
+
+        // Configure an active allowance due today, so the periodic check has
+        // at least one pending allowance to issue.
+        let today = chrono::Local::now().date_naive();
+        backend
+            .allowance_service
+            .update_allowance_config(UpdateAllowanceConfigCommand {
+                child_id: Some(child.id.clone()),
+                amount: 10.0,
+                day_of_week: today.weekday().num_days_from_sunday() as u8,
+                is_active: true,
+                use_age_based_amount: false,
+            })
+            .expect("configure allowance");
+
+        let mut app = AllowanceTrackerApp::new_for_test(backend);
+
+        // Simulate a stale header balance left over from before the background
+        // allowance was issued.
+        app.core.current_balance = 999.0;
+
+        // Run the periodic refresh. A fresh app has never refreshed, so
+        // `should_refresh_allowances()` returns true and the issuance path runs.
+        app.refresh_allowances();
+
+        // The store now reflects the issued allowance(s)...
+        let store_balance = app
+            .backend()
+            .balance_service
+            .get_current_balance(&child.id)
+            .expect("store balance");
+        assert!(
+            store_balance > 0.0,
+            "precondition: allowance issuance should have changed the store balance"
+        );
+
+        // ...and the in-memory header balance must match it, not the stale value.
+        assert_eq!(
+            app.current_balance(),
+            store_balance,
+            "header balance was not reloaded after background allowance issuance"
+        );
     }
 } 
