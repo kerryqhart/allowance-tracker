@@ -44,22 +44,24 @@ impl DataDirectoryService {
             response.active_child.child.ok_or_else(|| anyhow::anyhow!("No active child found"))?.id
         };
 
-        // Get the child's name (CSV connection expects name, not ID)
+        // Fetch the child to confirm it exists and to log a friendly name. The
+        // on-disk directory name is the child's id (the sanitized/"safe" name),
+        // NOT the display name, so all path resolution below uses `child_id_to_use`.
         let child = self.child_service.get_child(crate::backend::domain::commands::child::GetChildCommand {
             child_id: child_id_to_use.clone(),
         })?;
-        
+
         let child_name = match child.child {
             Some(child) => child.name,
             None => return Err(anyhow::anyhow!("Child not found: {}", child_id_to_use)),
         };
 
-        let current_path = self.csv_connection.get_child_directory(&child_name);
+        let current_path = self.csv_connection.get_child_directory(&child_id_to_use);
         let path_str = current_path.to_string_lossy().to_string();
 
         // Check if this location is via a redirect file
         let base_dir = self.csv_connection.base_directory();
-        let default_child_dir = base_dir.join(&child_name);
+        let default_child_dir = base_dir.join(&child_id_to_use);
         let redirect_file = default_child_dir.join(".allowance_redirect");
         let is_redirected = redirect_file.exists();
 
@@ -85,18 +87,20 @@ impl DataDirectoryService {
             response.active_child.child.ok_or_else(|| anyhow::anyhow!("No active child found"))?.id
         };
 
-        // Get the child's name (CSV connection expects name, not ID)
+        // Fetch the child to confirm it exists and to log a friendly name. The
+        // CSV layer resolves the directory by its name, which is the child's id
+        // (the sanitized/"safe" form), so we pass `child_id_to_use` below.
         let child = self.child_service.get_child(crate::backend::domain::commands::child::GetChildCommand {
             child_id: child_id_to_use.clone(),
         })?;
-        
+
         let child_name = match child.child {
             Some(child) => child.name,
             None => return Err(anyhow::anyhow!("Child not found: {}", child_id_to_use)),
         };
 
         info!("About to call csv_connection.relocate_child_data_directory with child '{}' (name: '{}') and path: {}", child_id_to_use, child_name, request.new_path);
-        match self.csv_connection.relocate_child_data_directory(&child_name, &request.new_path) {
+        match self.csv_connection.relocate_child_data_directory(&child_id_to_use, &request.new_path) {
             Ok(message) => {
                 info!("Data directory relocation successful for child '{}'", child_id_to_use);
                 Ok(RelocateDataDirectoryResponse {
@@ -133,23 +137,26 @@ impl DataDirectoryService {
             response.active_child.child.ok_or_else(|| anyhow::anyhow!("No active child found"))?.id
         };
 
-        // Get the child's name (CSV connection expects name, not ID)
+        // Fetch the child to confirm it exists and to log a friendly name. Path
+        // resolution uses `child_id_to_use` because the on-disk directory name is
+        // the child's id (the sanitized/"safe" name), not the display name.
         let child = self.child_service.get_child(crate::backend::domain::commands::child::GetChildCommand {
             child_id: child_id_to_use.clone(),
         })?;
-        
+
         let child_name = match child.child {
             Some(child) => child.name,
             None => return Err(anyhow::anyhow!("Child not found: {}", child_id_to_use)),
         };
+        info!("Reverting data directory for child '{}' (name: '{}')", child_id_to_use, child_name);
 
         // Check if there's actually a redirect file
         let base_dir = self.csv_connection.base_directory();
-        let default_child_dir = base_dir.join(&child_name);
+        let default_child_dir = base_dir.join(&child_id_to_use);
         let redirect_file = default_child_dir.join(".allowance_redirect");
         let was_redirected = redirect_file.exists();
 
-        match self.csv_connection.revert_child_data_directory(&child_name) {
+        match self.csv_connection.revert_child_data_directory(&child_id_to_use) {
             Ok(message) => {
                 info!("Data directory revert successful for child '{}'", child_id_to_use);
                 Ok(RevertDataDirectoryResponse {
@@ -280,23 +287,14 @@ impl DataDirectoryService {
             }
             ConflictResolution::UseTargetData => {
                 info!("Using target data and archiving current data");
-                
-                // Get the child's name first (needed for directory operations)
-                let child = self.child_service.get_child(crate::backend::domain::commands::child::GetChildCommand {
-                    child_id: child_id_to_use.clone(),
-                })?;
-                
-                let child_name = match child.child {
-                    Some(child) => child.name,
-                    None => return Err(anyhow::anyhow!("Child not found: {}", child_id_to_use)),
-                };
-                
+
                 // Archive current data first
                 let archive_path = self.archive_current_data(&child_id_to_use)?;
-                
-                // Create redirect to target location
+
+                // Create redirect to target location. The child's on-disk
+                // directory name is its id (the sanitized/"safe" name).
                 let base_dir = self.csv_connection.base_directory();
-                let default_child_dir = base_dir.join(&child_name);
+                let default_child_dir = base_dir.join(&child_id_to_use);
                 let redirect_file = default_child_dir.join(".allowance_redirect");
                 
                 // Clear default directory (except .git)
@@ -346,17 +344,18 @@ impl DataDirectoryService {
     fn archive_current_data(&self, child_id: &str) -> Result<String> {
         info!("Archiving current data for child: {}", child_id);
         
-        // Get the child's name (CSV connection expects name, not ID)
+        // Fetch the child for a friendly archive-folder label. Directory lookup
+        // uses the child's id, which is the on-disk (sanitized/"safe") name.
         let child = self.child_service.get_child(crate::backend::domain::commands::child::GetChildCommand {
             child_id: child_id.to_string(),
         })?;
-        
+
         let child_name = match child.child {
             Some(child) => child.name,
             None => return Err(anyhow::anyhow!("Child not found: {}", child_id)),
         };
-        
-        let current_data_dir = self.csv_connection.get_child_directory(&child_name);
+
+        let current_data_dir = self.csv_connection.get_child_directory(child_id);
         let base_dir = self.csv_connection.base_directory();
         let archive_base = base_dir.join("archive");
         
@@ -482,18 +481,19 @@ impl DataDirectoryService {
             response.active_child.child.ok_or_else(|| anyhow::anyhow!("No active child found"))?.id
         };
 
-        // Get the child's name (CSV connection expects name, not ID)
+        // Fetch the child to confirm it exists and for friendly log messages.
+        // Directory lookup uses the child's id (the on-disk sanitized/"safe" name).
         let child = self.child_service.get_child(crate::backend::domain::commands::child::GetChildCommand {
             child_id: child_id_to_use.clone(),
         })?;
-        
+
         let child_name = match child.child {
             Some(child) => child.name,
             None => return Err(anyhow::anyhow!("Child not found: {}", child_id_to_use)),
         };
 
         let base_dir = self.csv_connection.base_directory();
-        let default_child_dir = base_dir.join(&child_name);
+        let default_child_dir = base_dir.join(&child_id_to_use);
         let redirect_file = default_child_dir.join(".allowance_redirect");
 
         // Check if there's actually a redirect file
@@ -626,5 +626,126 @@ impl DataDirectoryService {
             message: format!("Data successfully returned to default location. Redirected data remains at: {}", redirected_path.display()),
             default_path,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backend::domain::models::child::Child as DomainChild;
+    use crate::backend::storage::csv::ChildRepository;
+    use crate::backend::storage::traits::ChildStorage;
+    use std::sync::Arc;
+    use tempfile::TempDir;
+
+    /// Build a `DataDirectoryService` over a fresh temp base directory and store
+    /// one child whose *display name* differs from its on-disk *directory name*.
+    ///
+    /// The on-disk directory name equals the child's id (enforced by
+    /// `ChildRepository`), which is the sanitized/"safe" form of the name — e.g.
+    /// "Keiko Hart" is stored in a directory called `keiko_hart`. This mismatch
+    /// is exactly the condition that broke directory relocation in the real app.
+    ///
+    /// Returns `(service, temp_dir, child_id)`. `child_id` is also the on-disk
+    /// directory name. `temp_dir` is returned so the caller keeps it alive.
+    fn service_with_child(display_name: &str) -> (DataDirectoryService, TempDir, String) {
+        let temp_dir = TempDir::new().unwrap();
+        let connection = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
+        let child_service = Arc::new(ChildService::new(connection.clone(), None));
+        let service = DataDirectoryService::new(connection.clone(), child_service);
+
+        let child_id = CsvConnection::generate_safe_directory_name(display_name);
+        let child = DomainChild {
+            id: child_id.clone(),
+            name: display_name.to_string(),
+            birthdate: chrono::NaiveDate::parse_from_str("2010-01-01", "%Y-%m-%d").unwrap(),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+        ChildRepository::new(connection).store_child(&child).unwrap();
+
+        (service, temp_dir, child_id)
+    }
+
+    #[test]
+    fn get_current_directory_resolves_real_dir_for_display_name_with_space() {
+        let (service, temp_dir, child_id) = service_with_child("Keiko Hart");
+
+        let resp = service
+            .get_current_directory(Some(child_id.clone()))
+            .unwrap();
+
+        // Must point at the child's real on-disk folder ("keiko_hart"), never at
+        // the raw display name ("Keiko Hart"), which is never created on disk.
+        let expected = temp_dir.path().join(&child_id);
+        assert_eq!(resp.current_path, expected.to_string_lossy());
+        assert!(!resp.is_redirected);
+    }
+
+    #[test]
+    fn relocate_directory_succeeds_for_display_name_with_space() {
+        let (service, temp_dir, child_id) = service_with_child("Keiko Hart");
+        let target = temp_dir.path().join("relocated");
+
+        let resp = service
+            .relocate_directory(RelocateDataDirectoryRequest {
+                child_id: Some(child_id.clone()),
+                new_path: target.to_string_lossy().to_string(),
+            })
+            .unwrap();
+
+        assert!(resp.success, "relocate should succeed but failed: {}", resp.message);
+        // The redirect marker is written into the child's real directory...
+        let redirect = temp_dir.path().join(&child_id).join(".allowance_redirect");
+        assert!(redirect.exists(), "redirect file should be created in the child's real directory");
+        // ...and the data lands at the target.
+        assert!(target.join("child.yaml").exists(), "child.yaml should be copied to the new location");
+    }
+
+    #[test]
+    fn get_current_directory_reports_redirect_after_relocate() {
+        let (service, temp_dir, child_id) = service_with_child("Keiko Hart");
+        let target = temp_dir.path().join("relocated");
+        service
+            .relocate_directory(RelocateDataDirectoryRequest {
+                child_id: Some(child_id.clone()),
+                new_path: target.to_string_lossy().to_string(),
+            })
+            .unwrap();
+
+        let resp = service.get_current_directory(Some(child_id)).unwrap();
+
+        assert!(resp.is_redirected, "should report redirected after relocate");
+        assert_eq!(resp.current_path, target.to_string_lossy());
+    }
+
+    #[test]
+    fn relocate_then_revert_round_trips_for_display_name_with_space() {
+        let (service, temp_dir, child_id) = service_with_child("Keiko Hart");
+        let target = temp_dir.path().join("relocated");
+
+        let relocated = service
+            .relocate_directory(RelocateDataDirectoryRequest {
+                child_id: Some(child_id.clone()),
+                new_path: target.to_string_lossy().to_string(),
+            })
+            .unwrap();
+        assert!(relocated.success, "relocate failed: {}", relocated.message);
+
+        let reverted = service
+            .revert_directory(RevertDataDirectoryRequest {
+                child_id: Some(child_id.clone()),
+            })
+            .unwrap();
+        assert!(reverted.success, "revert failed: {}", reverted.message);
+        assert!(reverted.was_redirected, "expected was_redirected = true");
+
+        // Redirect gone, data back at the default location.
+        let redirect = temp_dir.path().join(&child_id).join(".allowance_redirect");
+        assert!(!redirect.exists(), "redirect file should be removed after revert");
+
+        let resp = service.get_current_directory(Some(child_id.clone())).unwrap();
+        assert!(!resp.is_redirected, "should not be redirected after revert");
+        assert_eq!(resp.current_path, temp_dir.path().join(&child_id).to_string_lossy());
     }
 } 
