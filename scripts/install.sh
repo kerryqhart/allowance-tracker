@@ -59,6 +59,28 @@ if [ ! -d "$BUILT_APP" ]; then
   exit 1
 fi
 
+echo "==> Embedding app icon (.icns) into the bundle"
+# cargo-bundle 0.9 does not populate Contents/Resources (it drops neither the
+# icon nor other resources), so the .app would show a generic Finder icon —
+# most visibly when copied to another machine or a cloud drive. Embed the
+# pre-generated icon (see scripts/make-icon.sh) and point Info.plist at it.
+# (This is separate from the running app's Dock tile, which eframe sets at
+# runtime from egui-frontend/assets/app-icon.png.)
+ICNS_SRC="$REPO_ROOT/egui-frontend/assets/AppIcon.icns"
+if [ -f "$ICNS_SRC" ]; then
+  mkdir -p "$BUILT_APP/Contents/Resources"
+  cp "$ICNS_SRC" "$BUILT_APP/Contents/Resources/AppIcon.icns"
+  PLIST="$BUILT_APP/Contents/Info.plist"
+  if /usr/libexec/PlistBuddy -c "Set :CFBundleIconFile AppIcon" "$PLIST" 2>/dev/null; then
+    :
+  else
+    /usr/libexec/PlistBuddy -c "Add :CFBundleIconFile string AppIcon" "$PLIST"
+  fi
+else
+  echo "warning: $ICNS_SRC not found — run scripts/make-icon.sh." >&2
+  echo "         The bundle will fall back to a generic Finder icon." >&2
+fi
+
 echo "==> Normalizing permissions on the built bundle"
 chmod -R a+rX "$BUILT_APP"
 
@@ -82,6 +104,14 @@ echo "==> Normalizing permissions on the installed bundle"
 # Re-apply at the destination: this is the copy other users run, and it's
 # the copy iCloud can leave owner-only.
 chmod -R a+rX "$DEST_APP"
+
+# Nudge Launch Services so Finder/Dock refresh the icon instead of showing a
+# stale cached one. Harmless if it fails.
+LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+if [ -x "$LSREGISTER" ]; then
+  echo "==> Refreshing Launch Services (icon cache)"
+  "$LSREGISTER" -f "$DEST_APP" || true
+fi
 
 echo "==> Done."
 echo "    Installed: $DEST_APP"
