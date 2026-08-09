@@ -92,6 +92,18 @@ The application will create data files in your user directory automatically on f
   cargo build --release
   ```
 
+- **Build the macOS `.app` and install it (shareable):**
+  ```bash
+  scripts/install.sh                 # build + install to /Applications (all users)
+  scripts/install.sh "/some/dir"     # or install into a specific directory
+  scripts/install.sh -               # build only (fix perms, don't install)
+  ```
+  This runs `cargo bundle` and then normalizes the bundle's permissions
+  (`chmod -R a+rX`). Without it the `.app` can be left owner-only (dir
+  `700`, binary `751` = execute-without-read) — so other user accounts on
+  the Mac, or an iCloud-synced copy, can't read or launch it. Installs to
+  `/Applications` by default. Requires `cargo install cargo-bundle`.
+
 ### Project Structure
 
 #### Frontend (`egui-frontend/`)
