@@ -1,4 +1,7 @@
 pub mod sync;
+pub mod child_id;
+
+pub use child_id::ChildId;
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
