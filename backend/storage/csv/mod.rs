@@ -27,6 +27,7 @@ pub mod allowance_repository;
 pub mod parental_control_repository;
 pub mod global_config_repository;
 pub mod goal_repository;
+pub mod child_registry;
 
 #[cfg(test)]
 pub mod test_utils;
@@ -38,3 +39,4 @@ pub use allowance_repository::AllowanceRepository;
 pub use parental_control_repository::ParentalControlRepository;
 pub use global_config_repository::{GlobalConfigRepository, GlobalConfig, GlobalConfigStorage};
 pub use goal_repository::GoalRepository;
+pub use child_registry::{ChildRegistry, RegistryEntry, REGISTRY_FILENAME};
