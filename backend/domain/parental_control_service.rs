@@ -136,15 +136,22 @@ mod tests {
     use super::*;
     use crate::backend::storage::csv::CsvConnection;
 
-    fn setup_test() -> ParentalControlService {
+    /// A parental-control service over a temp dir that stays alive.
+    ///
+    /// The `TempDir` is returned rather than dropped at the end of this
+    /// function. It used to be dropped immediately, deleting the base
+    /// directory out from under the test; `create_dir_all` on the write path
+    /// silently recreated it. That call is gone, so the directory now has to
+    /// actually exist.
+    fn setup_test() -> (ParentalControlService, tempfile::TempDir) {
         let temp_dir = tempfile::tempdir().unwrap();
         let db = Arc::new(CsvConnection::new(temp_dir.path()).expect("Failed to create test database"));
-        ParentalControlService::new(db)
+        (ParentalControlService::new(db), temp_dir)
     }
 
     #[test]
     fn test_correct_answer_validation() {
-        let service = setup_test();
+        let (service, _temp_dir) = setup_test();
         
         let command = ValidateParentalControlCommand {
             answer: "ice cold".to_string(),
@@ -157,7 +164,7 @@ mod tests {
 
     #[test]
     fn test_case_insensitive_validation() {
-        let service = setup_test();
+        let (service, _temp_dir) = setup_test();
         
         let test_cases = vec![
             "ICE COLD",
@@ -179,7 +186,7 @@ mod tests {
 
     #[test]
     fn test_whitespace_handling() {
-        let service = setup_test();
+        let (service, _temp_dir) = setup_test();
         
         let test_cases = vec![
             "  ice cold  ",
@@ -200,7 +207,7 @@ mod tests {
 
     #[test]
     fn test_incorrect_answer_validation() {
-        let service = setup_test();
+        let (service, _temp_dir) = setup_test();
         
         let test_cases = vec![
             "wrong answer",
@@ -225,7 +232,7 @@ mod tests {
 
     #[test]
     fn test_attempts_are_recorded() {
-        let service = setup_test();
+        let (service, _temp_dir) = setup_test();
         
         // Initially no attempts
         let initial_attempts = service.get_recent_attempts(None).unwrap();
@@ -258,7 +265,7 @@ mod tests {
 
     #[test]
     fn test_validation_stats() {
-        let service = setup_test();
+        let (service, _temp_dir) = setup_test();
         
         // Initially no stats
         let initial_stats = service.get_validation_stats().unwrap();

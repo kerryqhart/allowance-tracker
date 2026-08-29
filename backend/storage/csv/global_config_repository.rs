@@ -38,6 +38,8 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
+use shared::ChildId;
+
 use super::connection::CsvConnection;
 
 /// Global configuration structure
@@ -134,11 +136,12 @@ impl GlobalConfigRepository {
         Ok(())
     }
     
-    /// Validate that a child directory exists
-    fn validate_child_directory(&self, child_directory: &str) -> Result<bool> {
-        let child_dir_path = self.connection.get_child_directory(child_directory);
-        let child_yaml_path = child_dir_path.join("child.yaml");
-        Ok(child_yaml_path.exists())
+    /// Validate that the named child resolves to a real folder.
+    ///
+    /// `active_child_directory` now holds the child's **id**; the registry
+    /// maps it to a location and `child_dir` proves that location is there.
+    fn validate_child_directory(&self, child_id: &str) -> Result<bool> {
+        Ok(self.connection.child_dir(&ChildId::from(child_id)).is_ok())
     }
 }
 

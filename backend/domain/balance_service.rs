@@ -295,10 +295,27 @@ mod tests {
     use crate::backend::domain::models::transaction::{Transaction, TransactionType};
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    fn create_test_service() -> BalanceService {
+    /// A balance service over a temp dir, with one child already created
+    /// through the *same* connection.
+    ///
+    /// The child must exist before any transaction call: resolution goes
+    /// through the child registry now, so an unregistered child is an error
+    /// rather than a fabricated folder. The `TempDir` is returned so the base
+    /// directory stays alive for the duration of the test — it used to be
+    /// dropped immediately, and only `create_dir_all` on the read path hid
+    /// that the base directory had already been deleted.
+    fn create_test_service() -> (BalanceService, tempfile::TempDir, String) {
         let temp_dir = tempfile::tempdir().unwrap();
         let db = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
-        BalanceService::new(db)
+        let child_service =
+            crate::backend::domain::child_service::ChildService::new(db.clone(), None);
+        let child_result = child_service
+            .create_child(CreateChildCommand {
+                name: "Test Child".to_string(),
+                birthdate: "2015-01-01".to_string(),
+            })
+            .unwrap();
+        (BalanceService::new(db), temp_dir, child_result.child.id)
     }
 
     fn create_test_transaction(service: &BalanceService, child_id: &str, date: &str, description: &str, amount: f64, balance: f64) -> Transaction {
@@ -329,17 +346,8 @@ mod tests {
 
     #[test]
     fn test_calculate_starting_balance_with_previous_transaction() {
-        let service = create_test_service();
-        
-        // Create a child first
-        let temp_dir = tempfile::tempdir().unwrap();
-        let db = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
-        let child_service = crate::backend::domain::child_service::ChildService::new(db, None);
-        let child_result = child_service.create_child(CreateChildCommand {
-            name: "Test Child".to_string(),
-            birthdate: "2015-01-01".to_string(),
-        }).unwrap();
-        let child_id = &child_result.child.id;
+        let (service, _temp_dir, child_id) = create_test_service();
+        let child_id = &child_id;
 
         // Create a transaction before our target date
         create_test_transaction(&service, child_id, "2025-01-10T10:00:00-05:00", "Previous transaction", 50.0, 50.0);
@@ -350,17 +358,8 @@ mod tests {
 
     #[test]
     fn test_calculate_starting_balance_no_previous_transaction() {
-        let service = create_test_service();
-        
-        // Create a child first
-        let temp_dir = tempfile::tempdir().unwrap();
-        let db = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
-        let child_service = crate::backend::domain::child_service::ChildService::new(db, None);
-        let child_result = child_service.create_child(CreateChildCommand {
-            name: "Test Child".to_string(),
-            birthdate: "2015-01-01".to_string(),
-        }).unwrap();
-        let child_id = &child_result.child.id;
+        let (service, _temp_dir, child_id) = create_test_service();
+        let child_id = &child_id;
 
         let starting_balance = service.calculate_starting_balance(child_id, "2025-01-15T10:00:00-05:00").unwrap();
         assert_eq!(starting_balance, 0.0);
@@ -368,17 +367,8 @@ mod tests {
 
     #[test]
     fn test_calculate_balance_for_new_transaction() {
-        let service = create_test_service();
-        
-        // Create a child first
-        let temp_dir = tempfile::tempdir().unwrap();
-        let db = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
-        let child_service = crate::backend::domain::child_service::ChildService::new(db, None);
-        let child_result = child_service.create_child(CreateChildCommand {
-            name: "Test Child".to_string(),
-            birthdate: "2015-01-01".to_string(),
-        }).unwrap();
-        let child_id = &child_result.child.id;
+        let (service, _temp_dir, child_id) = create_test_service();
+        let child_id = &child_id;
 
         // Create a previous transaction
         create_test_transaction(&service, child_id, "2025-01-10T10:00:00-05:00", "Previous", 30.0, 30.0);
@@ -443,17 +433,8 @@ mod tests {
 
     #[test]
     fn test_requires_balance_recalculation() {
-        let service = create_test_service();
-        
-        // Create a child first
-        let temp_dir = tempfile::tempdir().unwrap();
-        let db = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
-        let child_service = crate::backend::domain::child_service::ChildService::new(db, None);
-        let child_result = child_service.create_child(CreateChildCommand {
-            name: "Test Child".to_string(),
-            birthdate: "2015-01-01".to_string(),
-        }).unwrap();
-        let child_id = &child_result.child.id;
+        let (service, _temp_dir, child_id) = create_test_service();
+        let child_id = &child_id;
 
         // Create a transaction after our test date
         create_test_transaction(&service, child_id, "2025-01-20T10:00:00-05:00", "Future transaction", 100.0, 100.0);
@@ -469,17 +450,8 @@ mod tests {
 
     #[test]
     fn test_validate_all_balances_correct() {
-        let service = create_test_service();
-        
-        // Create a child first
-        let temp_dir = tempfile::tempdir().unwrap();
-        let db = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
-        let child_service = crate::backend::domain::child_service::ChildService::new(db, None);
-        let child_result = child_service.create_child(CreateChildCommand {
-            name: "Test Child".to_string(),
-            birthdate: "2015-01-01".to_string(),
-        }).unwrap();
-        let child_id = &child_result.child.id;
+        let (service, _temp_dir, child_id) = create_test_service();
+        let child_id = &child_id;
 
         // Create transactions with correct balances
         create_test_transaction(&service, child_id, "2025-01-10T10:00:00-05:00", "First", 100.0, 100.0);
@@ -494,17 +466,8 @@ mod tests {
 
     #[test]
     fn test_validate_all_balances_incorrect() {
-        let service = create_test_service();
-        
-        // Create a child first
-        let temp_dir = tempfile::tempdir().unwrap();
-        let db = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
-        let child_service = crate::backend::domain::child_service::ChildService::new(db, None);
-        let child_result = child_service.create_child(CreateChildCommand {
-            name: "Test Child".to_string(),
-            birthdate: "2015-01-01".to_string(),
-        }).unwrap();
-        let child_id = &child_result.child.id;
+        let (service, _temp_dir, child_id) = create_test_service();
+        let child_id = &child_id;
 
         // Create transactions with intentionally incorrect balances
         create_test_transaction(&service, child_id, "2025-01-10T10:00:00-05:00", "First", 100.0, 100.0);
@@ -519,17 +482,8 @@ mod tests {
 
     #[test]
     fn test_calculate_projected_balance_for_transaction_no_history() {
-        let service = create_test_service();
-        
-        // Create a child first
-        let temp_dir = tempfile::tempdir().unwrap();
-        let db = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
-        let child_service = crate::backend::domain::child_service::ChildService::new(db, None);
-        let child_result = child_service.create_child(CreateChildCommand {
-            name: "Test Child".to_string(),
-            birthdate: "2015-01-01".to_string(),
-        }).unwrap();
-        let child_id = &child_result.child.id;
+        let (service, _temp_dir, child_id) = create_test_service();
+        let child_id = &child_id;
 
         // No previous transactions - first allowance should be the amount itself
         let projected_balance = service
@@ -541,17 +495,8 @@ mod tests {
 
     #[test]
     fn test_calculate_projected_balance_for_transaction_with_history() {
-        let service = create_test_service();
-        
-        // Create a child first
-        let temp_dir = tempfile::tempdir().unwrap();
-        let db = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
-        let child_service = crate::backend::domain::child_service::ChildService::new(db, None);
-        let child_result = child_service.create_child(CreateChildCommand {
-            name: "Test Child".to_string(),
-            birthdate: "2015-01-01".to_string(),
-        }).unwrap();
-        let child_id = &child_result.child.id;
+        let (service, _temp_dir, child_id) = create_test_service();
+        let child_id = &child_id;
 
         // Create some historical transactions
         create_test_transaction(&service, child_id, "2025-07-01T12:00:00+00:00", "Previous allowance", 10.0, 10.0);
@@ -567,17 +512,8 @@ mod tests {
 
     #[test]
     fn test_calculate_projected_balance_for_transaction_mid_month() {
-        let service = create_test_service();
-        
-        // Create a child first
-        let temp_dir = tempfile::tempdir().unwrap();
-        let db = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
-        let child_service = crate::backend::domain::child_service::ChildService::new(db, None);
-        let child_result = child_service.create_child(CreateChildCommand {
-            name: "Test Child".to_string(),
-            birthdate: "2015-01-01".to_string(),
-        }).unwrap();
-        let child_id = &child_result.child.id;
+        let (service, _temp_dir, child_id) = create_test_service();
+        let child_id = &child_id;
 
         // Create transactions across multiple weeks
         create_test_transaction(&service, child_id, "2025-07-04T12:00:00+00:00", "Week 1 allowance", 10.0, 10.0);
@@ -594,17 +530,8 @@ mod tests {
 
     #[test]
     fn test_calculate_projected_balance_for_transaction_same_day_earlier() {
-        let service = create_test_service();
-        
-        // Create a child first
-        let temp_dir = tempfile::tempdir().unwrap();
-        let db = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
-        let child_service = crate::backend::domain::child_service::ChildService::new(db, None);
-        let child_result = child_service.create_child(CreateChildCommand {
-            name: "Test Child".to_string(),
-            birthdate: "2015-01-01".to_string(),
-        }).unwrap();
-        let child_id = &child_result.child.id;
+        let (service, _temp_dir, child_id) = create_test_service();
+        let child_id = &child_id;
 
         // Create early morning spending transaction
         create_test_transaction(&service, child_id, "2025-07-18T08:00:00+00:00", "Early spending", -2.0, -2.0);
@@ -622,17 +549,8 @@ mod tests {
 
     #[test]
     fn test_calculate_projected_balance_for_transaction_complex_scenario() {
-        let service = create_test_service();
-        
-        // Create a child first
-        let temp_dir = tempfile::tempdir().unwrap();
-        let db = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
-        let child_service = crate::backend::domain::child_service::ChildService::new(db, None);
-        let child_result = child_service.create_child(CreateChildCommand {
-            name: "Test Child".to_string(),
-            birthdate: "2015-01-01".to_string(),
-        }).unwrap();
-        let child_id = &child_result.child.id;
+        let (service, _temp_dir, child_id) = create_test_service();
+        let child_id = &child_id;
 
         // Create a complex history that mimics real allowance scenario
         create_test_transaction(&service, child_id, "2025-06-27T12:00:00+00:00", "June Week 4", 10.0, 10.0);

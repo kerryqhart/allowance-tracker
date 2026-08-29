@@ -5,6 +5,7 @@ use log::warn;
 use serde::{Deserialize, Serialize};
 use std::fs::{self};
 use std::io::BufWriter;
+use shared::ChildId;
 use super::connection::CsvConnection;
 
 /// CSV record structure for goals
@@ -69,7 +70,7 @@ impl GoalRepository {
     }
 
     fn read_goals(&self, child_id: &str) -> Result<Vec<DomainGoal>> {
-        let file_path = self.connection.get_goals_file_path(child_id);
+        let file_path = self.connection.goals_path(&ChildId::from(child_id))?;
         if !file_path.exists() {
             return Ok(Vec::new());
         }
@@ -91,12 +92,10 @@ impl GoalRepository {
     }
 
     fn write_goals(&self, child_id: &str, goals: &[DomainGoal]) -> Result<()> {
-        let file_path = self.connection.get_goals_file_path(child_id);
-
-        // Ensure the parent directory exists
-        if let Some(parent) = file_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
+        // No `create_dir_all` here: `goals_path` resolves through the registry
+        // and has already proven the child's folder is present. Creating it
+        // would be manufacturing a folder for a child whose data is elsewhere.
+        let file_path = self.connection.goals_path(&ChildId::from(child_id))?;
 
         let file = fs::File::create(&file_path)?;
         let mut wtr = csv::Writer::from_writer(BufWriter::new(file));

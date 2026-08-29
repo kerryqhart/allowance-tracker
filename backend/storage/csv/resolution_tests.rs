@@ -47,7 +47,6 @@ fn subdirs(helper: &TestHelper) -> BTreeSet<String> {
 }
 
 #[test]
-#[ignore = "fixed by the registry cutover in Task 9"]
 fn transactions_land_in_the_folder_the_id_names() {
     let helper = TestHelper::new().unwrap();
     let child = helper
@@ -84,7 +83,6 @@ fn transactions_land_in_the_folder_the_id_names() {
 }
 
 #[test]
-#[ignore = "fixed by the registry cutover in Task 9"]
 fn renaming_a_child_does_not_move_or_lose_their_transactions() {
     let helper = TestHelper::new().unwrap();
     let mut child = helper
@@ -285,7 +283,6 @@ fn parental_control_attempts_land_in_the_folder_the_id_names() {
 }
 
 #[test]
-#[ignore = "fixed by the registry cutover in Task 9"]
 fn reading_a_child_with_a_missing_folder_creates_nothing() {
     let helper = TestHelper::new().unwrap();
     let child = helper

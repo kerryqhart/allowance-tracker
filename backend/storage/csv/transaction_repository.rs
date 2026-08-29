@@ -12,6 +12,7 @@ use super::connection::CsvConnection;
 use super::child_repository::ChildRepository;
 use crate::backend::storage::ChildStorage;
 use crate::backend::storage::GitManager;
+use shared::ChildId;
 
 /// CSV-based transaction repository
 #[derive(Clone)]
@@ -32,12 +33,16 @@ impl TransactionRepository {
         }
     }
     
-    /// Read all transactions for a child from their CSV file
-    fn read_transactions(&self, child_name: &str) -> Result<Vec<DomainTransaction>> {
-        self.connection.ensure_transactions_file_exists(child_name)?;
-        
-        let file_path = self.connection.get_transactions_file_path(child_name);
-        
+    /// Read all transactions for a child from their CSV file.
+    ///
+    /// Resolution is by immutable id through the registry. It used to derive
+    /// the folder from the child's *display name*, so a rename silently
+    /// resolved elsewhere and the history read back as empty.
+    fn read_transactions(&self, child_id: &ChildId) -> Result<Vec<DomainTransaction>> {
+        self.connection.ensure_transactions_file_exists(child_id)?;
+
+        let file_path = self.connection.transactions_path(child_id)?;
+
         let file = File::open(&file_path)?;
         let reader = BufReader::new(file);
         let mut csv_reader = Reader::from_reader(reader);
@@ -126,8 +131,8 @@ impl TransactionRepository {
     }
     
     /// Write all transactions for a child to their CSV file (internal, no git commit)
-    fn write_transactions_internal(&self, child_name: &str, transactions: &[DomainTransaction]) -> Result<()> {
-        let file_path = self.connection.get_transactions_file_path(child_name);
+    fn write_transactions_internal(&self, child_id: &ChildId, transactions: &[DomainTransaction]) -> Result<()> {
+        let file_path = self.connection.transactions_path(child_id)?;
 
         let file = OpenOptions::new()
             .write(true)
@@ -165,11 +170,11 @@ impl TransactionRepository {
     }
 
     /// Write all transactions and commit to git (for user-facing operations)
-    fn write_transactions(&self, child_name: &str, transactions: &[DomainTransaction]) -> Result<()> {
-        self.write_transactions_internal(child_name, transactions)?;
+    fn write_transactions(&self, child_id: &ChildId, transactions: &[DomainTransaction]) -> Result<()> {
+        self.write_transactions_internal(child_id, transactions)?;
 
         // Git commit the transaction file change
-        let child_dir = self.connection.get_child_directory(child_name);
+        let child_dir = self.connection.child_dir(child_id)?;
         let action_description = format!("Updated transactions (total: {})", transactions.len());
         let _ = self.git_manager.commit_file_change(
             &child_dir,
@@ -179,53 +184,9 @@ impl TransactionRepository {
 
         Ok(())
     }
-    
-    /// Helper method to get child directory name from child ID
-    /// This looks up the actual child and generates a safe directory name
-    fn get_child_directory_name(&self, child_id: &str) -> Result<String> {
-        // Look up the child by ID to get their actual name
-        match self.child_repository.get_child(child_id)? {
-            Some(child) => {
-                // Use the centralized safe directory name generation
-                Ok(CsvConnection::generate_safe_directory_name(&child.name))
-            }
-            None => {
-                // Child not found - this shouldn't happen in normal operation
-                // Return a fallback, but log a warning
-                warn!("Child not found for ID: {}. Using fallback directory name.", child_id);
-                Ok(format!("unknown_child_{}", 
-                    child_id.chars()
-                        .filter(|c| c.is_alphanumeric())
-                        .take(10)
-                        .collect::<String>()
-                        .to_lowercase()
-                ))
-            }
-        }
-    }
-
-
 }
 
 impl TransactionRepository {
-    /// Read transactions using child_id, extracting child name
-    pub fn read_transactions_by_id(&self, child_id: &str) -> Result<Vec<DomainTransaction>> {
-        let child_name = self.get_child_directory_name(child_id)?;
-        self.read_transactions(&child_name)
-    }
-    
-    /// Write transactions using child_id, extracting child name (with git commit)
-    pub fn write_transactions_by_id(&self, child_id: &str, transactions: &[DomainTransaction]) -> Result<()> {
-        let child_name = self.get_child_directory_name(child_id)?;
-        self.write_transactions(&child_name, transactions)
-    }
-
-    /// Write transactions using child_id without git commit (for internal batch operations)
-    fn write_transactions_by_id_internal(&self, child_id: &str, transactions: &[DomainTransaction]) -> Result<()> {
-        let child_name = self.get_child_directory_name(child_id)?;
-        self.write_transactions_internal(&child_name, transactions)
-    }
-    
     /// Compare two DateTime objects properly handling timezone conversion
     fn compare_dates(&self, date1: &chrono::DateTime<chrono::FixedOffset>, date2: &str) -> i32 {
         // Parse date2 as string (for backwards compatibility with query parameters)
@@ -239,67 +200,41 @@ impl TransactionRepository {
         }
     }
     
-    /// Compare two DateTime objects directly  
-    fn compare_datetime_objects(&self, date1: &chrono::DateTime<chrono::FixedOffset>, date2: &chrono::DateTime<chrono::FixedOffset>) -> i32 {
-        if *date1 < *date2 { -1 } else if *date1 > *date2 { 1 } else { 0 }
-    }
-
-
-    
-    /// Store transaction with explicit child name (preferred method)
-    pub fn store_transaction_with_child_name(&self, transaction: &DomainTransaction, child_name: &str) -> Result<()> {
-        info!("Storing transaction in CSV for child '{}': {}", child_name, transaction.id);
-        
-        // Read existing transactions using child name
-        let mut transactions = self.read_transactions(child_name)?;
-        
-        // For now, just add the transaction - timestamp conflicts will be handled by the domain layer
-        transactions.push(transaction.clone());
-        
-        // Sort by date to maintain chronological order
-        transactions.sort_by(|a, b| self.compare_datetime_objects(&a.date, &b.date).cmp(&0));
-        
-        // Write back to file using child name
-        self.write_transactions(child_name, &transactions)?;
-        
-        info!("Successfully stored transaction for child '{}': {}", child_name, transaction.id);
-        Ok(())
-    }
-    
     /// Helper method to get all child IDs
-    fn get_all_child_ids(&self) -> Result<Vec<String>> {
+    fn get_all_child_ids(&self) -> Result<Vec<ChildId>> {
         // Get all children from the child repository
         let children = self.child_repository.list_children()?;
-        let child_ids: Vec<String> = children.into_iter().map(|child| child.id).collect();
-        Ok(child_ids)
+        Ok(children
+            .into_iter()
+            .map(|child| ChildId::from(child.id))
+            .collect())
     }
-    
+
     /// Find which child a transaction belongs to by searching through all child directories
-    fn find_child_id_for_transaction(&self, transaction_id: &str) -> Result<Option<String>> {
+    fn find_child_id_for_transaction(&self, transaction_id: &str) -> Result<Option<ChildId>> {
         let child_ids = self.get_all_child_ids()?;
-        
+
         for child_id in child_ids {
-            let transactions = self.read_transactions_by_id(&child_id)?;
+            let transactions = self.read_transactions(&child_id)?;
             if transactions.iter().any(|t| t.id == transaction_id) {
                 return Ok(Some(child_id));
             }
         }
-        
+
         Ok(None)
     }
 }
 
 impl crate::backend::storage::TransactionStorage for TransactionRepository {
     fn store_transaction(&self, transaction: &DomainTransaction) -> Result<()> {
-        // Convert child ID to child name for directory lookup
-        let child_name = self.get_child_directory_name(&transaction.child_id)?;
-        let mut transactions = self.read_transactions(&child_name)?;
+        let child_id = ChildId::from(transaction.child_id.as_str());
+        let mut transactions = self.read_transactions(&child_id)?;
         if let Some(pos) = transactions.iter().position(|t| t.id == transaction.id) {
             transactions[pos] = transaction.clone();
         } else {
             transactions.push(transaction.clone());
         }
-        self.write_transactions(&child_name, &transactions)
+        self.write_transactions(&child_id, &transactions)
     }
 
     fn get_transaction(
@@ -307,9 +242,7 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
         child_id: &str,
         transaction_id: &str,
     ) -> Result<Option<DomainTransaction>> {
-        // Convert child ID to child name for directory lookup
-        let child_name = self.get_child_directory_name(child_id)?;
-        let transactions = self.read_transactions(&child_name)?;
+        let transactions = self.read_transactions(&ChildId::from(child_id))?;
         Ok(transactions.into_iter().find(|t| t.id == transaction_id))
     }
 
@@ -319,9 +252,7 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
         limit: Option<u32>,
         after: Option<String>,
     ) -> Result<Vec<DomainTransaction>> {
-        // Convert child ID to child name for directory lookup
-        let child_name = self.get_child_directory_name(child_id)?;
-        let mut transactions = self.read_transactions(&child_name)?;
+        let mut transactions = self.read_transactions(&ChildId::from(child_id))?;
         transactions.sort_by(|a, b| b.date.cmp(&a.date)); // Sort by date descending
 
         let mut result = transactions;
@@ -345,10 +276,8 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
         start_date: Option<String>,
         end_date: Option<String>,
     ) -> Result<Vec<DomainTransaction>> {
-        // Convert child ID to child name for directory lookup
-        let child_name = self.get_child_directory_name(child_id)?;
-        let mut transactions = self.read_transactions(&child_name)?;
-        
+        let mut transactions = self.read_transactions(&ChildId::from(child_id))?;
+
         transactions.sort_by(|a, b| a.date.cmp(&b.date)); // Sort by date ascending
 
         let mut filtered = transactions;
@@ -367,23 +296,25 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
     fn update_transaction(&self, transaction: &DomainTransaction) -> Result<()> {
         info!("Updating transaction in CSV: {}", transaction.id);
 
-        let mut transactions = self.read_transactions_by_id(&transaction.child_id)?;
+        let child_id = ChildId::from(transaction.child_id.as_str());
+        let mut transactions = self.read_transactions(&child_id)?;
 
         if let Some(index) = transactions.iter().position(|t| t.id == transaction.id) {
             transactions[index] = transaction.clone();
-            self.write_transactions_by_id(&transaction.child_id, &transactions)?;
+            self.write_transactions(&child_id, &transactions)?;
         }
 
         Ok(())
     }
 
     fn delete_transaction(&self, child_id: &str, transaction_id: &str) -> Result<bool> {
-        let mut transactions = self.read_transactions_by_id(child_id)?;
+        let child_id = ChildId::from(child_id);
+        let mut transactions = self.read_transactions(&child_id)?;
         let original_len = transactions.len();
         transactions.retain(|t| t.id != transaction_id);
 
         if transactions.len() < original_len {
-            self.write_transactions_by_id(child_id, &transactions)?;
+            self.write_transactions(&child_id, &transactions)?;
             Ok(true)
         } else {
             Ok(false)
@@ -391,17 +322,16 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
     }
 
     fn delete_transactions(&self, child_id: &str, transaction_ids: &[String]) -> Result<u32> {
-        // Convert child ID to child name for directory lookup
-        let child_name = self.get_child_directory_name(child_id)?;
-        let mut transactions = self.read_transactions(&child_name)?;
+        let child_id = ChildId::from(child_id);
+        let mut transactions = self.read_transactions(&child_id)?;
         let initial_len = transactions.len();
         transactions.retain(|t| !transaction_ids.contains(&t.id));
-        self.write_transactions(&child_name, &transactions)?;
+        self.write_transactions(&child_id, &transactions)?;
         Ok((initial_len - transactions.len()) as u32)
     }
 
     fn get_latest_transaction(&self, child_id: &str) -> Result<Option<DomainTransaction>> {
-        let mut transactions = self.read_transactions_by_id(child_id)?;
+        let mut transactions = self.read_transactions(&ChildId::from(child_id))?;
         transactions.sort_by(|a, b| b.date.cmp(&a.date));
         Ok(transactions.into_iter().next())
     }
@@ -411,9 +341,7 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
         child_id: &str,
         date: &str,
     ) -> Result<Vec<DomainTransaction>> {
-        // Convert child ID to child name for directory lookup
-        let child_name = self.get_child_directory_name(child_id)?;
-        let mut transactions = self.read_transactions(&child_name)?;
+        let mut transactions = self.read_transactions(&ChildId::from(child_id))?;
         transactions.retain(|t| self.compare_dates(&t.date, date) >= 0);
         Ok(transactions)
     }
@@ -423,9 +351,7 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
         child_id: &str,
         date: &str,
     ) -> Result<Option<DomainTransaction>> {
-        // Convert child ID to child name for directory lookup
-        let child_name = self.get_child_directory_name(child_id)?;
-        let mut transactions = self.read_transactions(&child_name)?;
+        let mut transactions = self.read_transactions(&ChildId::from(child_id))?;
         transactions.retain(|t| self.compare_dates(&t.date, date) < 0);
         transactions.sort_by(|a, b| b.date.cmp(&a.date));
         Ok(transactions.into_iter().next())
@@ -453,8 +379,8 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
         info!("Updating {} transaction balances", updates.len());
 
         // Group updates by child_id by looking up each transaction's child
-        let mut child_updates: std::collections::HashMap<String, Vec<(String, f64)>> = std::collections::HashMap::new();
-        
+        let mut child_updates: std::collections::HashMap<ChildId, Vec<(String, f64)>> = std::collections::HashMap::new();
+
         for (transaction_id, new_balance) in updates {
             // Find which child this transaction belongs to
             let child_id = self.find_child_id_for_transaction(transaction_id)?;
@@ -467,7 +393,7 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
 
         // Update transactions for each child
         for (child_id, child_transaction_updates) in child_updates {
-            let mut transactions = self.read_transactions_by_id(&child_id)?;
+            let mut transactions = self.read_transactions(&child_id)?;
             let mut needs_write = false;
 
             for transaction in &mut transactions {
@@ -479,7 +405,7 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
 
             if needs_write {
                 // Use internal method to avoid git commits during balance recalculation
-                self.write_transactions_by_id_internal(&child_id, &transactions)?;
+                self.write_transactions_internal(&child_id, &transactions)?;
             }
         }
 
@@ -491,7 +417,7 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
         child_id: &str,
         transaction_ids: &[String],
     ) -> Result<Vec<String>> {
-        let all_transactions = self.read_transactions_by_id(child_id)?;
+        let all_transactions = self.read_transactions(&ChildId::from(child_id))?;
         let found_ids: Vec<String> = all_transactions
             .into_iter()
             .filter(|t| transaction_ids.contains(&t.id))
@@ -505,7 +431,7 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
         child_id: &str,
         transaction_ids: &[String],
     ) -> Result<Vec<DomainTransaction>> {
-        let all_transactions = self.read_transactions_by_id(child_id)?;
+        let all_transactions = self.read_transactions(&ChildId::from(child_id))?;
         let transactions: Vec<DomainTransaction> = all_transactions
             .into_iter()
             .filter(|t| transaction_ids.contains(&t.id))
@@ -523,25 +449,34 @@ mod tests {
     use std::sync::Arc;
     use tempfile::TempDir;
 
+    /// Build a repository over a temp dir with one registered child, id
+    /// `test_child`.
+    ///
+    /// The child must exist before any transaction call: resolution now goes
+    /// through the registry, and an unregistered child is an error rather than
+    /// a fabricated folder.
     fn setup_test_repo() -> Result<(TransactionRepository, TempDir)> {
         let temp_dir = TempDir::new()?;
         let connection = CsvConnection::new(temp_dir.path())?;
+        store_child_on(&connection, "test_child", "Test Child")?;
         let repo = TransactionRepository::new(connection);
         Ok((repo, temp_dir))
     }
 
-    fn setup_test_child(temp_dir: &TempDir) -> Result<DomainChild> {
+    /// Register a child through the *same* connection the repository uses.
+    ///
+    /// A second `CsvConnection` over the same directory would hold its own
+    /// registry snapshot, and the repository's connection would not see the
+    /// new child until it was rebuilt.
+    fn store_child_on(connection: &CsvConnection, id: &str, name: &str) -> Result<DomainChild> {
         let child = DomainChild {
-            id: "child::test_123".to_string(),
-            name: "Test Child".to_string(),
+            id: id.to_string(),
+            name: name.to_string(),
             birthdate: chrono::NaiveDate::parse_from_str("2010-01-01", "%Y-%m-%d").unwrap(),
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };
-
-        let connection = CsvConnection::new(temp_dir.path())?;
-        let child_repo = ChildRepository::new(Arc::new(connection));
-        child_repo.store_child(&child)?;
+        ChildRepository::new(Arc::new(connection.clone())).store_child(&child)?;
         Ok(child)
     }
 
@@ -634,8 +569,8 @@ mod tests {
     
     #[test]
     fn test_delete_transaction() -> Result<()> {
-        let (repo, temp_dir) = setup_test_repo()?;
-        let child = setup_test_child(&temp_dir)?;
+        let (repo, _temp_dir) = setup_test_repo()?;
+        let child = store_child_on(&repo.connection, "child::test_123", "Second Child")?;
 
         // Create a test transaction
         let transaction = DomainTransaction {

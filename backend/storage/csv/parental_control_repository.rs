@@ -40,7 +40,9 @@ use log::{info, debug};
 use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
 use std::io::{BufReader, BufWriter};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+use shared::ChildId;
 
 use crate::backend::domain::models::parental_control_attempt::ParentalControlAttempt as DomainParentalControlAttempt;
 use super::connection::CsvConnection;
@@ -82,60 +84,22 @@ impl ParentalControlRepository {
         }
     }
     
-    /// Get the parental control attempts CSV file path for a specific child directory
-    fn get_parental_control_file_path(&self, child_directory: &str) -> PathBuf {
-        if child_directory == "global" {
-            // For global parental control attempts, store at root level
-            self.connection
-                .base_directory()
-                .join("parental_control_attempts.csv")
+    /// Resolve the directory that holds a parental-control attempts file.
+    ///
+    /// The pseudo-id `global` names the base directory; every other id
+    /// resolves through the registry.
+    fn attempts_dir(&self, child_id: &str) -> Result<PathBuf> {
+        if child_id == "global" {
+            Ok(self.connection.base_directory().to_path_buf())
         } else {
-            // For child-specific attempts, store in child directory
-            self.connection
-                .get_child_directory(child_directory)
-                .join("parental_control_attempts.csv")
+            self.connection.child_dir(&ChildId::from(child_id))
         }
     }
-    
-    // NOTE: find_child_directory_by_id method removed - now using centralized version in CsvConnection
-    
-    /// Get all child directories that exist
-    fn get_all_child_directories(&self) -> Result<Vec<String>> {
-        let base_dir = self.connection.base_directory();
-        let mut directories = Vec::new();
-        
-        if !base_dir.exists() {
-            return Ok(directories);
-        }
-        
-        for entry in std::fs::read_dir(base_dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            
-            if !path.is_dir() {
-                continue;
-            }
-            
-            let dir_name = match path.file_name().and_then(|n| n.to_str()) {
-                Some(name) => name,
-                None => continue,
-            };
-            
-            // Only include directories that have a child.yaml file
-            let child_yaml_path = path.join("child.yaml");
-            if child_yaml_path.exists() {
-                directories.push(dir_name.to_string());
-            }
-        }
-        
-        directories.sort();
-        Ok(directories)
-    }
-    
-    /// Get the next available ID for a specific child's parental control attempts file
-    fn get_next_id(&self, child_directory: &str) -> Result<i64> {
-        let csv_path = self.get_parental_control_file_path(child_directory);
-        
+
+    /// Get the next available ID for an attempts file in the given directory
+    fn get_next_id(&self, dir: &Path) -> Result<i64> {
+        let csv_path = dir.join("parental_control_attempts.csv");
+
         if !csv_path.exists() {
             return Ok(1); // First ID
         }
@@ -159,17 +123,12 @@ impl ParentalControlRepository {
         Ok(max_id + 1)
     }
     
-    /// Append a parental control attempt to a specific child's CSV file
-    fn append_parental_control_attempt(&self, child_directory: &str, record: &ParentalControlAttemptRecord) -> Result<()> {
-        let child_dir = self.connection.get_child_directory(child_directory);
-        
-        // Ensure the child directory exists
-        if !child_dir.exists() {
-            std::fs::create_dir_all(&child_dir)?;
-            info!("Created child directory for parental control attempts: {:?}", child_dir);
-        }
-        
-        let csv_path = self.get_parental_control_file_path(child_directory);
+    /// Append a parental control attempt to an already-resolved directory.
+    ///
+    /// No `create_dir_all`: the directory came from `attempts_dir`, which
+    /// resolves through the registry and has already proven it is there.
+    fn append_parental_control_attempt(&self, dir: &Path, record: &ParentalControlAttemptRecord) -> Result<()> {
+        let csv_path = dir.join("parental_control_attempts.csv");
         let file_exists = csv_path.exists();
         
         // Open file in append mode
@@ -202,23 +161,23 @@ impl ParentalControlRepository {
         
         // This is non-blocking - git errors won't fail the parental control operation
         let _ = self.git_manager.commit_file_change(
-            &child_dir,
-            "parental_control_attempts.csv", 
+            dir,
+            "parental_control_attempts.csv",
             &action_description
         );
-        
+
         Ok(())
     }
-    
-    /// Load parental control attempts from a specific child's CSV file
-    fn load_parental_control_attempts_from_directory(&self, child_directory: &str, limit: Option<u32>) -> Result<Vec<DomainParentalControlAttempt>> {
-        let csv_path = self.get_parental_control_file_path(child_directory);
-        
+
+    /// Load parental control attempts from an already-resolved directory
+    fn load_parental_control_attempts_from_directory(&self, dir: &Path, limit: Option<u32>) -> Result<Vec<DomainParentalControlAttempt>> {
+        let csv_path = dir.join("parental_control_attempts.csv");
+
         if !csv_path.exists() {
-            debug!("No parental control attempts file found in directory '{}'", child_directory);
+            debug!("No parental control attempts file found in {:?}", dir);
             return Ok(Vec::new());
         }
-        
+
         let file = File::open(&csv_path)?;
         let reader = BufReader::new(file);
         let mut csv_reader = Reader::from_reader(reader);
@@ -245,28 +204,20 @@ impl ParentalControlRepository {
             attempts.truncate(limit as usize);
         }
         
-        debug!("Loaded {} parental control attempts from directory '{}'", attempts.len(), child_directory);
+        debug!("Loaded {} parental control attempts from {:?}", attempts.len(), dir);
         Ok(attempts)
     }
 }
 
 impl crate::backend::storage::ParentalControlStorage for ParentalControlRepository {
     fn record_parental_control_attempt(&self, child_id: &str, attempted_value: &str, success: bool) -> Result<i64> {
-        // Handle global parental control attempts specially
-        let child_directory = if child_id == "global" {
-            // For global attempts, use the root directory directly
-            "global".to_string()
-        } else {
-            // Find the child directory for specific child IDs using centralized logic
-            match self.connection.find_child_directory_by_id(child_id)? {
-                Some(dir) => dir,
-                None => return Err(anyhow::anyhow!("Child not found: {}", child_id)),
-            }
-        };
-        
+        let dir = self
+            .attempts_dir(child_id)
+            .map_err(|e| anyhow::anyhow!("Child not found: {} ({})", child_id, e))?;
+
         // Get the next available ID
-        let id = self.get_next_id(&child_directory)?;
-        
+        let id = self.get_next_id(&dir)?;
+
         // Create the record
         let record = ParentalControlAttemptRecord {
             id,
@@ -274,43 +225,36 @@ impl crate::backend::storage::ParentalControlStorage for ParentalControlReposito
             timestamp: chrono::Utc::now().to_rfc3339(),
             success,
         };
-        
+
         // Append to the CSV file
-        self.append_parental_control_attempt(&child_directory, &record)?;
-        
+        self.append_parental_control_attempt(&dir, &record)?;
+
         info!("Recorded parental control attempt for child '{}' with ID {}", child_id, id);
         Ok(id)
     }
 
     fn get_parental_control_attempts(&self, child_id: &str, limit: Option<u32>) -> Result<Vec<DomainParentalControlAttempt>> {
-        // Handle global parental control attempts specially
-        let child_directory = if child_id == "global" {
-            // For global attempts, use the root directory directly
-            "global".to_string()
-        } else {
-            // Find the child directory for specific child IDs using centralized logic
-            match self.connection.find_child_directory_by_id(child_id)? {
-                Some(dir) => dir,
-                None => return Ok(Vec::new()), // Return empty vector if child not found
-            }
+        let dir = match self.attempts_dir(child_id) {
+            Ok(dir) => dir,
+            // An unresolvable child has no attempts to show.
+            Err(_) => return Ok(Vec::new()),
         };
-        
-        // Load attempts from the directory
-        self.load_parental_control_attempts_from_directory(&child_directory, limit)
+
+        self.load_parental_control_attempts_from_directory(&dir, limit)
     }
 
+    /// Every registered child's attempts, from the registry rather than a
+    /// base-directory scan.
     fn get_all_parental_control_attempts(&self, limit: Option<u32>) -> Result<Vec<DomainParentalControlAttempt>> {
-        // Get all child directories
-        let child_directories = self.get_all_child_directories()?;
-        
+        let registry = self.connection.registry();
+
         let mut all_attempts = Vec::new();
-        
-        // Load attempts from each child directory
-        for child_directory in child_directories {
-            let attempts = self.load_parental_control_attempts_from_directory(&child_directory, None)?;
+
+        for entry in registry.entries() {
+            let attempts = self.load_parental_control_attempts_from_directory(&entry.path, None)?;
             all_attempts.extend(attempts);
         }
-        
+
         // Sort by timestamp descending (most recent first)
         all_attempts.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
         

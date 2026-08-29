@@ -1,21 +1,38 @@
-use anyhow::Result;
-use log::{info, warn};
-use std::sync::Arc;
+//! # Data Directory Service (vestigial)
+//!
+//! This service used to move a child's folder elsewhere and leave a
+//! `.allowance_redirect` marker behind, then follow that marker on every
+//! resolution. The child registry replaces that entirely: a child's location
+//! is a registry entry, and moving one is a `repoint`, not a copy plus a
+//! marker file.
+//!
+//! The redirect/relocate/revert machinery it called has been deleted from
+//! `CsvConnection`. What remains here is the minimum that keeps the settings
+//! UI compiling and honest: the current directory can still be reported, and
+//! every relocation entry point returns an unsuccessful response saying the
+//! operation is no longer available. A later task removes this service and its
+//! modal outright.
 
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
+use anyhow::Result;
+use log::info;
+use std::sync::Arc;
 
 use crate::backend::storage::csv::CsvConnection;
 
 use crate::backend::domain::child_service::ChildService;
 use shared::{
-    GetDataDirectoryResponse, RelocateDataDirectoryRequest, RelocateDataDirectoryResponse, 
+    ChildId,
+    GetDataDirectoryResponse, RelocateDataDirectoryRequest, RelocateDataDirectoryResponse,
     RevertDataDirectoryRequest, RevertDataDirectoryResponse,
     CheckDataDirectoryConflictRequest, CheckDataDirectoryConflictResponse,
     RelocateWithConflictResolutionRequest, RelocateWithConflictResolutionResponse,
     ReturnToDefaultLocationRequest, ReturnToDefaultLocationResponse,
-    ConflictResolution
 };
+
+/// Explanation handed back to the UI wherever a relocation is requested.
+const RELOCATION_RETIRED: &str = "Moving a child's data folder from this screen is no longer \
+available. A child's location now lives in the machine-local child registry \
+(children.yaml) rather than in redirect files.";
 
 /// Service for managing data directory operations
 #[derive(Clone)]
@@ -33,160 +50,79 @@ impl DataDirectoryService {
         }
     }
 
-    /// Get the current data directory path for a child
+    /// Resolve the child to act on: the one named, or the active one.
+    fn resolve_child_id(&self, child_id: Option<&str>) -> Result<String> {
+        match child_id {
+            Some(id) => Ok(id.to_string()),
+            None => {
+                let response = self.child_service.get_active_child()?;
+                Ok(response
+                    .active_child
+                    .child
+                    .ok_or_else(|| anyhow::anyhow!("No active child found"))?
+                    .id)
+            }
+        }
+    }
+
+    /// Get the current data directory path for a child.
+    ///
+    /// Resolution is a registry lookup. `is_redirected` is always false —
+    /// redirect files are gone, and a registered path is simply the path.
     pub fn get_current_directory(&self, child_id: Option<String>) -> Result<GetDataDirectoryResponse> {
         info!("Getting current data directory for child_id: {:?}", child_id);
 
-        let child_id_to_use = if let Some(id) = child_id {
-            id.to_string()
-        } else {
-            let response = self.child_service.get_active_child()?;
-            response.active_child.child.ok_or_else(|| anyhow::anyhow!("No active child found"))?.id
-        };
+        let child_id_to_use = self.resolve_child_id(child_id.as_deref())?;
 
-        // Fetch the child to confirm it exists and to log a friendly name. The
-        // on-disk directory name is the child's id (the sanitized/"safe" name),
-        // NOT the display name, so all path resolution below uses `child_id_to_use`.
-        let child = self.child_service.get_child(crate::backend::domain::commands::child::GetChildCommand {
-            child_id: child_id_to_use.clone(),
-        })?;
-
-        let child_name = match child.child {
-            Some(child) => child.name,
-            None => return Err(anyhow::anyhow!("Child not found: {}", child_id_to_use)),
-        };
-
-        let current_path = self.csv_connection.get_child_directory(&child_id_to_use);
+        let current_path = self
+            .csv_connection
+            .child_dir(&ChildId::from(child_id_to_use.as_str()))?;
         let path_str = current_path.to_string_lossy().to_string();
 
-        // Check if this location is via a redirect file
-        let base_dir = self.csv_connection.base_directory();
-        let default_child_dir = base_dir.join(&child_id_to_use);
-        let redirect_file = default_child_dir.join(".allowance_redirect");
-        let is_redirected = redirect_file.exists();
-
-        info!("Current data directory for child '{}' (name: '{}'): {} (redirected: {})", child_id_to_use, child_name, path_str, is_redirected);
+        info!("Current data directory for child '{}': {}", child_id_to_use, path_str);
 
         Ok(GetDataDirectoryResponse {
             current_path: path_str,
-            is_redirected,
+            is_redirected: false,
         })
     }
 
-    /// Relocate child's data directory to a new location
+    /// Relocation is retired; see the module docs.
     pub fn relocate_directory(
         &self,
         request: RelocateDataDirectoryRequest,
     ) -> Result<RelocateDataDirectoryResponse> {
-        info!("Relocating data directory to: {} for child_id: {:?}", request.new_path, request.child_id);
-
-        let child_id_to_use = if let Some(id) = request.child_id.as_deref() {
-            id.to_string()
-        } else {
-            let response = self.child_service.get_active_child()?;
-            response.active_child.child.ok_or_else(|| anyhow::anyhow!("No active child found"))?.id
-        };
-
-        // Fetch the child to confirm it exists and to log a friendly name. The
-        // CSV layer resolves the directory by its name, which is the child's id
-        // (the sanitized/"safe" form), so we pass `child_id_to_use` below.
-        let child = self.child_service.get_child(crate::backend::domain::commands::child::GetChildCommand {
-            child_id: child_id_to_use.clone(),
-        })?;
-
-        let child_name = match child.child {
-            Some(child) => child.name,
-            None => return Err(anyhow::anyhow!("Child not found: {}", child_id_to_use)),
-        };
-
-        info!("About to call csv_connection.relocate_child_data_directory with child '{}' (name: '{}') and path: {}", child_id_to_use, child_name, request.new_path);
-        match self.csv_connection.relocate_child_data_directory(&child_id_to_use, &request.new_path) {
-            Ok(message) => {
-                info!("Data directory relocation successful for child '{}'", child_id_to_use);
-                Ok(RelocateDataDirectoryResponse {
-                    success: true,
-                    message,
-                    new_path: request.new_path,
-                })
-            }
-            Err(e) => {
-                let error_message = format!("Failed to relocate data directory for child '{}': {}", child_id_to_use, e);
-                info!("Data directory relocation failed: {}", error_message);
-                // Also log the full error chain for debugging
-                info!("Full error details: {:?}", e);
-                Ok(RelocateDataDirectoryResponse {
-                    success: false,
-                    message: error_message,
-                    new_path: request.new_path,
-                })
-            }
-        }
+        Ok(RelocateDataDirectoryResponse {
+            success: false,
+            message: RELOCATION_RETIRED.to_string(),
+            new_path: request.new_path,
+        })
     }
 
-    /// Revert child's data directory back to the default location
+    /// Reverting a relocation is retired; see the module docs.
     pub fn revert_directory(
         &self,
-        request: RevertDataDirectoryRequest,
+        _request: RevertDataDirectoryRequest,
     ) -> Result<RevertDataDirectoryResponse> {
-        info!("Reverting data directory for child_id: {:?}", request.child_id);
-
-        let child_id_to_use = if let Some(id) = request.child_id.as_deref() {
-            id.to_string()
-        } else {
-            let response = self.child_service.get_active_child()?;
-            response.active_child.child.ok_or_else(|| anyhow::anyhow!("No active child found"))?.id
-        };
-
-        // Fetch the child to confirm it exists and to log a friendly name. Path
-        // resolution uses `child_id_to_use` because the on-disk directory name is
-        // the child's id (the sanitized/"safe" name), not the display name.
-        let child = self.child_service.get_child(crate::backend::domain::commands::child::GetChildCommand {
-            child_id: child_id_to_use.clone(),
-        })?;
-
-        let child_name = match child.child {
-            Some(child) => child.name,
-            None => return Err(anyhow::anyhow!("Child not found: {}", child_id_to_use)),
-        };
-        info!("Reverting data directory for child '{}' (name: '{}')", child_id_to_use, child_name);
-
-        // Check if there's actually a redirect file
-        let base_dir = self.csv_connection.base_directory();
-        let default_child_dir = base_dir.join(&child_id_to_use);
-        let redirect_file = default_child_dir.join(".allowance_redirect");
-        let was_redirected = redirect_file.exists();
-
-        match self.csv_connection.revert_child_data_directory(&child_id_to_use) {
-            Ok(message) => {
-                info!("Data directory revert successful for child '{}'", child_id_to_use);
-                Ok(RevertDataDirectoryResponse {
-                    success: true,
-                    message,
-                    was_redirected,
-                })
-            }
-            Err(e) => {
-                let error_message = format!("Failed to revert data directory for child '{}': {}", child_id_to_use, e);
-                info!("Data directory revert failed: {}", error_message);
-                Ok(RevertDataDirectoryResponse {
-                    success: false,
-                    message: error_message,
-                    was_redirected,
-                })
-            }
-        }
+        Ok(RevertDataDirectoryResponse {
+            success: false,
+            message: RELOCATION_RETIRED.to_string(),
+            was_redirected: false,
+        })
     }
 
-    /// Check if relocating to a path would cause conflicts
+    /// Check if relocating to a path would cause conflicts.
+    ///
+    /// This inspects only the target path, so it survives the registry
+    /// cutover untouched.
     pub fn check_relocation_conflicts(
         &self,
         request: CheckDataDirectoryConflictRequest,
     ) -> Result<CheckDataDirectoryConflictResponse> {
         info!("Checking data directory conflicts for path: {}", request.new_path);
 
-        // Note: This method only checks the target path for conflicts, so it doesn't need child info
         let new_path = std::path::PathBuf::from(&request.new_path);
-        
+
         // Check if target directory exists and has child data
         if !new_path.exists() {
             info!("Target directory does not exist - no conflicts");
@@ -220,9 +156,7 @@ impl DataDirectoryService {
         }
 
         // Check if target contains valid child data
-        let has_child_data = self.directory_contains_child_data(&new_path);
-        
-        if has_child_data {
+        if self.directory_contains_child_data(&new_path) {
             info!("Target directory contains child data - conflict detected");
             Ok(CheckDataDirectoryConflictResponse {
                 has_conflict: true,
@@ -239,393 +173,45 @@ impl DataDirectoryService {
         }
     }
 
-    /// Relocate data directory with conflict resolution
+    /// Relocation with conflict resolution is retired; see the module docs.
     pub fn relocate_with_conflict_resolution(
         &self,
         request: RelocateWithConflictResolutionRequest,
     ) -> Result<RelocateWithConflictResolutionResponse> {
-        info!("Relocating with conflict resolution: {:?}", request.resolution);
+        Ok(RelocateWithConflictResolutionResponse {
+            success: false,
+            message: RELOCATION_RETIRED.to_string(),
+            new_path: request.new_path,
+            archived_to: None,
+        })
+    }
 
-        let child_id_to_use = if let Some(id) = request.child_id.as_deref() {
-            id.to_string()
-        } else {
-            let response = self.child_service.get_active_child()?;
-            response.active_child.child.ok_or_else(|| anyhow::anyhow!("No active child found"))?.id
-        };
+    /// Returning to the default location is retired; see the module docs.
+    pub fn return_to_default_location(
+        &self,
+        request: ReturnToDefaultLocationRequest,
+    ) -> Result<ReturnToDefaultLocationResponse> {
+        let child_id_to_use = self.resolve_child_id(request.child_id.as_deref())?;
+        let default_path = self
+            .csv_connection
+            .child_dir(&ChildId::from(child_id_to_use.as_str()))
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_default();
 
-        match request.resolution {
-            ConflictResolution::Cancel => {
-                info!("User cancelled relocation");
-                Ok(RelocateWithConflictResolutionResponse {
-                    success: false,
-                    message: "Operation cancelled by user".to_string(),
-                    new_path: request.new_path,
-                    archived_to: None,
-                })
-            }
-            ConflictResolution::OverwriteTarget => {
-                info!("Overwriting target with current child data");
-                // Use existing relocate method but clear target directory first
-                let new_path = std::path::PathBuf::from(&request.new_path);
-                if new_path.exists() {
-                    std::fs::remove_dir_all(&new_path)?;
-                }
-                
-                let relocate_request = RelocateDataDirectoryRequest {
-                    child_id: Some(child_id_to_use),
-                    new_path: request.new_path.clone(),
-                };
-                
-                let result = self.relocate_directory(relocate_request)?;
-                
-                Ok(RelocateWithConflictResolutionResponse {
-                    success: result.success,
-                    message: result.message,
-                    new_path: result.new_path,
-                    archived_to: None,
-                })
-            }
-            ConflictResolution::UseTargetData => {
-                info!("Using target data and archiving current data");
-
-                // Archive current data first
-                let archive_path = self.archive_current_data(&child_id_to_use)?;
-
-                // Create redirect to target location. The child's on-disk
-                // directory name is its id (the sanitized/"safe" name).
-                let base_dir = self.csv_connection.base_directory();
-                let default_child_dir = base_dir.join(&child_id_to_use);
-                let redirect_file = default_child_dir.join(".allowance_redirect");
-                
-                // Clear default directory (except .git)
-                if default_child_dir.exists() {
-                    for entry in std::fs::read_dir(&default_child_dir)? {
-                        let entry = entry?;
-                        let path = entry.path();
-                        let file_name = path.file_name().unwrap_or_default();
-                        
-                        if file_name != ".git" {
-                            if path.is_dir() {
-                                std::fs::remove_dir_all(&path)?;
-                            } else {
-                                std::fs::remove_file(&path)?;
-                            }
-                        }
-                    }
-                } else {
-                    std::fs::create_dir_all(&default_child_dir)?;
-                }
-                
-                // Create redirect file
-                std::fs::write(&redirect_file, request.new_path.as_bytes())?;
-                
-                info!("Successfully redirected to target location and archived original data");
-                
-                Ok(RelocateWithConflictResolutionResponse {
-                    success: true,
-                    message: format!("Now using data from target location. Original data archived to: {}", archive_path),
-                    new_path: request.new_path,
-                    archived_to: Some(archive_path),
-                })
-            }
-        }
+        Ok(ReturnToDefaultLocationResponse {
+            success: false,
+            message: RELOCATION_RETIRED.to_string(),
+            default_path,
+        })
     }
 
     /// Check if a directory contains valid child data
     fn directory_contains_child_data(&self, path: &std::path::Path) -> bool {
         let child_file = path.join("child.yaml");
         let transactions_file = path.join("transactions.csv");
-        
+
         // Consider it child data if it has either the child config or transactions
         child_file.exists() || transactions_file.exists()
-    }
-
-    /// Archive current child data to archive/child_name folder in default location
-    fn archive_current_data(&self, child_id: &str) -> Result<String> {
-        info!("Archiving current data for child: {}", child_id);
-        
-        // Fetch the child for a friendly archive-folder label. Directory lookup
-        // uses the child's id, which is the on-disk (sanitized/"safe") name.
-        let child = self.child_service.get_child(crate::backend::domain::commands::child::GetChildCommand {
-            child_id: child_id.to_string(),
-        })?;
-
-        let child_name = match child.child {
-            Some(child) => child.name,
-            None => return Err(anyhow::anyhow!("Child not found: {}", child_id)),
-        };
-
-        let current_data_dir = self.csv_connection.get_child_directory(child_id);
-        let base_dir = self.csv_connection.base_directory();
-        let archive_base = base_dir.join("archive");
-        
-        // Create unique archive folder with timestamp
-        let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
-        let archive_dir = archive_base.join(format!("{}_{}", child_name, timestamp));
-        
-        info!("Creating archive directory: {}", archive_dir.display());
-        std::fs::create_dir_all(&archive_dir)?;
-        
-        // Copy all current data to archive (excluding .git and .allowance_redirect)
-        for entry in std::fs::read_dir(&current_data_dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            let file_name = path.file_name().unwrap_or_default();
-            
-            // Skip .git and .allowance_redirect files
-            if file_name == ".git" || file_name == ".allowance_redirect" {
-                continue;
-            }
-            
-            let dest_path = archive_dir.join(file_name);
-            
-            if path.is_dir() {
-                self.copy_directory_recursive(&path, &dest_path)?;
-            } else {
-                std::fs::copy(&path, &dest_path)?;
-            }
-        }
-        
-        let archive_path = archive_dir.to_string_lossy().to_string();
-        info!("Successfully archived data to: {}", archive_path);
-        Ok(archive_path)
-    }
-
-    /// Ensure a path is writable by owner (Unix only, no-op on other platforms)
-    #[cfg(unix)]
-    fn ensure_writable(path: &std::path::Path, mode_bits: u32) {
-        if let Ok(mut perms) = std::fs::metadata(path).map(|m| m.permissions()) {
-            perms.set_mode(perms.mode() | mode_bits);
-            let _ = std::fs::set_permissions(path, perms);
-        }
-    }
-
-    /// Set permissions on a copied file based on source (Unix only)
-    #[cfg(unix)]
-    fn set_copied_file_permissions(source: &std::path::Path, dest: &std::path::Path) {
-        let Ok(source_perms) = std::fs::metadata(source).map(|m| m.permissions()) else {
-            return;
-        };
-
-        // Git objects need read+write; regular files just need write
-        let extra_mode = if source.to_string_lossy().contains(".git/objects/") {
-            0o600
-        } else {
-            0o200
-        };
-
-        let new_perms = std::fs::Permissions::from_mode(source_perms.mode() | extra_mode);
-        if std::fs::set_permissions(dest, new_perms).is_err() {
-            Self::ensure_writable(dest, 0o200);
-        }
-    }
-
-    /// Recursively copy directory contents
-    fn copy_directory_recursive(&self, source: &std::path::Path, dest: &std::path::Path) -> Result<()> {
-        info!("Creating destination directory: {}", dest.display());
-        std::fs::create_dir_all(dest).map_err(|e| {
-            anyhow::anyhow!("Failed to create directory {}: {}", dest.display(), e)
-        })?;
-
-        // Ensure destination directory is writable (owner: rwx)
-        #[cfg(unix)]
-        Self::ensure_writable(dest, 0o700);
-
-        info!("Reading source directory: {}", source.display());
-        for entry in std::fs::read_dir(source).map_err(|e| {
-            anyhow::anyhow!("Failed to read source directory {}: {}", source.display(), e)
-        })? {
-            let entry = entry.map_err(|e| anyhow::anyhow!("Error reading directory entry in {}: {}", source.display(), e))?;
-            let path = entry.path();
-            let dest_path = dest.join(entry.file_name());
-
-            info!("Processing: {} -> {}", path.display(), dest_path.display());
-
-            if path.is_dir() {
-                self.copy_directory_recursive(&path, &dest_path)?;
-                continue;
-            }
-
-            // Make existing destination writable before overwriting
-            #[cfg(unix)]
-            if dest_path.exists() {
-                Self::ensure_writable(&dest_path, 0o600);
-            }
-
-            // Copy the file
-            std::fs::copy(&path, &dest_path).map_err(|e| {
-                anyhow::anyhow!("Failed to copy file {} to {}: {}", path.display(), dest_path.display(), e)
-            })?;
-
-            // Set appropriate permissions on the copied file
-            #[cfg(unix)]
-            Self::set_copied_file_permissions(&path, &dest_path);
-
-            info!("Successfully copied file: {} -> {}", path.display(), dest_path.display());
-        }
-
-        Ok(())
-    }
-
-    /// Return data to default location (copy from redirect location)
-    pub fn return_to_default_location(
-        &self,
-        request: ReturnToDefaultLocationRequest,
-    ) -> Result<ReturnToDefaultLocationResponse> {
-        info!("Returning data to default location for child_id: {:?}", request.child_id);
-
-        let child_id_to_use = if let Some(id) = request.child_id.as_deref() {
-            id.to_string()
-        } else {
-            let response = self.child_service.get_active_child()?;
-            response.active_child.child.ok_or_else(|| anyhow::anyhow!("No active child found"))?.id
-        };
-
-        // Fetch the child to confirm it exists and for friendly log messages.
-        // Directory lookup uses the child's id (the on-disk sanitized/"safe" name).
-        let child = self.child_service.get_child(crate::backend::domain::commands::child::GetChildCommand {
-            child_id: child_id_to_use.clone(),
-        })?;
-
-        let child_name = match child.child {
-            Some(child) => child.name,
-            None => return Err(anyhow::anyhow!("Child not found: {}", child_id_to_use)),
-        };
-
-        let base_dir = self.csv_connection.base_directory();
-        let default_child_dir = base_dir.join(&child_id_to_use);
-        let redirect_file = default_child_dir.join(".allowance_redirect");
-
-        // Check if there's actually a redirect file
-        if !redirect_file.exists() {
-            return Ok(ReturnToDefaultLocationResponse {
-                success: false,
-                message: "Data is already at the default location".to_string(),
-                default_path: default_child_dir.to_string_lossy().to_string(),
-            });
-        }
-
-        // Read the redirect location
-        let redirected_path = match std::fs::read_to_string(&redirect_file) {
-            Ok(path) => std::path::PathBuf::from(path.trim()),
-            Err(e) => return Err(anyhow::anyhow!("Failed to read redirect file: {}", e)),
-        };
-
-        info!("Found redirect pointing to: {}", redirected_path.display());
-
-        // Validate that redirected directory exists
-        if !redirected_path.exists() {
-            return Err(anyhow::anyhow!("Redirected directory does not exist: {}", redirected_path.display()));
-        }
-
-        // Remove all files and directories in default location except .git and .allowance_redirect
-        info!("Cleaning default directory: {}", default_child_dir.display());
-        
-        // Check if we can write to the directory first
-        if let Ok(metadata) = std::fs::metadata(&default_child_dir) {
-            if metadata.permissions().readonly() {
-                return Err(anyhow::anyhow!("Default directory is read-only: {}", default_child_dir.display()));
-            }
-        }
-        
-        for entry in std::fs::read_dir(&default_child_dir).map_err(|e| {
-            anyhow::anyhow!("Cannot read default directory {}: {}", default_child_dir.display(), e)
-        })? {
-            let entry = entry.map_err(|e| anyhow::anyhow!("Error reading directory entry: {}", e))?;
-            let path = entry.path();
-            let file_name = path.file_name().unwrap_or_default();
-            
-            if file_name != ".git" && file_name != ".allowance_redirect" {
-                info!("Attempting to remove: {}", path.display());
-                
-                if path.is_dir() {
-                    // For directories, make sure they're writable before trying to remove
-                    #[cfg(unix)]
-                    {
-                        fn make_writable_recursive(dir: &std::path::Path) -> std::io::Result<()> {
-                            for entry in std::fs::read_dir(dir)? {
-                                let entry = entry?;
-                                let path = entry.path();
-                                if path.is_dir() {
-                                    if let Ok(mut perms) = std::fs::metadata(&path).map(|m| m.permissions()) {
-                                        perms.set_mode(perms.mode() | 0o700);
-                                        let _ = std::fs::set_permissions(&path, perms);
-                                    }
-                                    make_writable_recursive(&path)?;
-                                } else {
-                                    if let Ok(mut perms) = std::fs::metadata(&path).map(|m| m.permissions()) {
-                                        perms.set_mode(perms.mode() | 0o600);
-                                        let _ = std::fs::set_permissions(&path, perms);
-                                    }
-                                }
-                            }
-                            Ok(())
-                        }
-                        let _ = make_writable_recursive(&path);
-                    }
-                    
-                    std::fs::remove_dir_all(&path).map_err(|e| {
-                        anyhow::anyhow!("Failed to remove directory {}: {}", path.display(), e)
-                    })?;
-                    info!("Successfully removed directory: {}", path.display());
-                } else {
-                    // Make file writable before trying to remove it
-                    #[cfg(unix)]
-                    {
-                        if let Ok(mut perms) = std::fs::metadata(&path).map(|m| m.permissions()) {
-                            perms.set_mode(perms.mode() | 0o600);
-                            let _ = std::fs::set_permissions(&path, perms);
-                        }
-                    }
-                    
-                    std::fs::remove_file(&path).map_err(|e| {
-                        anyhow::anyhow!("Failed to remove file {}: {}", path.display(), e)
-                    })?;
-                    info!("Successfully removed file: {}", path.display());
-                }
-            }
-        }
-
-        // Copy data from redirected location to default location (without removing source)
-        info!("Copying data from {} to {}", redirected_path.display(), default_child_dir.display());
-        self.copy_directory_recursive(&redirected_path, &default_child_dir).map_err(|e| {
-            anyhow::anyhow!("Failed to copy data from {} to {}: {}", redirected_path.display(), default_child_dir.display(), e)
-        })?;
-        info!("Successfully copied child '{}' data to default location", child_name);
-
-        // Verify the copy was successful
-        let key_files = ["child.yaml", "transactions.csv"];
-        for file in &key_files {
-            if redirected_path.join(file).exists() && !default_child_dir.join(file).exists() {
-                return Err(anyhow::anyhow!("File '{}' was not copied successfully during return to default", file));
-            }
-        }
-
-        // Remove the redirect file
-        info!("Removing redirect file: {}", redirect_file.display());
-        std::fs::remove_file(&redirect_file).map_err(|e| {
-            anyhow::anyhow!("Failed to remove redirect file {}: {}", redirect_file.display(), e)
-        })?;
-        info!("Successfully removed redirect file for child '{}'", child_name);
-
-        // If there's a .git directory, commit the removal of redirect file
-        let git_dir = default_child_dir.join(".git");
-        if git_dir.exists() {
-            // Use the CSV connection's commit method
-            match self.csv_connection.commit_redirect_removal(&default_child_dir, &child_name) {
-                Ok(_) => info!("Git commit successful for return to default"),
-                Err(e) => warn!("Git commit failed for return to default: {}", e),
-            }
-        }
-
-        let default_path = default_child_dir.to_string_lossy().to_string();
-        info!("Child '{}' data successfully returned to default location: {}", child_name, default_path);
-        
-        Ok(ReturnToDefaultLocationResponse {
-            success: true,
-            message: format!("Data successfully returned to default location. Redirected data remains at: {}", redirected_path.display()),
-            default_path,
-        })
     }
 }
 
@@ -638,16 +224,8 @@ mod tests {
     use std::sync::Arc;
     use tempfile::TempDir;
 
-    /// Build a `DataDirectoryService` over a fresh temp base directory and store
-    /// one child whose *display name* differs from its on-disk *directory name*.
-    ///
-    /// The on-disk directory name equals the child's id (enforced by
-    /// `ChildRepository`), which is the sanitized/"safe" form of the name — e.g.
-    /// "Keiko Hart" is stored in a directory called `keiko_hart`. This mismatch
-    /// is exactly the condition that broke directory relocation in the real app.
-    ///
-    /// Returns `(service, temp_dir, child_id)`. `child_id` is also the on-disk
-    /// directory name. `temp_dir` is returned so the caller keeps it alive.
+    /// Build a `DataDirectoryService` over a fresh temp base directory with one
+    /// registered child whose *display name* differs from its folder name.
     fn service_with_child(display_name: &str) -> (DataDirectoryService, TempDir, String) {
         let temp_dir = TempDir::new().unwrap();
         let connection = Arc::new(CsvConnection::new(temp_dir.path()).unwrap());
@@ -668,84 +246,41 @@ mod tests {
     }
 
     #[test]
-    fn get_current_directory_resolves_real_dir_for_display_name_with_space() {
+    fn get_current_directory_reports_the_registered_folder() {
         let (service, temp_dir, child_id) = service_with_child("Keiko Hart");
 
         let resp = service
             .get_current_directory(Some(child_id.clone()))
             .unwrap();
 
-        // Must point at the child's real on-disk folder ("keiko_hart"), never at
-        // the raw display name ("Keiko Hart"), which is never created on disk.
         let expected = temp_dir.path().join(&child_id);
         assert_eq!(resp.current_path, expected.to_string_lossy());
         assert!(!resp.is_redirected);
     }
 
+    /// Registration made the folder resolvable, so removing the folder must
+    /// make resolution fail rather than report a path nothing will honour.
     #[test]
-    fn relocate_directory_succeeds_for_display_name_with_space() {
+    fn get_current_directory_errors_when_the_folder_is_gone() {
+        let (service, temp_dir, child_id) = service_with_child("Keiko Hart");
+        std::fs::remove_dir_all(temp_dir.path().join(&child_id)).unwrap();
+
+        assert!(service.get_current_directory(Some(child_id)).is_err());
+    }
+
+    #[test]
+    fn relocation_reports_that_it_is_no_longer_available() {
         let (service, temp_dir, child_id) = service_with_child("Keiko Hart");
         let target = temp_dir.path().join("relocated");
 
         let resp = service
             .relocate_directory(RelocateDataDirectoryRequest {
-                child_id: Some(child_id.clone()),
+                child_id: Some(child_id),
                 new_path: target.to_string_lossy().to_string(),
             })
             .unwrap();
 
-        assert!(resp.success, "relocate should succeed but failed: {}", resp.message);
-        // The redirect marker is written into the child's real directory...
-        let redirect = temp_dir.path().join(&child_id).join(".allowance_redirect");
-        assert!(redirect.exists(), "redirect file should be created in the child's real directory");
-        // ...and the data lands at the target.
-        assert!(target.join("child.yaml").exists(), "child.yaml should be copied to the new location");
+        assert!(!resp.success);
+        assert!(!target.exists(), "a retired relocation must not touch the filesystem");
     }
-
-    #[test]
-    fn get_current_directory_reports_redirect_after_relocate() {
-        let (service, temp_dir, child_id) = service_with_child("Keiko Hart");
-        let target = temp_dir.path().join("relocated");
-        service
-            .relocate_directory(RelocateDataDirectoryRequest {
-                child_id: Some(child_id.clone()),
-                new_path: target.to_string_lossy().to_string(),
-            })
-            .unwrap();
-
-        let resp = service.get_current_directory(Some(child_id)).unwrap();
-
-        assert!(resp.is_redirected, "should report redirected after relocate");
-        assert_eq!(resp.current_path, target.to_string_lossy());
-    }
-
-    #[test]
-    fn relocate_then_revert_round_trips_for_display_name_with_space() {
-        let (service, temp_dir, child_id) = service_with_child("Keiko Hart");
-        let target = temp_dir.path().join("relocated");
-
-        let relocated = service
-            .relocate_directory(RelocateDataDirectoryRequest {
-                child_id: Some(child_id.clone()),
-                new_path: target.to_string_lossy().to_string(),
-            })
-            .unwrap();
-        assert!(relocated.success, "relocate failed: {}", relocated.message);
-
-        let reverted = service
-            .revert_directory(RevertDataDirectoryRequest {
-                child_id: Some(child_id.clone()),
-            })
-            .unwrap();
-        assert!(reverted.success, "revert failed: {}", reverted.message);
-        assert!(reverted.was_redirected, "expected was_redirected = true");
-
-        // Redirect gone, data back at the default location.
-        let redirect = temp_dir.path().join(&child_id).join(".allowance_redirect");
-        assert!(!redirect.exists(), "redirect file should be removed after revert");
-
-        let resp = service.get_current_directory(Some(child_id.clone())).unwrap();
-        assert!(!resp.is_redirected, "should not be redirected after revert");
-        assert_eq!(resp.current_path, temp_dir.path().join(&child_id).to_string_lossy());
-    }
-} 
+}
