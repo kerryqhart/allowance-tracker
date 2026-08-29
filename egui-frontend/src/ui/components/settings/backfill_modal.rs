@@ -12,28 +12,45 @@ impl AllowanceTrackerApp {
         self.settings.backfill_form.clear();
         self.settings.backfill_form.just_opened = true;
 
-        // Pre-compute entity counts
-        if let Ok(children_result) = self.backend().child_service.list_children() {
-            let children = &children_result.children;
-            self.settings.backfill_form.child_count = children.len();
+        // Pre-compute entity counts. Only `Available` children are counted:
+        // reading transactions for a folder iCloud has not delivered would
+        // block this render path, and backfilling a half-present folder would
+        // push an incomplete history to the remote as truth.
+        let children = self.available_children();
+        self.settings.backfill_form.child_count = children.len();
 
-            let mut tx_count = 0;
-            let mut goal_count = 0;
-            for child in children {
-                match self.backend().transaction_service.list_all_transactions_for_child(&child.id) {
-                    Ok(txs) => { tx_count += txs.len(); }
-                    Err(e) => log::warn!("Failed to load transactions for child {}: {}", child.id, e),
-                }
-                match self.backend().goal_service.list_all_goals_for_child(&child.id) {
-                    Ok(goals) => { goal_count += goals.len(); }
-                    Err(e) => log::warn!("Failed to load goals for child {}: {}", child.id, e),
-                }
+        let mut tx_count = 0;
+        let mut goal_count = 0;
+        for child in &children {
+            match self.backend().transaction_service.list_all_transactions_for_child(&child.id) {
+                Ok(txs) => { tx_count += txs.len(); }
+                Err(e) => log::warn!("Failed to load transactions for child {}: {}", child.id, e),
             }
-            self.settings.backfill_form.transaction_count = tx_count;
-            self.settings.backfill_form.goal_count = goal_count;
-            self.settings.backfill_form.total_entities =
-                self.settings.backfill_form.child_count + tx_count + goal_count;
+            match self.backend().goal_service.list_all_goals_for_child(&child.id) {
+                Ok(goals) => { goal_count += goals.len(); }
+                Err(e) => log::warn!("Failed to load goals for child {}: {}", child.id, e),
+            }
         }
+        self.settings.backfill_form.transaction_count = tx_count;
+        self.settings.backfill_form.goal_count = goal_count;
+        self.settings.backfill_form.total_entities =
+            self.settings.backfill_form.child_count + tx_count + goal_count;
+    }
+
+    /// The children the roster says are fully materialized, as domain models.
+    ///
+    /// The `Child` comes straight off `ChildStatus::Available`, which the
+    /// roster worker parsed from `child.yaml` — so this costs no I/O at all.
+    fn available_children(&self) -> Vec<crate::backend::domain::models::child::Child> {
+        use crate::backend::domain::ChildStatus;
+        self.roster
+            .entries()
+            .iter()
+            .filter_map(|e| match &e.status {
+                ChildStatus::Available(child) => Some(child.clone()),
+                _ => None,
+            })
+            .collect()
     }
 
     /// Start a backfill operation on a background thread
@@ -58,15 +75,15 @@ impl AllowanceTrackerApp {
         let (progress_tx, progress_rx) = mpsc::channel();
         self.settings.backfill_form.progress_rx = Some(progress_rx);
 
-        // Load all local data
-        let children = match self.backend().child_service.list_children() {
-            Ok(result) => result.children,
-            Err(e) => {
-                self.settings.backfill_form.is_running = false;
-                self.settings.backfill_form.error_message = Some(format!("Failed to load children: {}", e));
-                return;
-            }
-        };
+        // Load all local data. Only `Available` children are pushed — see
+        // `available_children`.
+        let children = self.available_children();
+        if children.is_empty() {
+            self.settings.backfill_form.is_running = false;
+            self.settings.backfill_form.error_message =
+                Some("No children are ready to sync yet.".to_string());
+            return;
+        }
 
         let mut transactions = std::collections::HashMap::new();
         let mut goals = std::collections::HashMap::new();

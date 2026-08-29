@@ -40,6 +40,11 @@ impl eframe::App for AllowanceTrackerApp {
         // Handle sync messages from the background sync thread (needs backend access)
         self.handle_sync_messages();
 
+        // Take whatever the roster worker has reported since the last frame.
+        // This is the only place child availability changes, and it is where
+        // allowance issuance is triggered.
+        self.drain_roster_messages();
+
         // Detect app focus changes and trigger an immediate sync poll on focus-gain
         let is_focused = ctx.input(|i| i.focused);
         if is_focused && !self.was_focused {
@@ -55,10 +60,26 @@ impl eframe::App for AllowanceTrackerApp {
             self.interaction.child_dropdown.is_open = false;
         }
         
-        // Load initial data on first run
+        // Load initial data on first run.
+        //
+        // Gated on the roster: `load_initial_data` reads `child.yaml` and then
+        // the child's transactions synchronously, and on a folder iCloud has
+        // not materialized that read blocks. Running it unguarded on frame 1
+        // means the window never gets drawn at all. While the active child is
+        // still `Downloading` we simply paint the loading screen and try again
+        // on the repaint the roster worker requests.
+        //
         // Note: Use cached current_child here to avoid infinite backend calls during loading
         if self.ui.loading && self.core.current_child.is_none() {
-            self.load_initial_data();
+            match self.active_child_status() {
+                Some(crate::backend::domain::ChildStatus::Downloading) => {
+                    // Still coming down. The worker wakes us when it lands.
+                }
+                // No active child, or one that is Available (warm) or
+                // Unavailable (load_initial_data resolves it to None and
+                // clears the loading flag rather than hanging).
+                _ => self.load_initial_data(),
+            }
         }
         
         // Check for pending allowances periodically (throttled to avoid excessive calls)
@@ -172,12 +193,27 @@ impl AllowanceTrackerApp {
         }
     }
 
-    /// Render the loading screen
+    /// Render the loading screen.
+    ///
+    /// Says *why* we are waiting when the roster is still pulling a folder down
+    /// from iCloud — a bare "Loading..." during a multi-minute first sync is
+    /// indistinguishable from a hang. Reads only in-memory roster state.
     pub fn render_loading_screen(&self, ui: &mut egui::Ui) {
+        use crate::backend::domain::ChildStatus;
+        let downloading = self
+            .roster
+            .entries()
+            .iter()
+            .any(|e| matches!(e.status, ChildStatus::Downloading));
+
         ui.vertical_centered(|ui| {
             ui.add_space(100.0);
             ui.spinner();
-            ui.label("Loading...");
+            ui.label(if downloading {
+                "Downloading from iCloud…"
+            } else {
+                "Loading..."
+            });
         });
     }
 
@@ -407,6 +443,7 @@ impl AllowanceTrackerApp {
     /// variants require backend access to read/write local repositories.
     fn handle_sync_messages(&mut self) {
         let mut local_state_dirty = false;
+        let mut roster_dirty = false;
         while let Some(msg) = self.sync.try_recv_message() {
             match msg {
                 SyncMessage::ReadEntityRequest { child_id, entity_type, entity_id, response_tx } => {
@@ -414,20 +451,29 @@ impl AllowanceTrackerApp {
                     let _ = response_tx.send(json);
                 }
                 SyncMessage::GetChildIdsRequest { response_tx } => {
-                    let ids = match self.backend().child_service.list_children() {
-                        Ok(result) => result.children.into_iter().map(|c| c.id).collect(),
-                        Err(e) => {
-                            log::warn!("SYNC: list_children failed: {e}");
-                            Vec::new()
-                        }
-                    };
+                    // Only `Available` children are polled. Reporting a
+                    // downloading or missing child would let the apply path
+                    // write a fresh transactions.csv into a folder iCloud is
+                    // still pulling down — a conflict generator on exactly the
+                    // first-run scenario this design exists to fix.
+                    let ids: Vec<String> = self
+                        .roster
+                        .available_ids()
+                        .into_iter()
+                        .map(|id| id.as_str().to_string())
+                        .collect();
                     let _ = response_tx.send(ids);
                 }
                 SyncMessage::ApplyRemoteEntity { child_id, entity_type, entity_id, entity_json, event_id } => {
+                    // A remote child change can rename the child or arrive for
+                    // one we have cached; re-walk so the picker and the cached
+                    // label follow `child.yaml`.
+                    roster_dirty |= matches!(entity_type, EntityType::Child);
                     self.apply_remote_entity(&child_id, &entity_type, &entity_id, &entity_json, &event_id);
                     local_state_dirty = true;
                 }
                 SyncMessage::DeleteLocalEntity { child_id, entity_type, entity_id, event_id } => {
+                    roster_dirty |= matches!(entity_type, EntityType::Child);
                     self.delete_local_entity(&child_id, &entity_type, &entity_id, &event_id);
                     local_state_dirty = true;
                 }
@@ -450,6 +496,12 @@ impl AllowanceTrackerApp {
                     self.sync.status = SyncStatus::HasConflicts(self.sync.pending_conflict_count());
                 }
             }
+        }
+        // Rebuild once after draining, not once per entity during a bulk sync.
+        // `rebuild_roster` drains and persists pending label changes first —
+        // rebuilding would otherwise throw them away.
+        if roster_dirty {
+            self.rebuild_roster();
         }
         // Refresh UI once after draining, rather than per-entity during bulk sync.
         if local_state_dirty {
@@ -611,8 +663,23 @@ impl AllowanceTrackerApp {
                 }
             }
             EntityType::Child => {
-                if let Err(e) = self.core.backend.child_service.delete_child_by_id(child_id) {
-                    log::error!("Failed to delete local child {}: {}", child_id, e);
+                // Deregister only — never `remove_dir_all`. A sync event must
+                // not delete a folder it does not own: on a second machine
+                // this path would destroy the shared iCloud folder out from
+                // under the first. Forgetting the child locally is the whole
+                // of what a remote delete can safely mean.
+                let id = shared::ChildId::from(child_id);
+                if self.core.backend.csv_connection.registry().path_for(&id).is_none() {
+                    log::debug!("Remote delete for child {} which is not registered here", child_id);
+                    return;
+                }
+                if let Err(e) = self
+                    .core
+                    .backend
+                    .csv_connection
+                    .update_registry(|reg| reg.deregister(&id))
+                {
+                    log::error!("Failed to deregister child {} after remote delete: {}", child_id, e);
                 }
             }
         }
@@ -637,7 +704,23 @@ impl AllowanceTrackerApp {
         // Check if it's time to refresh allowances (throttled to avoid excessive calls)
         if self.ui.should_refresh_allowances() {
             log::debug!("Performing periodic allowance refresh check");
-            
+
+            // Issue only for an active child whose folder is materialized.
+            // Issuing into a folder iCloud is still delivering would append to
+            // a half-present transactions.csv. The timestamp is marked either
+            // way so we don't re-check every frame; the "just became
+            // available" case is covered by the roster trigger in
+            // `drain_roster_messages`, not by this throttle.
+            let active_available = matches!(
+                self.active_child_status(),
+                Some(crate::backend::domain::ChildStatus::Available(_))
+            );
+            if !active_available {
+                log::debug!("Skipping allowance refresh: active child is not available yet");
+                self.ui.mark_allowance_refresh();
+                return;
+            }
+
             // Use the existing backend method to check and issue pending allowances
             match self.core.backend.transaction_service.as_ref().check_and_issue_pending_allowances() {
                 Ok(count) => {
@@ -751,4 +834,48 @@ mod refresh_allowance_tests {
             "header balance was not reloaded after background allowance issuance"
         );
     }
-} 
+
+    /// A remote child delete must DEREGISTER ONLY.
+    ///
+    /// The folder is shared — on a second machine it is the same iCloud
+    /// directory the first machine is still using. `remove_dir_all` here would
+    /// destroy another machine's data in response to a sync event. Forgetting
+    /// the child locally is the whole of what a remote delete can safely mean.
+    #[test]
+    fn a_remote_child_delete_deregisters_without_touching_the_folder() {
+        use shared::sync::EntityType;
+        use shared::ChildId;
+
+        let temp = tempfile::TempDir::new().expect("temp dir");
+        let backend = Backend::with_data_dir(temp.path().to_path_buf(), None)
+            .expect("backend on temp dir");
+
+        let child = backend
+            .child_service
+            .create_child(CreateChildCommand {
+                name: "Test Kid".to_string(),
+                birthdate: "2015-01-01".to_string(),
+            })
+            .expect("create child")
+            .child;
+
+        let id = ChildId::from(child.id.as_str());
+        let folder = backend
+            .csv_connection
+            .child_dir(&id)
+            .expect("child folder resolves");
+        assert!(folder.join("child.yaml").exists(), "precondition: folder is real");
+
+        let mut app = AllowanceTrackerApp::new_for_test(backend);
+        app.delete_local_entity(&child.id, &EntityType::Child, &child.id, "evt-1");
+
+        assert!(
+            folder.join("child.yaml").exists(),
+            "a remote delete must not remove the shared child folder"
+        );
+        assert!(
+            app.backend().csv_connection.registry().path_for(&id).is_none(),
+            "the child must be deregistered locally"
+        );
+    }
+}

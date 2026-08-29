@@ -28,14 +28,16 @@ use log::{info, warn};
 use chrono::{Datelike, TimeZone};
 use shared::*;
 use crate::backend::Backend;
-use crate::backend::domain::{SyncCommand, SyncThreadHandle};
+use crate::backend::domain::{ChildStatus, RealFolderSource, SyncCommand, SyncThreadHandle, WakeUi};
 use crate::backend::domain::sync_notifier::sync_channel;
 use crate::backend::domain::sync_persistence::{SyncState, RetryQueue, sync_state_path, retry_queue_path};
+use crate::backend::storage::csv::GlobalConfigRepository;
 use crate::backend::storage::HttpRemoteClient;
 use std::sync::Arc;
 
 // Import all state modules
 use crate::ui::state::*;
+use crate::ui::state::roster::{spawn_loader, ChildRoster, RosterMessage};
 
 // Re-export types from state modules to avoid duplication
 pub use crate::ui::state::{MainTab, OverlayType, ParentalControlStage, ProtectedAction, TransactionType};
@@ -67,6 +69,20 @@ pub struct AllowanceTrackerApp {
     /// Initialised to `true` so the first frame doesn't spuriously trigger a `PollNow`
     /// — Task 6 can do an explicit startup poll if one is desired.
     pub was_focused: bool,
+
+    // ── Child roster ─────────────────────────────────────────────────────
+    /// What every render path reads instead of scanning the filesystem.
+    pub roster: ChildRoster,
+    /// Statuses from the worker walk, drained once per frame.
+    pub roster_rx: std::sync::mpsc::Receiver<RosterMessage>,
+    /// Kept so a rebuild can hand a fresh loader the same channel; stale
+    /// messages from the superseded walk are discarded by generation.
+    pub roster_tx: std::sync::mpsc::Sender<RosterMessage>,
+    /// Repaint hook, the same `WakeUi` pattern the sync thread uses.
+    pub roster_wake: WakeUi,
+    /// Monotonic walk counter. Bumped by `next_generation` on every rebuild so
+    /// a slow walk cannot overwrite a newer one's results.
+    pub roster_generation: u64,
 }
 
 impl AllowanceTrackerApp {
@@ -118,20 +134,38 @@ impl AllowanceTrackerApp {
 
         let backend = crate::backend::Backend::new(sync_notifier)?;
 
-        // Check for pending allowances on app startup
-        match backend.transaction_service.as_ref().check_and_issue_pending_allowances() {
-            Ok(count) => {
-                if count > 0 {
-                    info!("Issued {} pending allowances on app startup", count);
-                } else {
-                    info!("No pending allowances found on app startup");
-                }
-            }
-            Err(e) => {
-                warn!("Failed to check pending allowances on startup: {}", e);
-            }
+        // ── Child roster ─────────────────────────────────────────────────
+        //
+        // Registry load policy lives here, mirroring the sync_state.yaml
+        // precedent above: a malformed hand-editable file must be
+        // diagnosable, never silently reset to empty. (`CsvConnection::new`
+        // has already surfaced a parse failure as a startup error.)
+        //
+        // There is deliberately NO eager `check_and_issue_pending_allowances`
+        // here any more. It ran on the main thread before the first frame, so
+        // a child folder that iCloud had not yet materialized turned app
+        // launch into a bouncing Dock icon with no window at all — strictly
+        // worse than the mid-frame freeze this design removes, because there
+        // is not even a label to read. Issuance is now a consumer of roster
+        // completion; see `drain_roster_messages`.
+        let registry = backend.csv_connection.registry();
+        if registry.entries().is_empty() {
+            info!("No children registered — Settings → Children → Add existing child…");
         }
-        
+
+        let (roster_tx, roster_rx) = std::sync::mpsc::channel();
+        let roster_generation = 1;
+        let roster = ChildRoster::new(registry.clone(), roster_generation);
+        let ctx_for_roster = cc.egui_ctx.clone();
+        let roster_wake: WakeUi = Arc::new(move || ctx_for_roster.request_repaint());
+        spawn_loader(
+            registry,
+            Arc::new(RealFolderSource),
+            roster_generation,
+            roster_tx.clone(),
+            roster_wake.clone(),
+        );
+
         let now = chrono::Local::now();
         let _current_month = now.month();
         let _current_year = now.year();
@@ -211,6 +245,11 @@ impl AllowanceTrackerApp {
             sync_command_tx,
             sync_thread,
             was_focused: true,
+            roster,
+            roster_rx,
+            roster_tx,
+            roster_wake,
+            roster_generation,
         })
     }
 
@@ -218,8 +257,33 @@ impl AllowanceTrackerApp {
     /// eframe `CreationContext` (fonts, image loaders, sync-thread wiring)
     /// that `new` requires. For tests that exercise app-level logic without a
     /// live egui context. Sync is disabled.
+    ///
+    /// The roster is walked *synchronously* here: the loader still runs on its
+    /// own thread, but we block until it reports `Finished` so a test sees a
+    /// settled roster rather than racing the walk. Every availability gate in
+    /// the app then behaves deterministically under test.
     #[cfg(test)]
     pub fn new_for_test(backend: Backend) -> Self {
+        let registry = backend.csv_connection.registry();
+        let (roster_tx, roster_rx) = std::sync::mpsc::channel();
+        let roster_generation = 1;
+        let mut roster = ChildRoster::new(registry.clone(), roster_generation);
+        let roster_wake: WakeUi = Arc::new(|| {});
+        spawn_loader(
+            registry,
+            Arc::new(RealFolderSource),
+            roster_generation,
+            roster_tx.clone(),
+            roster_wake.clone(),
+        );
+        while let Ok(msg) = roster_rx.recv() {
+            let finished = matches!(msg, RosterMessage::Finished { .. });
+            roster.apply(msg);
+            if finished {
+                break;
+            }
+        }
+
         Self {
             core: CoreAppState::new(backend),
             ui: UIState::new(),
@@ -235,12 +299,186 @@ impl AllowanceTrackerApp {
             sync_command_tx: None,
             sync_thread: None,
             was_focused: true,
+            roster,
+            roster_rx,
+            roster_tx,
+            roster_wake,
+            roster_generation,
         }
     }
 
     // TEMPORARY: Getter methods for backward compatibility
     pub fn backend(&self) -> &Backend {
         &self.core.backend
+    }
+
+    // ====================
+    // CHILD ROSTER
+    // ====================
+
+    /// The active child's id, read from `global_config.yaml` and nothing else.
+    ///
+    /// Deliberately *not* `child_service.get_active_child()`: that resolves the
+    /// child by reading its `child.yaml`, which blocks on a folder iCloud has
+    /// not materialized. This is the one question the app must be able to
+    /// answer before any child folder is readable — "which child are we waiting
+    /// for?" — so it goes to the machine-local config file directly.
+    ///
+    /// `GlobalConfigRepository` is constructed from a *clone* of the shared
+    /// `CsvConnection`, which shares its registry handle; it is not a second,
+    /// independent snapshot.
+    pub fn active_child_id(&self) -> Option<ChildId> {
+        let repo = GlobalConfigRepository::new((*self.core.backend.csv_connection).clone());
+        match repo.active_child_id() {
+            Ok(id) => id,
+            Err(e) => {
+                warn!("Could not read the active child from global_config.yaml: {}", e);
+                None
+            }
+        }
+    }
+
+    /// The active child's roster status, or `None` when no child is active or
+    /// the active id is not registered on this machine.
+    pub fn active_child_status(&self) -> Option<ChildStatus> {
+        let id = self.active_child_id()?;
+        self.roster.status_of(&id).cloned()
+    }
+
+    /// Pre-increment and return the roster generation. Every rebuild takes a
+    /// fresh one so results from the walk it supersedes are discarded.
+    pub fn next_generation(&mut self) -> u64 {
+        self.roster_generation += 1;
+        self.roster_generation
+    }
+
+    /// Persist the display names this walk observed — all of them, in ONE
+    /// registry write.
+    ///
+    /// Must be called before `self.roster` is replaced: `ChildRoster::new`
+    /// starts with an empty `changed_labels`, so a rebuild silently discards
+    /// anything not yet drained. Losing them means a child whose folder is
+    /// still downloading has no cached name to show after a restart — exactly
+    /// the case the cache exists for.
+    fn persist_roster_labels(&mut self) {
+        let changed = self.roster.drain_changed_labels();
+        if changed.is_empty() {
+            return;
+        }
+        if let Err(e) = self.core.backend.csv_connection.update_registry(|reg| {
+            for (id, label) in &changed {
+                reg.set_label(id, label);
+            }
+            Ok(())
+        }) {
+            // Display cache only — the children themselves are fine — but it
+            // must not vanish silently: `children.yaml` can sit on a read-only
+            // or full volume.
+            warn!(
+                "Could not persist {} refreshed child display name(s); the picker may \
+                 show stale names until this succeeds: {}",
+                changed.len(),
+                e
+            );
+        }
+    }
+
+    /// Rebuild the roster from the current registry and start a fresh walk.
+    ///
+    /// Call this after anything that changes *which* children are registered
+    /// (a create, a deregistration, a sync-applied child change). Pending
+    /// label changes are drained and persisted first — see
+    /// `persist_roster_labels`.
+    ///
+    /// Rebuilding without respawning the loader would leave every entry stuck
+    /// at `Downloading` forever: sync would stop polling, and the active child
+    /// would never come back. So the two always happen together.
+    pub fn rebuild_roster(&mut self) {
+        self.persist_roster_labels();
+
+        let generation = self.next_generation();
+        let registry = self.core.backend.csv_connection.registry();
+        self.roster = ChildRoster::new(registry.clone(), generation);
+        spawn_loader(
+            registry,
+            Arc::new(RealFolderSource),
+            generation,
+            self.roster_tx.clone(),
+            self.roster_wake.clone(),
+        );
+    }
+
+    /// Drain this frame's roster messages and react to them.
+    ///
+    /// Allowance issuance hangs off this rather than off app start: the moment
+    /// the active child's folder is readable is the earliest moment issuance
+    /// can succeed, and it is reached on a worker thread with the window
+    /// already drawn.
+    pub fn drain_roster_messages(&mut self) {
+        let mut messages = Vec::new();
+        while let Ok(msg) = self.roster_rx.try_recv() {
+            messages.push(msg);
+        }
+        if messages.is_empty() {
+            return;
+        }
+
+        // One read of global_config.yaml per frame that has messages, rather
+        // than one per message.
+        let active = self.active_child_id();
+        let mut issue_allowances = false;
+        let mut walk_finished = false;
+
+        for msg in messages {
+            let newly_available = matches!(
+                msg,
+                RosterMessage::Status { ref status, .. } if matches!(status, ChildStatus::Available(_))
+            );
+            let msg_id = match &msg {
+                RosterMessage::Status { id, .. } => Some(id.clone()),
+                RosterMessage::Finished { .. } => None,
+            };
+            if matches!(msg, RosterMessage::Finished { generation } if generation == self.roster_generation) {
+                walk_finished = true;
+            }
+            self.roster.apply(msg);
+
+            if newly_available && msg_id.is_some() && msg_id == active {
+                issue_allowances = true;
+            }
+        }
+
+        if walk_finished {
+            // One registry write per walk, not one per renamed child.
+            self.persist_roster_labels();
+        }
+
+        if issue_allowances {
+            self.issue_pending_allowances_for_active_child();
+        }
+    }
+
+    /// Issue any allowances the active child is owed, and refresh the views
+    /// derived from transactions if any were issued.
+    fn issue_pending_allowances_for_active_child(&mut self) {
+        let issued = self
+            .backend()
+            .transaction_service
+            .check_and_issue_pending_allowances();
+        match issued {
+            Ok(0) => info!("No pending allowances for the active child"),
+            Ok(count) => {
+                info!("Issued {} pending allowances for the active child", count);
+                // Same reload set as the periodic path: header balance,
+                // calendar, goal and chart — deliberately not the table, which
+                // would reset the user's scroll position mid-session.
+                self.load_balance();
+                self.load_calendar_data();
+                self.load_goal_data();
+                self.load_chart_data();
+            }
+            Err(e) => warn!("Failed to check pending allowances: {}", e),
+        }
     }
     
     /// Get current child directly from backend service (the source of truth)

@@ -226,11 +226,16 @@ impl DropdownMenu {
                                     egui::Sense::click()
                                 );
                                 
-                                // Manually draw the text (no text selection possible)
-                                let text_color = if item.is_current { 
-                                    egui::Color32::from_rgb(79, 109, 245) 
-                                } else { 
-                                    egui::Color32::from_rgb(60, 60, 60) 
+                                // Manually draw the text (no text selection possible).
+                                // A disabled item is greyed: it takes no hover
+                                // highlight and no click below, so the colour is
+                                // the only cue that it is not selectable.
+                                let text_color = if !item.is_enabled {
+                                    egui::Color32::from_rgb(150, 150, 150)
+                                } else if item.is_current {
+                                    egui::Color32::from_rgb(79, 109, 245)
+                                } else {
+                                    egui::Color32::from_rgb(60, 60, 60)
                                 };
                                 ui.painter().text(
                                     button_response.rect.center(),

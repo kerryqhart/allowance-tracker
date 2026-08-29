@@ -36,6 +36,40 @@ pub struct RosterEntry {
     pub status: ChildStatus,
 }
 
+impl RosterEntry {
+    /// The name to paint in the picker. `child.yaml` wins when we have it;
+    /// otherwise the registry's cached label, which is the whole reason the
+    /// cache exists — a child whose folder is still downloading must still be
+    /// nameable.
+    pub fn display_name(&self) -> &str {
+        match &self.status {
+            ChildStatus::Available(child) => &child.name,
+            _ => &self.entry.label,
+        }
+    }
+
+    pub fn is_available(&self) -> bool {
+        matches!(self.status, ChildStatus::Available(_))
+    }
+}
+
+/// A short, user-facing explanation of why a child cannot be selected, or
+/// `None` when it can. Kept here rather than in the widgets so the picker, the
+/// selector modal, and the loading screen all say the same thing.
+pub fn status_label(status: &ChildStatus) -> Option<&'static str> {
+    match status {
+        ChildStatus::Available(_) => None,
+        ChildStatus::Downloading => Some("Downloading from iCloud…"),
+        ChildStatus::Unavailable(reason) => Some(match reason {
+            UnavailableReason::PathMissing => "Folder not found",
+            UnavailableReason::NotAChildFolder => "Folder has no child.yaml",
+            UnavailableReason::IdMismatch { .. } => "Folder belongs to another child",
+            UnavailableReason::ReadFailed(_) => "Folder could not be read",
+            UnavailableReason::ParseFailed(_) => "child.yaml could not be parsed",
+        }),
+    }
+}
+
 #[derive(Debug)]
 pub enum RosterMessage {
     Status { generation: u64, id: ChildId, status: ChildStatus },
@@ -468,6 +502,47 @@ mod tests {
             status: ChildStatus::Unavailable(UnavailableReason::PathMissing),
         });
         assert!(roster.available_ids().is_empty());
+    }
+
+    /// Pins the contract the sync thread depends on: `GetChildIdsRequest` is
+    /// answered from `available_ids`, so an unavailable child must never be
+    /// offered. Reporting one would let the apply path write a fresh
+    /// `transactions.csv` into a folder iCloud is still pulling down.
+    #[test]
+    fn sync_is_offered_only_available_children() {
+        let mut reg = ChildRegistry::default();
+        reg.register(RegistryEntry {
+            id: ChildId::from("ready"),
+            path: PathBuf::from("/a"),
+            label: "A".into(),
+        })
+        .unwrap();
+        reg.register(RegistryEntry {
+            id: ChildId::from("cold"),
+            path: PathBuf::from("/b"),
+            label: "B".into(),
+        })
+        .unwrap();
+
+        let mut roster = ChildRoster::new(Arc::new(reg), 1);
+        roster.apply(RosterMessage::Status {
+            generation: 1,
+            id: ChildId::from("ready"),
+            status: ChildStatus::Available(Child {
+                id: "ready".into(),
+                name: "A".into(),
+                birthdate: NaiveDate::from_ymd_opt(2010, 1, 1).unwrap(),
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            }),
+        });
+        roster.apply(RosterMessage::Status {
+            generation: 1,
+            id: ChildId::from("cold"),
+            status: ChildStatus::Unavailable(UnavailableReason::PathMissing),
+        });
+
+        assert_eq!(roster.available_ids(), vec![ChildId::from("ready")]);
     }
 
     /// Cached labels are persisted once at the end of a roster walk, not per

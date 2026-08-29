@@ -256,7 +256,12 @@ impl AllowanceTrackerApp {
         match self.backend().child_service.create_child(command) {
             Ok(result) => {
                 log::info!("Child created successfully: {}", result.child.name);
-                
+
+                // The registry gained an entry — re-walk so the new child shows
+                // up in the picker and becomes eligible for sync. (Drains and
+                // persists any pending display-name changes first.)
+                self.rebuild_roster();
+
                 // Clone child name and ID before moving
                 let child_name = result.child.name.clone();
                 let child_id = result.child.id.clone();

@@ -116,47 +116,56 @@ impl AllowanceTrackerApp {
     }
     
     /// Render child selector dropdown using generalized component
+    ///
+    /// Reads the roster, never the filesystem. This is a per-frame render path:
+    /// the old `list_children()` here walked every child folder while the menu
+    /// was open, which froze the window mid-frame on a cold iCloud folder.
+    ///
+    /// A child that is not `Available` is still listed — greyed out and
+    /// unclickable, annotated with why. Dropping it would make a downloading
+    /// child indistinguishable from a missing one, which is the very bug this
+    /// design exists to fix.
     pub fn render_child_dropdown_with_generalized_component(&mut self, ui: &mut egui::Ui, button_rect: egui::Rect) {
-        // Load children from backend and build menu items
-        let children_list = match self.backend().child_service.list_children() {
-            Ok(children_result) => children_result.children,
-            Err(_) => vec![],
-        };
-        
-        // SURGICAL DEBUG: Available children and current selection
-        let current_child_from_backend = self.get_current_child_from_backend();
-        log::info!("DROPDOWN_DEBUG: Available children: {:?}", 
-            children_list.iter().map(|c| (&c.id, &c.name)).collect::<Vec<_>>());
-        log::info!("DROPDOWN_DEBUG: Backend says current child: {:?}", 
-            current_child_from_backend.as_ref().map(|c| (&c.id, &c.name)));
+        use crate::ui::state::roster::status_label;
 
-        let menu_items: Vec<DropdownMenuItem> = if children_list.is_empty() {
+        // Snapshot what we need so the roster borrow ends before the dropdown
+        // widget takes `&mut self.interaction`.
+        let rows: Vec<(shared::ChildId, String, bool)> = self
+            .roster
+            .entries()
+            .iter()
+            .map(|e| (e.entry.id.clone(), match status_label(&e.status) {
+                Some(reason) => format!("{} — {}", e.display_name(), reason),
+                None => e.display_name().to_string(),
+            }, e.is_available()))
+            .collect();
+
+        let current_child_from_backend = self.get_current_child_from_backend();
+
+        let menu_items: Vec<DropdownMenuItem> = if rows.is_empty() {
             vec![DropdownMenuItem {
-                label: "No children available".to_string(),
+                label: "No children registered yet".to_string(),
                 icon: None,
                 is_current: false,
                 is_enabled: false,
             }]
         } else {
-            children_list.iter().map(|child| {
-                // FIXED: Use backend as source of truth for dropdown display
-                let is_current = current_child_from_backend.as_ref()
-                    .map(|c| c.id == child.id)
-                    .unwrap_or(false);
-                
-                // SURGICAL DEBUG: Log each dropdown item
-                log::info!("DROPDOWN_ITEM: {} ({}), is_current: {}", 
-                    child.name, child.id, is_current);
-                
+            rows.iter().map(|(id, label, available)| {
+                // Backend remains the source of truth for *which* child is active.
+                let is_current = *available
+                    && current_child_from_backend.as_ref()
+                        .map(|c| c.id.as_str() == id.as_str())
+                        .unwrap_or(false);
+
                 DropdownMenuItem {
-                    label: child.name.clone(),
+                    label: label.clone(),
                     icon: if is_current { Some("👑".to_string()) } else { None },
                     is_current,
-                    is_enabled: true,
+                    is_enabled: *available,
                 }
             }).collect()
         };
-        
+
         let menu_config = DropdownMenuConfig {
             min_width: 120.0,
             item_height: 22.0,
@@ -172,53 +181,30 @@ impl AllowanceTrackerApp {
         
         // Handle item selection outside the closure to avoid borrowing conflicts
         if let Some(index) = selected_index {
-            if index < children_list.len() {
-                let selected_child = &children_list[index];
-                
-                // SURGICAL DEBUG: Child selection process - CRITICAL PATH
-                log::info!("DROPDOWN_CLICKED: User clicked child {} ({})",
-                    selected_child.name, selected_child.id);
-                
-                let current_before_switch = self.get_current_child_from_backend();
-                log::info!("BEFORE_SWITCH: Backend thinks current child is: {:?}", 
-                    current_before_switch.as_ref().map(|c| (&c.id, &c.name)));
-                
-                // FIXED: Use backend as source of truth, not UI cache
-                let is_current = current_before_switch.as_ref()
-                    .map(|c| c.id == selected_child.id)
+            if let Some((id, _, available)) = rows.get(index) {
+                // The dropdown already refuses clicks on disabled items; this
+                // is the belt-and-braces half, since selecting an unavailable
+                // child would set it active and then fail to load.
+                if !available {
+                    return;
+                }
+
+                let is_current = self
+                    .get_current_child_from_backend()
+                    .map(|c| c.id.as_str() == id.as_str())
                     .unwrap_or(false);
-                
-                log::info!("IS_CURRENT_CHECK: Selected child {} is_current={}", selected_child.name, is_current);
-                
+
                 if !is_current {
-                    // Set this child as active
                     let command = crate::backend::domain::commands::child::SetActiveChildCommand {
-                        child_id: selected_child.id.clone(),
+                        child_id: id.as_str().to_string(),
                     };
-                    
-                    log::info!("EXECUTING_COMMAND: SetActiveChildCommand {{ child_id: {} }}", selected_child.id);
-                    
                     match self.backend().child_service.set_active_child(command) {
-                        Ok(result) => {
-                            log::info!("BACKEND_SUCCESS: Child service says switch to {} worked!", selected_child.name);
-                            log::info!("SWITCH_RESULT: Backend result details: {:?}", result);
-                            
-                            // Critical verification: Check if the switch actually worked
-                            let current_after_switch = self.get_current_child_from_backend();
-                            log::info!("AFTER_SWITCH_VERIFY: Backend now thinks current child is: {:?}", 
-                                current_after_switch.as_ref().map(|c| (&c.id, &c.name)));
-                            
-                            // Double-check: Did the switch actually work?
-                            let switch_worked = current_after_switch.as_ref()
-                                .map(|c| c.id == selected_child.id)
-                                .unwrap_or(false);
-                            log::info!("VERIFICATION: Did switch to {} actually work? {}", 
-                                selected_child.name, switch_worked);
-                            
+                        Ok(_) => {
+                            log::info!("Switched active child to {}", id);
                             self.refresh_all_data_for_current_child();
                         }
                         Err(e) => {
-                            log::error!("BACKEND_ERROR: Child service failed to switch to {}: {}", selected_child.name, e);
+                            log::error!("Failed to switch active child to {}: {}", id, e);
                             self.ui.error_message = Some(format!("Failed to select child: {}", e));
                         }
                     }
