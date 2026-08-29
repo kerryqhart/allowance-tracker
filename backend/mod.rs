@@ -61,6 +61,39 @@ impl Backend {
         // Load email config path before moving data_path
         let email_config_path = data_path.join("email_config.toml");
 
+        // Convert the legacy scan-plus-redirect layout to a children.yaml
+        // registry. Runs at most once — a no-op when children.yaml already
+        // exists. Nothing reads the registry yet; this phase only produces
+        // it. Failure is logged, not fatal: the legacy directory scan is
+        // still authoritative in this phase, so a failed migration must
+        // never prevent the app from starting.
+        match crate::backend::storage::csv::run_migration(&data_path) {
+            Ok(Some(report)) => {
+                log::info!(
+                    "Child registry migration: {} registered, {} orphan(s), {} skipped",
+                    report.registered.len(),
+                    report.orphans.len(),
+                    report.skipped.len()
+                );
+                for orphan in &report.orphans {
+                    log::warn!(
+                        "Folder holds child data but no child.yaml — not registered: {}",
+                        orphan.display()
+                    );
+                }
+                for (path, reason) in &report.skipped {
+                    log::warn!("Skipped {} during migration: {}", path.display(), reason);
+                }
+            }
+            Ok(None) => log::debug!("Child registry already present; migration skipped"),
+            Err(e) => log::error!(
+                "Child registry migration failed and did not write children.yaml — the \
+                 candidate folders under {:?} were examined but none could be registered, so \
+                 your data is present but unrecognized; inspect it before it is lost: {e}",
+                data_path
+            ),
+        }
+
         // Create the CSV connection with the real data directory
         log::info!("Backend::new() using real data path: {:?}", data_path);
         let csv_connection = Arc::new(CsvConnection::new(data_path.clone())?);
@@ -117,4 +150,47 @@ impl Backend {
             data_dir: data_path,
         })
     }
-} 
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn with_data_dir_migrates_a_legacy_layout_once() {
+        use tempfile::TempDir;
+        let dir = TempDir::new().unwrap();
+        let child = dir.path().join("keiko_hart");
+        std::fs::create_dir_all(&child).unwrap();
+        std::fs::write(
+            child.join("child.yaml"),
+            "id: keiko_hart\nname: Keiko Hart\nbirthdate: '2010-01-01'\n\
+             created_at: '2024-01-01T00:00:00Z'\nupdated_at: '2024-01-01T00:00:00Z'\n",
+        )
+        .unwrap();
+
+        let _backend = Backend::with_data_dir(dir.path().to_path_buf(), None).unwrap();
+
+        let registry_path = dir.path().join("children.yaml");
+        assert!(registry_path.exists(), "startup must produce children.yaml");
+        let text = std::fs::read_to_string(&registry_path).unwrap();
+        assert!(text.contains("keiko_hart"), "got: {text}");
+    }
+
+    /// Read-only verification gate against the REAL data directory. Never run
+    /// automatically — `plan_migration` writes nothing, so this is safe, but
+    /// it is still excluded from the default test run because it depends on
+    /// the state of this machine's real install.
+    #[test]
+    #[ignore] // run explicitly: cargo test -p allowance-tracker-egui dry_run_real_install -- --ignored --nocapture
+    fn dry_run_real_install() {
+        let base = dirs::home_dir().unwrap().join("Documents").join("Allowance Tracker");
+        let (registry, report) = crate::backend::storage::csv::plan_migration(&base).unwrap();
+        println!("--- proposed registry ---");
+        for e in registry.entries() {
+            println!("  {} -> {} ({})", e.id, e.path.display(), e.label);
+        }
+        println!("orphans: {:?}", report.orphans);
+        println!("skipped: {:?}", report.skipped);
+    }
+}
