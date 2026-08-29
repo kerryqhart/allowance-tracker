@@ -267,8 +267,8 @@ impl AllowanceTrackerApp {
                 is_enabled: true,
             },
             DropdownMenuItem {
-                label: "Data directory".to_string(),
-                icon: Some("📁".to_string()),
+                label: "Children".to_string(),
+                icon: Some("👶".to_string()),
                 is_current: false,
                 is_enabled: true,
             },
@@ -308,7 +308,7 @@ impl AllowanceTrackerApp {
                 2 => crate::ui::state::modal_state::SettingsAction::ConfigureAllowance,
                 3 => crate::ui::state::modal_state::SettingsAction::DeleteTransactions,
                 4 => crate::ui::state::modal_state::SettingsAction::ExportData,
-                5 => crate::ui::state::modal_state::SettingsAction::DataDirectory,
+                5 => crate::ui::state::modal_state::SettingsAction::Children,
                 6 => crate::ui::state::modal_state::SettingsAction::InitialSync,
                 _ => {
                     log::warn!("🚨 Unknown settings menu item clicked: {}", index);

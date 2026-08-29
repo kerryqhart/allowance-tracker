@@ -811,12 +811,11 @@ impl AllowanceTrackerApp {
                 let child_name_ref = child_name.as_deref();
                 self.settings.export_form.update_preview(child_name_ref);
             }
-            SettingsAction::DataDirectory => {
-                info!("Data directory action - opening modal");
-                self.settings.show_data_directory_modal = true;
-
-                // Clear form state when opening modal
-                self.settings.data_directory_form.clear();
+            SettingsAction::Children => {
+                info!("👶 Children action - opening modal");
+                self.settings.show_children_modal = true;
+                self.settings.children_form.clear();
+                self.settings.children_form.just_opened = true;
             }
             SettingsAction::InitialSync => {
                 self.open_backfill_modal();

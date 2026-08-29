@@ -27,7 +27,6 @@ pub struct Backend {
     pub goal_service: domain::GoalService,
     pub parental_control_service: domain::ParentalControlService,
     pub balance_service: domain::BalanceService,
-    pub data_directory_service: domain::DataDirectoryService,
     pub export_service: domain::ExportService,
     /// The shared CSV connection, which owns the child registry.
     ///
@@ -140,11 +139,6 @@ impl Backend {
         
         let parental_control_service = domain::ParentalControlService::new(csv_connection.clone());
         
-        let data_directory_service = domain::DataDirectoryService::new(
-            csv_connection.clone(),
-            Arc::new(child_service.clone()),
-        );
-        
         let export_service = domain::ExportService::new();
         
         Ok(Backend {
@@ -155,7 +149,6 @@ impl Backend {
             goal_service,
             parental_control_service,
             balance_service,
-            data_directory_service,
             export_service,
             csv_connection,
             data_dir: data_path,

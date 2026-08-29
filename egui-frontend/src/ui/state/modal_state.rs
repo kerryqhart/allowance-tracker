@@ -34,7 +34,7 @@ pub enum SettingsAction {
     ConfigureAllowance,
     DeleteTransactions,
     ExportData,
-    DataDirectory,
+    Children,
     InitialSync,
 }
 

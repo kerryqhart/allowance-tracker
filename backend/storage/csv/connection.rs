@@ -50,11 +50,6 @@ impl CsvConnection {
         &self.base_directory
     }
 
-    /// Get the current data directory path (owned, for callers that need it)
-    pub fn get_current_data_directory(&self) -> PathBuf {
-        self.base_directory.clone()
-    }
-
     /// A stable snapshot of the registry. Cheap: one `Arc` clone.
     pub fn registry(&self) -> Arc<ChildRegistry> {
         self.registry
