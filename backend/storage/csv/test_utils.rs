@@ -111,7 +111,11 @@ impl TestHelper {
 
     /// Create a test child with an explicitly chosen id.
     pub fn create_test_child_with_distinct_id(&self, name: &str, id: &str) -> Result<DomainChild> {
-        debug_assert_ne!(
+        // NOT debug_assert_ne!: this is the guard that stops the
+        // `id == safe_name` coincidence from being reintroduced, and it must
+        // hold under `cargo test --release` too. A guard that compiles out is
+        // not a guard. This is a test fixture; the cost is irrelevant.
+        assert_ne!(
             id,
             CsvConnection::generate_safe_directory_name(name),
             "fixtures must keep id and sanitized name distinct"
