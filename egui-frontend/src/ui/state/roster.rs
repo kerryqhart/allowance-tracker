@@ -216,7 +216,7 @@ mod tests {
     use chrono::{NaiveDate, TimeZone, Utc};
     use std::path::PathBuf;
     use std::sync::mpsc;
-    use std::sync::{Arc, Barrier};
+    use std::sync::{Arc, Barrier, Mutex};
 
     const VALID_YAML: &str = "id: kid\nname: Kid\nbirthdate: '2010-01-01'\n\
                               created_at: '2024-01-01T00:00:00Z'\nupdated_at: '2024-01-01T00:00:00Z'\n";
@@ -238,14 +238,41 @@ mod tests {
     }
 
     fn registry_with_one() -> Arc<ChildRegistry> {
+        registry_at(&PathBuf::from("/data/kid"))
+    }
+
+    /// Build a one-child registry pointed at an arbitrary (often real,
+    /// existing) directory — needed whenever `load_one`'s own unmocked
+    /// `std::fs` calls (`dir.exists()`, `std::fs::metadata(dir)`,
+    /// `Path::exists()` in the prefetch loop) must see a genuine directory.
+    fn registry_at(dir: &Path) -> Arc<ChildRegistry> {
         let mut reg = ChildRegistry::default();
         reg.register(RegistryEntry {
             id: ChildId::from("kid"),
-            path: PathBuf::from("/data/kid"),
+            path: dir.to_path_buf(),
             label: "Kid".into(),
         })
         .unwrap();
         Arc::new(reg)
+    }
+
+    /// A fake that records every path it's asked to `read`, in call order.
+    /// Unlike `BlockingSource`, this never blocks — reusing `BlockingSource`
+    /// for a prefetch test would deadlock, since its `read` waits on a
+    /// barrier that nothing but the test's own (already-consumed) `wait()`
+    /// releases.
+    struct RecordingSource {
+        reads: Mutex<Vec<PathBuf>>,
+        availability: Availability,
+        yaml: String,
+    }
+
+    impl ChildFolderSource for RecordingSource {
+        fn probe(&self, _p: &Path) -> Availability { self.availability }
+        fn read(&self, p: &Path) -> std::io::Result<String> {
+            self.reads.lock().unwrap().push(p.to_path_buf());
+            Ok(self.yaml.clone())
+        }
     }
 
     fn child_named(name: &str) -> Child {
@@ -268,14 +295,7 @@ mod tests {
         // — deliberately real, not routed through `ChildFolderSource` — sees
         // what a truly-present-but-cold folder looks like.
         let tmp = tempfile::TempDir::new().unwrap();
-        let mut reg = ChildRegistry::default();
-        reg.register(RegistryEntry {
-            id: ChildId::from("kid"),
-            path: tmp.path().to_path_buf(),
-            label: "Kid".into(),
-        })
-        .unwrap();
-        let registry = Arc::new(reg);
+        let registry = registry_at(tmp.path());
 
         let barrier = Arc::new(Barrier::new(2));
         let source = Arc::new(BlockingSource {
@@ -320,6 +340,110 @@ mod tests {
             RosterMessage::Status { ref status, .. }
                 if *status == ChildStatus::Unavailable(UnavailableReason::PathMissing)
         ));
+    }
+
+    #[test]
+    fn a_present_folder_without_child_yaml_reports_not_a_child_folder() {
+        // Same probe result as `a_missing_folder_...` (`Availability::Missing`
+        // — meaning `child.yaml` isn't there), but this time the directory
+        // itself genuinely exists, which is the other half of the decision
+        // `load_one` makes in that branch: `dir.exists()` is what turns
+        // "gone" (`PathMissing`) into "present but wrong" (`NotAChildFolder`).
+        // Conflating the two in the UI would tell a user their data is gone
+        // when the folder is merely misidentified.
+        struct MissingSource;
+        impl ChildFolderSource for MissingSource {
+            fn probe(&self, _p: &Path) -> Availability { Availability::Missing }
+            fn read(&self, _p: &Path) -> std::io::Result<String> {
+                panic!("must not read when probe reports Missing");
+            }
+        }
+        let tmp = tempfile::TempDir::new().unwrap(); // real, existing, but empty
+        let registry = registry_at(tmp.path());
+        let (tx, rx) = mpsc::channel();
+        spawn_loader(registry, Arc::new(MissingSource), 1, tx, Arc::new(|| {}));
+
+        let msg = rx.recv().unwrap();
+        assert!(matches!(
+            msg,
+            RosterMessage::Status { ref status, .. }
+                if *status == ChildStatus::Unavailable(UnavailableReason::NotAChildFolder)
+        ));
+    }
+
+    /// The prefetch is the whole reason this task exists: without it the
+    /// freeze this design fixes just moves from the picker to the first
+    /// calendar render. Pins all three plan constraints at once: the five
+    /// files are read, in the declared order; `.git` — a real object store
+    /// dir placed right next to them — is never touched; and (see the
+    /// sibling test below) prefetch never runs for a non-`Available` child.
+    #[test]
+    fn prefetch_reads_all_five_files_in_order_and_skips_dot_git() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        // `load_one`'s prefetch loop checks `Path::exists()` for real (it's
+        // not routed through the trait), so these four must genuinely exist
+        // for their reads to be recorded at all. `child.yaml` itself is read
+        // unconditionally, so it doesn't strictly need to exist on disk, but
+        // creating it keeps the fixture honest about what a real child folder
+        // looks like.
+        for name in PREFETCH {
+            std::fs::write(tmp.path().join(name), "").unwrap();
+        }
+        let git_dir = tmp.path().join(".git");
+        std::fs::create_dir(&git_dir).unwrap();
+        std::fs::write(git_dir.join("HEAD"), "ref: refs/heads/main\n").unwrap();
+
+        let registry = registry_at(tmp.path());
+        let source = Arc::new(RecordingSource {
+            reads: Mutex::new(Vec::new()),
+            availability: Availability::Materialized,
+            yaml: VALID_YAML.to_string(),
+        });
+        let (tx, rx) = mpsc::channel();
+        spawn_loader(registry, source.clone(), 1, tx, Arc::new(|| {}));
+
+        let status_msg = rx.recv().unwrap();
+        assert!(matches!(
+            status_msg,
+            RosterMessage::Status { ref status, .. } if matches!(status, ChildStatus::Available(_))
+        ));
+        let finished = rx.recv().unwrap();
+        assert!(matches!(finished, RosterMessage::Finished { generation: 1 }));
+
+        let recorded = source.reads.lock().unwrap();
+        let expected: Vec<PathBuf> = PREFETCH.iter().map(|name| tmp.path().join(name)).collect();
+        assert_eq!(*recorded, expected, "must read exactly the five prefetch files, in order");
+        assert!(
+            recorded.iter().all(|p| !p.starts_with(&git_dir)),
+            "must never read anything under .git: {recorded:?}"
+        );
+    }
+
+    #[test]
+    fn prefetch_is_skipped_for_a_child_that_does_not_resolve_to_available() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let registry = registry_at(tmp.path());
+        let source = Arc::new(RecordingSource {
+            reads: Mutex::new(Vec::new()),
+            availability: Availability::Materialized,
+            yaml: "{{{ not yaml".to_string(), // makes classify() return ParseFailed
+        });
+        let (tx, rx) = mpsc::channel();
+        spawn_loader(registry, source.clone(), 1, tx, Arc::new(|| {}));
+
+        let msg = rx.recv().unwrap();
+        assert!(matches!(
+            msg,
+            RosterMessage::Status { ref status, .. }
+                if matches!(status, ChildStatus::Unavailable(UnavailableReason::ParseFailed(_)))
+        ));
+
+        let recorded = source.reads.lock().unwrap();
+        assert_eq!(
+            *recorded,
+            vec![tmp.path().join("child.yaml")],
+            "a non-Available child must not trigger prefetch beyond the initial child.yaml read"
+        );
     }
 
     #[test]
