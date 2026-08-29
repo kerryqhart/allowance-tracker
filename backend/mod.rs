@@ -29,6 +29,14 @@ pub struct Backend {
     pub balance_service: domain::BalanceService,
     pub data_directory_service: domain::DataDirectoryService,
     pub export_service: domain::ExportService,
+    /// The shared CSV connection, which owns the child registry.
+    ///
+    /// Exposed so UI-driven registry mutations (registering an existing
+    /// child's folder, repointing one, deregistering) can reach
+    /// `update_registry` without going through a domain service. Every
+    /// service above holds a clone of this same `Arc`, so a mutation here is
+    /// visible to all of them.
+    pub csv_connection: Arc<CsvConnection>,
     /// Base data directory (e.g. ~/Documents/Allowance Tracker)
     pub data_dir: std::path::PathBuf,
 }
@@ -149,6 +157,7 @@ impl Backend {
             balance_service,
             data_directory_service,
             export_service,
+            csv_connection,
             data_dir: data_path,
         })
     }
