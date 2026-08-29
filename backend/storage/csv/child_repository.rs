@@ -234,14 +234,15 @@ impl crate::backend::storage::ChildStorage for ChildRepository {
 
     /// Get the currently active child
     fn get_active_child(&self) -> Result<Option<String>> {
-        let config = self.global_config().get_global_config()?;
-
-        let Some(active_id) = config.active_child_directory else {
+        // Resolve through the repository's own accessor so this and the UI's
+        // `active_child_id()` read the same key — a migrated config's legacy
+        // `active_child_directory` holds a folder name, not an id.
+        let Some(active_id) = self.global_config().active_child_id()? else {
             return Ok(None);
         };
 
         // Confirm the child is still resolvable before reporting it active.
-        Ok(self.get_child(&active_id)?.map(|c| c.id))
+        Ok(self.get_child(active_id.as_str())?.map(|c| c.id))
     }
 
     /// Set the currently active child

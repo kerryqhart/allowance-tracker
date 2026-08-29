@@ -45,6 +45,18 @@ use super::connection::CsvConnection;
 /// Global configuration structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GlobalConfig {
+    /// Id of the currently active child (None if no active child).
+    ///
+    /// This is the authoritative key. The registry migration writes it, and
+    /// [`GlobalConfigRepository::active_child_id`] reads it in preference to
+    /// the legacy `active_child_directory` below, which on a migrated install
+    /// still holds the *folder name* — and a folder name is not an id once
+    /// "Add existing child…" can adopt an arbitrary directory.
+    ///
+    /// `serde(default)` so a pre-migration file (which has only the legacy
+    /// key) still loads rather than hard-erroring.
+    #[serde(default)]
+    pub active_child_id: Option<String>,
     /// Directory name of the currently active child (None if no active child)
     pub active_child_directory: Option<String>,
     /// Data format version for future migrations
@@ -59,6 +71,7 @@ impl Default for GlobalConfig {
     fn default() -> Self {
         let now = Utc::now().to_rfc3339();
         Self {
+            active_child_id: None,
             active_child_directory: None,
             data_format_version: "1.0".to_string(),
             created_at: now.clone(),
@@ -143,6 +156,20 @@ impl GlobalConfigRepository {
     fn validate_child_directory(&self, child_id: &str) -> Result<bool> {
         Ok(self.connection.child_dir(&ChildId::from(child_id)).is_ok())
     }
+
+    /// The active child's id, or `None` if none is set.
+    ///
+    /// Reads `global_config.yaml` only — no child folder is touched — which is
+    /// what makes this safe to call while a child's folder is still coming
+    /// down from iCloud. Prefers `active_child_id`, falling back to the legacy
+    /// `active_child_directory` for a config that predates the migration.
+    pub fn active_child_id(&self) -> Result<Option<ChildId>> {
+        let config = self.load_or_create_global_config()?;
+        Ok(config
+            .active_child_id
+            .or(config.active_child_directory)
+            .map(|s| ChildId::from(s.as_str())))
+    }
 }
 
 impl GlobalConfigStorage for GlobalConfigRepository {
@@ -162,6 +189,11 @@ impl GlobalConfigStorage for GlobalConfigRepository {
         }
         
         let mut config = self.load_or_create_global_config()?;
+        // Both keys are written so the file stays self-consistent: the caller
+        // passes an id, and leaving the legacy key pointing at a different
+        // child would make the two disagree for any reader still on the old
+        // key.
+        config.active_child_id = child_directory.clone();
         config.active_child_directory = child_directory.clone();
         config.updated_at = Utc::now().to_rfc3339();
         
