@@ -27,6 +27,7 @@ pub mod table_state;
 pub mod chart_state;
 pub mod goal_state;
 pub mod sync_state;
+pub mod roster;
 
 // Re-export all state components for easy access
 pub use app_state::*;
