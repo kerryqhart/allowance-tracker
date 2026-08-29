@@ -73,6 +73,7 @@ pub mod sync_notifier;
 pub mod sync_manager;
 pub mod sync_thread;
 pub mod sync_persistence;
+pub mod child_availability;
 
 pub use transaction_service::*;
 pub use transaction_table::*;
@@ -90,4 +91,7 @@ pub use email_config_service::*;
 pub use sync_notifier::{SyncNotifier, sync_channel};
 pub use sync_manager::{SyncEngine, SyncMessage, SyncStatus, SyncCommand, PollResult, WakeUi, UiMessenger};
 pub use sync_thread::SyncThreadHandle;
+pub use child_availability::{
+    classify, Availability, ChildFolderSource, ChildStatus, RealFolderSource, UnavailableReason,
+};
  
