@@ -18,6 +18,32 @@ pub mod storage;
 // Re-export commonly used types
 pub use storage::csv::CsvConnection;
 
+/// How loudly a [`StartupNotice`] should be painted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NoticeSeverity {
+    /// Something the user should look at, but the app works.
+    Warning,
+    /// Something is broken and children are missing because of it.
+    Error,
+}
+
+/// Something the user must be told about what happened during startup.
+///
+/// Migration orphans, migration skips, and a `children.yaml` that would not
+/// parse were all log-only. In a GUI app whose stdout nobody reads, that is
+/// indistinguishable from silence — and the failure mode it hides is an empty
+/// child picker, which is the exact bug this branch exists to remove. These
+/// are collected while the backend is built and drained by the UI into the
+/// startup banner.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StartupNotice {
+    pub severity: NoticeSeverity,
+    /// One line, the headline. Rendered bold.
+    pub title: String,
+    /// Supporting lines — paths, reasons, what to do next.
+    pub details: Vec<String>,
+}
+
 /// Main backend struct that orchestrates all services
 pub struct Backend {
     pub child_service: domain::child_service::ChildService,
@@ -38,6 +64,9 @@ pub struct Backend {
     pub csv_connection: Arc<CsvConnection>,
     /// Base data directory (e.g. ~/Documents/Allowance Tracker)
     pub data_dir: std::path::PathBuf,
+    /// What startup found that the user needs to know. Drained by the UI into
+    /// the startup banner; see [`StartupNotice`].
+    pub startup_notices: Vec<StartupNotice>,
 }
 
 impl Backend {
@@ -70,10 +99,16 @@ impl Backend {
 
         // Convert the legacy scan-plus-redirect layout to a children.yaml
         // registry. Runs at most once — a no-op when children.yaml already
-        // exists. Nothing reads the registry yet; this phase only produces
-        // it. Failure is logged, not fatal: the legacy directory scan is
-        // still authoritative in this phase, so a failed migration must
-        // never prevent the app from starting.
+        // exists.
+        //
+        // The registry is now the ONLY source of children: the legacy
+        // directory scan was deleted with the resolver cutover, so nothing
+        // backstops a migration that writes nothing. Failure therefore stays
+        // non-fatal (an app that will not launch is strictly worse than one
+        // with an empty roster and a message) but it must never be silent —
+        // every outcome below that the user could care about becomes a
+        // StartupNotice and is painted in the startup banner.
+        let mut startup_notices: Vec<StartupNotice> = Vec::new();
         match crate::backend::storage::csv::run_migration(&data_path) {
             Ok(Some(report)) => {
                 log::info!(
@@ -82,30 +117,84 @@ impl Backend {
                     report.orphans.len(),
                     report.skipped.len()
                 );
+                let mut details = Vec::new();
                 for orphan in &report.orphans {
                     log::warn!(
                         "Folder holds child data but no child.yaml — not registered: {}",
                         orphan.display()
                     );
+                    // Named in full: an orphan is a folder that may hold real
+                    // transactions, and the path is the only way to find it.
+                    details.push(format!(
+                        "{} holds child data but no child.yaml, so it was not registered. \
+                         Nothing was deleted.",
+                        orphan.display()
+                    ));
                 }
-                for (path, reason) in &report.skipped {
-                    log::warn!("Skipped {} during migration: {}", path.display(), reason);
+                for skip in &report.skipped {
+                    log::warn!(
+                        "Skipped {} during migration: {}",
+                        skip.path.display(),
+                        skip.reason
+                    );
+                    details.push(format!("{} — {}", skip.path.display(), skip.reason));
+                }
+                if report.needs_attention() {
+                    details.push(
+                        "Add any missing child with Settings → Children → Add existing child…"
+                            .to_string(),
+                    );
+                    startup_notices.push(StartupNotice {
+                        severity: NoticeSeverity::Warning,
+                        title: "Some folders were not added to the child registry".to_string(),
+                        details,
+                    });
                 }
             }
             Ok(None) => log::debug!("Child registry already present; migration skipped"),
-            Err(e) => log::error!(
-                "Child registry migration failed and wrote nothing to children.yaml: {e} — \
-                 this may mean candidate folders under {:?} could not be recognized as \
-                 children (inspect them before assuming data loss), or it may be an unrelated \
-                 disk or permissions failure; startup continues regardless since the legacy \
-                 directory scan is still authoritative in this phase",
-                data_path
-            ),
+            Err(e) => {
+                log::error!(
+                    "Child registry migration failed and wrote nothing to children.yaml: {e} — \
+                     candidate folders under {:?} could not be recognized as children; inspect \
+                     them before assuming data loss. Startup continues with no children \
+                     registered.",
+                    data_path
+                );
+                startup_notices.push(StartupNotice {
+                    severity: NoticeSeverity::Error,
+                    title: "The child registry could not be created".to_string(),
+                    details: vec![
+                        format!("{e}"),
+                        format!("Nothing was written to {}.", data_path.join("children.yaml").display()),
+                        "No data was changed. Add a child with Settings → Children → Add \
+                         existing child…"
+                            .to_string(),
+                    ],
+                });
+            }
         }
 
         // Create the CSV connection with the real data directory
         log::info!("Backend::new() using real data path: {:?}", data_path);
         let csv_connection = Arc::new(CsvConnection::new(data_path.clone())?);
+
+        // A children.yaml that would not parse no longer aborts the launch —
+        // it starts an empty roster instead — so this is the only thing that
+        // tells the user why their children are gone.
+        if let Some(reason) = csv_connection.registry_load_error() {
+            startup_notices.push(StartupNotice {
+                severity: NoticeSeverity::Error,
+                title: format!("{} could not be read", csv_connection.registry_path().display()),
+                details: vec![
+                    reason.to_string(),
+                    "No children are registered until this is fixed. The file was left exactly \
+                     as it is — nothing was reset."
+                        .to_string(),
+                    "Fix the file (or move it aside to start over) and restart the app."
+                        .to_string(),
+                ],
+            });
+        }
 
         // Create services using the Arc<CsvConnection> pattern
         let child_service = domain::child_service::ChildService::new(csv_connection.clone(), sync_notifier.clone());
@@ -152,6 +241,7 @@ impl Backend {
             export_service,
             csv_connection,
             data_dir: data_path,
+            startup_notices,
         })
     }
 }
@@ -181,13 +271,16 @@ mod tests {
         assert!(text.contains("keiko_hart"), "got: {text}");
     }
 
-    /// The central constraint of this task: a failed migration must never
-    /// block startup. The legacy directory scan is still authoritative in
-    /// this phase, so `Backend::with_data_dir` must come up regardless of
-    /// what `run_migration` does. Build a folder that `run_migration`
-    /// cannot register (no `child.yaml`, no recognizable child data), which
-    /// makes it return `Err` and write nothing, then assert startup still
-    /// succeeds and `children.yaml` was never created.
+    /// A failed migration must never block startup — an app that will not
+    /// launch is strictly worse than one that comes up with an empty roster
+    /// and says why. Nothing backstops it any more (the legacy directory scan
+    /// was deleted with the resolver cutover), so the compensating requirement
+    /// is that the failure is *visible*: it must produce a StartupNotice for
+    /// the banner rather than only a log line.
+    ///
+    /// Build a folder `run_migration` cannot register (no `child.yaml`, no
+    /// recognizable child data), which makes it return `Err` and write
+    /// nothing.
     #[test]
     fn with_data_dir_starts_up_even_when_migration_fails() {
         use tempfile::TempDir;
@@ -198,9 +291,68 @@ mod tests {
 
         let backend = Backend::with_data_dir(dir.path().to_path_buf(), None);
         assert!(backend.is_ok(), "startup must succeed even when migration fails: {:?}", backend.err());
+        let backend = backend.unwrap();
 
         let registry_path = dir.path().join("children.yaml");
         assert!(!registry_path.exists(), "a failed migration must not write children.yaml");
+
+        assert_eq!(backend.startup_notices.len(), 1, "the user must be told");
+        assert_eq!(backend.startup_notices[0].severity, NoticeSeverity::Error);
+    }
+
+    /// The Critical case, end to end through the real startup path: the only
+    /// candidate is a redirect stub whose iCloud target has not arrived. The
+    /// app must come up, `children.yaml` must exist so a later run is a no-op,
+    /// and the skip must reach the banner instead of dying in the log.
+    #[test]
+    fn with_data_dir_persists_and_reports_when_a_redirect_target_is_not_here_yet() {
+        use tempfile::TempDir;
+        let dir = TempDir::new().unwrap();
+        let stub = dir.path().join("keiko_hart");
+        std::fs::create_dir_all(&stub).unwrap();
+        std::fs::write(
+            stub.join(".allowance_redirect"),
+            "/nowhere/yet/Allowance Tracker/keiko_hart",
+        )
+        .unwrap();
+
+        let backend = Backend::with_data_dir(dir.path().to_path_buf(), None).unwrap();
+
+        assert!(
+            dir.path().join("children.yaml").exists(),
+            "a not-yet-present redirect target must not stop the registry being written"
+        );
+        assert_eq!(backend.startup_notices.len(), 1, "the skip must be surfaced");
+        assert_eq!(backend.startup_notices[0].severity, NoticeSeverity::Warning);
+        assert!(
+            backend.startup_notices[0]
+                .details
+                .iter()
+                .any(|d| d.contains("keiko_hart")),
+            "the notice must name the folder: {:?}",
+            backend.startup_notices[0].details
+        );
+    }
+
+    /// A malformed `children.yaml` must launch (see the connection.rs pins for
+    /// the roster half) *and* say so.
+    #[test]
+    fn with_data_dir_reports_an_unreadable_registry_instead_of_failing_to_launch() {
+        use tempfile::TempDir;
+        let dir = TempDir::new().unwrap();
+        std::fs::write(dir.path().join("children.yaml"), "children: [ not: valid").unwrap();
+
+        let backend = Backend::with_data_dir(dir.path().to_path_buf(), None)
+            .expect("a malformed children.yaml must not stop the app launching");
+
+        assert!(backend.csv_connection.registry().entries().is_empty());
+        assert_eq!(backend.startup_notices.len(), 1);
+        assert_eq!(backend.startup_notices[0].severity, NoticeSeverity::Error);
+        assert!(
+            backend.startup_notices[0].title.contains("children.yaml"),
+            "the banner must name the file: {}",
+            backend.startup_notices[0].title
+        );
     }
 
     /// Read-only verification gate against the REAL data directory. Never run

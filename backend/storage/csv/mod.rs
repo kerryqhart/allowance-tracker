@@ -46,4 +46,6 @@ pub use global_config_repository::{GlobalConfigRepository, GlobalConfig, GlobalC
 pub use goal_repository::GoalRepository;
 pub use child_registry::{ChildRegistry, RegistryEntry, REGISTRY_FILENAME};
 pub use checksum::tree_checksum;
-pub use migration::{plan_migration, run_migration, write_dry_run, MigrationReport};
+pub use migration::{
+    plan_migration, run_migration, write_dry_run, MigrationReport, SkipKind, SkippedFolder,
+};

@@ -79,6 +79,11 @@ impl eframe::App for AllowanceTrackerApp {
             ctx.request_repaint_after(std::time::Duration::from_secs(5));
         }
         
+        // What startup could not fix by itself, above everything else. Painted
+        // before the CentralPanel so it takes its own band and stays out of
+        // that panel's hand-computed four-layer rect arithmetic.
+        self.render_startup_banner(ctx);
+
         // Main UI with image background
         egui::CentralPanel::default().show(ctx, |ui| {
             // Draw image background with blue overlay first

@@ -26,6 +26,14 @@ pub struct CsvConnection {
     /// hold borrows against it; writers rebuild and swap. The lock is held for
     /// a pointer copy and never across I/O.
     registry: Arc<Mutex<Arc<ChildRegistry>>>,
+    /// Set when `children.yaml` exists but could not be read — a YAML typo, or
+    /// a version this build does not understand.
+    ///
+    /// The file is hand-editable by design, so this is neither fatal nor
+    /// silently repaired: the app starts with an empty roster, the message
+    /// reaches the startup banner, and the bad file is left exactly as the
+    /// user wrote it. See `update_registry`, which refuses to write over it.
+    registry_load_error: Arc<Option<String>>,
 }
 
 impl CsvConnection {
@@ -37,17 +45,47 @@ impl CsvConnection {
             fs::create_dir_all(&base_path)?;
         }
 
-        let registry = ChildRegistry::load(&base_path)?;
+        // A `children.yaml` that will not parse must NOT abort startup.
+        // Propagating this error killed the process before eframe opened a
+        // window: the app "failed to start" with nothing on screen and the
+        // reason only in a log nobody reads. The file is hand-editable by
+        // design, so the policy is log, banner, empty roster — never a silent
+        // reset, and never a failure to launch.
+        let (registry, registry_load_error) = match ChildRegistry::load(&base_path) {
+            Ok(registry) => (registry, None),
+            Err(e) => {
+                let detail = format!("{e:#}");
+                log::error!(
+                    "Could not read {}: {detail} — starting with no children registered. \
+                     The file has been left untouched; fix it and restart.",
+                    base_path.join(super::child_registry::REGISTRY_FILENAME).display()
+                );
+                (ChildRegistry::default(), Some(detail))
+            }
+        };
 
         Ok(Self {
             base_directory: base_path,
             registry: Arc::new(Mutex::new(Arc::new(registry))),
+            registry_load_error: Arc::new(registry_load_error),
         })
     }
 
     /// Get the base directory path
     pub fn base_directory(&self) -> &Path {
         &self.base_directory
+    }
+
+    /// Why `children.yaml` could not be read, when it could not be.
+    ///
+    /// `None` on the normal path, including a fresh install with no file yet.
+    pub fn registry_load_error(&self) -> Option<&str> {
+        self.registry_load_error.as_deref()
+    }
+
+    /// The full path of the registry file, for messages that must name it.
+    pub fn registry_path(&self) -> PathBuf {
+        self.base_directory.join(super::child_registry::REGISTRY_FILENAME)
     }
 
     /// A stable snapshot of the registry. Cheap: one `Arc` clone.
@@ -62,10 +100,22 @@ impl CsvConnection {
     ///
     /// Persisting before the swap means a write failure leaves the in-memory
     /// registry untouched rather than diverging from disk.
+    ///
+    /// Refuses outright while `children.yaml` is unreadable. The in-memory
+    /// registry is empty in that state, so saving would overwrite whatever the
+    /// user actually wrote with a file holding one entry — a silent reset by a
+    /// slower route, and the one thing the error-handling policy forbids.
     pub fn update_registry(
         &self,
         f: impl FnOnce(&mut ChildRegistry) -> Result<()>,
     ) -> Result<()> {
+        if let Some(e) = self.registry_load_error() {
+            anyhow::bail!(
+                "{} could not be read ({e}), so it cannot be modified without losing what is \
+                 in it. Fix the file — or move it aside to start over — and restart the app.",
+                self.registry_path().display()
+            );
+        }
         let current = self.registry();
         let mut next = (*current).clone();
         f(&mut next)?;
@@ -99,10 +149,19 @@ impl CsvConnection {
 
     /// Resolve without the existence check.
     ///
-    /// Exactly one caller is legitimate: writing `child.yaml` for the first
-    /// time, where the file cannot exist yet. Registration happens before the
-    /// write (mkdir -> register -> write `child.yaml`), so the entry is
-    /// present by the time this is called.
+    /// Two callers are legitimate, both of them cases where requiring
+    /// `child.yaml` to be present would be wrong:
+    ///
+    /// - `ChildRepository::store_child` writing `child.yaml` for the first
+    ///   time, where the file cannot exist yet. Registration happens before
+    ///   the write (mkdir -> register -> write `child.yaml`), so the entry is
+    ///   present by the time this is called.
+    /// - `ChildRepository::delete_child`, which must still remove a folder
+    ///   that has lost its `child.yaml` — precisely the damaged state a user
+    ///   reaches for delete to clean up.
+    ///
+    /// Everything else goes through [`CsvConnection::child_dir`]. Adding a
+    /// third caller means re-deriving why the `stat` is safe to skip there.
     pub fn child_dir_for_create(&self, id: &ChildId) -> Result<PathBuf> {
         self.registry()
             .path_for(id)
@@ -190,7 +249,7 @@ impl CsvConnection {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::storage::csv::child_registry::RegistryEntry;
+    use crate::backend::storage::csv::child_registry::{RegistryEntry, REGISTRY_FILENAME};
     use tempfile::TempDir;
 
     fn conn_with_child(dir: &Path, id: &str) -> CsvConnection {
@@ -253,6 +312,67 @@ mod tests {
             .ensure_transactions_file_exists(&ChildId::from("child_abc"))
             .is_err());
         assert!(!dir.path().join("child_abc").exists());
+    }
+
+    /// A hand-edited `children.yaml` with a typo must not stop the app from
+    /// launching. Before the fix this error propagated out of `new`, through
+    /// `Backend`, and out of `AllowanceTrackerApp::new` into eframe, which
+    /// exited with no window at all.
+    #[test]
+    fn a_malformed_registry_yields_an_empty_roster_rather_than_a_failed_launch() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join(REGISTRY_FILENAME);
+        std::fs::write(&path, "children: [ this is not: valid").unwrap();
+
+        let conn = CsvConnection::new(dir.path()).expect("a bad registry must not fail startup");
+        assert!(conn.registry().entries().is_empty(), "roster starts empty");
+        assert!(
+            conn.registry_load_error().is_some(),
+            "the reason must be available to the startup banner"
+        );
+
+        // Never silently reset: the user's bytes are still on disk.
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "children: [ this is not: valid",
+            "the malformed file must be left exactly as written"
+        );
+    }
+
+    /// Same policy for a version this build does not understand.
+    #[test]
+    fn an_unknown_registry_version_yields_an_empty_roster_rather_than_a_failed_launch() {
+        let dir = TempDir::new().unwrap();
+        std::fs::write(dir.path().join(REGISTRY_FILENAME), "version: 99\nchildren: []\n").unwrap();
+
+        let conn = CsvConnection::new(dir.path()).expect("an unknown version must not fail startup");
+        assert!(conn.registry().entries().is_empty());
+        assert!(conn.registry_load_error().unwrap().contains("version"));
+    }
+
+    /// The other half of "never silently reset": a mutation must not quietly
+    /// replace the unreadable file with the empty registry we started from.
+    #[test]
+    fn a_mutation_is_refused_while_the_registry_file_is_unreadable() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join(REGISTRY_FILENAME);
+        std::fs::write(&path, "children: [ this is not: valid").unwrap();
+
+        let conn = CsvConnection::new(dir.path()).unwrap();
+        let err = conn
+            .update_registry(|reg| {
+                reg.register(RegistryEntry {
+                    id: ChildId::from("kid"),
+                    path: dir.path().join("kid"),
+                    label: "Kid".into(),
+                })
+            })
+            .unwrap_err();
+        assert!(err.to_string().contains(REGISTRY_FILENAME), "got: {err}");
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "children: [ this is not: valid"
+        );
     }
 
     #[test]

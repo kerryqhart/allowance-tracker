@@ -209,7 +209,6 @@ impl crate::backend::storage::ChildStorage for ChildRepository {
         }
     }
 
-    /// Delete a child by ID
     /// Delete a child: remove its folder, then deregister it.
     ///
     /// Resolution goes through `child_dir_for_create`, **not** `child_dir`.

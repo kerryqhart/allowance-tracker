@@ -7,9 +7,15 @@
 //! of every `child.yaml`. Those three conventions agreed only because id,
 //! folder name, and sanitized name happened to be the same string.
 //!
-//! Coverage — one pin per resolution convention, per repository:
+//! All five now resolve through the one registry lookup,
+//! `CsvConnection::child_dir`. These pins were written against the three
+//! conventions they replaced, and they stay because they are what proves the
+//! cutover landed — the *superseded* convention is named below so a failure
+//! says which old behaviour crept back.
 //!
-//! | Repository                   | Convention today            | Pinned by |
+//! Coverage — one pin per repository:
+//!
+//! | Repository                   | Convention it used to use   | Pinned by |
 //! |------------------------------|-----------------------------|-----------|
 //! | `TransactionRepository`      | sanitized display name      | `transactions_land_in_the_folder_the_id_names`, `renaming_a_child_does_not_move_or_lose_their_transactions`, `reading_a_child_with_a_missing_folder_creates_nothing` |
 //! | `GoalRepository`             | `child_id` passed straight  | `goals_land_in_the_folder_the_id_names` |
@@ -24,9 +30,10 @@
 //!
 //! Every test asserts the **full** subdirectory set of the base directory, not
 //! just the expected path plus one named stray. A resolver that writes into a
-//! third, unanticipated folder must fail these too — `create_dir_all` on the
-//! write *and read* paths means a wrong folder is silently manufactured rather
-//! than erroring.
+//! third, unanticipated folder must fail these too — under the old layout
+//! `create_dir_all` on the write *and read* paths meant a wrong folder was
+//! silently manufactured rather than erroring, and the set assertion is what
+//! catches a reintroduction.
 
 #![cfg(test)]
 
@@ -186,9 +193,10 @@ fn child_yaml_lands_in_the_folder_the_id_names() {
     );
 }
 
-/// `AllowanceRepository` resolves via `CsvConnection::find_child_directory_by_id`,
-/// a scan of every `child.yaml` under the base directory. That is a third
-/// convention again, and the Task 9 cutover replaces it — so pin it now.
+/// `AllowanceRepository` used to resolve via a scan of every `child.yaml`
+/// under the base directory — a third convention again. It now goes through
+/// `CsvConnection::child_dir` like everything else; this pins that the bytes
+/// did not move when the scan was deleted.
 #[test]
 fn allowance_config_lands_in_the_folder_the_id_names() {
     let helper = TestHelper::new().unwrap();
@@ -231,7 +239,7 @@ fn allowance_config_lands_in_the_folder_the_id_names() {
     );
 }
 
-/// `ParentalControlRepository` also resolves via the base-dir scan. It writes
+/// `ParentalControlRepository` also used to resolve via the base-dir scan. It writes
 /// BOTH a per-child `parental_control_attempts.csv` and a global one at the
 /// base directory; this pins the per-child path.
 ///

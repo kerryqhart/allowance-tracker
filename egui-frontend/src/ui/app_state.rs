@@ -83,6 +83,13 @@ pub struct AllowanceTrackerApp {
     /// Monotonic walk counter. Bumped by `next_generation` on every rebuild so
     /// a slow walk cannot overwrite a newer one's results.
     pub roster_generation: u64,
+    /// What startup found and could not fix by itself: a `children.yaml` that
+    /// would not parse, a migration that skipped a folder, a migration that
+    /// found an orphan. Painted across the top of the window until dismissed,
+    /// because all three end in a child missing from the picker, and a
+    /// silently empty picker is indistinguishable from the bug this branch
+    /// exists to remove.
+    pub startup_banner: crate::ui::components::startup_banner::StartupBanner,
     /// A `load_initial_data` that could not run yet because the active child's
     /// folder was still coming down. Retried every frame until it can. It is
     /// deferred rather than dropped: the sync path uses it to refresh the UI
@@ -138,7 +145,14 @@ impl AllowanceTrackerApp {
             (None, None)
         };
 
-        let backend = crate::backend::Backend::new(sync_notifier)?;
+        let mut backend = crate::backend::Backend::new(sync_notifier)?;
+
+        // Take what startup wants to tell the user before `backend` is moved
+        // into `CoreAppState`. Migration orphans, migration skips, and a
+        // registry file that would not parse were all log-only until now.
+        let startup_banner = crate::ui::components::startup_banner::StartupBanner::new(
+            std::mem::take(&mut backend.startup_notices),
+        );
 
         // ── Child roster ─────────────────────────────────────────────────
         //
@@ -256,6 +270,7 @@ impl AllowanceTrackerApp {
             roster_tx,
             roster_wake,
             roster_generation,
+            startup_banner,
             pending_initial_load: false,
         })
     }
@@ -270,7 +285,10 @@ impl AllowanceTrackerApp {
     /// settled roster rather than racing the walk. Every availability gate in
     /// the app then behaves deterministically under test.
     #[cfg(test)]
-    pub fn new_for_test(backend: Backend) -> Self {
+    pub fn new_for_test(mut backend: Backend) -> Self {
+        let startup_banner = crate::ui::components::startup_banner::StartupBanner::new(
+            std::mem::take(&mut backend.startup_notices),
+        );
         let registry = backend.csv_connection.registry();
         let (roster_tx, roster_rx) = std::sync::mpsc::channel();
         let roster_generation = 1;
@@ -311,6 +329,7 @@ impl AllowanceTrackerApp {
             roster_tx,
             roster_wake,
             roster_generation,
+            startup_banner,
             pending_initial_load: false,
         }
     }

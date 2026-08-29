@@ -30,13 +30,56 @@ const ORPHAN_MARKERS: &[&str] = &[
     "parental_control_attempts.csv",
 ];
 
+/// Why a candidate folder was not registered — and, crucially, whether that
+/// says anything is *wrong*.
+///
+/// The distinction is load-bearing. `run_migration` refuses to persist when it
+/// examined candidates and registered none, because that result becomes
+/// permanent (migration is a no-op once `children.yaml` exists). But refusing
+/// is only correct when the reason indicates trouble. A redirect stub whose
+/// iCloud target has not been delivered to this machine yet is the *expected*
+/// state of a fresh install — refusing there writes no registry at all, which
+/// is the empty picker this whole branch exists to abolish.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SkipKind {
+    /// The folder is not there *yet*: a redirect pointing at a path iCloud has
+    /// not materialized. Recoverable on its own, and recoverable by hand via
+    /// Settings → Children → Add existing child…. Never blocks persistence.
+    NotYetPresent,
+    /// Something we do not understand, cannot read, or that collides with an
+    /// entry already registered. Blocks persistence when nothing registered.
+    Unrecognized,
+}
+
+/// One folder migration declined to register, with the reason and its kind.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SkippedFolder {
+    pub path: PathBuf,
+    pub reason: String,
+    pub kind: SkipKind,
+}
+
 #[derive(Debug, Default, PartialEq)]
 pub struct MigrationReport {
     pub registered: Vec<ChildId>,
     /// Folders with child data but no `child.yaml`. Surfaced to the user.
     pub orphans: Vec<PathBuf>,
     /// Folders we declined to register, with the reason.
-    pub skipped: Vec<(PathBuf, String)>,
+    pub skipped: Vec<SkippedFolder>,
+}
+
+impl MigrationReport {
+    /// Whether anything here needs to reach a human. Log-only is not enough:
+    /// nobody reads a GUI app's stdout.
+    pub fn needs_attention(&self) -> bool {
+        !self.orphans.is_empty() || !self.skipped.is_empty()
+    }
+
+    /// Skips that indicate real trouble, as opposed to a folder that simply
+    /// has not arrived yet.
+    fn blocking_skips(&self) -> impl Iterator<Item = &SkippedFolder> {
+        self.skipped.iter().filter(|s| s.kind == SkipKind::Unrecognized)
+    }
 }
 
 /// Minimal view of `child.yaml` — only what migration needs.
@@ -70,10 +113,14 @@ pub fn plan_migration(base_dir: &Path) -> Result<(ChildRegistry, MigrationReport
                 }
             }
             Err(e) => {
-                report.skipped.push((
-                    base_dir.to_path_buf(),
-                    format!("could not read a directory entry under {}: {e}", base_dir.display()),
-                ));
+                report.skipped.push(SkippedFolder {
+                    path: base_dir.to_path_buf(),
+                    reason: format!(
+                        "could not read a directory entry under {}: {e}",
+                        base_dir.display()
+                    ),
+                    kind: SkipKind::Unrecognized,
+                });
             }
         }
     }
@@ -89,9 +136,33 @@ pub fn plan_migration(base_dir: &Path) -> Result<(ChildRegistry, MigrationReport
         }
 
         let resolved = match resolve_legacy_dir(&dir) {
-            Ok(p) => p,
+            Ok(LegacyDir::Resolved(p)) => p,
+            Ok(LegacyDir::NotYetPresent(target)) => {
+                // Expected on a machine iCloud has not finished populating.
+                // Recorded so it reaches the startup banner, but deliberately
+                // NOT treated as trouble: see `SkipKind`.
+                warn!(
+                    "Migration found a redirect to a folder that is not here yet: {} -> {}",
+                    dir.display(),
+                    target.display()
+                );
+                report.skipped.push(SkippedFolder {
+                    path: dir.clone(),
+                    reason: format!(
+                        "redirect target does not exist yet — iCloud may not have \
+                         delivered it: {}",
+                        target.display()
+                    ),
+                    kind: SkipKind::NotYetPresent,
+                });
+                continue;
+            }
             Err(e) => {
-                report.skipped.push((dir.clone(), e.to_string()));
+                report.skipped.push(SkippedFolder {
+                    path: dir.clone(),
+                    reason: e.to_string(),
+                    kind: SkipKind::Unrecognized,
+                });
                 continue;
             }
         };
@@ -110,10 +181,11 @@ pub fn plan_migration(base_dir: &Path) -> Result<(ChildRegistry, MigrationReport
                     "Migration found an unrecognized folder (no child.yaml, no known child data): {}",
                     resolved.display()
                 );
-                report.skipped.push((
-                    resolved,
-                    "no child.yaml and no recognizable child data".to_string(),
-                ));
+                report.skipped.push(SkippedFolder {
+                    path: resolved,
+                    reason: "no child.yaml and no recognizable child data".to_string(),
+                    kind: SkipKind::Unrecognized,
+                });
             }
             continue;
         }
@@ -121,14 +193,22 @@ pub fn plan_migration(base_dir: &Path) -> Result<(ChildRegistry, MigrationReport
         let text = match fs::read_to_string(&yaml_path) {
             Ok(t) => t,
             Err(e) => {
-                report.skipped.push((resolved, format!("could not read child.yaml: {e}")));
+                report.skipped.push(SkippedFolder {
+                    path: resolved,
+                    reason: format!("could not read child.yaml: {e}"),
+                    kind: SkipKind::Unrecognized,
+                });
                 continue;
             }
         };
         let parsed: ChildYaml = match serde_yaml::from_str(&text) {
             Ok(p) => p,
             Err(e) => {
-                report.skipped.push((resolved, format!("could not parse child.yaml: {e}")));
+                report.skipped.push(SkippedFolder {
+                    path: resolved,
+                    reason: format!("could not parse child.yaml: {e}"),
+                    kind: SkipKind::Unrecognized,
+                });
                 continue;
             }
         };
@@ -141,39 +221,72 @@ pub fn plan_migration(base_dir: &Path) -> Result<(ChildRegistry, MigrationReport
         let id = entry.id.clone();
         match registry.register(entry) {
             Ok(()) => report.registered.push(id),
-            Err(e) => report.skipped.push((resolved, e.to_string())),
+            Err(e) => report.skipped.push(SkippedFolder {
+                path: resolved,
+                reason: e.to_string(),
+                kind: SkipKind::Unrecognized,
+            }),
         }
     }
 
     Ok((registry, report))
 }
 
+/// What a legacy base-directory entry pointed at.
+enum LegacyDir {
+    /// A folder that is here now.
+    Resolved(PathBuf),
+    /// A redirect naming a folder that is not on this machine yet, carrying
+    /// the target so the user can be told which path to wait for.
+    NotYetPresent(PathBuf),
+}
+
 /// Follow `.allowance_redirect` if present, else return the directory itself.
-fn resolve_legacy_dir(dir: &Path) -> Result<PathBuf> {
+///
+/// A redirect whose target is absent is **not** an error. On a fresh Mac that
+/// is simply iCloud not having delivered the folder yet, and treating it as a
+/// failure is what turned migration into a silently empty registry.
+fn resolve_legacy_dir(dir: &Path) -> Result<LegacyDir> {
     let redirect = dir.join(".allowance_redirect");
     if !redirect.exists() {
-        return Ok(dir.to_path_buf());
+        return Ok(LegacyDir::Resolved(dir.to_path_buf()));
     }
     let target = fs::read_to_string(&redirect)
         .with_context(|| format!("reading {}", redirect.display()))?;
     let target = PathBuf::from(target.trim());
     if !target.exists() {
-        anyhow::bail!("redirect target does not exist: {}", target.display());
+        return Ok(LegacyDir::NotYetPresent(target));
     }
-    Ok(target)
+    Ok(LegacyDir::Resolved(target))
 }
 
 /// Run migration once. Returns `Ok(None)` when the registry already exists.
 ///
-/// Refuses to persist when it examined at least one candidate directory but
-/// could not register any of them — every candidate ending up in `skipped`
-/// or `orphans` is very likely a bug (in migration, or in the install being
-/// migrated) rather than a legitimately empty roster. Persisting anyway would
-/// be silently permanent: `run_migration` is a no-op once `children.yaml`
-/// exists, so a bad first run would never get a second chance. A genuinely
-/// fresh install (an empty or absent base dir, zero candidate directories)
-/// still persists an empty registry — that path is legitimate and must not
-/// be blocked by this check.
+/// Refuses to persist only when it registered nothing **and** at least one
+/// candidate failed for a reason that indicates real trouble
+/// ([`SkipKind::Unrecognized`]): an unreadable or unparseable `child.yaml`, a
+/// folder we cannot identify at all, a collision with an entry already
+/// registered. Persisting there would be silently permanent, because
+/// `run_migration` is a no-op once `children.yaml` exists, so a bad first run
+/// would never get a second chance.
+///
+/// Two cases deliberately do **not** refuse:
+///
+/// - A genuinely fresh install — an empty or absent base dir, zero candidates.
+/// - A redirect stub whose target has not been delivered by iCloud yet
+///   ([`SkipKind::NotYetPresent`]). This is the single real install this
+///   branch has to migrate, and refusing there wrote no registry at all: an
+///   empty picker with no message, which is indistinguishable from the bug
+///   this branch exists to remove. Persisting a registry that omits the child
+///   is recoverable and visible — the skip reaches the startup banner, and
+///   **Settings → Children → Add existing child…** registers the folder once
+///   it lands. Idempotency is unaffected either way: a second run is a no-op
+///   because `children.yaml` now exists, so nothing can un-register what the
+///   user added by hand.
+///
+/// Orphans (child data with no `child.yaml`) never block either. They are
+/// reported, not repaired, and refusing on their account would suppress the
+/// very banner that tells the user which folder to look at.
 pub fn run_migration(base_dir: &Path) -> Result<Option<MigrationReport>> {
     if base_dir.join(REGISTRY_FILENAME).exists() {
         return Ok(None);
@@ -182,13 +295,17 @@ pub fn run_migration(base_dir: &Path) -> Result<Option<MigrationReport>> {
     let (registry, report) = plan_migration(base_dir)?;
 
     let candidates = report.registered.len() + report.orphans.len() + report.skipped.len();
-    if candidates > 0 && report.registered.is_empty() {
+    let blocking: Vec<&SkippedFolder> = report.blocking_skips().collect();
+    if report.registered.is_empty() && !blocking.is_empty() {
         anyhow::bail!(
-            "migration examined {candidates} candidate director{plural} but could not register \
-             any of them ({} orphaned, {} skipped) — inspect the MigrationReport's orphan and \
-             skip reasons before retrying; nothing was written",
-            report.orphans.len(),
-            report.skipped.len(),
+            "migration examined {candidates} candidate director{plural}, registered none, and \
+             could not make sense of {}: {} — inspect these before retrying; nothing was written",
+            blocking.len(),
+            blocking
+                .iter()
+                .map(|s| format!("{} ({})", s.path.display(), s.reason))
+                .collect::<Vec<_>>()
+                .join("; "),
             plural = if candidates == 1 { "y" } else { "ies" },
         );
     }
@@ -416,7 +533,12 @@ mod tests {
         let (reg, report) = plan_migration(base.path()).unwrap();
         assert!(reg.entries().is_empty());
         assert_eq!(report.skipped.len(), 1);
-        assert!(report.skipped[0].1.contains("does not exist"));
+        assert!(report.skipped[0].reason.contains("does not exist"));
+        assert_eq!(
+            report.skipped[0].kind,
+            SkipKind::NotYetPresent,
+            "a redirect target that has not arrived yet is not corruption"
+        );
     }
 
     #[test]
@@ -547,12 +669,12 @@ mod tests {
         assert!(report.skipped.is_empty());
     }
 
-    /// Critical fix, side 1 of the line: a genuinely fresh install (an empty
-    /// base directory, zero candidate directories) must still persist an
-    /// empty registry. The refusal-to-persist guard must key off "candidates
-    /// examined but none registered," never off "registered is empty" on its
-    /// own — an empty `registered` is also true here, and this case must NOT
-    /// be refused.
+    /// Side 1 of the line: a genuinely fresh install (an empty base directory,
+    /// zero candidate directories) must still persist an empty registry. The
+    /// refusal-to-persist guard keys off "registered nothing AND at least one
+    /// candidate we could not make sense of," never off "registered is empty"
+    /// on its own — an empty `registered` is also true here, and this case
+    /// must NOT be refused.
     #[test]
     fn run_migration_persists_empty_registry_for_a_fresh_install() {
         let base = TempDir::new().unwrap();
@@ -567,10 +689,11 @@ mod tests {
                 "children.yaml must be written even when empty");
     }
 
-    /// Critical fix, side 2 of the line: at least one candidate directory was
-    /// examined and none of them could be registered. Persisting here would
-    /// make a partial/empty registry permanent, since run_migration is a
-    /// no-op once children.yaml exists on disk.
+    /// Side 2 of the line: a candidate we could not make sense of at all, and
+    /// nothing registered. Persisting here would make an empty registry
+    /// permanent, since run_migration is a no-op once children.yaml exists on
+    /// disk, and the folder might be a child whose `child.yaml` we failed to
+    /// recognize for a reason worth a human's attention.
     #[test]
     fn run_migration_refuses_to_persist_when_no_candidate_registers() {
         let base = TempDir::new().unwrap();
@@ -584,6 +707,80 @@ mod tests {
                 "error should name how many candidates were examined: {err}");
         assert!(!base.path().join(REGISTRY_FILENAME).exists(),
                 "must not persist children.yaml when it could not register any candidate");
+    }
+
+    /// The regression this fix exists for, and the exact shape of the one real
+    /// install that has to migrate: a base directory whose only candidate is a
+    /// redirect stub pointing at an iCloud folder that has not been delivered
+    /// yet. Before the fix this returned `Err`, wrote nothing, and produced an
+    /// empty picker with no message at all.
+    ///
+    /// Asserts all three halves of the contract: it persists, the skip is
+    /// still reported so the banner can name it, and the child that was
+    /// omitted is still registerable afterwards — through the same
+    /// `ChildRegistry::register` that **Settings → Children → Add existing
+    /// child…** calls.
+    #[test]
+    fn a_not_yet_present_redirect_still_persists_a_usable_registry() {
+        let base = TempDir::new().unwrap();
+        let icloud = TempDir::new().unwrap();
+        let not_here_yet = icloud.path().join("keiko_hart");
+        redirect_stub(base.path(), "keiko_hart", &not_here_yet);
+
+        let report = run_migration(base.path())
+            .expect("a redirect target that has not arrived is not a migration failure")
+            .expect("first run must not be a no-op");
+
+        assert!(
+            base.path().join(REGISTRY_FILENAME).exists(),
+            "children.yaml must be written even when the only child could not be resolved"
+        );
+        assert!(report.registered.is_empty());
+        assert_eq!(report.skipped.len(), 1, "the skip must still be reported");
+        assert_eq!(report.skipped[0].kind, SkipKind::NotYetPresent);
+        assert!(
+            report.needs_attention(),
+            "the user must be told; a silent empty registry is the bug being fixed"
+        );
+
+        // The child arrives later and is added by hand. This is the recovery
+        // path the relaxed guard depends on being real.
+        let mut registry = ChildRegistry::load(base.path()).unwrap();
+        std::fs::create_dir_all(&not_here_yet).unwrap();
+        registry
+            .register(RegistryEntry {
+                id: ChildId::from("keiko_hart"),
+                path: not_here_yet.clone(),
+                label: "Keiko Hart".to_string(),
+            })
+            .unwrap();
+        registry.save(base.path()).unwrap();
+
+        // ...and migration stays idempotent: the second run is a no-op that
+        // cannot undo what the user just added.
+        assert!(
+            run_migration(base.path()).unwrap().is_none(),
+            "a second run must be a no-op once children.yaml exists"
+        );
+        let reloaded = ChildRegistry::load(base.path()).unwrap();
+        assert_eq!(reloaded.entries().len(), 1);
+        assert_eq!(reloaded.entries()[0].path, not_here_yet);
+    }
+
+    /// The other half of the same line: an orphan is reported rather than
+    /// blocking. Refusing on an orphan's account would suppress the banner
+    /// that names the folder holding the data.
+    #[test]
+    fn an_orphan_alone_does_not_block_persistence() {
+        let base = TempDir::new().unwrap();
+        let orphan = base.path().join("keiko_smith");
+        std::fs::create_dir_all(&orphan).unwrap();
+        std::fs::write(orphan.join("transactions.csv"), "id,child_id\n").unwrap();
+
+        let report = run_migration(base.path()).unwrap().unwrap();
+        assert!(base.path().join(REGISTRY_FILENAME).exists());
+        assert_eq!(report.orphans, vec![orphan]);
+        assert!(report.needs_attention());
     }
 
     /// write_dry_run has its own success-path test: children.yaml.proposed is
