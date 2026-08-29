@@ -210,24 +210,46 @@ impl crate::backend::storage::ChildStorage for ChildRepository {
     }
 
     /// Delete a child by ID
+    /// Delete a child: remove its folder, then deregister it.
+    ///
+    /// Resolution goes through `child_dir_for_create`, **not** `child_dir`.
+    /// `child_dir` additionally requires `child.yaml` to be present, and a
+    /// folder that has lost its `child.yaml` is precisely the damaged state a
+    /// user reaches for delete to clean up. Resolving through `child_dir` here
+    /// meant that case skipped the removal, deregistered anyway, and left the
+    /// folder behind with nothing in the registry still naming it — an orphan
+    /// no UI could see or reach.
+    ///
+    /// The registered path is only ever bound by a flow that first validated a
+    /// `child.yaml` there (create, Add existing child…, Locate…), so this is a
+    /// child's folder even when its `child.yaml` has since gone missing.
+    ///
+    /// Order is remove-then-deregister: a failed removal aborts with the entry
+    /// still in place, so the operation is retryable and the registry never
+    /// describes a machine state that isn't true.
     fn delete_child(&self, child_id: &str) -> Result<()> {
         let id = ChildId::from(child_id);
 
-        match self.connection.child_dir(&id) {
+        match self.connection.child_dir_for_create(&id) {
             Ok(child_dir) => {
-                fs::remove_dir_all(&child_dir)?;
-                info!("Deleted child directory: {:?}", child_dir);
+                if child_dir.exists() {
+                    fs::remove_dir_all(&child_dir)?;
+                    info!("Deleted child directory: {:?}", child_dir);
+                } else {
+                    warn!(
+                        "Child {} was registered at {} but nothing is there; deregistering only",
+                        child_id,
+                        child_dir.display()
+                    );
+                }
             }
             Err(e) => {
                 warn!("Attempted to delete a non-existent child {}: {}", child_id, e);
+                return Ok(());
             }
         }
 
-        // Deregister regardless of whether the folder was there: a registered
-        // entry with no folder is exactly the state this removes.
-        if self.connection.registry().path_for(&id).is_some() {
-            self.connection.update_registry(|reg| reg.deregister(&id))?;
-        }
+        self.connection.update_registry(|reg| reg.deregister(&id))?;
 
         Ok(())
     }
@@ -322,6 +344,47 @@ mod tests {
 
         let child = repo.get_child("child_abc_123").unwrap().expect("child must load");
         assert_eq!(child.name, "Keiko Hart");
+    }
+
+    /// Delete must not leave the folder behind when `child.yaml` is missing.
+    ///
+    /// That folder is unreachable afterwards — nothing in `children.yaml`
+    /// names it and no screen lists it — so a "delete" that leaves it is a
+    /// silent inconsistency, not a conservative choice.
+    #[test]
+    fn delete_removes_the_folder_even_without_a_child_yaml() {
+        let (repo, temp_dir) = setup_test_repo();
+
+        let now = chrono::Utc::now();
+        let child = DomainChild {
+            id: "test_child".to_string(),
+            name: "Test Child".to_string(),
+            birthdate: chrono::NaiveDate::from_ymd_opt(2015, 5, 15).unwrap(),
+            created_at: now,
+            updated_at: now,
+        };
+        repo.store_child(&child).unwrap();
+
+        let folder = temp_dir.path().join("test_child");
+        std::fs::remove_file(folder.join("child.yaml")).unwrap();
+        std::fs::write(folder.join("transactions.csv"), "id,child_id\n").unwrap();
+
+        repo.delete_child("test_child").unwrap();
+
+        assert!(!folder.exists(), "the folder must not be orphaned");
+        assert!(repo
+            .connection
+            .registry()
+            .path_for(&ChildId::from("test_child"))
+            .is_none());
+    }
+
+    /// An unregistered child is not an error, and deleting one must not
+    /// invent a path to remove.
+    #[test]
+    fn delete_of_an_unregistered_child_is_a_no_op() {
+        let (repo, _temp_dir) = setup_test_repo();
+        repo.delete_child("never_existed").unwrap();
     }
 
     #[test]
