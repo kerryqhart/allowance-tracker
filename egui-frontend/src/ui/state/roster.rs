@@ -158,14 +158,6 @@ impl ChildRoster {
     pub fn drain_changed_labels(&mut self) -> Vec<(ChildId, String)> {
         std::mem::take(&mut self.changed_labels)
     }
-
-    /// Mark one entry for reload — used when a sync-applied rename arrives,
-    /// which changes `child.yaml` without changing the registry.
-    pub fn mark_stale(&mut self, id: &ChildId) {
-        if let Some(e) = self.entries.iter_mut().find(|e| &e.entry.id == id) {
-            e.status = ChildStatus::Downloading;
-        }
-    }
 }
 
 /// Walk the registry on a worker thread, reporting each child's status.

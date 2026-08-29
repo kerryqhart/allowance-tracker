@@ -171,9 +171,12 @@ impl AllowanceTrackerApp {
                         .font(egui::FontId::new(16.0, egui::FontFamily::Proportional))).clicked() {
                         // Re-walk the registry on the worker thread — this is
                         // the user's manual retry for a child that was still
-                        // downloading — then reload the active child.
+                        // downloading — then reload the active child once the
+                        // walk says its folder is readable. The rebuild leaves
+                        // every entry `Downloading`, so this must be a request,
+                        // not a direct call.
                         self.rebuild_roster();
-                        self.load_initial_data();
+                        self.pending_initial_load = true;
                     }
                 });
             });

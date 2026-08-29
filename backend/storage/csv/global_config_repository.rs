@@ -33,7 +33,7 @@
 
 use anyhow::Result;
 use chrono::Utc;
-use log::{info, debug};
+use log::{info, debug, warn};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -163,12 +163,28 @@ impl GlobalConfigRepository {
     /// what makes this safe to call while a child's folder is still coming
     /// down from iCloud. Prefers `active_child_id`, falling back to the legacy
     /// `active_child_directory` for a config that predates the migration.
+    /// The fallback is correct for a config the migration has rewritten (it
+    /// resolves the folder name to a real id and stores it in
+    /// `active_child_id`), but on a *pre-migration* config the legacy value is
+    /// still a folder name. Where that name is not also the id, this yields an
+    /// id matching no registry entry. That fails safe — no roster entry, so
+    /// nothing is selected — but it must not fail invisibly, so the fallback
+    /// branch warns.
     pub fn active_child_id(&self) -> Result<Option<ChildId>> {
         let config = self.load_or_create_global_config()?;
-        Ok(config
-            .active_child_id
-            .or(config.active_child_directory)
-            .map(|s| ChildId::from(s.as_str())))
+        if let Some(id) = config.active_child_id {
+            return Ok(Some(ChildId::from(id.as_str())));
+        }
+        let Some(legacy) = config.active_child_directory else {
+            return Ok(None);
+        };
+        warn!(
+            "global_config.yaml has no active_child_id; interpreting the legacy \
+             active_child_directory '{}' as a child id. If that is a folder name \
+             rather than an id, no child will be active until one is selected again.",
+            legacy
+        );
+        Ok(Some(ChildId::from(legacy.as_str())))
     }
 }
 
@@ -208,8 +224,21 @@ impl GlobalConfigStorage for GlobalConfigRepository {
     }
     
     fn update_global_config(&self, config: &GlobalConfig) -> Result<()> {
-        // Validate child directory if set
-        if let Some(ref dir) = config.active_child_directory {
+        // Reconcile the two keys before validating, so this path cannot write a
+        // file where they disagree — `active_child_id` is what
+        // `Self::active_child_id` prefers, so a divergent pair would silently
+        // activate the stale one. `active_child_id` wins when both are set,
+        // matching read precedence; either alone fills in the other.
+        let mut updated_config = config.clone();
+        let active = updated_config
+            .active_child_id
+            .clone()
+            .or_else(|| updated_config.active_child_directory.clone());
+        updated_config.active_child_id = active.clone();
+        updated_config.active_child_directory = active;
+
+        // Validate the active child if set
+        if let Some(ref dir) = updated_config.active_child_directory {
             if !self.validate_child_directory(dir)? {
                 return Err(anyhow::anyhow!(
                     "Invalid child directory in config: '{}' does not exist or does not contain a valid child",
@@ -217,10 +246,9 @@ impl GlobalConfigStorage for GlobalConfigRepository {
                 ));
             }
         }
-        
-        let mut updated_config = config.clone();
+
         updated_config.updated_at = Utc::now().to_rfc3339();
-        
+
         self.save_global_config(&updated_config)?;
         info!("Updated global config");
         Ok(())
@@ -328,6 +356,111 @@ mod tests {
         let updated_config = repo.get_global_config().unwrap();
         assert_eq!(updated_config.data_format_version, "2.0");
         assert_ne!(updated_config.updated_at, initial_updated_at);
+    }
+
+    fn store_child_named(child_repo: &ChildRepository, id: &str) {
+        let child = DomainChild {
+            id: id.to_string(),
+            name: "Test Child".to_string(),
+            birthdate: chrono::NaiveDate::parse_from_str("2010-01-01", "%Y-%m-%d").unwrap(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        child_repo.store_child(&child).unwrap();
+    }
+
+    /// The migration writes the resolved id into `active_child_id` while
+    /// *preserving* the legacy `active_child_directory` as a folder name. The
+    /// id key must win, or a migrated install activates a name that matches no
+    /// registry entry.
+    #[test]
+    fn active_child_id_prefers_the_id_key_over_a_divergent_legacy_folder_name() {
+        let (repo, child_repo, temp_dir) = setup_test_repo();
+        store_child_named(&child_repo, "test_child");
+
+        fs::write(
+            temp_dir.path().join("global_config.yaml"),
+            "active_child_id: test_child\nactive_child_directory: Some Folder Name\n\
+             data_format_version: '1.0'\ncreated_at: '2024-01-01T00:00:00Z'\n\
+             updated_at: '2024-01-01T00:00:00Z'\n",
+        )
+        .unwrap();
+
+        assert_eq!(
+            repo.active_child_id().unwrap(),
+            Some(ChildId::from("test_child"))
+        );
+    }
+
+    /// A pre-migration config has only the legacy key. Reading it as an id is
+    /// the documented fallback (it warns); this pins that the fallback still
+    /// happens rather than returning `None`.
+    #[test]
+    fn active_child_id_falls_back_to_the_legacy_key_when_the_id_key_is_absent() {
+        let (repo, child_repo, temp_dir) = setup_test_repo();
+        store_child_named(&child_repo, "test_child");
+
+        fs::write(
+            temp_dir.path().join("global_config.yaml"),
+            "active_child_directory: test_child\ndata_format_version: '1.0'\n\
+             created_at: '2024-01-01T00:00:00Z'\nupdated_at: '2024-01-01T00:00:00Z'\n",
+        )
+        .unwrap();
+
+        assert_eq!(
+            repo.active_child_id().unwrap(),
+            Some(ChildId::from("test_child"))
+        );
+    }
+
+    /// `update_global_config` must not be a way to write a file whose two
+    /// active-child keys disagree: `active_child_id` is what reads prefer, so a
+    /// divergent pair silently activates whichever one the caller did not mean.
+    #[test]
+    fn update_global_config_cannot_leave_the_two_active_child_keys_divergent() {
+        let (repo, child_repo, _temp_dir) = setup_test_repo();
+        store_child_named(&child_repo, "test_child");
+        store_child_named(&child_repo, "other_child");
+
+        // Only the id key set — the legacy key must be filled in to match.
+        let mut config = repo.get_global_config().unwrap();
+        config.active_child_id = Some("test_child".to_string());
+        config.active_child_directory = None;
+        repo.update_global_config(&config).unwrap();
+
+        let stored = repo.get_global_config().unwrap();
+        assert_eq!(stored.active_child_id.as_deref(), Some("test_child"));
+        assert_eq!(stored.active_child_directory.as_deref(), Some("test_child"));
+
+        // Both set but disagreeing — the id key wins and both are rewritten.
+        let mut config = repo.get_global_config().unwrap();
+        config.active_child_id = Some("other_child".to_string());
+        config.active_child_directory = Some("test_child".to_string());
+        repo.update_global_config(&config).unwrap();
+
+        let stored = repo.get_global_config().unwrap();
+        assert_eq!(stored.active_child_id.as_deref(), Some("other_child"));
+        assert_eq!(stored.active_child_directory.as_deref(), Some("other_child"));
+        assert_eq!(
+            repo.active_child_id().unwrap(),
+            Some(ChildId::from("other_child"))
+        );
+    }
+
+    /// The other direction: a caller that knows only the legacy key still
+    /// produces a file the id-preferring read path resolves correctly.
+    #[test]
+    fn update_global_config_fills_in_the_id_key_from_the_legacy_key() {
+        let (repo, child_repo, _temp_dir) = setup_test_repo();
+        store_child_named(&child_repo, "test_child");
+
+        let mut config = repo.get_global_config().unwrap();
+        config.active_child_id = None;
+        config.active_child_directory = Some("test_child".to_string());
+        repo.update_global_config(&config).unwrap();
+
+        let stored = repo.get_global_config().unwrap();
+        assert_eq!(stored.active_child_id.as_deref(), Some("test_child"));
     }
 
     #[test]

@@ -83,6 +83,12 @@ pub struct AllowanceTrackerApp {
     /// Monotonic walk counter. Bumped by `next_generation` on every rebuild so
     /// a slow walk cannot overwrite a newer one's results.
     pub roster_generation: u64,
+    /// A `load_initial_data` that could not run yet because the active child's
+    /// folder was still coming down. Retried every frame until it can. It is
+    /// deferred rather than dropped: the sync path uses it to refresh the UI
+    /// after applying remote entities, and silently skipping that would leave
+    /// the window showing pre-sync data with nothing to trigger a reload.
+    pub pending_initial_load: bool,
 }
 
 impl AllowanceTrackerApp {
@@ -250,6 +256,7 @@ impl AllowanceTrackerApp {
             roster_tx,
             roster_wake,
             roster_generation,
+            pending_initial_load: false,
         })
     }
 
@@ -304,6 +311,7 @@ impl AllowanceTrackerApp {
             roster_tx,
             roster_wake,
             roster_generation,
+            pending_initial_load: false,
         }
     }
 
@@ -343,6 +351,35 @@ impl AllowanceTrackerApp {
     pub fn active_child_status(&self) -> Option<ChildStatus> {
         let id = self.active_child_id()?;
         self.roster.status_of(&id).cloned()
+    }
+
+    /// Whether the roster currently reports this child as materialized.
+    pub fn is_available(&self, id: &ChildId) -> bool {
+        matches!(self.roster.status_of(id), Some(ChildStatus::Available(_)))
+    }
+
+    /// Run `load_initial_data`, or defer it if the active child's folder is
+    /// still coming down from iCloud.
+    ///
+    /// `load_initial_data` reads `child.yaml` and then the child's transactions
+    /// synchronously; on a dataless folder that read blocks the frame, and on
+    /// frame 1 it blocks before anything is drawn at all. **Every** caller goes
+    /// through here so no path can reintroduce that freeze — including the sync
+    /// path, which calls `rebuild_roster` first and so is guaranteed to find
+    /// every entry `Downloading` at that instant.
+    ///
+    /// A deferred load is retried from `update` on the repaint the roster
+    /// worker requests when a status lands.
+    pub fn load_initial_data_when_ready(&mut self) {
+        if matches!(self.active_child_status(), Some(ChildStatus::Downloading)) {
+            self.pending_initial_load = true;
+            return;
+        }
+        // No active child, or one that is Available (warm) or Unavailable —
+        // `load_initial_data` resolves the latter two to a child or to `None`
+        // and clears the loading flag rather than hanging.
+        self.pending_initial_load = false;
+        self.load_initial_data();
     }
 
     /// Pre-increment and return the roster generation. Every rebuild takes a
@@ -430,10 +467,6 @@ impl AllowanceTrackerApp {
         let mut walk_finished = false;
 
         for msg in messages {
-            let newly_available = matches!(
-                msg,
-                RosterMessage::Status { ref status, .. } if matches!(status, ChildStatus::Available(_))
-            );
             let msg_id = match &msg {
                 RosterMessage::Status { id, .. } => Some(id.clone()),
                 RosterMessage::Finished { .. } => None,
@@ -441,10 +474,25 @@ impl AllowanceTrackerApp {
             if matches!(msg, RosterMessage::Finished { generation } if generation == self.roster_generation) {
                 walk_finished = true;
             }
+
+            // The trigger is a *transition* in the roster's own state, read
+            // either side of `apply` — never the message's contents.
+            //
+            // Reading the message would mean a status `apply` discarded (one
+            // from a superseded walk) could still issue allowances: money
+            // moving on a report the roster itself rejected. It would also
+            // re-fire on every re-report of an already-`Available` child,
+            // paying for a full transaction read to discover nothing changed.
+            let was_available = msg_id
+                .as_ref()
+                .map(|id| self.is_available(id))
+                .unwrap_or(false);
             self.roster.apply(msg);
 
-            if newly_available && msg_id.is_some() && msg_id == active {
-                issue_allowances = true;
+            if let Some(id) = msg_id {
+                if !was_available && self.is_available(&id) && Some(&id) == active.as_ref() {
+                    issue_allowances = true;
+                }
             }
         }
 

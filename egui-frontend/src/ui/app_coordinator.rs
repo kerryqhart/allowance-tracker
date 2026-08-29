@@ -60,26 +60,13 @@ impl eframe::App for AllowanceTrackerApp {
             self.interaction.child_dropdown.is_open = false;
         }
         
-        // Load initial data on first run.
-        //
-        // Gated on the roster: `load_initial_data` reads `child.yaml` and then
-        // the child's transactions synchronously, and on a folder iCloud has
-        // not materialized that read blocks. Running it unguarded on frame 1
-        // means the window never gets drawn at all. While the active child is
-        // still `Downloading` we simply paint the loading screen and try again
-        // on the repaint the roster worker requests.
+        // Load initial data on first run, and retry any load the availability
+        // gate deferred — including one requested by the sync path above, which
+        // runs earlier in this same frame.
         //
         // Note: Use cached current_child here to avoid infinite backend calls during loading
-        if self.ui.loading && self.core.current_child.is_none() {
-            match self.active_child_status() {
-                Some(crate::backend::domain::ChildStatus::Downloading) => {
-                    // Still coming down. The worker wakes us when it lands.
-                }
-                // No active child, or one that is Available (warm) or
-                // Unavailable (load_initial_data resolves it to None and
-                // clears the loading flag rather than hanging).
-                _ => self.load_initial_data(),
-            }
+        if (self.ui.loading && self.core.current_child.is_none()) || self.pending_initial_load {
+            self.load_initial_data_when_ready();
         }
         
         // Check for pending allowances periodically (throttled to avoid excessive calls)
@@ -503,9 +490,14 @@ impl AllowanceTrackerApp {
         if roster_dirty {
             self.rebuild_roster();
         }
-        // Refresh UI once after draining, rather than per-entity during bulk sync.
+        // Refresh UI once after draining, rather than per-entity during bulk
+        // sync. Requested rather than called directly: a `rebuild_roster` just
+        // above leaves every entry `Downloading`, so this must go through the
+        // availability gate in `update` — which runs later in this same frame,
+        // and re-runs on the repaint the roster worker requests once the active
+        // child's folder lands.
         if local_state_dirty {
-            self.load_initial_data();
+            self.pending_initial_load = true;
         }
     }
 
@@ -832,6 +824,171 @@ mod refresh_allowance_tests {
             app.current_balance(),
             store_balance,
             "header balance was not reloaded after background allowance issuance"
+        );
+    }
+
+    /// Build a backend with one active child owed an allowance today, and an
+    /// app whose roster has been reset to "nothing loaded yet" (every entry
+    /// `Downloading`, generation 1) so availability transitions can be driven
+    /// by hand. Returns the app and the child's id.
+    #[cfg(test)]
+    fn app_awaiting_its_active_child() -> (AllowanceTrackerApp, String, tempfile::TempDir) {
+        use crate::ui::state::roster::ChildRoster;
+
+        let temp = tempfile::TempDir::new().expect("temp dir");
+        let backend = Backend::with_data_dir(temp.path().to_path_buf(), None)
+            .expect("backend on temp dir");
+
+        let child = backend
+            .child_service
+            .create_child(CreateChildCommand {
+                name: "Test Kid".to_string(),
+                birthdate: "2015-01-01".to_string(),
+            })
+            .expect("create child")
+            .child;
+        backend
+            .child_service
+            .set_active_child(SetActiveChildCommand { child_id: child.id.clone() })
+            .expect("set active child");
+
+        let today = chrono::Local::now().date_naive();
+        backend
+            .allowance_service
+            .update_allowance_config(UpdateAllowanceConfigCommand {
+                child_id: Some(child.id.clone()),
+                amount: 10.0,
+                day_of_week: today.weekday().num_days_from_sunday() as u8,
+                is_active: true,
+                use_age_based_amount: false,
+            })
+            .expect("configure allowance");
+
+        let mut app = AllowanceTrackerApp::new_for_test(backend);
+
+        // `new_for_test` settles the roster; wind it back so the child starts
+        // out unloaded and the transition can be driven message by message.
+        let registry = app.backend().csv_connection.registry();
+        app.roster = ChildRoster::new(registry, app.roster_generation);
+
+        (app, child.id, temp)
+    }
+
+    fn available_status(child_id: &str) -> crate::backend::domain::ChildStatus {
+        use crate::backend::domain::models::child::Child as DomainChild;
+        crate::backend::domain::ChildStatus::Available(DomainChild {
+            id: child_id.to_string(),
+            name: "Test Kid".to_string(),
+            birthdate: chrono::NaiveDate::from_ymd_opt(2015, 1, 1).unwrap(),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        })
+    }
+
+    /// Allowance issuance must hang off a *transition in the roster's own
+    /// state*, never off the contents of a message.
+    ///
+    /// `ChildRoster::apply` discards a status from a superseded walk. A trigger
+    /// that read the message instead would issue allowances on a report the
+    /// roster itself rejected — money moving on discarded data.
+    #[test]
+    fn a_discarded_stale_generation_status_does_not_issue_allowances() {
+        use crate::ui::state::roster::RosterMessage;
+        use shared::ChildId;
+
+        let (mut app, child_id, _temp) = app_awaiting_its_active_child();
+
+        app.roster_tx
+            .send(RosterMessage::Status {
+                generation: app.roster_generation + 99, // not the current walk
+                id: ChildId::from(child_id.as_str()),
+                status: available_status(&child_id),
+            })
+            .unwrap();
+        app.drain_roster_messages();
+
+        assert!(
+            !app.is_available(&ChildId::from(child_id.as_str())),
+            "precondition: apply must have discarded the stale-generation status"
+        );
+        let balance = app
+            .backend()
+            .balance_service
+            .get_current_balance(&child_id)
+            .expect("store balance");
+        assert_eq!(
+            balance, 0.0,
+            "no allowance may be issued off a status the roster discarded"
+        );
+    }
+
+    /// The other half: a status the roster *accepts* for the active child does
+    /// trigger issuance, and does so on the transition into `Available`.
+    #[test]
+    fn the_active_child_becoming_available_issues_its_pending_allowances() {
+        use crate::ui::state::roster::RosterMessage;
+        use shared::ChildId;
+
+        let (mut app, child_id, _temp) = app_awaiting_its_active_child();
+
+        app.roster_tx
+            .send(RosterMessage::Status {
+                generation: app.roster_generation,
+                id: ChildId::from(child_id.as_str()),
+                status: available_status(&child_id),
+            })
+            .unwrap();
+        app.drain_roster_messages();
+
+        assert!(app.is_available(&ChildId::from(child_id.as_str())));
+        let balance = app
+            .backend()
+            .balance_service
+            .get_current_balance(&child_id)
+            .expect("store balance");
+        assert!(
+            balance > 0.0,
+            "the transition into Available must issue the pending allowance"
+        );
+    }
+
+    /// The availability gate must *defer* a load, not drop it. The sync path
+    /// rebuilds the roster (leaving every entry `Downloading`) and then asks
+    /// for a refresh; dropping it would leave the window on pre-sync data with
+    /// nothing left to trigger a reload.
+    #[test]
+    fn a_load_requested_while_the_child_is_downloading_is_deferred_then_runs() {
+        use crate::ui::state::roster::RosterMessage;
+        use shared::ChildId;
+
+        let (mut app, child_id, _temp) = app_awaiting_its_active_child();
+
+        app.load_initial_data_when_ready();
+        assert!(
+            app.pending_initial_load,
+            "a load requested while the folder is downloading must be held, not dropped"
+        );
+        assert!(
+            app.core.current_child.is_none(),
+            "nothing may be read out of a folder that is still downloading"
+        );
+
+        // The folder lands.
+        app.roster_tx
+            .send(RosterMessage::Status {
+                generation: app.roster_generation,
+                id: ChildId::from(child_id.as_str()),
+                status: available_status(&child_id),
+            })
+            .unwrap();
+        app.drain_roster_messages();
+
+        app.load_initial_data_when_ready();
+        assert!(!app.pending_initial_load, "the deferred load must be cleared once it runs");
+        assert_eq!(
+            app.core.current_child.as_ref().map(|c| c.id.clone()),
+            Some(child_id),
+            "the deferred load must actually run once the folder is available"
         );
     }
 
