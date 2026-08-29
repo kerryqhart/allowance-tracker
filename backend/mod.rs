@@ -87,9 +87,11 @@ impl Backend {
             }
             Ok(None) => log::debug!("Child registry already present; migration skipped"),
             Err(e) => log::error!(
-                "Child registry migration failed and did not write children.yaml — the \
-                 candidate folders under {:?} were examined but none could be registered, so \
-                 your data is present but unrecognized; inspect it before it is lost: {e}",
+                "Child registry migration failed and wrote nothing to children.yaml: {e} — \
+                 this may mean candidate folders under {:?} could not be recognized as \
+                 children (inspect them before assuming data loss), or it may be an unrelated \
+                 disk or permissions failure; startup continues regardless since the legacy \
+                 directory scan is still authoritative in this phase",
                 data_path
             ),
         }
@@ -175,6 +177,28 @@ mod tests {
         assert!(registry_path.exists(), "startup must produce children.yaml");
         let text = std::fs::read_to_string(&registry_path).unwrap();
         assert!(text.contains("keiko_hart"), "got: {text}");
+    }
+
+    /// The central constraint of this task: a failed migration must never
+    /// block startup. The legacy directory scan is still authoritative in
+    /// this phase, so `Backend::with_data_dir` must come up regardless of
+    /// what `run_migration` does. Build a folder that `run_migration`
+    /// cannot register (no `child.yaml`, no recognizable child data), which
+    /// makes it return `Err` and write nothing, then assert startup still
+    /// succeeds and `children.yaml` was never created.
+    #[test]
+    fn with_data_dir_starts_up_even_when_migration_fails() {
+        use tempfile::TempDir;
+        let dir = TempDir::new().unwrap();
+        let mystery = dir.path().join("mystery_folder");
+        std::fs::create_dir_all(&mystery).unwrap();
+        std::fs::write(mystery.join("notes.txt"), "hi").unwrap();
+
+        let backend = Backend::with_data_dir(dir.path().to_path_buf(), None);
+        assert!(backend.is_ok(), "startup must succeed even when migration fails: {:?}", backend.err());
+
+        let registry_path = dir.path().join("children.yaml");
+        assert!(!registry_path.exists(), "a failed migration must not write children.yaml");
     }
 
     /// Read-only verification gate against the REAL data directory. Never run
