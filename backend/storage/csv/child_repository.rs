@@ -136,12 +136,21 @@ impl ChildRepository {
             .iter()
             .any(|e| e.id == id && e.label != label)
         {
-            let _ = self
-                .connection
-                .update_registry(|reg| {
-                    reg.set_label(&id, &label);
-                    Ok(())
-                });
+            // A failed write leaves the cached label stale, so the picker would
+            // show the old name. Not worth failing the operation over — the
+            // child itself saved fine and the label is only a display cache —
+            // but it must not vanish silently: `children.yaml` can sit on a
+            // read-only, full, or unmounted path.
+            if let Err(e) = self.connection.update_registry(|reg| {
+                reg.set_label(&id, &label);
+                Ok(())
+            }) {
+                warn!(
+                    "Could not refresh the cached display name for child '{}' to '{}' in the registry; \
+                     the child picker may show a stale name until this is written again: {}",
+                    id, label, e
+                );
+            }
         }
 
         Ok(())
@@ -339,5 +348,68 @@ mod tests {
         // Get active child
         let active_child_id = repo.get_active_child().expect("Failed to get active child");
         assert_eq!(active_child_id, Some("test_child".to_string()));
+    }
+
+    /// The registry's `label` is only a display cache, so a failure to refresh
+    /// it must not fail the save — but it must not vanish silently either.
+    /// `children.yaml` sits on a path that can be read-only, full, or on an
+    /// unmounted volume, so this is a failure that actually happens.
+    ///
+    /// Making the base directory unwritable blocks `children.yaml.tmp` while
+    /// still allowing the write of `child.yaml` inside the child's own folder:
+    /// on Unix, creating an entry needs write permission on the *containing*
+    /// directory, and the child directory keeps its own.
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_label_refresh_does_not_fail_the_save() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let (repo, temp_dir) = setup_test_repo();
+
+        let now = chrono::Utc::now();
+        let mut child = DomainChild {
+            id: "test_child".to_string(),
+            name: "Keiko Hart".to_string(),
+            birthdate: chrono::NaiveDate::from_ymd_opt(2015, 5, 15).unwrap(),
+            created_at: now,
+            updated_at: now,
+        };
+        repo.store_child(&child).unwrap();
+
+        let base = temp_dir.path();
+        let original = std::fs::metadata(base).unwrap().permissions();
+
+        // Read + execute only: entries can be resolved, but none created.
+        std::fs::set_permissions(base, std::fs::Permissions::from_mode(0o500)).unwrap();
+
+        child.name = "Keiko Smith".to_string();
+        let result = repo.update_child(&child);
+
+        // Restore before asserting, so a failed assertion still leaves the
+        // TempDir removable.
+        std::fs::set_permissions(base, original).unwrap();
+
+        assert!(
+            result.is_ok(),
+            "a stale display cache must not fail the save: {:?}",
+            result.err()
+        );
+
+        // child.yaml is the source of truth and did get the new name...
+        let reloaded = repo.get_child("test_child").unwrap().unwrap();
+        assert_eq!(reloaded.name, "Keiko Smith");
+
+        // ...while the cached label stayed behind, which is exactly the
+        // condition the warning exists to report.
+        let registry = repo.connection.registry();
+        let entry = registry
+            .entries()
+            .iter()
+            .find(|e| e.id == ChildId::from("test_child"))
+            .unwrap();
+        assert_eq!(
+            entry.label, "Keiko Hart",
+            "the label refresh was expected to fail and leave the cache stale"
+        );
     }
 }
