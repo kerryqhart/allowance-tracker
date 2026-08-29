@@ -23,7 +23,12 @@ use super::checksum::tree_checksum;
 const NON_CHILD_DIRS: &[&str] = &["archive", "global"];
 
 /// Files that suggest a folder held child data even though `child.yaml` is gone.
-const ORPHAN_MARKERS: &[&str] = &["transactions.csv", "goals.csv", "allowance_config.yaml"];
+const ORPHAN_MARKERS: &[&str] = &[
+    "transactions.csv",
+    "goals.csv",
+    "allowance_config.yaml",
+    "parental_control_attempts.csv",
+];
 
 #[derive(Debug, Default, PartialEq)]
 pub struct MigrationReport {
@@ -52,11 +57,26 @@ pub fn plan_migration(base_dir: &Path) -> Result<(ChildRegistry, MigrationReport
 
     // Sort for deterministic ordering: with two folders claiming one id, the
     // first by name wins and the second is reported.
-    let mut dirs: Vec<PathBuf> = fs::read_dir(base_dir)?
-        .filter_map(|e| e.ok())
-        .map(|e| e.path())
-        .filter(|p| p.is_dir())
-        .collect();
+    //
+    // A failed directory entry is recorded rather than silently dropped: in a
+    // one-shot migration, a dropped entry can mean a dropped child.
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    for entry in fs::read_dir(base_dir)? {
+        match entry {
+            Ok(e) => {
+                let p = e.path();
+                if p.is_dir() {
+                    dirs.push(p);
+                }
+            }
+            Err(e) => {
+                report.skipped.push((
+                    base_dir.to_path_buf(),
+                    format!("could not read a directory entry under {}: {e}", base_dir.display()),
+                ));
+            }
+        }
+    }
     dirs.sort();
 
     for dir in dirs {
@@ -81,6 +101,19 @@ pub fn plan_migration(base_dir: &Path) -> Result<(ChildRegistry, MigrationReport
             if ORPHAN_MARKERS.iter().any(|f| resolved.join(f).exists()) {
                 warn!("Migration found an orphan folder with child data: {}", resolved.display());
                 report.orphans.push(resolved);
+            } else {
+                // Every candidate directory must end up in exactly one of
+                // registered / orphans / skipped. A folder with neither
+                // child.yaml nor any recognizable child data is not silently
+                // dropped — it is reported so a human can look at it.
+                warn!(
+                    "Migration found an unrecognized folder (no child.yaml, no known child data): {}",
+                    resolved.display()
+                );
+                report.skipped.push((
+                    resolved,
+                    "no child.yaml and no recognizable child data".to_string(),
+                ));
             }
             continue;
         }
@@ -131,12 +164,35 @@ fn resolve_legacy_dir(dir: &Path) -> Result<PathBuf> {
 }
 
 /// Run migration once. Returns `Ok(None)` when the registry already exists.
+///
+/// Refuses to persist when it examined at least one candidate directory but
+/// could not register any of them — every candidate ending up in `skipped`
+/// or `orphans` is very likely a bug (in migration, or in the install being
+/// migrated) rather than a legitimately empty roster. Persisting anyway would
+/// be silently permanent: `run_migration` is a no-op once `children.yaml`
+/// exists, so a bad first run would never get a second chance. A genuinely
+/// fresh install (an empty or absent base dir, zero candidate directories)
+/// still persists an empty registry — that path is legitimate and must not
+/// be blocked by this check.
 pub fn run_migration(base_dir: &Path) -> Result<Option<MigrationReport>> {
     if base_dir.join(REGISTRY_FILENAME).exists() {
         return Ok(None);
     }
 
     let (registry, report) = plan_migration(base_dir)?;
+
+    let candidates = report.registered.len() + report.orphans.len() + report.skipped.len();
+    if candidates > 0 && report.registered.is_empty() {
+        anyhow::bail!(
+            "migration examined {candidates} candidate director{plural} but could not register \
+             any of them ({} orphaned, {} skipped) — inspect the MigrationReport's orphan and \
+             skip reasons before retrying; nothing was written",
+            report.orphans.len(),
+            report.skipped.len(),
+            plural = if candidates == 1 { "y" } else { "ies" },
+        );
+    }
+
     registry.save(base_dir)?;
     migrate_global_config(base_dir, &registry)?;
 
@@ -158,23 +214,31 @@ pub fn write_dry_run(base_dir: &Path) -> Result<PathBuf> {
     // `save` owns the filename, so serialize through a scratch dir and move.
     let scratch = base_dir.join(".registry_dry_run");
     fs::create_dir_all(&scratch)?;
-    registry.save(&scratch)?;
-    fs::rename(scratch.join(REGISTRY_FILENAME), &path)?;
-    fs::remove_dir_all(&scratch)?;
+
+    // Cleanup must be unconditional: a `?` on `save` or `rename` must not
+    // leak `.registry_dry_run` inside the user's base directory.
+    let result = registry
+        .save(&scratch)
+        .and_then(|()| fs::rename(scratch.join(REGISTRY_FILENAME), &path).map_err(Into::into));
+    let _ = fs::remove_dir_all(&scratch);
+    result?;
+
     Ok(path)
 }
 
-/// Convert `active_child_directory` to `active_child_id`, preserving the
+/// Add `active_child_id` alongside `active_child_directory`, preserving the
 /// original file so a pre-migration build can be restored by hand.
 ///
-/// Writes the FULL four-key `global_config.yaml` shape
-/// (`active_child_id` / `data_format_version` / `created_at` / `updated_at`),
-/// not just the two keys touched by this migration. `GlobalConfig::load` (see
-/// `global_config_repository.rs`) hard-errors on a missing field, and a later
-/// task makes `GlobalConfigRepository` the sole owner of this file — a
-/// two-key output would fail to parse on first launch after migration.
-/// `data_format_version` and `created_at` are preserved from the existing
-/// file when present; `updated_at` always reflects this migration.
+/// Writes the FULL five-key `global_config.yaml` shape (`active_child_id` /
+/// `active_child_directory` / `data_format_version` / `created_at` /
+/// `updated_at`), not just the fields this migration itself computes.
+/// `GlobalConfig::load` (see `global_config_repository.rs`) hard-errors on a
+/// missing field and still reads `active_child_directory` — a later task
+/// wires `run_migration` into application startup, and a further task after
+/// that renames the field. Dropping `active_child_directory` here would mean
+/// every code path between now and that rename silently forgets which child
+/// is active. `data_format_version` and `created_at` are preserved from the
+/// existing file when present; `updated_at` always reflects this migration.
 fn migrate_global_config(base_dir: &Path, registry: &ChildRegistry) -> Result<()> {
     let path = base_dir.join("global_config.yaml");
     if !path.exists() {
@@ -229,6 +293,10 @@ fn migrate_global_config(base_dir: &Path, registry: &ChildRegistry) -> Result<()
     out.insert(
         serde_yaml::Value::String("active_child_id".into()),
         serde_yaml::Value::String(active_id.as_str().to_string()),
+    );
+    out.insert(
+        serde_yaml::Value::String("active_child_directory".into()),
+        serde_yaml::Value::String(legacy_dir.clone()),
     );
     out.insert(
         serde_yaml::Value::String("data_format_version".into()),
@@ -401,11 +469,16 @@ mod tests {
                 "the pre-migration file must be preserved for rollback");
     }
 
-    /// Mandatory override: the migrated global_config.yaml must carry all
-    /// four fields GlobalConfig requires (active_child_id,
-    /// data_format_version, created_at, updated_at), not just the two the
-    /// migration itself changes. created_at is preserved verbatim from the
-    /// pre-migration file; updated_at is refreshed to reflect the migration.
+    /// Mandatory override: the migrated global_config.yaml must carry every
+    /// field GlobalConfig requires (active_child_directory,
+    /// data_format_version, created_at, updated_at) plus the new
+    /// active_child_id, not just the fields this migration itself changes.
+    /// created_at is preserved verbatim from the pre-migration file;
+    /// updated_at is refreshed to reflect the migration. The real regression
+    /// pin is deserializing through `GlobalConfig` itself (the struct
+    /// `GlobalConfigRepository::load_or_create_global_config` uses, which
+    /// hard-errors on a missing field) rather than just poking at
+    /// `serde_yaml::Value`.
     #[test]
     fn run_migration_preserves_created_at_and_sets_updated_at() {
         let base = TempDir::new().unwrap();
@@ -426,13 +499,18 @@ mod tests {
         );
         assert!(migrated.contains("updated_at:"), "updated_at must be present: {migrated}");
         assert!(migrated.contains("active_child_id: keiko_hart"), "got: {migrated}");
+        assert!(migrated.contains("active_child_directory: keiko_hart"), "got: {migrated}");
 
-        // Parse to confirm the file matches the shape GlobalConfig requires,
-        // and that updated_at genuinely changed rather than being copied
-        // through unchanged.
-        let value: serde_yaml::Value = serde_yaml::from_str(&migrated).unwrap();
-        assert_eq!(value.get("created_at").and_then(|v| v.as_str()), Some("2020-06-01T00:00:00Z"));
-        assert_ne!(value.get("updated_at").and_then(|v| v.as_str()), Some("2020-06-01T00:00:00Z"));
+        // The real regression pin: this must deserialize through the actual
+        // GlobalConfig struct GlobalConfigRepository uses, not just parse as
+        // a loose serde_yaml::Value. GlobalConfig::load hard-errors on a
+        // missing field, so this is what would have caught the original
+        // two-key defect.
+        let config: super::super::global_config_repository::GlobalConfig =
+            serde_yaml::from_str(&migrated).expect("migrated global_config.yaml must deserialize as GlobalConfig");
+        assert_eq!(config.created_at, "2020-06-01T00:00:00Z");
+        assert_ne!(config.updated_at, "2020-06-01T00:00:00Z");
+        assert_eq!(config.active_child_directory, Some("keiko_hart".to_string()));
     }
 
     /// Golden fixture replicating the real install's shape: a redirect stub
@@ -467,5 +545,86 @@ mod tests {
         assert_eq!(reg.entries()[0].label, "Keiko Hart");
         assert!(report.orphans.is_empty());
         assert!(report.skipped.is_empty());
+    }
+
+    /// Critical fix, side 1 of the line: a genuinely fresh install (an empty
+    /// base directory, zero candidate directories) must still persist an
+    /// empty registry. The refusal-to-persist guard must key off "candidates
+    /// examined but none registered," never off "registered is empty" on its
+    /// own — an empty `registered` is also true here, and this case must NOT
+    /// be refused.
+    #[test]
+    fn run_migration_persists_empty_registry_for_a_fresh_install() {
+        let base = TempDir::new().unwrap();
+
+        let report = run_migration(base.path()).unwrap();
+        assert!(report.is_some(), "a fresh install with zero candidates must still persist");
+        let report = report.unwrap();
+        assert!(report.registered.is_empty());
+        assert!(report.orphans.is_empty());
+        assert!(report.skipped.is_empty());
+        assert!(base.path().join(REGISTRY_FILENAME).exists(),
+                "children.yaml must be written even when empty");
+    }
+
+    /// Critical fix, side 2 of the line: at least one candidate directory was
+    /// examined and none of them could be registered. Persisting here would
+    /// make a partial/empty registry permanent, since run_migration is a
+    /// no-op once children.yaml exists on disk.
+    #[test]
+    fn run_migration_refuses_to_persist_when_no_candidate_registers() {
+        let base = TempDir::new().unwrap();
+        // One candidate directory: no child.yaml, no orphan markers. Falls
+        // into "unrecognized" (skipped), not silently dropped.
+        std::fs::create_dir_all(base.path().join("mystery_folder")).unwrap();
+        std::fs::write(base.path().join("mystery_folder/notes.txt"), "hi").unwrap();
+
+        let err = run_migration(base.path()).unwrap_err();
+        assert!(err.to_string().contains('1'),
+                "error should name how many candidates were examined: {err}");
+        assert!(!base.path().join(REGISTRY_FILENAME).exists(),
+                "must not persist children.yaml when it could not register any candidate");
+    }
+
+    /// write_dry_run has its own success-path test: children.yaml.proposed is
+    /// written with the expected content, the real children.yaml is
+    /// untouched (dry run is inert), and the `.registry_dry_run` scratch
+    /// directory used internally leaves nothing behind.
+    #[test]
+    fn write_dry_run_produces_children_yaml_proposed_and_cleans_up_scratch() {
+        let base = TempDir::new().unwrap();
+        child_folder(base.path(), "keiko_hart", "keiko_hart", "Keiko Hart");
+
+        let path = write_dry_run(base.path()).unwrap();
+        assert_eq!(path, base.path().join("children.yaml.proposed"));
+        assert!(path.exists());
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains("keiko_hart"), "got: {content}");
+
+        assert!(!base.path().join(".registry_dry_run").exists(),
+                "the scratch directory must not be left behind on success");
+        assert!(!base.path().join(REGISTRY_FILENAME).exists(),
+                "a dry run must not create the real children.yaml");
+    }
+
+    /// The scratch directory cleanup in write_dry_run must run even when the
+    /// operation fails partway through, not just on the happy path. Force a
+    /// failure by pre-creating `children.yaml.proposed` as a directory, so
+    /// the final `fs::rename` errors — then confirm `.registry_dry_run` was
+    /// still removed.
+    #[test]
+    fn write_dry_run_cleans_up_scratch_even_when_it_errors() {
+        let base = TempDir::new().unwrap();
+        child_folder(base.path(), "keiko_hart", "keiko_hart", "Keiko Hart");
+        // Occupy the destination path with a non-empty directory so the
+        // rename inside write_dry_run fails.
+        std::fs::create_dir_all(base.path().join("children.yaml.proposed")).unwrap();
+        std::fs::write(base.path().join("children.yaml.proposed/blocker.txt"), "x").unwrap();
+
+        let result = write_dry_run(base.path());
+        assert!(result.is_err(), "rename onto a non-empty directory must fail");
+        assert!(!base.path().join(".registry_dry_run").exists(),
+                "the scratch directory must be cleaned up even when write_dry_run errors");
     }
 }
