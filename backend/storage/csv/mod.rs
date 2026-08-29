@@ -34,6 +34,9 @@ pub mod migration;
 #[cfg(test)]
 pub mod test_utils;
 
+#[cfg(test)]
+mod resolution_tests;
+
 pub use connection::CsvConnection;
 pub use transaction_repository::TransactionRepository;
 pub use child_repository::ChildRepository;

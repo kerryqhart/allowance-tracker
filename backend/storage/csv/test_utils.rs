@@ -93,31 +93,36 @@ impl TestHelper {
         })
     }
 
-    /// Create a test child with default values
+    /// Create a test child whose id deliberately differs from its sanitized
+    /// display name.
+    ///
+    /// This is the default on purpose. When id, folder name, and sanitized
+    /// name are all the same string, a resolver that uses the wrong one still
+    /// passes — which is how the rename bug survived in a green suite.
     pub fn create_test_child(&self) -> Result<DomainChild> {
-        let child = DomainChild {
-            id: "test_child".to_string(),  // ID matches directory name
-            name: "Test Child".to_string(),
-            birthdate: chrono::NaiveDate::parse_from_str("2010-01-01", "%Y-%m-%d").unwrap(),
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-        };
-
-        self.child_repo.store_child(&child)?;
-        Ok(child)
+        self.create_test_child_with_distinct_id("Test Child", "child_fixture_001")
     }
 
-    /// Create a test child with a specific name
+    /// Create a test child with a specific display name and a distinct id.
     pub fn create_test_child_with_name(&self, name: &str) -> Result<DomainChild> {
-        let safe_name = CsvConnection::generate_safe_directory_name(name);
+        let safe = CsvConnection::generate_safe_directory_name(name);
+        self.create_test_child_with_distinct_id(name, &format!("id_{safe}"))
+    }
+
+    /// Create a test child with an explicitly chosen id.
+    pub fn create_test_child_with_distinct_id(&self, name: &str, id: &str) -> Result<DomainChild> {
+        debug_assert_ne!(
+            id,
+            CsvConnection::generate_safe_directory_name(name),
+            "fixtures must keep id and sanitized name distinct"
+        );
         let child = DomainChild {
-            id: safe_name.clone(),  // ID matches directory name
+            id: id.to_string(),
             name: name.to_string(),
             birthdate: chrono::NaiveDate::parse_from_str("2010-01-01", "%Y-%m-%d").unwrap(),
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };
-
         self.child_repo.store_child(&child)?;
         Ok(child)
     }
@@ -227,15 +232,40 @@ mod tests {
     #[test]
     fn test_repository_helper() -> Result<()> {
         let helper = TestHelper::new()?;
-        
+
         // Test child creation
         let child = helper.create_test_child()?;
         assert_eq!(child.name, "Test Child");
-        assert_eq!(child.id, "test_child");
-        
+        assert_eq!(child.id, "child_fixture_001");
+
+        // The whole point of the fixture: the id must NOT be the sanitized
+        // display name, so a resolver that uses the wrong one is caught.
+        assert_ne!(
+            child.id,
+            CsvConnection::generate_safe_directory_name(&child.name),
+            "fixture must keep id and sanitized name distinct"
+        );
+
         // Verify child was stored
         helper.verify_child_exists(&child)?;
-        
+
+        Ok(())
+    }
+
+    #[test]
+    fn create_test_child_with_name_mints_a_distinct_id() -> Result<()> {
+        let helper = TestHelper::new()?;
+
+        let child = helper.create_test_child_with_name("Keiko Hart")?;
+        assert_eq!(child.name, "Keiko Hart");
+        assert_ne!(
+            child.id,
+            CsvConnection::generate_safe_directory_name(&child.name),
+            "fixture must keep id and sanitized name distinct"
+        );
+
+        helper.verify_child_exists(&child)?;
+
         Ok(())
     }
 } 
