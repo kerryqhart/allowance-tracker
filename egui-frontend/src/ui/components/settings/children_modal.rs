@@ -58,12 +58,27 @@ pub fn validate_child_folder(path: &Path) -> Result<RegistryEntry> {
 /// Move a child's folder, then repoint the registry.
 ///
 /// Refuses a non-empty target — adopting a folder that already holds data is
-/// Add-existing, which is non-destructive. Verifies the copy by checksum before
-/// deleting the source, so a partial copy never costs data.
+/// Add-existing, which is non-destructive. Refuses a target *inside* the
+/// source, which `copy_dir_recursive` would otherwise descend into forever.
+/// Verifies the copy by checksum before deleting the source, so a partial copy
+/// never costs data.
 pub fn move_child_data(conn: &CsvConnection, id: &ChildId, target: &Path) -> Result<()> {
     let source = conn.child_dir(id)?;
 
-    if target.exists() {
+    // A target nested inside the source (or equal to it) makes
+    // `copy_dir_recursive` copy into the tree it is walking. It never
+    // terminates, and it does so while the source is the only copy of the
+    // data. Cheap to refuse, catastrophic to attempt.
+    if target.starts_with(&source) {
+        anyhow::bail!(
+            "{} is inside {} — a child's folder cannot be moved into itself",
+            target.display(),
+            source.display()
+        );
+    }
+
+    let target_existed = target.exists();
+    if target_existed {
         let occupied = std::fs::read_dir(target)?.next().is_some();
         if occupied {
             anyhow::bail!(
@@ -76,12 +91,42 @@ pub fn move_child_data(conn: &CsvConnection, id: &ChildId, target: &Path) -> Res
     copy_dir_recursive(&source, target)?;
 
     if tree_checksum(&source)? != tree_checksum(target)? {
-        std::fs::remove_dir_all(target).ok();
+        if let Err(cleanup) = undo_copy(target, target_existed) {
+            anyhow::bail!(
+                "copy verification failed and the partial copy under {} could not be cleaned \
+                 up ({cleanup}); nothing was moved — {} is untouched",
+                target.display(),
+                source.display()
+            );
+        }
         anyhow::bail!("copy verification failed; nothing was moved");
     }
 
     conn.update_registry(|reg| reg.repoint(id, target.to_path_buf()))?;
     std::fs::remove_dir_all(&source)?;
+    Ok(())
+}
+
+/// Roll back a failed copy, removing only what the copy itself created.
+///
+/// The target directory may be one the *user* made — this flow only requires
+/// it to be empty, not absent — so `remove_dir_all(target)` would delete a
+/// directory we were merely lent. When the target pre-existed we clear its
+/// contents (all of which we just wrote, since it was empty) and leave the
+/// directory itself standing; only a target we created ourselves is removed
+/// outright.
+fn undo_copy(target: &Path, target_existed: bool) -> Result<()> {
+    if !target_existed {
+        return Ok(std::fs::remove_dir_all(target)?);
+    }
+    for entry in std::fs::read_dir(target)? {
+        let entry = entry?;
+        if entry.file_type()?.is_dir() {
+            std::fs::remove_dir_all(entry.path())?;
+        } else {
+            std::fs::remove_file(entry.path())?;
+        }
+    }
     Ok(())
 }
 
@@ -138,6 +183,30 @@ struct Row {
     status_text: String,
     status_color: egui::Color32,
     available: bool,
+}
+
+/// Which per-row buttons a row offers.
+#[derive(Debug, PartialEq, Eq)]
+struct RowActions {
+    /// Re-walk this one entry. Only means anything for a row that failed.
+    retry: bool,
+    /// Point the entry at a different folder. Only for a row that failed.
+    locate: bool,
+    /// Deregister. Offered for **every** row, whatever its status.
+    remove: bool,
+}
+
+/// Decide a row's actions from its status.
+///
+/// Retry and Locate… are repairs, so they appear only where there is something
+/// to repair. **Remove from this machine is unconditional.** It was previously
+/// gated on `!available`, which meant a perfectly healthy child could never be
+/// deregistered through any UI — `delete_child` is a different operation (it
+/// deletes data) and had no caller at all. That left "stop tracking this child
+/// on this laptop, leave the iCloud folder alone" unreachable, which is the
+/// normal way to unwind a machine.
+fn row_actions(available: bool) -> RowActions {
+    RowActions { retry: !available, locate: !available, remove: true }
 }
 
 /// What a click asked for. Collected during rendering and executed afterwards,
@@ -306,22 +375,23 @@ impl AllowanceTrackerApp {
                         .wrap(),
                     );
 
-                    // Repair actions, offered only where there is something to
-                    // repair. A `Ready` child needs none of them.
-                    if !row.available {
-                        ui.add_space(3.0);
-                        ui.horizontal(|ui| {
-                            if ui.small_button("Retry").clicked() {
-                                *action = Some(Action::Retry(row.id.clone()));
-                            }
-                            if ui.small_button("Locate…").clicked() {
-                                *action = Some(Action::Locate(row.id.clone()));
-                            }
-                            if ui.small_button("Remove from this machine").clicked() {
-                                *action = Some(Action::AskRemove(row.id.clone()));
-                            }
-                        });
-                    }
+                    // Repairs where there is something to repair; deregister
+                    // always. See `row_actions`.
+                    let actions = row_actions(row.available);
+                    ui.add_space(3.0);
+                    ui.horizontal(|ui| {
+                        if actions.retry && ui.small_button("Retry").clicked() {
+                            *action = Some(Action::Retry(row.id.clone()));
+                        }
+                        if actions.locate && ui.small_button("Locate…").clicked() {
+                            *action = Some(Action::Locate(row.id.clone()));
+                        }
+                        if actions.remove
+                            && ui.small_button("Remove from this machine").clicked()
+                        {
+                            *action = Some(Action::AskRemove(row.id.clone()));
+                        }
+                    });
 
                     ui.add_space(6.0);
                     ui.separator();
@@ -392,13 +462,27 @@ impl AllowanceTrackerApp {
             Action::Retry(id) => self.retry_child(&id),
             Action::Locate(id) => self.locate_child_folder(&id),
             Action::AskRemove(id) => {
-                let path = self
+                // The confirmation's entire job is naming the folder being
+                // left behind, so there is no confirmation to show without a
+                // path. `unwrap_or_default()` here produced a dialogue that
+                // said data would be left at "" — worse than no dialogue.
+                // An id with no registry entry means the row is stale (the
+                // registry changed under a roster the modal snapshotted), so
+                // say so and resync rather than confirming a phantom.
+                let Some(path) = self
                     .backend()
                     .csv_connection
                     .registry()
                     .path_for(&id)
                     .map(Path::to_path_buf)
-                    .unwrap_or_default();
+                else {
+                    self.settings.children_form.set_error(format!(
+                        "'{id}' is no longer registered on this machine — the list has been \
+                         refreshed."
+                    ));
+                    self.rebuild_roster();
+                    return;
+                };
                 let label = self
                     .roster
                     .entries()
@@ -752,6 +836,119 @@ mod tests {
             before,
             tree_checksum(base.path()).unwrap(),
             "a refused move must change nothing"
+        );
+    }
+
+    /// `copy_dir_recursive` would descend into its own output. Refused before
+    /// a single byte is copied, because the only copy of the data is the
+    /// source it would be churning.
+    #[test]
+    fn move_refuses_a_target_nested_inside_the_source() {
+        let base = TempDir::new().unwrap();
+        let source = child_folder(base.path(), "kid", "kid");
+
+        let conn = CsvConnection::new(base.path()).unwrap();
+        conn.update_registry(|reg| {
+            reg.register(RegistryEntry {
+                id: ChildId::from("kid"),
+                path: source.clone(),
+                label: "Kid".into(),
+            })
+        })
+        .unwrap();
+
+        let before = tree_checksum(base.path()).unwrap();
+        for nested in [source.join("inside"), source.clone()] {
+            let err = move_child_data(&conn, &ChildId::from("kid"), &nested).unwrap_err();
+            assert!(err.to_string().contains("into itself"), "got: {err}");
+        }
+        assert_eq!(
+            before,
+            tree_checksum(base.path()).unwrap(),
+            "a refused move must change nothing"
+        );
+    }
+
+    /// A failed verification must not take a directory the user created with
+    /// it. `undo_copy` removes only what the copy wrote.
+    #[test]
+    fn undo_copy_spares_a_target_directory_the_user_created() {
+        let base = TempDir::new().unwrap();
+        let user_made = base.path().join("their_folder");
+        std::fs::create_dir_all(user_made.join("copied_subdir")).unwrap();
+        std::fs::write(user_made.join("copied.txt"), "from the copy").unwrap();
+
+        undo_copy(&user_made, true).unwrap();
+
+        assert!(user_made.exists(), "the user's own directory must survive");
+        assert_eq!(
+            std::fs::read_dir(&user_made).unwrap().count(),
+            0,
+            "everything the copy wrote must be gone"
+        );
+    }
+
+    /// The other branch: a target we created ourselves is ours to remove.
+    #[test]
+    fn undo_copy_removes_a_target_the_copy_created() {
+        let base = TempDir::new().unwrap();
+        let ours = base.path().join("we_made_this");
+        std::fs::create_dir_all(&ours).unwrap();
+        std::fs::write(ours.join("copied.txt"), "from the copy").unwrap();
+
+        undo_copy(&ours, false).unwrap();
+        assert!(!ours.exists());
+    }
+
+    /// Important 4: **Remove from this machine** must be reachable for a
+    /// healthy child. It was gated behind `!available`, which — with
+    /// `delete_child` having no caller — left no way at all to deregister a
+    /// child that was working fine.
+    #[test]
+    fn remove_is_offered_for_an_available_row() {
+        let ready = row_actions(true);
+        assert!(ready.remove, "a Ready child must still be removable");
+        assert!(!ready.retry, "a Ready child has nothing to retry");
+        assert!(!ready.locate, "a Ready child has nothing to locate");
+
+        let broken = row_actions(false);
+        assert_eq!(broken, RowActions { retry: true, locate: true, remove: true });
+    }
+
+    /// The recovery path the relaxed migration guard depends on: migration
+    /// persisted a registry that omits a child whose iCloud folder had not
+    /// arrived, and the user adds it by hand once it does. Exercised through
+    /// the exact pair **Add existing child…** calls.
+    #[test]
+    fn a_child_migration_could_not_resolve_is_addable_afterwards() {
+        use crate::backend::storage::csv::run_migration;
+
+        let base = TempDir::new().unwrap();
+        let icloud = TempDir::new().unwrap();
+        let late_arrival = icloud.path().join("keiko_hart");
+
+        let stub = base.path().join("keiko_hart");
+        std::fs::create_dir_all(&stub).unwrap();
+        std::fs::write(stub.join(".allowance_redirect"), late_arrival.to_string_lossy().as_bytes())
+            .unwrap();
+
+        // Migration runs while the folder is still in the cloud.
+        let report = run_migration(base.path()).unwrap().unwrap();
+        assert!(report.registered.is_empty());
+
+        // iCloud delivers it, and the user picks it in Settings → Children.
+        child_folder(icloud.path(), "keiko_hart", "keiko_hart");
+        let conn = CsvConnection::new(base.path()).unwrap();
+        let entry = validate_child_folder(&late_arrival).unwrap();
+        conn.update_registry(|reg| reg.register(entry)).unwrap();
+
+        assert_eq!(
+            conn.registry().path_for(&ChildId::from("keiko_hart")),
+            Some(late_arrival.as_path())
+        );
+        assert!(
+            run_migration(base.path()).unwrap().is_none(),
+            "migration stays idempotent — it cannot undo what the user added"
         );
     }
 
