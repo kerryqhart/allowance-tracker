@@ -11,6 +11,7 @@ use crate::backend::storage::csv::{CsvConnection, TransactionRepository};
 use crate::backend::storage::traits::TransactionStorage;
 use crate::backend::domain::SyncNotifier;
 use shared::sync::{EntityType, SyncAction, SyncEvent, SyncSource};
+use allowance_core::money::Money;
 
 /// Service responsible for balance calculations and recalculations
 #[derive(Clone)]
@@ -58,7 +59,7 @@ impl BalanceService {
 
         // Calculate the starting balance (balance just before our first transaction)
         let starting_balance = self.calculate_starting_balance(child_id, from_date)?;
-        info!("Starting balance for recalculation: ${:.2}", starting_balance);
+        info!("Starting balance for recalculation: ${}", starting_balance.render());
 
         // Recalculate balances for all transactions. Track which rows actually
         // changed so we only emit Updated sync events for real diffs — the
@@ -66,19 +67,20 @@ impl BalanceService {
         // row to the same balance it was stored with, and we don't want to
         // emit a redundant Updated on top of the Created event.
         let mut running_balance = starting_balance;
-        let mut balance_updates = Vec::new();
+        let mut balance_updates: Vec<(String, Money)> = Vec::new();
         let mut changed_ids: Vec<String> = Vec::new();
 
         for transaction in &transactions {
-            running_balance += transaction.amount;
+            running_balance = running_balance + transaction.amount;
             balance_updates.push((transaction.id.clone(), running_balance));
 
-            if (transaction.balance - running_balance).abs() > 0.001 {
+            // Exact cents comparison now that balances are Money — no epsilon needed.
+            if transaction.balance != running_balance {
                 changed_ids.push(transaction.id.clone());
             }
 
-            info!("Transaction {}: amount={:.2}, new_balance={:.2}",
-                  transaction.id, transaction.amount, running_balance);
+            info!("Transaction {}: amount={}, new_balance={}",
+                  transaction.id, transaction.amount.render(), running_balance.render());
         }
 
         // Update all balances atomically
@@ -104,19 +106,19 @@ impl BalanceService {
 
     /// Calculate the starting balance for a recalculation
     /// This is the balance just before the specified date
-    fn calculate_starting_balance(&self, child_id: &str, from_date: &str) -> Result<f64> {
+    fn calculate_starting_balance(&self, child_id: &str, from_date: &str) -> Result<Money> {
         // Find the most recent transaction before the specified date
         match self.transaction_repository
-            .get_latest_transaction_before_date(child_id, from_date)? 
+            .get_latest_transaction_before_date(child_id, from_date)?
         {
             Some(transaction) => {
-                info!("Found previous transaction {} with balance ${:.2}", 
-                      transaction.id, transaction.balance);
+                info!("Found previous transaction {} with balance ${}",
+                      transaction.id, transaction.balance.render());
                 Ok(transaction.balance)
             }
             None => {
                 info!("No transactions found before {}, starting balance is $0.00", from_date);
-                Ok(0.0)
+                Ok(Money::from_cents(0))
             }
         }
     }
@@ -124,12 +126,17 @@ impl BalanceService {
     /// Calculate the correct balance for a new transaction at a specific date
     /// This is used when inserting a backdated transaction to determine its balance
     pub fn calculate_balance_for_new_transaction(&self, child_id: &str, transaction_date: &str, transaction_amount: f64) -> Result<f64> {
+        // Boundary conversion: this method's public signature is still f64
+        // dollars (it is called from call sites this task does not own), but
+        // every internal accumulation below is done in exact Money cents.
+        let transaction_amount = Money::from_cents((transaction_amount * 100.0).round() as i64);
+
         // First, get the most recent transaction before this date (excluding same day)
         let base_balance = match self.transaction_repository
-            .get_latest_transaction_before_date(child_id, transaction_date)? 
+            .get_latest_transaction_before_date(child_id, transaction_date)?
         {
             Some(transaction) => transaction.balance,
-            None => 0.0,
+            None => Money::from_cents(0),
         };
 
         // Then, get all transactions from the same day that occurred before this one
@@ -167,21 +174,22 @@ impl BalanceService {
         // Calculate the running balance including same-day transactions
         let mut running_balance = base_balance;
         for tx in &same_day_earlier_transactions {
-            running_balance += tx.amount;
+            running_balance = running_balance + tx.amount;
         }
 
         let final_balance = running_balance + transaction_amount;
-        
-        info!("Calculated balance for new transaction: base_balance={:.2} + same_day_adjustments={:.2} + amount={:.2} = {:.2}", 
-              base_balance, running_balance - base_balance, transaction_amount, final_balance);
+
+        info!("Calculated balance for new transaction: base_balance={} + same_day_adjustments={} + amount={} = {}",
+              base_balance.render(), (running_balance - base_balance).render(), transaction_amount.render(), final_balance.render());
         if !same_day_earlier_transactions.is_empty() {
             info!("  Found {} same-day earlier transactions", same_day_earlier_transactions.len());
             for (i, tx) in same_day_earlier_transactions.iter().enumerate() {
-                info!("    {}: {} amount={:.2} at {}", i + 1, tx.id, tx.amount, tx.date);
+                info!("    {}: {} amount={} at {}", i + 1, tx.id, tx.amount.render(), tx.date);
             }
         }
-        
-        Ok(final_balance)
+
+        // Boundary conversion back to the untouched f64 public signature.
+        Ok(final_balance.cents() as f64 / 100.0)
     }
 
     /// Calculate the projected balance for a future transaction
@@ -220,15 +228,16 @@ impl BalanceService {
             .list_transactions_chronological(child_id, None, None)?;
 
         let mut errors = Vec::new();
-        let mut expected_balance = 0.0;
+        let mut expected_balance = Money::from_cents(0);
 
         for transaction in transactions {
-            expected_balance += transaction.amount;
-            
-            if (transaction.balance - expected_balance).abs() > 0.001 { // Small epsilon for float comparison
+            expected_balance = expected_balance + transaction.amount;
+
+            // Exact cents comparison now that balances are Money — no epsilon needed.
+            if transaction.balance != expected_balance {
                 let error = format!(
-                    "Transaction {} has incorrect balance: expected {:.2}, actual {:.2}", 
-                    transaction.id, expected_balance, transaction.balance
+                    "Transaction {} has incorrect balance: expected {}, actual {}",
+                    transaction.id, expected_balance.render(), transaction.balance.render()
                 );
                 errors.push(error);
                 warn!("Balance validation error: {}", errors.last().unwrap());
@@ -256,9 +265,10 @@ impl BalanceService {
                 // Check if this transaction is exactly on the target date or before
                 let tx_date_str = transaction.date.format("%Y-%m-%dT%H:%M:%S%.3f%z").to_string();
                 if tx_date_str.as_str() <= target_date {
-                    info!("Found transaction {} at {} with balance ${:.2}", 
-                          transaction.id, tx_date_str, transaction.balance);
-                    Ok(transaction.balance)
+                    info!("Found transaction {} at {} with balance ${}",
+                          transaction.id, tx_date_str, transaction.balance.render());
+                    // Boundary conversion back to the untouched f64 public signature.
+                    Ok(transaction.balance.cents() as f64 / 100.0)
                 } else {
                     info!("No transactions found at or before {}, balance is $0.00", target_date);
                     Ok(0.0)
@@ -276,8 +286,9 @@ impl BalanceService {
     pub fn get_current_balance(&self, child_id: &str) -> Result<f64> {
         match self.transaction_repository.get_latest_transaction(child_id)? {
             Some(transaction) => {
-                info!("Current balance for child {}: ${:.2}", child_id, transaction.balance);
-                Ok(transaction.balance)
+                info!("Current balance for child {}: ${}", child_id, transaction.balance.render());
+                // Boundary conversion back to the untouched f64 public signature.
+                Ok(transaction.balance.cents() as f64 / 100.0)
             }
             None => {
                 info!("No transactions found for child {}, balance is $0.00", child_id);
@@ -318,18 +329,28 @@ mod tests {
         (BalanceService::new(db), temp_dir, child_result.child.id)
     }
 
+    /// Convert a dollar-amount literal (as tests already write them) into
+    /// exact `Money` cents, mirroring `Money`'s own `Deserialize` boundary
+    /// conversion. Not money arithmetic — a one-shot literal conversion.
+    fn dollars(amount: f64) -> Money {
+        Money::from_cents((amount * 100.0).round() as i64)
+    }
+
     fn create_test_transaction(service: &BalanceService, child_id: &str, date: &str, description: &str, amount: f64, balance: f64) -> Transaction {
         let now_millis = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_millis() as u64;
-        
+
         let parsed_date = chrono::DateTime::parse_from_rfc3339(date)
             .unwrap_or_else(|_| {
                 chrono::DateTime::parse_from_str(&format!("{}T12:00:00-05:00", date), "%Y-%m-%dT%H:%M:%S%z")
                     .expect("Failed to parse date")
             });
-        
+
+        let amount = dollars(amount);
+        let balance = dollars(balance);
+
         let transaction = Transaction {
             id: Transaction::generate_id(amount, now_millis),
             child_id: child_id.to_string(),
@@ -337,7 +358,7 @@ mod tests {
             description: description.to_string(),
             amount,
             balance,
-            transaction_type: if amount >= 0.0 { TransactionType::OneOffIncome } else { TransactionType::Expense },
+            transaction_type: if amount.cents() >= 0 { TransactionType::OneOffIncome } else { TransactionType::Expense },
         };
 
         service.transaction_repository.store_transaction(&transaction).unwrap();
@@ -353,7 +374,7 @@ mod tests {
         create_test_transaction(&service, child_id, "2025-01-10T10:00:00-05:00", "Previous transaction", 50.0, 50.0);
 
         let starting_balance = service.calculate_starting_balance(child_id, "2025-01-15T10:00:00-05:00").unwrap();
-        assert_eq!(starting_balance, 50.0);
+        assert_eq!(starting_balance, dollars(50.0));
     }
 
     #[test]
@@ -362,7 +383,7 @@ mod tests {
         let child_id = &child_id;
 
         let starting_balance = service.calculate_starting_balance(child_id, "2025-01-15T10:00:00-05:00").unwrap();
-        assert_eq!(starting_balance, 0.0);
+        assert_eq!(starting_balance, Money::from_cents(0));
     }
 
     #[test]
@@ -403,7 +424,7 @@ mod tests {
         
         let tx3 = create_test_transaction(&balance_service, child_id, "2025-01-20T10:00:00-05:00", "Third", 50.0, 130.0);
 
-        println!("TEST: Initial balances - tx1: {}, tx2: {}, tx3: {}", tx1.balance, tx2.balance, tx3.balance);
+        println!("TEST: Initial balances - tx1: {}, tx2: {}, tx3: {}", tx1.balance.render(), tx2.balance.render(), tx3.balance.render());
         
         // Step 2: Verify initial balances are correct
         let initial_errors = balance_service.validate_all_balances(child_id).unwrap();
@@ -411,7 +432,7 @@ mod tests {
 
         // Step 3: Insert a backdated transaction between tx1 and tx2
         let backdated_tx = create_test_transaction(&balance_service, child_id, "2025-01-12T10:00:00-05:00", "Backdated", 25.0, 125.0);
-        println!("TEST: Inserted backdated transaction: {}", backdated_tx.balance);
+        println!("TEST: Inserted backdated transaction: {}", backdated_tx.balance.render());
         
         // Step 4: At this point, tx2 and tx3 have wrong balances because of the backdated insertion
         // tx2 should be 105.0 (125.0 - 20.0) but is still 80.0

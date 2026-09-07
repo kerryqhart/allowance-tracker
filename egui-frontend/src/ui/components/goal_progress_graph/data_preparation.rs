@@ -6,6 +6,7 @@
 use chrono::NaiveDate;
 use shared::Transaction;
 use crate::backend::domain::models::goal::DomainGoal;
+use allowance_core::money::Money;
 
 /// Data point for the goal progress graph (similar to ChartDataPoint but goal-specific)
 #[derive(Debug, Clone)]
@@ -375,24 +376,30 @@ pub fn convert_domain_transactions_to_data_points(
         // Use the FINAL transaction's balance for this day (last transaction after sorting)
         if let Some(final_transaction) = sorted_day_transactions.last() {
             let is_future = date > today;
-            let is_goal_target = final_transaction.balance >= goal.target_amount;
-            
+            // Boundary conversion: DomainGoal.target_amount is still f64
+            // dollars (DomainGoal is out of scope for this task).
+            let target_amount_money = Money::from_cents((goal.target_amount * 100.0).round() as i64);
+            let is_goal_target = final_transaction.balance >= target_amount_money;
+            // Graph-plotting boundary: GoalGraphDataPoint stores plain f64
+            // for rendering.
+            let balance_dollars = final_transaction.balance.cents() as f64 / 100.0;
+
             if is_future {
                 // Future allowance - use balance calculated by domain layer (BalanceService)
-                let mut data_point = GoalGraphDataPoint::new_projection(date, final_transaction.balance);
+                let mut data_point = GoalGraphDataPoint::new_projection(date, balance_dollars);
                 if is_goal_target {
                     data_point.is_goal_target = true;
                 }
                 data_points.push(data_point);
-                
-                log::info!("  Day {}: final balance ${:.2} (future: {}, goal_target: {}) from {} transactions", 
-                           date, final_transaction.balance, is_future, is_goal_target, sorted_day_transactions.len());
+
+                log::info!("  Day {}: final balance ${:.2} (future: {}, goal_target: {}) from {} transactions",
+                           date, balance_dollars, is_future, is_goal_target, sorted_day_transactions.len());
             } else {
                 // Historical transaction - use final balance from domain layer
-                data_points.push(GoalGraphDataPoint::new(date, final_transaction.balance, false));
-                
-                log::info!("  Day {}: final balance ${:.2} (historical, goal_target: {}) from {} transactions", 
-                           date, final_transaction.balance, is_goal_target, sorted_day_transactions.len());
+                data_points.push(GoalGraphDataPoint::new(date, balance_dollars, false));
+
+                log::info!("  Day {}: final balance ${:.2} (historical, goal_target: {}) from {} transactions",
+                           date, balance_dollars, is_goal_target, sorted_day_transactions.len());
             }
         }
     }

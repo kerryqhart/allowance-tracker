@@ -80,17 +80,19 @@ impl EmailService {
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("Email service not initialized"))?;
 
+        let abs_amount = if transaction.amount.cents() < 0 { -transaction.amount } else { transaction.amount };
+
         let subject = format!(
-            "Allowance Tracker - {} {} ${:.2}",
-            child.name, action, transaction.amount.abs()
+            "Allowance Tracker - {} {} ${}",
+            child.name, action, abs_amount.render()
         );
 
         let body = format!(
-            "Hello!\n\n{} has {} ${:.2}.\n\nTransaction Details:\n- Amount: ${:.2}\n- Description: {}\n- Date: {}\n\nCurrent Balance: ${:.2}\n\nBest regards,\nAllowance Tracker",
+            "Hello!\n\n{} has {} ${}.\n\nTransaction Details:\n- Amount: ${}\n- Description: {}\n- Date: {}\n\nCurrent Balance: ${:.2}\n\nBest regards,\nAllowance Tracker",
             child.name,
             action,
-            transaction.amount.abs(),
-            transaction.amount.abs(),
+            abs_amount.render(),
+            abs_amount.render(),
             transaction.description,
             transaction.date.format("%B %d, %Y"),
             current_balance
@@ -141,9 +143,9 @@ impl EmailService {
         );
 
         let body = format!(
-            "Hello!\n\nA transaction for {} has been deleted.\n\nDeleted Transaction Details:\n- Amount: ${:.2}\n- Description: {}\n- Date: {}\n\nCurrent Balance: ${:.2}\n\nBest regards,\nAllowance Tracker",
+            "Hello!\n\nA transaction for {} has been deleted.\n\nDeleted Transaction Details:\n- Amount: ${}\n- Description: {}\n- Date: {}\n\nCurrent Balance: ${:.2}\n\nBest regards,\nAllowance Tracker",
             child.name,
-            transaction.amount,
+            transaction.amount.render(),
             transaction.description,
             transaction.date.format("%B %d, %Y"),
             current_balance

@@ -477,6 +477,14 @@ impl Default for CalendarService {
 mod tests {
     use super::*;
     use crate::backend::storage::traits::{TransactionStorage, Connection};
+    use allowance_core::money::Money;
+
+    /// Boundary conversion for building a domain `Transaction` (Money) out
+    /// of the `shared::Transaction` DTO (f64) these tests already build.
+    /// `shared::Transaction` is out of scope for the Money migration.
+    fn to_money(amount: f64) -> Money {
+        Money::from_cents((amount * 100.0).round() as i64)
+    }
 
     fn create_test_transaction(date: &str, amount: f64, balance: f64, description: &str) -> Transaction {
         let parsed_date = chrono::DateTime::parse_from_rfc3339(date)
@@ -825,8 +833,8 @@ mod tests {
             child_id: child_id.clone(),
             date: historical_tx1.date,
             description: historical_tx1.description.clone(),
-            amount: historical_tx1.amount,
-            balance: historical_tx1.balance,
+            amount: to_money(historical_tx1.amount),
+            balance: to_money(historical_tx1.balance),
             transaction_type: crate::backend::domain::models::transaction::TransactionType::OneOffIncome,
         };
         let historical_domain_tx2 = crate::backend::domain::models::transaction::Transaction {
@@ -834,8 +842,8 @@ mod tests {
             child_id: child_id.clone(),
             date: historical_tx2.date,
             description: historical_tx2.description.clone(),
-            amount: historical_tx2.amount,
-            balance: historical_tx2.balance,
+            amount: to_money(historical_tx2.amount),
+            balance: to_money(historical_tx2.balance),
             transaction_type: crate::backend::domain::models::transaction::TransactionType::OneOffIncome,
         };
         transaction_repository.store_transaction(&historical_domain_tx1).unwrap();
@@ -894,8 +902,8 @@ mod tests {
             child_id: child_id.clone(),
             date: chrono::DateTime::parse_from_rfc3339("2025-07-04T12:00:00+00:00").unwrap(),
             description: "Historical allowance".to_string(),
-            amount: 15.0,
-            balance: 15.0,
+            amount: Money::from_cents(1500),
+            balance: Money::from_cents(1500),
             transaction_type: crate::backend::domain::models::transaction::TransactionType::OneOffIncome,
         };
         transaction_repository.store_transaction(&historical_domain_tx).unwrap();
@@ -966,8 +974,8 @@ mod tests {
                     child_id: child_id.clone(),
                     date: transaction.date.clone(),
                     description: transaction.description.clone(),
-                    amount: transaction.amount,
-                    balance: transaction.balance,
+                    amount: to_money(transaction.amount),
+                    balance: to_money(transaction.balance),
                     transaction_type: if transaction.amount > 0.0 { 
                         crate::backend::domain::models::transaction::TransactionType::OneOffIncome 
                     } else { 
@@ -1070,8 +1078,8 @@ mod tests {
                     child_id: child_id.clone(),
                     date: transaction.date.clone(),
                     description: transaction.description.clone(),
-                    amount: transaction.amount,
-                    balance: transaction.balance,
+                    amount: to_money(transaction.amount),
+                    balance: to_money(transaction.balance),
                     transaction_type: if transaction.amount > 0.0 { 
                         crate::backend::domain::models::transaction::TransactionType::OneOffIncome 
                     } else { 
@@ -1164,8 +1172,8 @@ mod tests {
                     child_id: child_id.clone(),
                     date: transaction.date.clone(),
                     description: transaction.description.clone(),
-                    amount: transaction.amount,
-                    balance: transaction.balance,
+                    amount: to_money(transaction.amount),
+                    balance: to_money(transaction.balance),
                     transaction_type: if transaction.amount > 0.0 { 
                         crate::backend::domain::models::transaction::TransactionType::OneOffIncome 
                     } else { 
@@ -1247,8 +1255,8 @@ mod tests {
                     child_id: child_id.clone(),
                     date: transaction.date.clone(),
                     description: transaction.description.clone(),
-                    amount: transaction.amount,
-                    balance: transaction.balance,
+                    amount: to_money(transaction.amount),
+                    balance: to_money(transaction.balance),
                     transaction_type: if transaction.amount > 0.0 { 
                         crate::backend::domain::models::transaction::TransactionType::OneOffIncome 
                     } else { 

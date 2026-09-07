@@ -415,8 +415,8 @@ mod tests {
             child_id: "child1".to_string(),
             date: chrono::Utc::now().fixed_offset(),
             description: "Allowance".to_string(),
-            amount: 10.0,
-            balance: 10.0,
+            amount: allowance_core::money::Money::from_cents(1000),
+            balance: allowance_core::money::Money::from_cents(1000),
             transaction_type: super::super::models::transaction::TransactionType::Allowance,
         };
 

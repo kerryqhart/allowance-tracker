@@ -8,6 +8,8 @@ use std::sync::Arc;
 use crate::backend::domain::models::transaction::{
     Transaction as DomainTransaction, TransactionType as DomainTransactionType,
 };
+use allowance_core::money::Money;
+use std::str::FromStr;
 use super::connection::CsvConnection;
 use super::child_repository::ChildRepository;
 use crate::backend::storage::ChildStorage;
@@ -56,8 +58,10 @@ impl TransactionRepository {
             let date_str = record.get(2).unwrap_or("");
             let parsed_date = self.parse_date_string(date_str)?;
             
-            // Parse CSV record into Transaction
-            let amount = record.get(4).unwrap_or("0").parse::<f64>().unwrap_or(0.0);
+            // Parse CSV record into Transaction. `Money::from_str` accepts the
+            // plain decimal strings `f64::to_string()` already wrote to disk
+            // (e.g. "5", "5.5", "-2.25"), so old rows still parse.
+            let amount = Money::from_str(record.get(4).unwrap_or("0")).unwrap_or(Money::from_cents(0));
             let description = record.get(3).unwrap_or("");
             let transaction = DomainTransaction {
                 id: record.get(0).unwrap_or("").to_string(),
@@ -65,7 +69,7 @@ impl TransactionRepository {
                 date: parsed_date,  // Now uses parsed DateTime object
                 description: description.to_string(),
                 amount,
-                balance: record.get(5).unwrap_or("0").parse::<f64>().unwrap_or(0.0),
+                balance: Money::from_str(record.get(5).unwrap_or("0")).unwrap_or(Money::from_cents(0)),
                 transaction_type: Self::parse_transaction_type(
                     record.get(6),  // type column (may be None for old data)
                     description,    // description for fallback
@@ -83,7 +87,7 @@ impl TransactionRepository {
     fn parse_transaction_type(
         type_field: Option<&str>,
         description: &str,
-        amount: f64,
+        amount: Money,
     ) -> DomainTransactionType {
         // If type column exists, use it
         if let Some(type_str) = type_field {
@@ -100,7 +104,7 @@ impl TransactionRepository {
         let desc_lower = description.to_lowercase();
         if desc_lower.contains("allowance") || desc_lower.contains("weekly") {
             DomainTransactionType::Allowance
-        } else if amount >= 0.0 {
+        } else if amount.cents() >= 0 {
             DomainTransactionType::OneOffIncome
         } else {
             DomainTransactionType::Expense
@@ -159,8 +163,8 @@ impl TransactionRepository {
                 &transaction.child_id,
                 &transaction.date.to_rfc3339(),  // Convert DateTime back to string for CSV storage
                 &transaction.description,
-                &transaction.amount.to_string(),
-                &transaction.balance.to_string(),
+                &transaction.amount.render(),
+                &transaction.balance.render(),
                 type_str,
             ])?;
         }
@@ -360,7 +364,7 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
     fn update_transaction_balance(
         &self,
         _transaction_id: &str,
-        _new_balance: f64,
+        _new_balance: Money,
     ) -> Result<()> {
         // This is a complex operation in a file-based system, as it requires
         // finding the right child, reading all transactions, updating one, and writing back.
@@ -369,7 +373,7 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
         Ok(())
     }
 
-    fn update_transaction_balances(&self, updates: &[(String, f64)]) -> Result<()> {
+    fn update_transaction_balances(&self, updates: &[(String, Money)]) -> Result<()> {
         info!("Updating multiple transaction balances in CSV");
 
         if updates.is_empty() {
@@ -379,7 +383,7 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
         info!("Updating {} transaction balances", updates.len());
 
         // Group updates by child_id by looking up each transaction's child
-        let mut child_updates: std::collections::HashMap<ChildId, Vec<(String, f64)>> = std::collections::HashMap::new();
+        let mut child_updates: std::collections::HashMap<ChildId, Vec<(String, Money)>> = std::collections::HashMap::new();
 
         for (transaction_id, new_balance) in updates {
             // Find which child this transaction belongs to
@@ -449,6 +453,13 @@ mod tests {
     use std::sync::Arc;
     use tempfile::TempDir;
 
+    /// Convert a dollar-amount literal (as tests already write them) into
+    /// exact `Money` cents, mirroring `Money`'s own `Deserialize` boundary
+    /// conversion. Not money arithmetic — a one-shot literal conversion.
+    fn dollars(amount: f64) -> Money {
+        Money::from_cents((amount * 100.0).round() as i64)
+    }
+
     /// Build a repository over a temp dir with one registered child, id
     /// `test_child`.
     ///
@@ -516,22 +527,22 @@ mod tests {
             child_id: "test_child".to_string(),
             date: chrono::DateTime::parse_from_rfc3339("2024-01-15T10:30:00Z").unwrap(),
             description: "Test transaction".to_string(),
-            amount: 25.50,
-            balance: 25.50,
+            amount: dollars(25.50),
+            balance: dollars(25.50),
             transaction_type: DomainTransactionType::OneOffIncome,
         };
-        
+
         // Store transaction
         repo.store_transaction(&transaction)?;
-        
+
         // Retrieve transaction
         let retrieved = repo.get_transaction("test_child", "test_tx_001")?;
         assert!(retrieved.is_some());
-        
+
         let retrieved = retrieved.unwrap();
         assert_eq!(retrieved.id, "test_tx_001");
         assert_eq!(retrieved.description, "Test transaction");
-        assert_eq!(retrieved.amount, 25.50);
+        assert_eq!(retrieved.amount, dollars(25.50));
         
         Ok(())
     }
@@ -547,8 +558,8 @@ mod tests {
                 child_id: "test_child".to_string(),
                 date: chrono::DateTime::parse_from_rfc3339(&format!("2024-01-{:02}T10:30:00Z", i + 10)).unwrap(),
                 description: format!("Transaction {}", i),
-                amount: i as f64 * 10.0,
-                balance: (i * (i + 1) / 2) as f64 * 10.0, // Cumulative sum
+                amount: dollars(i as f64 * 10.0),
+                balance: dollars((i * (i + 1) / 2) as f64 * 10.0), // Cumulative sum
                 transaction_type: DomainTransactionType::OneOffIncome,
             };
             
@@ -578,8 +589,8 @@ mod tests {
             child_id: child.id.clone(),
             date: chrono::DateTime::parse_from_rfc3339("2025-01-01T12:00:00Z").unwrap(),
             description: "Test transaction".to_string(),
-            amount: 10.0,
-            balance: 10.0,
+            amount: dollars(10.0),
+            balance: dollars(10.0),
             transaction_type: DomainTransactionType::OneOffIncome,
         };
 
@@ -635,11 +646,11 @@ mod tests {
             child_id: "child".to_string(),
             date: chrono::DateTime::parse_from_rfc3339("2024-01-01T12:00:00Z").unwrap(), // Fixed domain model to use DateTime
             description: "Test".to_string(),
-            amount: 10.0,
-            balance: 10.0,
+            amount: dollars(10.0),
+            balance: dollars(10.0),
             transaction_type: DomainTransactionType::OneOffIncome,
         };
-        
+
         // This test checks that the date field is NOT a string
         // Currently this will fail because date is still a String
         let date_field_type = TypeId::of::<String>();
@@ -668,8 +679,8 @@ mod tests {
             child_id: "test_child".to_string(),
             date: chrono::DateTime::parse_from_str("2024-06-15T10:30:00-0500", "%Y-%m-%dT%H:%M:%S%z").unwrap(), // Parse with timezone
             description: "Test isolation".to_string(),
-            amount: 50.0,
-            balance: 50.0,
+            amount: dollars(50.0),
+            balance: dollars(50.0),
             transaction_type: DomainTransactionType::OneOffIncome,
         };
         
@@ -713,8 +724,8 @@ mod tests {
                 child_id: "test_child".to_string(),
                 date: chrono::DateTime::parse_from_rfc3339(date_str).unwrap(),
                 description: format!("Test {}", description),
-                amount: 10.0,
-                balance: 10.0,
+                amount: dollars(10.0),
+                balance: dollars(10.0),
                 transaction_type: DomainTransactionType::OneOffIncome,
             };
             
@@ -754,8 +765,8 @@ mod tests {
                 child_id: "test_child".to_string(),
                 date: chrono::DateTime::parse_from_str(invalid_date, "%Y-%m-%dT%H:%M:%S%z").unwrap_or_else(|_| chrono::DateTime::parse_from_rfc3339("2024-01-01T00:00:00Z").unwrap()),
                 description: format!("Test invalid date: {}", invalid_date),
-                amount: 10.0,
-                balance: 10.0,
+                amount: dollars(10.0),
+                balance: dollars(10.0),
                 transaction_type: DomainTransactionType::OneOffIncome,
             };
             
@@ -794,8 +805,8 @@ mod tests {
             child_id: "test_child".to_string(),
             date: chrono::DateTime::parse_from_rfc3339("2025-07-21T09:00:00Z").unwrap(),
             description: "Morning transaction".to_string(),
-            amount: 1.00,
-            balance: 17.62,
+            amount: dollars(1.00),
+            balance: dollars(17.62),
             transaction_type: DomainTransactionType::OneOffIncome,
         };
         
@@ -804,8 +815,8 @@ mod tests {
             child_id: "test_child".to_string(),
             date: chrono::DateTime::parse_from_rfc3339("2025-07-21T15:00:00Z").unwrap(),
             description: "Afternoon transaction".to_string(),
-            amount: 2.00,
-            balance: 19.62,
+            amount: dollars(2.00),
+            balance: dollars(19.62),
             transaction_type: DomainTransactionType::OneOffIncome,
         };
         

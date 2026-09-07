@@ -38,6 +38,8 @@ use crate::backend::domain::commands::transactions::{TransactionListQuery};
 use shared::GoalCalculation;
 use shared::sync::{SyncEvent, SyncAction, SyncSource, EntityType};
 use crate::backend::domain::SyncNotifier;
+use crate::backend::domain::models::transaction::Transaction as DomainTransaction;
+use allowance_core::money::Money;
 
 /// Service for managing goals and goal-related calculations
 pub struct GoalService {
@@ -430,22 +432,24 @@ impl GoalService {
         // Calculate proper balances for future allowances using BalanceService
         // (AllowanceService creates them with NaN balance to delegate balance calculation)
         for allowance in &mut future_allowances {
-            if allowance.balance.is_nan() {
-                // Use BalanceService to calculate projected balance for this future transaction
+            if allowance.balance == DomainTransaction::BALANCE_PENDING {
+                // Use BalanceService to calculate projected balance for this future transaction.
+                // Boundary conversion: BalanceService's public signature is
+                // still f64 dollars (out of scope for this task).
                 match self.balance_service.calculate_projected_balance_for_transaction(
                     &goal.child_id,
                     &allowance.date.to_rfc3339(),
-                    allowance.amount
+                    allowance.amount.cents() as f64 / 100.0
                 ) {
                     Ok(projected_balance) => {
-                        allowance.balance = projected_balance;
-                        info!("Calculated projected balance for {}: ${:.2}", 
+                        allowance.balance = Money::from_cents((projected_balance * 100.0).round() as i64);
+                        info!("Calculated projected balance for {}: ${:.2}",
                               allowance.date.format("%Y-%m-%d"), projected_balance);
                     }
                     Err(e) => {
-                        warn!("Failed to calculate projected balance for future allowance {}: {}", 
+                        warn!("Failed to calculate projected balance for future allowance {}: {}",
                               allowance.id, e);
-                        // Keep NaN balance as fallback
+                        // Keep the pending-balance sentinel as fallback
                     }
                 }
             }
@@ -456,8 +460,8 @@ impl GoalService {
         // Debug logging for future allowances
         info!("DOMAIN DEBUG: Future allowances breakdown:");
         for (i, allowance) in future_allowances.iter().enumerate() {
-            info!("  Future allowance {}: {} - ${:.2} (type: {:?})", 
-                   i, allowance.date.format("%Y-%m-%d"), allowance.balance, allowance.transaction_type);
+            info!("  Future allowance {}: {} - ${} (type: {:?})",
+                   i, allowance.date.format("%Y-%m-%d"), allowance.balance.render(), allowance.transaction_type);
         }
         
         // Get counts before moving
@@ -587,7 +591,9 @@ impl GoalService {
         let result = self.transaction_service.as_ref().list_transactions(query)?;
 
         match result.transactions.first() {
-            Some(tx) => Ok(tx.balance),
+            // Boundary conversion: this method's public signature is still
+            // f64 dollars (used broadly outside this task's scope).
+            Some(tx) => Ok(tx.balance.cents() as f64 / 100.0),
             None => Ok(0.0),
         }
     }

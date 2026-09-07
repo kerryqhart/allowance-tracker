@@ -9,6 +9,7 @@ use crate::backend::domain::models::child::Child as DomainChild;
 use crate::backend::domain::models::transaction::Transaction as DomainTransaction;
 use crate::backend::domain::models::allowance::AllowanceConfig as DomainAllowanceConfig;
 use crate::backend::domain::models::parental_control_attempt::ParentalControlAttempt as DomainParentalControlAttempt;
+use allowance_core::money::Money;
 
 /// Trait defining the interface for transaction storage operations
 /// 
@@ -56,11 +57,11 @@ pub trait TransactionStorage: Send + Sync {
     
     /// Update the balance of a specific transaction
     /// Used during balance recalculation after backdated transactions
-    fn update_transaction_balance(&self, transaction_id: &str, new_balance: f64) -> Result<()>;
-    
+    fn update_transaction_balance(&self, transaction_id: &str, new_balance: Money) -> Result<()>;
+
     /// Update multiple transaction balances atomically
     /// Used for bulk balance recalculation after backdated transactions
-    fn update_transaction_balances(&self, updates: &[(String, f64)]) -> Result<()>;
+    fn update_transaction_balances(&self, updates: &[(String, Money)]) -> Result<()>;
     
     /// Check if transactions exist by their IDs for a specific child
     fn check_transactions_exist(&self, child_id: &str, transaction_ids: &[String]) -> Result<Vec<String>>;

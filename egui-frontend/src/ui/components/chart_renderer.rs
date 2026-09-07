@@ -295,8 +295,13 @@ impl AllowanceTrackerApp {
                     .map(|tx| shared::Transaction {
                         id: tx.id,
                         child_id: tx.child_id,
-                        amount: tx.amount,
-                        balance: tx.balance,
+                        // Chart-display boundary: shared::Transaction (the
+                        // chart DTO) is out of scope for the Money migration
+                        // and stays f64. This query never returns future
+                        // allowances, so there is no BALANCE_PENDING sentinel
+                        // to special-case here (contrast with mappers.rs).
+                        amount: tx.amount.cents() as f64 / 100.0,
+                        balance: tx.balance.cents() as f64 / 100.0,
                         transaction_type: match tx.transaction_type {
                             crate::backend::domain::models::transaction::TransactionType::Allowance => shared::TransactionType::Allowance,
                             crate::backend::domain::models::transaction::TransactionType::OneOffIncome => shared::TransactionType::OneOffIncome,

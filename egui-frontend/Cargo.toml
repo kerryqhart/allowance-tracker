@@ -18,6 +18,7 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg"]
 
 # Local dependencies
 shared = { path = "../shared" }
+allowance-core = { path = "../allowance-core" }
 
 # Date and time handling
 chrono = { version = "0.4", features = ["serde"] }

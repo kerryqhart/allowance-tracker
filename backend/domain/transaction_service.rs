@@ -20,6 +20,7 @@ use log::{error, info, debug};
 use std::sync::Arc;
 use shared::sync::{SyncEvent, SyncAction, SyncSource, EntityType};
 use crate::backend::domain::SyncNotifier;
+use allowance_core::money::Money;
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -100,19 +101,25 @@ impl TransactionService {
             chrono::Local::now().fixed_offset()
         });
 
+        // Boundary conversion: CreateTransactionCommand is a command DTO that
+        // stays f64 dollars (out of scope for this task); the domain
+        // Transaction it produces is Money.
+        let amount = Money::from_cents((command.amount * 100.0).round() as i64);
+
         let transaction = self.create_transaction_internal(
             &active_child.id,
             transaction_date,
             command.description,
-            command.amount,
+            amount,
         )?;
 
         // Send email notification if email service is configured
         if let Some(email_service) = &self.email_service {
             log::info!("Email service is configured, sending notification for transaction: {}", transaction.id);
-            let action = if transaction.amount >= 0.0 { "earned" } else { "spent" };
+            let action = if transaction.amount.cents() >= 0 { "earned" } else { "spent" };
             let current_balance = self.balance_service.get_current_balance(&active_child.id)?;
-            log::info!("Sending email notification: {} ${:.2} for {}", action, transaction.amount.abs(), active_child.name);
+            let abs_amount = if transaction.amount.cents() < 0 { -transaction.amount } else { transaction.amount };
+            log::info!("Sending email notification: {} ${} for {}", action, abs_amount.render(), active_child.name);
             if let Err(e) = email_service.send_transaction_notification(&transaction, &active_child, action, current_balance) {
                 error!("Failed to send transaction notification email: {}", e);
             } else {
@@ -131,18 +138,21 @@ impl TransactionService {
         child_id: &str,
         date: chrono::DateTime<chrono::FixedOffset>,
         description: String,
-        amount: f64,
+        amount: Money,
     ) -> Result<DomainTransaction> {
         let now_millis = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64;
         let transaction_id = DomainTransaction::generate_id(amount, now_millis);
 
+        // Boundary conversion: BalanceService's public signature is still
+        // f64 dollars (it is used broadly outside this task's scope).
         let transaction_balance = self
             .balance_service
             .calculate_balance_for_new_transaction(
                 child_id,
                 &date.to_rfc3339(),
-                amount,
+                amount.cents() as f64 / 100.0,
             )?;
+        let transaction_balance = Money::from_cents((transaction_balance * 100.0).round() as i64);
 
         let domain_transaction = DomainTransaction {
             id: transaction_id,
@@ -151,7 +161,7 @@ impl TransactionService {
             description,
             amount,
             balance: transaction_balance,
-            transaction_type: if amount >= 0.0 {
+            transaction_type: if amount.cents() >= 0 {
                 DomainTransactionType::OneOffIncome
             } else {
                 DomainTransactionType::Expense
@@ -303,8 +313,8 @@ impl TransactionService {
             Ok(future_allowances) => {
                 debug!("🗓️ Generated {} future allowances", future_allowances.len());
                 for (i, allowance) in future_allowances.iter().enumerate().take(3) {
-                    debug!("🗓️ Future allowance {}: id={}, date={}, amount={}", 
-                         i + 1, allowance.id, allowance.date, allowance.amount);
+                    debug!("🗓️ Future allowance {}: id={}, date={}, amount={}",
+                         i + 1, allowance.id, allowance.date, allowance.amount.render());
                 }
                 if future_allowances.len() > 3 {
                     debug!("🗓️ ... and {} more future allowances", future_allowances.len() - 3);
@@ -414,8 +424,12 @@ impl TransactionService {
             let mut issued_count = 0;
             for (allowance_date, amount) in pending_allowances {
                 debug!("ALLOWANCE DEBUG: About to create allowance for {} (${:.2})", allowance_date, amount);
+                // Boundary conversion: AllowanceService's pending-allowance
+                // amounts are still f64 dollars (AllowanceConfig is out of
+                // scope for this task); the transaction they produce is Money.
+                let money_amount = Money::from_cents((amount * 100.0).round() as i64);
                 match self
-                    .create_allowance_transaction(&active_child.id, allowance_date, amount)
+                    .create_allowance_transaction(&active_child.id, allowance_date, money_amount)
                 {
                     Ok(transaction) => {
                         info!(
@@ -444,9 +458,9 @@ impl TransactionService {
         &self,
         child_id: &str,
         date: NaiveDate,
-        amount: f64,
+        amount: Money,
     ) -> Result<DomainTransaction> {
-        debug!("ALLOWANCE DEBUG: create_allowance_transaction() called for child {}, date {}, amount ${:.2}", child_id, date, amount);
+        debug!("ALLOWANCE DEBUG: create_allowance_transaction() called for child {}, date {}, amount ${}", child_id, date, amount.render());
 
         // Convert NaiveDate to DateTime at noon Eastern time
         let allowance_datetime = date.and_hms_opt(12, 0, 0).unwrap();
@@ -461,13 +475,16 @@ impl TransactionService {
         let now_millis = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64;
         let transaction_id = DomainTransaction::generate_id(amount, now_millis);
 
+        // Boundary conversion: BalanceService's public signature is still
+        // f64 dollars (it is used broadly outside this task's scope).
         let transaction_balance = self
             .balance_service
             .calculate_balance_for_new_transaction(
                 child_id,
                 &eastern_datetime.to_rfc3339(),
-                amount,
+                amount.cents() as f64 / 100.0,
             )?;
+        let transaction_balance = Money::from_cents((transaction_balance * 100.0).round() as i64);
 
         let domain_transaction = DomainTransaction {
             id: transaction_id,
@@ -613,9 +630,9 @@ mod tests {
             date: None,
         };
         let transaction = service.create_transaction(cmd).unwrap();
-        assert_eq!(transaction.amount, 10.0);
+        assert_eq!(transaction.amount, Money::from_cents(1000));
         assert_eq!(transaction.description, "Test transaction");
-        assert_eq!(transaction.balance, 10.0);
+        assert_eq!(transaction.balance, Money::from_cents(1000));
         assert_eq!(transaction.transaction_type, DomainTransactionType::OneOffIncome);
     }
 
@@ -738,7 +755,7 @@ mod tests {
         
         // Verify the allowance details
         if let Some(allowance) = allowance_count_after.first() {
-            assert_eq!(allowance.amount, 10.0, "Allowance amount should be $10");
+            assert_eq!(allowance.amount, Money::from_cents(1000), "Allowance amount should be $10");
             assert!(allowance.description.to_lowercase().contains("allowance"), "Should be an allowance transaction");
         }
     }

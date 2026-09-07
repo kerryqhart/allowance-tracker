@@ -2,6 +2,7 @@
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 use chrono::{DateTime, FixedOffset};
+use allowance_core::money::Money;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum TransactionType {
@@ -17,17 +18,25 @@ pub struct Transaction {
     pub child_id: String,
     pub date: DateTime<FixedOffset>,  // FIXED: Now uses proper DateTime object
     pub description: String,
-    pub amount: f64,
-    pub balance: f64,
+    pub amount: Money,
+    pub balance: Money,
     pub transaction_type: TransactionType,
 }
 
 impl Transaction {
+    /// Sentinel balance for a transaction (e.g. a not-yet-materialized future
+    /// allowance) whose balance `BalanceService` has not calculated yet.
+    ///
+    /// The old `f64` balance field used `f64::NAN` for this. `Money` has no
+    /// NaN, so this in-domain sentinel takes its place. No real transaction
+    /// balance can reach `i64::MIN` cents, so it is safe to reuse as a marker.
+    pub const BALANCE_PENDING: Money = Money::from_cents(i64::MIN);
+
     /// Generate a unique transaction ID based on amount and current timestamp.
     /// Format: <type>-<timestamp_ms>-<random_suffix>
     /// Example: in-1625846400123-af3c
-    pub fn generate_id(amount: f64, timestamp_ms: u64) -> String {
-        let tx_type = if amount >= 0.0 { "in" } else { "ex" };
+    pub fn generate_id(amount: Money, timestamp_ms: u64) -> String {
+        let tx_type = if amount.cents() >= 0 { "in" } else { "ex" };
         let random_suffix = Self::generate_random_suffix(4);
         format!("{}-{}-{}", tx_type, timestamp_ms, random_suffix)
     }
