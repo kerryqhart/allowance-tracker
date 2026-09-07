@@ -117,7 +117,17 @@ transport, no change to Phase 2/3 as designed.
 behavior when the 60s bound is exceeded — the spike is written to report that
 as a distinct, legitimate failure rather than pass regardless, but it has not
 been observed to fire. Phase 2/3's retry/backoff behavior around a slow or
-absent reconcile is still a design question, not something this spike answers.
+absent reconcile is still a design question, not something this spike
+answers. **Nor does it establish that the fetched `refs/lgs-auth/heads/*`
+ref came from *this run's own push.*** Reconcile is asynchronous: in one of
+the two observed runs, the OID the poll found at `refs/lgs-auth/heads/main`
+was the *previous* run's commit, not the one that run had just pushed — the
+poll simply returns as soon as some real value exists at that ref path. What
+the spike demonstrates is narrower and still sufficient for Task 15's
+purposes: `refs/lgs-auth/*` is fetchable over this transport and carries real,
+verifiable objects, not that a given push's tip is visible there by any
+particular deadline. Task 15's merge-input dependency on this ref should be
+read with that boundary in mind.
 
 One false start along the way, noted because it shapes how this test should be
 run in CI: pointing the spike at a freshly `lgs add`-registered project with no
