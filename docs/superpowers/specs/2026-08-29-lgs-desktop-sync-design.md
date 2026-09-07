@@ -301,11 +301,15 @@ predictable repair is to widen the epsilon.
 Canonical rendering also removes a whole class of byte-divergence independent of
 the arithmetic.
 
-**Blast radius, stated because it is not small:** `Transaction` is serialized to
-JSON for the AWS sync-service and read by the MCP Lambda in the zephytop-brain
-stack. The serde representation must stay **wire-compatible** — same JSON shape,
-accepting existing stored values — so no cross-repo change is forced. Internal
-representation changes; the wire does not.
+**Blast radius, stated because it is not small.** The type that changes is the
+**domain** `Transaction` (`backend/domain/models/transaction.rs`), and it is not
+only the CSV model: `read_entity_for_sync` (`app_coordinator.rs:512-526`)
+serializes it directly as the AWS wire payload, which the MCP Lambda in the
+zephytop-brain stack then reads. The serde representation must therefore stay
+**wire-compatible** — same JSON shape, still accepting values already stored in
+DynamoDB — so no cross-repo change is forced. Internal representation changes;
+the wire does not. A round-trip test against a captured production payload
+enforces this.
 
 `validate_all_balances` currently returns `Ok(Vec<String>)`, so it returns `Ok`
 when balances are wrong and a `?` at the call site swallows it. It becomes
@@ -472,17 +476,31 @@ that is what makes the crude resolution rule acceptable.**
 
 **Base-absent add/add and base-present edit/edit are different situations.** An
 edit/edit is one row edited twice — pick one. An add/add is *two distinct rows
-that collided on a key*, and picking one destroys a real transaction. Ids are
-`format!("transaction::{}::{}", transaction_type, epoch_millis)`
-(`shared/src/lib.rs:581`) with no device component, so two Macs adding an expense
-in the same millisecond mint the same id for different transactions. Re-keying
+that collided on a key*, and picking one destroys a real transaction. Re-keying
 appends the short commit hash of the side being re-keyed, so both machines choose
 the same loser.
 
-The generator is also fixed — a short random suffix, with `parse_id` relaxed to
-`parts.len() >= 3` — so collisions become vanishingly rare and the merge rule is
-a backstop rather than the only defense. `Goal` id generation is checked for the
-same defect.
+> **Correction to the review finding.** Greg's critique cited
+> `shared/src/lib.rs:581` (`transaction::{type}::{millis}`, no suffix). That
+> generator is **dead** — it is referenced only by its own unit tests. The live
+> one is `DomainTransaction::generate_id`
+> (`backend/domain/models/transaction.rs:29`), used by `transaction_service.rs:137,462`
+> and `balance_service.rs:334`, and it already appends a 4-hex suffix:
+> `in-1625846400123-af3c`.
+>
+> The concern survives in weakened form. `generate_random_suffix` is **not
+> random** — it is `SystemTime::now().as_nanos() % 16^4`
+> (`models/transaction.rs:49-56`), so it is a second clock reading, not entropy,
+> and two machines are correlated in exactly the way the suffix is meant to
+> break. The collision is far less likely than "same millisecond", but the
+> consequence is unchanged: two real transactions silently become one.
+>
+> So the table split above is the load-bearing fix and stays. The generator
+> change is narrowed to *making the suffix actually random*, and the dead
+> `shared::Transaction::generate_id` is deleted rather than aligned, so no future
+> reader mistakes it for the live path.
+
+`Goal` id generation is checked for the same defect.
 
 **When there is no merge base**, treat the base as empty and union both sides.
 With no common ancestor nothing can be shown to have been deleted, so nothing is
