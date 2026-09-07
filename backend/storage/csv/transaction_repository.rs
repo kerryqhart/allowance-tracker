@@ -4,15 +4,12 @@ use csv::{Reader, Writer};
 use log::{info, warn};
 use std::fs::{File, OpenOptions};
 use std::io::{BufReader, BufWriter};
-use std::sync::Arc;
 use crate::backend::domain::models::transaction::{
     Transaction as DomainTransaction, TransactionType as DomainTransactionType,
 };
 use allowance_core::money::Money;
 use std::str::FromStr;
 use super::connection::CsvConnection;
-use super::child_repository::ChildRepository;
-use crate::backend::storage::ChildStorage;
 use crate::backend::storage::GitManager;
 use shared::ChildId;
 
@@ -20,17 +17,14 @@ use shared::ChildId;
 #[derive(Clone)]
 pub struct TransactionRepository {
     connection: CsvConnection,
-    child_repository: ChildRepository,
     git_manager: GitManager,
 }
 
 impl TransactionRepository {
     /// Create a new CSV transaction repository
     pub fn new(connection: CsvConnection) -> Self {
-        let child_repository = ChildRepository::new(Arc::new(connection.clone()));
         Self {
             connection,
-            child_repository,
             git_manager: GitManager::new(),
         }
     }
@@ -429,7 +423,8 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::storage::TransactionStorage;
+    use super::super::child_repository::ChildRepository;
+    use crate::backend::storage::{ChildStorage, TransactionStorage};
     use crate::backend::domain::models::child::Child as DomainChild;
     use chrono::Utc;
     use std::sync::Arc;
