@@ -79,20 +79,45 @@ with repeated merges. Widening the goal requires proving confluence first.
 Ran `egui-frontend/tests/spike_git2_http.rs` against `git2 0.19.0`
 (`default-features = false`, unchanged at `egui-frontend/Cargo.toml:48` — no
 `https`, no `ssh`) with a live lgs daemon (`daemon.state: "ok"`) over its
-localhost smart-HTTP endpoint. All three operations succeeded:
+localhost smart-HTTP endpoint. Each of the three operations was verified
+independently of libgit2's own success return values, per a review round that
+correctly flagged the first pass of this spike as insufficient (see the report
+for full detail: `.superpowers/sdd/2026-09-07-lgs-desktop-sync/task-1-report.md`):
 
-```
-clone: OK
-push: OK
-fetch refs/lgs-auth/*: OK
-```
+- **Clone**: `git2::Repository::clone` succeeded.
+- **Push**: verified two ways — a `push_update_reference` callback confirmed
+  libgit2 reported no per-ref rejection (the thing a bare `Ok(())` from
+  `Remote::push` cannot rule out on its own), **and** an independent
+  `git ls-remote <clone_url>` against the real remote showed
+  `refs/heads/<branch>` at the exact OID of the commit just pushed.
+- **Fetch of `refs/lgs-auth/heads/*`**: `refs/lgs-auth/heads/<branch>` is
+  written by the daemon's **reconcile pass**, which runs on the daemon's poll
+  interval plus a cloud round-trip — not synchronously on push. A fetch whose
+  refspec matches nothing yet is not an error, so "fetch: OK" alone cannot
+  distinguish a real transfer from a vacuous one. The spike now forces
+  `lgs sync <project>` and polls the real remote via `git ls-remote` (bounded,
+  60s, no blind sleep) until `refs/lgs-auth/heads/<branch>` actually exists
+  there, only then fetches, and asserts the locally fetched
+  `refs/remotes/lgs-auth/<branch>` resolves to the same OID `git ls-remote`
+  observed. Two consecutive runs both completed this within ~1.5s of
+  triggering sync and passed with matching OIDs — a genuine object transfer,
+  not a refspec matching zero refs.
 
-Every transport claim in this spec — clone, `receive-pack` push, and the
-`refs/lgs-auth/heads/*` fetch the [Fetch](#fetch--the-refspec-matters) section
-depends on — is confirmed working under the flags this build already ships
-with. `GitManager`'s new methods (Task 13) can be built directly on `git2`; no
-`https` feature, no shelling out to `git` for transport, no change to Phase 2/3
-as designed.
+Every transport claim in this spec — clone, `receive-pack` push landing (not
+merely being accepted locally), and a non-vacuous `refs/lgs-auth/heads/*`
+fetch that the [Fetch](#fetch--the-refspec-matters) section depends on — is
+confirmed working under the flags this build already ships with, on this one
+machine, against a bare-plus-cloud-root reconcile that completed in about a
+second under no load. `GitManager`'s new methods (Task 13) can be built
+directly on `git2`; no `https` feature, no shelling out to `git` for
+transport, no change to Phase 2/3 as designed.
+
+**What this does not establish:** reconcile latency under real conditions
+(cross-machine, cold cloud-drive mount, larger repos, or daemon load), or
+behavior when the 60s bound is exceeded — the spike is written to report that
+as a distinct, legitimate failure rather than pass regardless, but it has not
+been observed to fire. Phase 2/3's retry/backoff behavior around a slow or
+absent reconcile is still a design question, not something this spike answers.
 
 One false start along the way, noted because it shapes how this test should be
 run in CI: pointing the spike at a freshly `lgs add`-registered project with no
