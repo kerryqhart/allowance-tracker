@@ -60,7 +60,10 @@ impl FromStr for Money {
             1 => frac.parse::<i64>().map_err(|_| MoneyParseError(s.to_string()))? * 10,
             _ => frac.parse().map_err(|_| MoneyParseError(s.to_string()))?,
         };
-        let total = whole * 100 + frac_cents;
+        let total = whole
+            .checked_mul(100)
+            .and_then(|w| w.checked_add(frac_cents))
+            .ok_or_else(|| MoneyParseError(s.to_string()))?;
         Ok(Money(if neg { -total } else { total }))
     }
 }
@@ -144,5 +147,37 @@ mod tests {
         assert_eq!(serde_json::from_str::<Money>("5").unwrap(), Money::from_cents(500));
         assert_eq!(serde_json::from_str::<Money>("5.0").unwrap(), Money::from_cents(500));
         assert_eq!(serde_json::from_str::<Money>("-2.5").unwrap(), Money::from_cents(-250));
+    }
+
+    #[test]
+    fn fromstr_overflow_on_multiply_returns_err() {
+        // A value that overflows when multiplied by 100
+        assert!("922337203685477581".parse::<Money>().is_err());
+    }
+
+    #[test]
+    fn fromstr_overflow_on_add_returns_err() {
+        // A large whole part that multiplies ok, but overflows when fractional cents are added
+        let large_frac = format!("{}.99", i64::MAX);
+        assert!(large_frac.parse::<Money>().is_err());
+    }
+
+    #[test]
+    fn i64_max_cents_renders_stably() {
+        let m = Money::from_cents(i64::MAX);
+        let rendered = m.render();
+        // Verify it's stable across multiple renders
+        assert_eq!(m.render(), rendered);
+    }
+
+    #[test]
+    fn i64_min_render_parses_back_to_err() {
+        // i64::MIN is -9223372036854775808 cents
+        // Rendering it gives "-92233720368547758.08"
+        // Parsing it back should overflow since the magnitude exceeds i64::MAX
+        let m = Money::from_cents(i64::MIN);
+        let rendered = m.render();
+        // This should error rather than silently wrap to a wrong value
+        assert!(rendered.parse::<Money>().is_err());
     }
 }
