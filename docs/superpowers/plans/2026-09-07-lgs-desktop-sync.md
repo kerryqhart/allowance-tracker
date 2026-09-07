@@ -538,10 +538,10 @@ git commit -m "refactor(domain): Transaction money becomes Money(i64), wire form
 - Modify: `backend/domain/balance_service.rs`
 
 **Interfaces:**
-- Consumes: `Money`, `TxRow` (Task 5 defines `TxRow`; for this task operate on a slice of the domain `Transaction` via a small trait-free helper — see Step 3).
-- Produces: `recompute_running_balances(&mut [T])` and `validate(&[T]) -> Vec<BalanceMismatch>` where `T` is `allowance_core::row::TxRow`.
+- Consumes: `Money` (Task 2).
+- Produces: **`allowance-core/src/row.rs`** — `TxRow`, `TxType`, `Provenance`, `Sided` — plus `recompute_running_balances(&mut [TxRow])` and `validate(&[TxRow]) -> Vec<BalanceMismatch>`.
 
-> Ordering note: this task defines `TxRow` because `balance` and `codec` both need it. Task 5 uses it rather than redefining it.
+> **This task owns `row.rs`.** `balance`, `codec` (Task 5), `merge` (Task 7) and `ChildSyncEngine` (Task 15) all consume those types and none of them redefine any part of it.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -835,7 +835,7 @@ x,keiko,2026-01-01,d,1.00,1.00,expense\n";
     }
 
     #[test]
-    fn an_unknown_type_is_preserved_not_derived() {
+    fn an_unknown_type_is_refused_not_derived() {
         let future = "id,child_id,date,description,amount,balance,type\n\
 x,keiko,2026-01-01T00:00:00+00:00,d,1.00,1.00,rebate\n";
         // Derivation would silently downgrade a row an older app does not know,
@@ -1287,15 +1287,21 @@ pub fn merge(base: Option<&[TxRow]>, ours: &Sided, theirs: &Sided) -> MergeOutco
                     // add/add: two DIFFERENT rows that collided on a key.
                     // Keeping one destroys a real transaction, so keep both and
                     // re-key deterministically.
-                    let (keep, rekey, keep_prov, rekey_prov) =
-                        if wins(&ours.provenance, &theirs.provenance) {
-                            (o, t, ours.provenance, theirs.provenance)
-                        } else {
-                            (t, o, theirs.provenance, ours.provenance)
-                        };
-                    let _ = keep_prov;
+                    //
+                    // The suffix is derived from the ROW'S OWN CONTENT, never
+                    // from provenance. A provenance-derived suffix is not a
+                    // fixed point: re-merging the result against the same side
+                    // sees the same collision on the original id and re-keys
+                    // again with a fresh suffix, forever. Content-derived plus
+                    // the dedupe below means the second merge produces exactly
+                    // the first merge's rows.
+                    let (keep, rekey) = if wins(&ours.provenance, &theirs.provenance) {
+                        (o, t)
+                    } else {
+                        (t, o)
+                    };
                     let mut moved = rekey.clone();
-                    moved.id = format!("{}-{}", rekey.id, rekey_prov.short_hex());
+                    moved.id = format!("{}-{}", rekey.id, content_suffix(rekey));
                     decisions.push(Decision::KeptBothReKeyed {
                         original: rekey.id.clone(),
                         re_keyed: moved.id.clone(),
@@ -1317,8 +1323,39 @@ pub fn merge(base: Option<&[TxRow]>, ours: &Sided, theirs: &Sided) -> MergeOutco
         }
     }
 
+    // A re-keyed row can equal a row the other side already carries (exactly
+    // what makes the second merge a fixed point). Collapse those.
+    rows.sort_by(|a, b| a.id.cmp(&b.id));
+    rows.dedup_by(|a, b| a.id == b.id);
+
     recompute_running_balances(&mut rows);
     MergeOutcome { rows, decisions }
+}
+
+/// A stable fingerprint of a row's intrinsic fields.
+///
+/// FNV-1a, written out explicitly. `DefaultHasher` would be wrong here: Rust
+/// does not guarantee its output is stable across compiler versions, and this
+/// value becomes part of a transaction id that both machines must agree on
+/// while building from separate toolchains.
+fn content_suffix(row: &TxRow) -> String {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut eat = |bytes: &[u8]| {
+        for b in bytes {
+            hash ^= *b as u64;
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    };
+    eat(row.child_id.as_bytes());
+    eat(b"\x1f");
+    eat(row.date.to_rfc3339().as_bytes());
+    eat(b"\x1f");
+    eat(row.description.as_bytes());
+    eat(b"\x1f");
+    eat(row.amount.cents().to_string().as_bytes());
+    eat(b"\x1f");
+    eat(row.tx_type.as_csv().as_bytes());
+    format!("{:08x}", hash as u32)
 }
 
 /// Later committer timestamp wins; ties break on commit oid.
@@ -1394,6 +1431,12 @@ fn row_strategy() -> impl Strategy<Value = TxRow> {
 fn sided_strategy() -> impl Strategy<Value = Sided> {
     (prop::collection::vec(row_strategy(), 0..8), 0i64..1000, 0u8..255).prop_map(
         |(mut rows, epoch, oid)| {
+            // Sort BEFORE dedup: `dedup_by` only removes *consecutive*
+            // duplicates, so an unsorted vec keeps duplicate ids. The merge
+            // indexes rows by id, so a duplicate would be silently dropped and
+            // symmetry would appear to fail for a reason that is purely an
+            // artifact of the generator.
+            rows.sort_by(|a, b| a.id.cmp(&b.id));
             rows.dedup_by(|a, b| a.id == b.id);
             Sided { rows, provenance: Provenance { committer_epoch: epoch, commit_oid: [oid; 20] } }
         },
@@ -1501,7 +1544,7 @@ The single most important safety rule in the spec. As a pure predicate over inje
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: `SyncPaths { data_dir, children_root, lgs_binary, cloud_root: Option<PathBuf> }` and `is_cloud_synced(candidate: &Path, env: &SyncPaths, documents_is_symlink: bool) -> Option<Reason>`.
+- Produces: `SyncPaths { data_dir, children_root, lgs_binary, cloud_root: Option<PathBuf>, home: PathBuf }` and `is_cloud_synced(candidate: &Path, env: &SyncPaths, documents_is_symlink: bool) -> Option<Reason>`. The `home` field is required — the guard compares against `home/Library/Mobile Documents` and `home/Documents`, and reading `dirs::home_dir()` internally is what would make it untestable.
 
 - [ ] **Step 1: Write the failing table test**
 
@@ -2382,7 +2425,7 @@ git commit -m "test(sync): two-machine harness over one temp cloud root"
 
 **Interfaces:**
 - Consumes: `GitManager` remote ops, `allowance_core::merge`.
-- Produces: `SyncMessage::ApplyMerge { child_id, rows: Vec<TxRow>, parents: (String, String), decisions: Vec<Decision> }` and `ChildSyncEngine::cycle(&ChildId) -> Result<CycleOutcome>`.
+- Produces: `SyncMessage::ApplyMerge { child_id, rows: Vec<TxRow>, parents: (String, String), decisions: Vec<Decision> }`; `ChildSyncEngine::cycle(&ChildId) -> Result<CycleOutcome>`; and the pure helper the test in Step 2 targets — `classify(ours: Option<&str>, auth: Option<&str>, base: Option<&str>) -> Cycle` with `enum Cycle { UpToDate, FastForward, Diverged }`. `cycle()` calls `classify` after the fetch; keeping the decision separable is what makes it testable without a repository.
 
 - [ ] **Step 1: Add the message**
 
