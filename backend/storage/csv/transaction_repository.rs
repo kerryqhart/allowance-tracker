@@ -229,8 +229,29 @@ impl TransactionRepository {
     }
 }
 
+/// Guard shared by every single-transaction write path: refuses to persist a
+/// transaction whose balance is still `Transaction::BALANCE_PENDING`
+/// (`Money::from_cents(i64::MIN)`, the in-domain stand-in for the old
+/// `f64::NAN` "not yet calculated" sentinel).
+///
+/// `Money::render()` on `i64::MIN` produces `"-92233720368547758.08"`, and
+/// parsing that back overflows `i64` and returns `Err` (see allowance-core's
+/// own test for this). A later task turns an unparseable CSV row into a
+/// hard, unrecoverable read error with no fallback — so persisting
+/// BALANCE_PENDING today would write a file this app can never read again.
+fn reject_pending_balance(transaction: &DomainTransaction) -> Result<()> {
+    if transaction.balance == DomainTransaction::BALANCE_PENDING {
+        anyhow::bail!(
+            "refusing to persist transaction {}: balance is still BALANCE_PENDING (not yet calculated by BalanceService)",
+            transaction.id
+        );
+    }
+    Ok(())
+}
+
 impl crate::backend::storage::TransactionStorage for TransactionRepository {
     fn store_transaction(&self, transaction: &DomainTransaction) -> Result<()> {
+        reject_pending_balance(transaction)?;
         let child_id = ChildId::from(transaction.child_id.as_str());
         let mut transactions = self.read_transactions(&child_id)?;
         if let Some(pos) = transactions.iter().position(|t| t.id == transaction.id) {
@@ -298,6 +319,7 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
     }
 
     fn update_transaction(&self, transaction: &DomainTransaction) -> Result<()> {
+        reject_pending_balance(transaction)?;
         info!("Updating transaction in CSV: {}", transaction.id);
 
         let child_id = ChildId::from(transaction.child_id.as_str());
@@ -574,10 +596,80 @@ mod tests {
         assert_eq!(transactions[0].id, "tx_005");
         assert_eq!(transactions[1].id, "tx_004");
         assert_eq!(transactions[2].id, "tx_003");
-        
+
         Ok(())
     }
-    
+
+    /// Regression test: `Transaction::BALANCE_PENDING`
+    /// (`Money::from_cents(i64::MIN)`) must never be persisted. Its
+    /// `render()` overflows `i64` on the way back in, and a later task turns
+    /// an unparseable CSV row into a hard, unrecoverable read error — so a
+    /// persisted BALANCE_PENDING row would permanently brick that child's
+    /// transaction file.
+    #[test]
+    fn store_transaction_refuses_a_balance_pending_transaction() -> Result<()> {
+        let (repo, _env) = setup_test_repo()?;
+
+        let transaction = DomainTransaction {
+            id: "test_tx_pending".to_string(),
+            child_id: "test_child".to_string(),
+            date: chrono::DateTime::parse_from_rfc3339("2024-01-15T10:30:00Z").unwrap(),
+            description: "Future allowance".to_string(),
+            amount: dollars(10.0),
+            balance: DomainTransaction::BALANCE_PENDING,
+            transaction_type: DomainTransactionType::FutureAllowance,
+        };
+
+        let result = repo.store_transaction(&transaction);
+        assert!(
+            result.is_err(),
+            "storing a transaction with balance == BALANCE_PENDING must fail, not silently persist it"
+        );
+
+        assert!(
+            repo.get_transaction("test_child", "test_tx_pending")?.is_none(),
+            "a refused BALANCE_PENDING transaction must not end up in storage"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn update_transaction_refuses_a_balance_pending_transaction() -> Result<()> {
+        let (repo, _env) = setup_test_repo()?;
+
+        // Store a normal transaction first...
+        let transaction = DomainTransaction {
+            id: "test_tx_to_update".to_string(),
+            child_id: "test_child".to_string(),
+            date: chrono::DateTime::parse_from_rfc3339("2024-01-15T10:30:00Z").unwrap(),
+            description: "Allowance".to_string(),
+            amount: dollars(10.0),
+            balance: dollars(10.0),
+            transaction_type: DomainTransactionType::Allowance,
+        };
+        repo.store_transaction(&transaction)?;
+
+        // ...then attempt to update it to carry BALANCE_PENDING.
+        use crate::backend::storage::traits::TransactionStorage;
+        let mut pending_update = transaction.clone();
+        pending_update.balance = DomainTransaction::BALANCE_PENDING;
+        let result = TransactionStorage::update_transaction(&repo, &pending_update);
+        assert!(
+            result.is_err(),
+            "updating a transaction to carry BALANCE_PENDING must fail, not silently persist it"
+        );
+
+        let stored = repo.get_transaction("test_child", "test_tx_to_update")?.unwrap();
+        assert_eq!(
+            stored.balance,
+            dollars(10.0),
+            "the original balance must be untouched after a refused update"
+        );
+
+        Ok(())
+    }
+
     #[test]
     fn test_delete_transaction() -> Result<()> {
         let (repo, _temp_dir) = setup_test_repo()?;

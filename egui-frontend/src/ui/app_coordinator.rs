@@ -31,6 +31,31 @@ use crate::ui::components::styling::{setup_kid_friendly_style, draw_image_backgr
 use crate::backend::domain::{SyncCommand, SyncMessage, SyncStatus};
 use shared::sync::EntityType;
 
+/// Guard for the AWS-wire chokepoint in `read_entity_for_sync`: that path
+/// serializes the RAW domain `Transaction` directly (it never goes through
+/// `mappers::transaction_to_dto`, so it gets none of that function's
+/// `BALANCE_PENDING` -> `NaN` translation). Returns `Err` with a
+/// human-readable reason if `tx` must not be put on the wire as-is.
+///
+/// `Money::render()` on `Transaction::BALANCE_PENDING`
+/// (`Money::from_cents(i64::MIN)`) produces `"-92233720368547758.08"`, and
+/// parsing that back overflows `i64` and returns `Err` (allowance-core has a
+/// test pinning exactly this). A later task turns an unparseable CSV row
+/// into a hard, unrecoverable read error with no fallback — so silently
+/// encoding this sentinel onto the wire (or into local storage) would arm a
+/// fault a later task detonates.
+fn transaction_is_syncable(
+    tx: &crate::backend::domain::models::transaction::Transaction,
+) -> Result<(), String> {
+    if tx.balance == crate::backend::domain::models::transaction::Transaction::BALANCE_PENDING {
+        return Err(format!(
+            "transaction {} balance is still BALANCE_PENDING (not yet calculated by BalanceService)",
+            tx.id
+        ));
+    }
+    Ok(())
+}
+
 impl eframe::App for AllowanceTrackerApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // log::info!("APP UPDATE called - main render loop"); // Commented out - too verbose
@@ -516,6 +541,13 @@ impl AllowanceTrackerApp {
                     .get_transaction_by_id(child_id, entity_id)
                 {
                     Ok(Some(tx)) => {
+                        if let Err(reason) = transaction_is_syncable(&tx) {
+                            log::error!(
+                                "Refusing to sync transaction {} for child {}: {}",
+                                entity_id, child_id, reason
+                            );
+                            return None;
+                        }
                         match serde_json::to_string(&tx) {
                             Ok(json) => Some(json),
                             Err(e) => {
@@ -1038,6 +1070,48 @@ mod refresh_allowance_tests {
         assert!(
             app.backend().csv_connection.registry().path_for(&id).is_none(),
             "the child must be deregistered locally"
+        );
+    }
+}
+
+#[cfg(test)]
+mod sync_guard_tests {
+    use super::transaction_is_syncable;
+    use crate::backend::domain::models::transaction::{Transaction, TransactionType};
+    use allowance_core::money::Money;
+
+    fn a_transaction(balance: Money) -> Transaction {
+        Transaction {
+            id: "tx-1".to_string(),
+            child_id: "child-1".to_string(),
+            date: chrono::DateTime::parse_from_rfc3339("2026-01-01T00:00:00Z").unwrap(),
+            description: "Test".to_string(),
+            amount: Money::from_cents(1000),
+            balance,
+            transaction_type: TransactionType::OneOffIncome,
+        }
+    }
+
+    /// Regression test for the AWS-wire chokepoint: `read_entity_for_sync`
+    /// serializes the raw domain `Transaction` (no `mappers.rs` NaN
+    /// translation on this path), so a `BALANCE_PENDING` balance must be
+    /// refused here rather than silently encoded as a finite garbage float.
+    #[test]
+    fn a_balance_pending_transaction_is_refused() {
+        let tx = a_transaction(Transaction::BALANCE_PENDING);
+        let result = transaction_is_syncable(&tx);
+        assert!(
+            result.is_err(),
+            "a transaction with balance == BALANCE_PENDING must be refused, not synced"
+        );
+    }
+
+    #[test]
+    fn an_ordinary_balance_is_syncable() {
+        let tx = a_transaction(Money::from_cents(2500));
+        assert!(
+            transaction_is_syncable(&tx).is_ok(),
+            "an ordinary, already-calculated balance must be syncable"
         );
     }
 }
