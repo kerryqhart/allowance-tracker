@@ -74,14 +74,39 @@ with repeated merges. Widening the goal requires proving confluence first.
 
 **Does this build's libgit2 speak smart-HTTP to a local lgs daemon?**
 
-`git2 = { version = "0.19", default-features = false }`
-(`egui-frontend/Cargo.toml:48`) — no `https`, no `ssh`. lgs serves
-`http://localhost:<port>/<name>.git`. Every transport claim below depends on
-clone, fetch, **and push** (`receive-pack`) working under those flags.
+**Resolved 2026-09-07. Verdict: yes — no exit needed.**
 
-Run it, and write the result into this section before planning. If it fails, the
-two exits are: enable `https` and accept the build weight, or shell out to `git`
-for transport and drop the remaining zero-dependency language.
+Ran `egui-frontend/tests/spike_git2_http.rs` against `git2 0.19.0`
+(`default-features = false`, unchanged at `egui-frontend/Cargo.toml:48` — no
+`https`, no `ssh`) with a live lgs daemon (`daemon.state: "ok"`) over its
+localhost smart-HTTP endpoint. All three operations succeeded:
+
+```
+clone: OK
+push: OK
+fetch refs/lgs-auth/*: OK
+```
+
+Every transport claim in this spec — clone, `receive-pack` push, and the
+`refs/lgs-auth/heads/*` fetch the [Fetch](#fetch--the-refspec-matters) section
+depends on — is confirmed working under the flags this build already ships
+with. `GitManager`'s new methods (Task 13) can be built directly on `git2`; no
+`https` feature, no shelling out to `git` for transport, no change to Phase 2/3
+as designed.
+
+One false start along the way, noted because it shapes how this test should be
+run in CI: pointing the spike at a freshly `lgs add`-registered project with no
+prior `git push` produces an empty remote, and `git2::Repository::clone` of an
+empty repo yields a local repo with an unborn `HEAD` (`refs/heads/master` by
+libgit2's own default) — the immediate next call, `repo.head()`, then fails
+with `reference 'refs/heads/master' not found`. That is a test-fixture gap
+(the harness must seed the remote with a real commit first via a `git push`
+before pointing `git2` at it), not a transport defect — it reproduced
+identically against a real `git` CLI push and had nothing to do with
+`default-features = false`. Confirmed by re-running against a project that
+had one prior commit pushed to it: all three stages passed cleanly. The
+`TwoMachineHarness` (Testing section) should seed its fixture repos with an
+initial commit before the first clone for exactly this reason.
 
 ## Architecture
 
