@@ -59,9 +59,13 @@ pub trait TransactionStorage: Send + Sync {
     /// Used during balance recalculation after backdated transactions
     fn update_transaction_balance(&self, transaction_id: &str, new_balance: Money) -> Result<()>;
 
-    /// Update multiple transaction balances atomically
-    /// Used for bulk balance recalculation after backdated transactions
-    fn update_transaction_balances(&self, updates: &[(String, Money)]) -> Result<()>;
+    /// Update multiple transaction balances atomically, all for one child.
+    /// Used for bulk balance recalculation after backdated transactions.
+    ///
+    /// `child_id` is required rather than derived per-update: the caller
+    /// already knows which child's ledger it just recomputed, so there is no
+    /// reason to rediscover it by scanning every child's CSV per row.
+    fn update_transaction_balances(&self, child_id: &str, updates: &[(String, Money)]) -> Result<()>;
     
     /// Check if transactions exist by their IDs for a specific child
     fn check_transactions_exist(&self, child_id: &str, transaction_ids: &[String]) -> Result<Vec<String>>;

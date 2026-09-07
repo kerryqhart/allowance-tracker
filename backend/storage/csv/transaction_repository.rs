@@ -204,29 +204,6 @@ impl TransactionRepository {
         }
     }
     
-    /// Helper method to get all child IDs
-    fn get_all_child_ids(&self) -> Result<Vec<ChildId>> {
-        // Get all children from the child repository
-        let children = self.child_repository.list_children()?;
-        Ok(children
-            .into_iter()
-            .map(|child| ChildId::from(child.id))
-            .collect())
-    }
-
-    /// Find which child a transaction belongs to by searching through all child directories
-    fn find_child_id_for_transaction(&self, transaction_id: &str) -> Result<Option<ChildId>> {
-        let child_ids = self.get_all_child_ids()?;
-
-        for child_id in child_ids {
-            let transactions = self.read_transactions(&child_id)?;
-            if transactions.iter().any(|t| t.id == transaction_id) {
-                return Ok(Some(child_id));
-            }
-        }
-
-        Ok(None)
-    }
 }
 
 /// Guard shared by every single-transaction write path: refuses to persist a
@@ -395,44 +372,27 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
         Ok(())
     }
 
-    fn update_transaction_balances(&self, updates: &[(String, Money)]) -> Result<()> {
-        info!("Updating multiple transaction balances in CSV");
-
+    fn update_transaction_balances(&self, child_id: &str, updates: &[(String, Money)]) -> Result<()> {
         if updates.is_empty() {
             return Ok(());
         }
 
-        info!("Updating {} transaction balances", updates.len());
+        info!("Updating {} transaction balances for child {}", updates.len(), child_id);
 
-        // Group updates by child_id by looking up each transaction's child
-        let mut child_updates: std::collections::HashMap<ChildId, Vec<(String, Money)>> = std::collections::HashMap::new();
+        let child_id = ChildId::from(child_id);
+        let mut transactions = self.read_transactions(&child_id)?;
+        let mut needs_write = false;
 
-        for (transaction_id, new_balance) in updates {
-            // Find which child this transaction belongs to
-            let child_id = self.find_child_id_for_transaction(transaction_id)?;
-            if let Some(child_id) = child_id {
-                child_updates.entry(child_id).or_insert_with(Vec::new).push((transaction_id.clone(), *new_balance));
-            } else {
-                warn!("Could not find child for transaction {}, skipping update", transaction_id);
+        for transaction in &mut transactions {
+            if let Some(update) = updates.iter().find(|(id, _)| id == &transaction.id) {
+                transaction.balance = update.1;
+                needs_write = true;
             }
         }
 
-        // Update transactions for each child
-        for (child_id, child_transaction_updates) in child_updates {
-            let mut transactions = self.read_transactions(&child_id)?;
-            let mut needs_write = false;
-
-            for transaction in &mut transactions {
-                if let Some(update) = child_transaction_updates.iter().find(|(id, _)| id == &transaction.id) {
-                    transaction.balance = update.1;
-                    needs_write = true;
-                }
-            }
-
-            if needs_write {
-                // Use internal method to avoid git commits during balance recalculation
-                self.write_transactions_internal(&child_id, &transactions)?;
-            }
+        if needs_write {
+            // Use internal method to avoid git commits during balance recalculation
+            self.write_transactions_internal(&child_id, &transactions)?;
         }
 
         Ok(())
