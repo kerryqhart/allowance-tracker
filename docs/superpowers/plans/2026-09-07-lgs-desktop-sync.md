@@ -327,15 +327,19 @@ impl Sum for Money {
     fn sum<I: Iterator<Item = Money>>(iter: I) -> Money { Money(iter.map(|m| m.0).sum()) }
 }
 
-/// Serializes as a JSON **number** with two decimals, and deserializes from any
-/// JSON number. This is load-bearing: the domain `Transaction` is serialized
-/// straight onto the AWS wire and read by the MCP Lambda in another stack, so
-/// the shape cannot change.
+/// Serializes as a plain number and deserializes from one. This is
+/// load-bearing: the domain `Transaction` is serialized straight onto the AWS
+/// wire and read by the MCP Lambda in another stack, so the shape cannot
+/// change.
+///
+/// Deliberately `serialize_f64` rather than routing through
+/// `serde_json::Number` — the latter is JSON-specific, and money also has to
+/// survive the YAML serializers this codebase uses for `child.yaml` and
+/// `allowance_config.yaml`. A format-specific impl would work in tests and
+/// fail the first time a `Money` field reached YAML.
 impl Serialize for Money {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        serde_json::Number::from_f64(self.0 as f64 / 100.0)
-            .ok_or_else(|| serde::ser::Error::custom("money out of range"))?
-            .serialize(s)
+        s.serialize_f64(self.0 as f64 / 100.0)
     }
 }
 
