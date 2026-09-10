@@ -8,6 +8,12 @@ pub enum Decision {
     TookTheirs { id: String },
     KeptBothReKeyed { original: String, re_keyed: String },
     Deleted { id: String },
+    /// A row was removed by the post-loop dedupe (its id collided with
+    /// another surviving row, e.g. a re-keyed row landing on an id another
+    /// side already used). A row disappearing must never be silent — that is
+    /// the stated goal of this whole design — so every drop is logged with
+    /// what it would have shown.
+    DuplicateDropped { id: String, discarded_description: String },
 }
 
 #[derive(Debug, Clone)]
@@ -88,13 +94,34 @@ pub fn merge(base: Option<&[TxRow]>, ours: &Sided, theirs: &Sided) -> MergeOutco
                     rows.push(keep.clone());
                     rows.push(moved);
                 } else {
-                    // edit/edit: one row, two edits. Pick one.
-                    if wins(&ours.provenance, &theirs.provenance) {
+                    // edit/edit: base is known and had this id (the add/add
+                    // branch above already caught `b.is_none()`), and the two
+                    // sides differ from each other. The core three-way rule:
+                    // ask whether each side is actually UNCHANGED from base
+                    // before falling back to provenance. A side that never
+                    // touched the row is not a competing edit — the other
+                    // side's edit must win outright, regardless of epoch,
+                    // or a stale untouched copy can resurrect over a real
+                    // edit just because it happened to commit later.
+                    let base_row = b.expect("b.is_none() handled above");
+                    let o_unchanged = base_row.intrinsic_eq(o);
+                    let t_unchanged = base_row.intrinsic_eq(t);
+                    if o_unchanged && !t_unchanged {
+                        decisions.push(Decision::TookTheirs { id: id.clone() });
+                        rows.push(t.clone());
+                    } else if t_unchanged && !o_unchanged {
                         decisions.push(Decision::TookOurs { id: id.clone() });
                         rows.push(o.clone());
                     } else {
-                        decisions.push(Decision::TookTheirs { id: id.clone() });
-                        rows.push(t.clone());
+                        // Both sides genuinely changed the row: a real
+                        // conflict, resolved by provenance.
+                        if wins(&ours.provenance, &theirs.provenance) {
+                            decisions.push(Decision::TookOurs { id: id.clone() });
+                            rows.push(o.clone());
+                        } else {
+                            decisions.push(Decision::TookTheirs { id: id.clone() });
+                            rows.push(t.clone());
+                        }
                     }
                 }
             }
@@ -103,9 +130,23 @@ pub fn merge(base: Option<&[TxRow]>, ours: &Sided, theirs: &Sided) -> MergeOutco
     }
 
     // A re-keyed row can equal a row the other side already carries (exactly
-    // what makes the second merge a fixed point). Collapse those.
+    // what makes the second merge a fixed point). Collapse those — but a row
+    // disappearing must never be silent, so every drop is logged with what it
+    // would have shown, not just discarded.
     rows.sort_by(|a, b| a.id.cmp(&b.id));
-    rows.dedup_by(|a, b| a.id == b.id);
+    let mut deduped: Vec<TxRow> = Vec::with_capacity(rows.len());
+    for candidate in rows {
+        match deduped.last() {
+            Some(kept) if kept.id == candidate.id => {
+                decisions.push(Decision::DuplicateDropped {
+                    id: candidate.id.clone(),
+                    discarded_description: candidate.description.clone(),
+                });
+            }
+            _ => deduped.push(candidate),
+        }
+    }
+    let mut rows = deduped;
 
     recompute_running_balances(&mut rows);
     MergeOutcome { rows, decisions }
@@ -134,7 +175,10 @@ fn content_suffix(row: &TxRow) -> String {
     eat(row.amount.cents().to_string().as_bytes());
     eat(b"\x1f");
     eat(row.tx_type.as_csv().as_bytes());
-    format!("{:08x}", hash as u32)
+    // Full 64 bits, not truncated to u32: a truncated suffix makes a
+    // collision merely unlikely rather than negligible, and a suffix
+    // collision is exactly what the dedupe pass below has to clean up.
+    format!("{hash:016x}")
 }
 
 /// Later committer timestamp wins; ties break on commit oid.
@@ -142,6 +186,12 @@ fn content_suffix(row: &TxRow) -> String {
 /// Must be symmetric — a "prefer ours" rule would have each machine choose its
 /// own side and the two would never converge.
 fn wins(ours: &Provenance, theirs: &Provenance) -> bool {
+    // Equal provenance (same epoch AND same oid) means the same commit, so
+    // there is no actual divergence to resolve — the caller should never
+    // reach `wins` with both sides identical. Stated and checked rather than
+    // merely believed, since `wins` returns `false` in both directions at
+    // this input and is therefore NOT symmetric there.
+    debug_assert!(ours != theirs, "wins() called with identical provenance on both sides");
     match ours.committer_epoch.cmp(&theirs.committer_epoch) {
         std::cmp::Ordering::Greater => true,
         std::cmp::Ordering::Less => false,
@@ -270,5 +320,142 @@ mod tests {
         let theirs = sided(vec![row("b", "y", -400)], 20, 2);
         let out = merge(Some(&[]), &ours, &theirs);
         assert!(crate::balance::validate(&out.rows).is_empty());
+    }
+
+    // --- Critical-1 fix: unchanged-vs-base must beat provenance -----------
+
+    #[test]
+    fn edit_survives_against_a_stale_untouched_peer_even_at_higher_epoch() {
+        // Regression for the missing three-way check: the merge result R
+        // already carries a real edit (a: slime -> book) plus a re-keyed row
+        // surviving from an earlier add/add collision. The peer never
+        // touched "a" at all -- it only added a new row. The old code never
+        // asked "did this side even change it relative to base," so the
+        // peer's higher epoch won and resurrected "slime kit" over "book
+        // fair," destroying the edit.
+        let slime = row("a", "slime kit", -100);
+        let suffix = content_suffix(&slime);
+        let mut rekeyed = slime.clone();
+        rekeyed.id = format!("a-{suffix}");
+
+        let base = vec![slime.clone()];
+        let ours = sided(vec![row("a", "book fair", -250), rekeyed], 10, 1);
+        // Peer's epoch is far higher, but it never edited "a" -- the edited
+        // side must still win.
+        let theirs = sided(
+            vec![row("a", "slime kit", -100), row("z", "candy", -50)],
+            999,
+            2,
+        );
+
+        let out = merge(Some(&base), &ours, &theirs);
+        let total: i64 = out.rows.iter().map(|r| r.amount.cents()).sum();
+        assert_eq!(total, -400, "book fair (-250) + re-keyed slime (-100) + candy (-50)");
+        assert!(out.rows.iter().any(|r| r.description == "book fair"), "the real edit must survive");
+    }
+
+    #[test]
+    fn one_sided_edit_wins_regardless_of_epoch_when_ours_is_the_edit() {
+        let base = vec![row("a", "x", -100)];
+        let ours = sided(vec![row("a", "edited", -100)], 1, 1); // lower epoch, real edit
+        let theirs = sided(vec![row("a", "x", -100)], 999, 2); // higher epoch, untouched
+        let out = merge(Some(&base), &ours, &theirs);
+        assert_eq!(out.rows[0].description, "edited");
+    }
+
+    #[test]
+    fn one_sided_edit_wins_regardless_of_epoch_when_theirs_is_the_edit() {
+        let base = vec![row("a", "x", -100)];
+        let ours = sided(vec![row("a", "x", -100)], 999, 1); // higher epoch, untouched
+        let theirs = sided(vec![row("a", "edited", -100)], 1, 2); // lower epoch, real edit
+        let out = merge(Some(&base), &ours, &theirs);
+        assert_eq!(out.rows[0].description, "edited");
+    }
+
+    #[test]
+    fn merging_a_side_with_itself_is_idempotent() {
+        let base = vec![row("a", "x", -100)];
+        let x = sided(vec![row("a", "x", -100), row("b", "y", -200)], 10, 1);
+        let out = merge(Some(&base), &x, &x);
+        let mut expected = x.rows.clone();
+        recompute_running_balances(&mut expected);
+        assert_eq!(out.rows, expected, "merging a side with itself must reproduce it, canonicalised");
+    }
+
+    // --- Critical-2 fix: dedupe must log, never silently drop --------------
+
+    #[test]
+    fn dedupe_logs_the_dropped_row_instead_of_discarding_it_silently() {
+        let slime = row("a", "slime kit", -100);
+        let suffix = content_suffix(&slime);
+        let collision_id = format!("a-{suffix}");
+
+        let ours = sided(vec![slime.clone()], 10, 1);
+        let mut orphan = row("placeholder", "should not vanish", -999);
+        orphan.id = collision_id.clone();
+        // theirs wins the add/add (higher epoch), so "ours" (slime) is the
+        // one re-keyed to `collision_id` -- exactly the id we planted the
+        // orphan row under, forcing a post-loop id collision.
+        let theirs = sided(vec![row("a", "book fair", -250), orphan], 20, 2);
+
+        let out = merge(Some(&[]), &ours, &theirs);
+
+        let dropped_desc = out.decisions.iter().find_map(|d| match d {
+            Decision::DuplicateDropped { id, discarded_description } if id == &collision_id => {
+                Some(discarded_description.clone())
+            }
+            _ => None,
+        });
+        assert_eq!(
+            dropped_desc.as_deref(),
+            Some("should not vanish"),
+            "a duplicate id collision must be logged with what it discarded, not silent"
+        );
+        assert_eq!(
+            out.rows.iter().filter(|r| r.id == collision_id).count(),
+            1,
+            "exactly one survivor at the collided id"
+        );
+        assert!(!out.rows.iter().any(|r| r.description == "should not vanish"));
+    }
+
+    // --- Decisions must be populated, not just correctness of `rows` ------
+
+    #[test]
+    fn edit_edit_conflict_is_logged() {
+        let base = vec![row("a", "x", -100)];
+        let ours = sided(vec![row("a", "ours", -100)], 10, 1);
+        let theirs = sided(vec![row("a", "theirs", -100)], 99, 2);
+        let out = merge(Some(&base), &ours, &theirs);
+        assert!(out.decisions.contains(&Decision::TookTheirs { id: "a".to_string() }));
+    }
+
+    #[test]
+    fn add_add_collision_is_logged() {
+        let ours = sided(vec![row("a", "slime kit", -100)], 10, 1);
+        let theirs = sided(vec![row("a", "book fair", -250)], 20, 2);
+        let out = merge(Some(&[]), &ours, &theirs);
+        assert!(out.decisions.iter().any(|d| matches!(
+            d,
+            Decision::KeptBothReKeyed { original, .. } if original == "a"
+        )));
+    }
+
+    #[test]
+    fn delete_is_logged() {
+        let base = vec![row("a", "x", -100)];
+        let ours = sided(vec![], 10, 1);
+        let theirs = sided(vec![row("a", "x", -100)], 20, 2);
+        let out = merge(Some(&base), &ours, &theirs);
+        assert!(out.decisions.contains(&Decision::Deleted { id: "a".to_string() }));
+    }
+
+    // --- Important-4: wins() states its assumption and checks it ----------
+
+    #[test]
+    #[should_panic]
+    fn wins_asserts_against_fully_equal_provenance() {
+        let p = Provenance { committer_epoch: 1, commit_oid: [7u8; 20] };
+        let _ = wins(&p, &p);
     }
 }
