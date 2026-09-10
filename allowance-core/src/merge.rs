@@ -9,6 +9,10 @@ pub enum Decision {
     TookTheirs { id: String },
     KeptBothReKeyed { original: String, re_keyed: String },
     Deleted { id: String },
+    /// One side deleted a row while the other edited it. The edit wins, which
+    /// means a deliberate deletion was undone — the user who deleted it needs
+    /// to be able to see that happened.
+    EditBeatDelete { id: String },
     /// A row was removed by the post-loop dedupe (its id collided with
     /// another surviving row, e.g. a re-keyed row landing on an id another
     /// side already used). A row disappearing must never be silent — that is
@@ -62,6 +66,15 @@ pub fn merge(base: Option<&[TxRow]>, ours: &Sided, theirs: &Sided) -> MergeOutco
                 if base_known && b.is_some() && unchanged_by_us {
                     decisions.push(Decision::Deleted { id: id.clone() });
                 } else {
+                    // `b.is_some()` here means the row existed in base and we
+                    // changed it (unchanged_by_us is false), so theirs' delete
+                    // is being overridden by our edit — a deliberate deletion
+                    // undone. `b.is_none()` means this id was never in base at
+                    // all (an add, not a delete/edit conflict), so nothing is
+                    // logged in that case.
+                    if base_known && b.is_some() {
+                        decisions.push(Decision::EditBeatDelete { id: id.clone() });
+                    }
                     rows.push(o.clone());
                 }
             }
@@ -70,6 +83,9 @@ pub fn merge(base: Option<&[TxRow]>, ours: &Sided, theirs: &Sided) -> MergeOutco
                 if base_known && b.is_some() && unchanged_by_them {
                     decisions.push(Decision::Deleted { id: id.clone() });
                 } else {
+                    if base_known && b.is_some() {
+                        decisions.push(Decision::EditBeatDelete { id: id.clone() });
+                    }
                     rows.push(t.clone());
                 }
             }
@@ -261,6 +277,30 @@ mod tests {
         let out = merge(Some(&base), &ours, &theirs);
         assert_eq!(ids(&out), vec!["a"]);
         assert_eq!(out.rows[0].description, "edited");
+        // The deleting user's deletion was undone -- that must be logged,
+        // not just correctly resolved. A row resurrecting must never be
+        // silent, same as a row disappearing.
+        assert!(
+            out.decisions.contains(&Decision::EditBeatDelete { id: "a".to_string() }),
+            "expected EditBeatDelete to be logged, got {:?}", out.decisions
+        );
+    }
+
+    #[test]
+    fn an_edit_beats_a_delete_the_other_way() {
+        // Mirror of `an_edit_beats_a_delete`: this time OURS is the edit and
+        // THEIRS is the delete, exercising the `(Some(o), None)` arm instead
+        // of `(None, Some(t))`.
+        let base = vec![row("a", "x", -100)];
+        let ours = sided(vec![row("a", "edited", -100)], 20, 2);
+        let theirs = sided(vec![], 10, 1);
+        let out = merge(Some(&base), &ours, &theirs);
+        assert_eq!(ids(&out), vec!["a"]);
+        assert_eq!(out.rows[0].description, "edited");
+        assert!(
+            out.decisions.contains(&Decision::EditBeatDelete { id: "a".to_string() }),
+            "expected EditBeatDelete to be logged, got {:?}", out.decisions
+        );
     }
 
     #[test]

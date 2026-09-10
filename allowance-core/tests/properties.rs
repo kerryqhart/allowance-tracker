@@ -416,6 +416,7 @@ struct PathHits {
     deleted: u32,
     equal_epoch_conflict: u32,
     duplicate_dropped: u32,
+    edit_beat_delete: u32,
 }
 
 fn classify(base: &[TxRow], ours: &Sided, theirs: &Sided, out: &MergeOutcome, hits: &mut PathHits) {
@@ -427,6 +428,7 @@ fn classify(base: &[TxRow], ours: &Sided, theirs: &Sided, out: &MergeOutcome, hi
             Decision::KeptBothReKeyed { .. } => hits.add_add_rekey += 1,
             Decision::Deleted { .. } => hits.deleted += 1,
             Decision::DuplicateDropped { .. } => hits.duplicate_dropped += 1,
+            Decision::EditBeatDelete { .. } => hits.edit_beat_delete += 1,
             Decision::TookOurs { id } | Decision::TookTheirs { id } => {
                 if let (Some(b), Some(o), Some(t)) =
                     (base_map.get(id.as_str()), ours_map.get(id.as_str()), theirs_map.get(id.as_str()))
@@ -460,14 +462,21 @@ fn generator_path_coverage() {
         classify(&base, &ours, &theirs, &out, &mut hits);
     }
 
+    // NOTE: these are raw DECISION COUNTS across all {CASES} cases, not
+    // per-case hit probabilities. A single case's scenario has 1-4 base
+    // rows, and each row can independently produce its own decision, so a
+    // count can (and does) reflect more than one decision per case on
+    // average or fewer, depending on the path -- do not divide by CASES and
+    // read the result as "the probability a case exercises this path."
     println!(
-        "generator_path_coverage over {CASES} cases: \
+        "generator_path_coverage over {CASES} cases (decision counts, not per-case rates): \
          add_add_rekey={} edit_edit_both_changed={} one_sided_edit_wins={} \
-         deleted={} equal_epoch_conflict={} duplicate_dropped_organic={}",
+         deleted={} edit_beat_delete={} equal_epoch_conflict={} duplicate_dropped_organic={}",
         hits.add_add_rekey,
         hits.edit_edit_both_changed,
         hits.one_sided_edit_wins,
         hits.deleted,
+        hits.edit_beat_delete,
         hits.equal_epoch_conflict,
         hits.duplicate_dropped,
     );
@@ -476,6 +485,7 @@ fn generator_path_coverage() {
     assert!(hits.edit_edit_both_changed > 0, "edit/edit both-changed path never hit: {hits:?}");
     assert!(hits.one_sided_edit_wins > 0, "one-sided-edit path never hit: {hits:?}");
     assert!(hits.deleted > 0, "Deleted path never hit: {hits:?}");
+    assert!(hits.edit_beat_delete > 0, "EditBeatDelete path never hit: {hits:?}");
     assert!(hits.equal_epoch_conflict > 0, "equal-epoch oid-tiebreak path never hit: {hits:?}");
     // `duplicate_dropped` is deliberately NOT asserted here: it only fires on
     // a 64-bit hash collision between a re-keyed id and another surviving
