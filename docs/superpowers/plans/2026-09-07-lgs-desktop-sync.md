@@ -33,7 +33,7 @@
 |---|---|
 | `allowance-core/src/money.rs` | `Money(i64)` cents, wire-compatible serde, canonical 2-decimal rendering |
 | `allowance-core/src/row.rs` | `TxRow`, `Sided<T>`, `Provenance` — the merge's data model |
-| `allowance-core/src/codec.rs` | `parse_transactions` / `render_transactions`, canonical ordering |
+| `allowance-core/src/codec.rs` | `parse_transactions` / `render_transactions`, canonical ordering. **Note:** `parse_transactions` returns `ParsedTransactions { rows, rows_rounded }`, not a bare `Vec<TxRow>` — Task 5 changed this so the legacy-precision rounding count cannot be silently dropped. Later tasks use `.rows`. |
 | `allowance-core/src/merge.rs` | `merge(base, ours, theirs)` — the resolution table |
 | `allowance-core/src/balance.rs` | pure `recompute_running_balances` / `validate` |
 
@@ -1503,7 +1503,7 @@ proptest! {
     #[test]
     fn round_trip_is_byte_stable(rows in prop::collection::vec(row_strategy(), 0..10)) {
         let once = render_transactions(&rows);
-        let twice = render_transactions(&parse_transactions(&once).unwrap());
+        let twice = render_transactions(&parse_transactions(&once).unwrap().rows);
         prop_assert_eq!(once, twice);
     }
 
@@ -1534,9 +1534,9 @@ fn merge_output_does_not_depend_on_the_machine_timezone() {
     let csv = "id,child_id,date,description,amount,balance,type\n\
 a,c,2026-01-01T00:00:00+00:00,x,1.00,1.00,expense\n";
     std::env::set_var("TZ", "UTC");
-    let utc = render_transactions(&parse_transactions(csv).unwrap());
+    let utc = render_transactions(&parse_transactions(csv).unwrap().rows);
     std::env::set_var("TZ", "America/Los_Angeles");
-    let la = render_transactions(&parse_transactions(csv).unwrap());
+    let la = render_transactions(&parse_transactions(csv).unwrap().rows);
     assert_eq!(utc, la);
 }
 ```
