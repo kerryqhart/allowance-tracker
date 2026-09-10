@@ -1,0 +1,111 @@
+{
+  "daemon_running": true,
+  "daemon": {
+    "state": "ok",
+    "version": "0.1.0",
+    "cli_version": "0.1.0"
+  },
+  "cloud_root": "/Users/kerryhart/Library/CloudStorage/ProtonDrive-kerry.q.hart@protonmail.com-folder/Code",
+  "cloud_root_exists": true,
+  "port": 8418,
+  "projects": [
+    {
+      "name": "allowance-tracker",
+      "working_repo_path": "/Users/kerryhart/Code/allowance-tracker",
+      "clone_url": "http://localhost:8418/allowance-tracker.git",
+      "durability": {
+        "state": "stranded",
+        "branches": [
+          "lgs-desktop-sync",
+          "main"
+        ],
+        "oldest_at": "2026-09-07T00:19:05Z"
+      },
+      "durability_label": "Not saved anywhere else — lgs-desktop-sync has commits from 2026-09-07 that exist only on this machine",
+      "durability_next_step": "run `git push lgs lgs-desktop-sync`.",
+      "machines": 2,
+      "failed_sync_attempts": 0,
+      "archived": false,
+      "archive": null,
+      "compaction": null
+    },
+    {
+      "name": "weathertop-brain",
+      "working_repo_path": "/Users/kerryhart/Code/weathertop-brain",
+      "clone_url": "http://localhost:8418/weathertop-brain.git",
+      "durability": {
+        "state": "backed_up",
+        "generation": 5,
+        "checked_at": "2026-09-10T23:37:47.809526Z"
+      },
+      "durability_label": "Backed up ✓",
+      "durability_next_step": null,
+      "machines": 1,
+      "failed_sync_attempts": 0,
+      "archived": false,
+      "archive": null,
+      "compaction": null
+    },
+    {
+      "name": "weathertop-data",
+      "working_repo_path": "/Users/kerryhart/weathertop-data",
+      "clone_url": "http://localhost:8418/weathertop-data.git",
+      "durability": {
+        "state": "backed_up",
+        "generation": 7,
+        "checked_at": "2026-09-10T23:37:47.924962Z"
+      },
+      "durability_label": "Backed up ✓",
+      "durability_next_step": null,
+      "machines": 1,
+      "failed_sync_attempts": 0,
+      "archived": false,
+      "archive": null,
+      "compaction": null
+    },
+    {
+      "name": "kerry-ai-config-personal",
+      "working_repo_path": "/Users/kerryhart/Code/kerry-ai-config-personal",
+      "clone_url": "http://localhost:8418/kerry-ai-config-personal.git",
+      "durability": {
+        "state": "backed_up",
+        "generation": 5,
+        "checked_at": "2026-09-10T23:37:48.045725Z"
+      },
+      "durability_label": "Backed up ✓",
+      "durability_next_step": null,
+      "machines": 2,
+      "failed_sync_attempts": 0,
+      "archived": false,
+      "archive": null,
+      "compaction": null
+    },
+    {
+      "name": "local-git-sync",
+      "working_repo_path": "/Users/kerryhart/Code/local-git-sync",
+      "clone_url": "http://localhost:8418/local-git-sync.git",
+      "durability": {
+        "state": "backed_up",
+        "generation": 16,
+        "checked_at": "2026-09-10T23:37:48.195426Z"
+      },
+      "durability_label": "Backed up ✓",
+      "durability_next_step": null,
+      "machines": 2,
+      "failed_sync_attempts": 0,
+      "archived": false,
+      "archive": null,
+      "compaction": null
+    }
+  ],
+  "adoptable": [
+    {
+      "name": "kerry-ai-config",
+      "archived": false
+    },
+    {
+      "name": "lgs-spike-scratch",
+      "archived": false
+    }
+  ]
+}
