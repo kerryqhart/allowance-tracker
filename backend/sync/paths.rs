@@ -30,6 +30,10 @@ pub enum Reason {
     InsideCloudRoot,
     MobileDocuments,
     DocumentsSyncOn,
+    /// The candidate contains `..` components that cannot be resolved
+    /// lexically (a `ParentDir` would pop above the root). The guard cannot
+    /// prove such a path is safe, so it fails closed rather than guessing.
+    NotNormalisable,
 }
 
 impl Reason {
@@ -41,8 +45,101 @@ impl Reason {
                 "that folder is in iCloud Drive, which writes conflict copies inside .git and can corrupt the repository",
             Reason::DocumentsSyncOn =>
                 "Desktop & Documents Folders syncing is on, so iCloud would replicate this repository's .git",
+            Reason::NotNormalisable =>
+                "that path contains `..` components that cannot be resolved, so it cannot be checked for cloud syncing",
         }
     }
+}
+
+/// Lexically normalise `candidate`'s `.` and `..` components, without ever
+/// touching the filesystem (no `canonicalize` — that would hit disk and
+/// destroy the property that makes [`is_cloud_synced`] pure and testable).
+///
+/// `Path::starts_with` does purely literal, component-wise comparison and
+/// never interprets `..`/`.` — so without this step, something like
+/// `<children_root>/../../../Library/Mobile Documents/x` would compare as
+/// unrelated to `~/Library/Mobile Documents` even though it resolves into
+/// iCloud at the OS level. That is a false NEGATIVE — an accepted path whose
+/// `.git` silently ends up inside iCloud — which is the dangerous direction
+/// for this guard, so it must be closed.
+///
+/// Returns `None` if a `ParentDir` component would pop above the root: the
+/// path escapes somewhere this function cannot reason about, and a guard
+/// that cannot prove a path is safe must say no rather than guess. Callers
+/// treat that as [`Reason::NotNormalisable`] — fail closed.
+///
+/// This normalisation is lexical, not physical: in the presence of
+/// symlinks, POSIX resolves a real `..` against the *target* of a preceding
+/// symlink's parent, not against the lexical parent computed here. That can
+/// disagree with what the filesystem would actually do. This is the same
+/// limitation `is_cloud_synced` already has with respect to symlinks in
+/// `candidate` generally (see its doc comment) — resolving symlinks before
+/// calling this guard is the caller's responsibility, not something this
+/// pure function can do.
+fn normalize_lexically(path: &Path) -> Option<PathBuf> {
+    use std::path::Component;
+
+    let mut stack: Vec<Component> = Vec::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {
+                // "./" contributes nothing.
+            }
+            Component::ParentDir => match stack.last() {
+                Some(Component::Normal(_)) => {
+                    stack.pop();
+                }
+                // Nothing to pop above the root (or nothing at all): give up
+                // rather than guess where this path actually lands.
+                _ => return None,
+            },
+            other => stack.push(other),
+        }
+    }
+
+    let mut result = PathBuf::new();
+    for component in stack {
+        result.push(component.as_os_str());
+    }
+    Some(result)
+}
+
+/// Component-wise `starts_with`, case-insensitively.
+///
+/// macOS's default APFS volume is case-INSENSITIVE, but `Path::starts_with`
+/// (and `OsStr` equality generally) is case-sensitive — so on a real Mac,
+/// `/Users/k/Library/Mobile Documents` and
+/// `/users/k/library/mobile documents` name the *same* directory, but a
+/// case-sensitive comparison would treat the second as unrelated and accept
+/// it. That is a false NEGATIVE: a "different-looking" path that is actually
+/// the hazardous one.
+///
+/// Comparing case-insensitively trades that for the possibility of a false
+/// POSITIVE on a genuinely case-sensitive volume (rare on macOS, but
+/// possible) — rejecting two paths that really are distinct because they
+/// only differ by case. A false positive here merely inconveniences the
+/// user (the guard says no to a folder that was actually fine); a false
+/// negative corrupts their `.git`. Given the choice, this guard fails
+/// closed: case-insensitive comparison stays the default in both
+/// directions. Do not reverse this trade without re-deriving it.
+///
+/// Comparison stays component-wise (not a raw string prefix check) so that
+/// `/x/Code` still does not match `/x/CodeOther/child` — only case folding
+/// changes, not the component-boundary semantics `Path::starts_with`
+/// already gets right.
+fn starts_with_ignore_case(candidate: &Path, prefix: &Path) -> bool {
+    let mut candidate_components = candidate.components();
+    for prefix_component in prefix.components() {
+        let Some(candidate_component) = candidate_components.next() else {
+            return false;
+        };
+        let a = candidate_component.as_os_str().to_string_lossy().to_lowercase();
+        let b = prefix_component.as_os_str().to_string_lossy().to_lowercase();
+        if a != b {
+            return false;
+        }
+    }
+    true
 }
 
 /// Reject any candidate git-working-directory path that a cloud-drive sync
@@ -64,20 +161,33 @@ impl Reason {
 /// Trusting the pref produces a false positive there, which is worse than a
 /// false negative here — it would block a safe setup, and the next person
 /// to "fix" the annoyance might delete the check instead of the pref.
+///
+/// `candidate` is normalised lexically for `..`/`.` (see
+/// [`normalize_lexically`]) but is otherwise NOT resolved: this function
+/// cannot see through symlinks anywhere in `candidate`. If some component of
+/// `candidate` is itself a symlink into a cloud-synced location, this guard
+/// will not detect it. Resolving symlinks in the candidate path (e.g. with
+/// `std::fs::canonicalize`, filesystem access this function deliberately
+/// does not perform) is the caller's responsibility before calling this
+/// guard, not something a pure predicate can do on its own.
 pub fn is_cloud_synced(
     candidate: &Path,
     env: &SyncPaths,
     documents_is_symlink: bool,
 ) -> Option<Reason> {
+    let normalized = match normalize_lexically(candidate) {
+        Some(p) => p,
+        None => return Some(Reason::NotNormalisable),
+    };
     if let Some(root) = &env.cloud_root {
-        if candidate.starts_with(root) {
+        if starts_with_ignore_case(&normalized, root) {
             return Some(Reason::InsideCloudRoot);
         }
     }
-    if candidate.starts_with(env.home.join("Library/Mobile Documents")) {
+    if starts_with_ignore_case(&normalized, &env.home.join("Library/Mobile Documents")) {
         return Some(Reason::MobileDocuments);
     }
-    if documents_is_symlink && candidate.starts_with(env.home.join("Documents")) {
+    if documents_is_symlink && starts_with_ignore_case(&normalized, &env.home.join("Documents")) {
         return Some(Reason::DocumentsSyncOn);
     }
     None
@@ -173,6 +283,106 @@ mod tests {
         let candidate = PathBuf::from(
             "/Users/k/Library/Application Support/Allowance Tracker/children/keiko",
         );
+        assert_eq!(is_cloud_synced(&candidate, &e, false), None);
+    }
+
+    // `..` traversal: `Path::starts_with` never interprets `ParentDir`, so
+    // without lexical normalisation a candidate can walk itself into a
+    // rejected location while comparing as unrelated. These pin the fix.
+    // `env().children_root` is `/Users/k/Library/Application Support/Allowance
+    // Tracker/children` — four `..` from there lands back at `/Users/k`.
+
+    #[test]
+    fn dot_dot_escaping_into_the_cloud_root_is_rejected() {
+        let e = env();
+        let candidate = e.children_root.join(
+            "../../../../Library/CloudStorage/ProtonDrive-x/Code/inside",
+        );
+        assert_eq!(is_cloud_synced(&candidate, &e, false), Some(Reason::InsideCloudRoot));
+    }
+
+    #[test]
+    fn dot_dot_escaping_into_mobile_documents_is_rejected() {
+        let e = env();
+        let candidate = e.children_root.join("../../../../Library/Mobile Documents/x");
+        assert_eq!(is_cloud_synced(&candidate, &e, false), Some(Reason::MobileDocuments));
+    }
+
+    #[test]
+    fn dot_dot_escaping_into_documents_is_rejected_when_symlinked() {
+        let e = env();
+        let candidate = e.children_root.join("../../../../Documents/Allowance Tracker/keiko");
+        assert_eq!(is_cloud_synced(&candidate, &e, true), Some(Reason::DocumentsSyncOn));
+    }
+
+    /// A benign `..` that never leaves a safe area must still be accepted —
+    /// the normaliser must resolve it, not blanket-reject anything
+    /// containing a dot-dot.
+    #[test]
+    fn a_dot_dot_that_stays_outside_any_cloud_location_is_accepted() {
+        let mut e = env();
+        e.cloud_root = Some(PathBuf::from("/x/Code"));
+        e.home = PathBuf::from("/x/home");
+        let candidate = PathBuf::from("/x/CodeOther/child/../child2");
+        assert_eq!(is_cloud_synced(&candidate, &e, false), None);
+    }
+
+    /// A `..` that would pop above the filesystem root cannot be resolved
+    /// lexically. The guard must fail closed rather than guess.
+    #[test]
+    fn a_dot_dot_popping_above_root_is_not_normalisable() {
+        let e = env();
+        let candidate = PathBuf::from("/../etc/passwd");
+        assert_eq!(is_cloud_synced(&candidate, &e, false), Some(Reason::NotNormalisable));
+    }
+
+    /// A redundant `./` component must be dropped and must not change the
+    /// verdict either way.
+    #[test]
+    fn a_redundant_current_dir_component_does_not_change_the_verdict() {
+        let e = env();
+        let accepted = e.children_root.join("./keiko");
+        assert_eq!(is_cloud_synced(&accepted, &e, false), None);
+
+        let rejected = PathBuf::from("/Users/k/Library/Mobile Documents/./com~apple~CloudDocs/x");
+        assert_eq!(is_cloud_synced(&rejected, &e, false), Some(Reason::MobileDocuments));
+    }
+
+    // Case sensitivity: macOS's default APFS volume is case-insensitive, so
+    // these lowercase/mixed-case spellings name the same real directories as
+    // the canonical-cased ones above and must be rejected the same way.
+
+    #[test]
+    fn lowercase_cloud_root_is_still_rejected() {
+        let e = env();
+        let candidate =
+            PathBuf::from("/users/k/library/cloudstorage/protondrive-x/code/inside");
+        assert_eq!(is_cloud_synced(&candidate, &e, false), Some(Reason::InsideCloudRoot));
+    }
+
+    #[test]
+    fn lowercase_mobile_documents_is_still_rejected() {
+        let e = env();
+        let candidate = PathBuf::from("/users/k/library/mobile documents/x");
+        assert_eq!(is_cloud_synced(&candidate, &e, false), Some(Reason::MobileDocuments));
+    }
+
+    #[test]
+    fn mixed_case_documents_is_still_rejected_when_symlinked() {
+        let e = env();
+        let candidate = PathBuf::from("/Users/k/DOCUMENTS/Allowance Tracker/keiko");
+        assert_eq!(is_cloud_synced(&candidate, &e, true), Some(Reason::DocumentsSyncOn));
+    }
+
+    /// Case-insensitive comparison must not resurrect the prefix-string bug:
+    /// `/x/Code` and `/x/CodeOther/child` are still distinct components even
+    /// when both are folded to lowercase.
+    #[test]
+    fn case_insensitive_comparison_does_not_break_the_prefix_sibling_case() {
+        let mut e = env();
+        e.cloud_root = Some(PathBuf::from("/x/Code"));
+        e.home = PathBuf::from("/x/home");
+        let candidate = PathBuf::from("/x/CODEOTHER/child");
         assert_eq!(is_cloud_synced(&candidate, &e, false), None);
     }
 }
