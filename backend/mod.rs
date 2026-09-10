@@ -14,6 +14,7 @@ use crate::backend::domain::SyncNotifier;
 // Domain modules
 pub mod domain;
 pub mod storage;
+pub mod sync;
 
 // Re-export commonly used types
 pub use storage::csv::CsvConnection;
