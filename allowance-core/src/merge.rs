@@ -1,4 +1,5 @@
 use crate::balance::recompute_running_balances;
+use crate::money::Money;
 use crate::row::{Provenance, Sided, TxRow};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -12,8 +13,15 @@ pub enum Decision {
     /// another surviving row, e.g. a re-keyed row landing on an id another
     /// side already used). A row disappearing must never be silent — that is
     /// the stated goal of this whole design — so every drop is logged with
-    /// what it would have shown.
-    DuplicateDropped { id: String, discarded_description: String },
+    /// enough to reconstruct what vanished: description alone doesn't say
+    /// what money disappeared, so the amount and the row's rendered date
+    /// come along too.
+    DuplicateDropped {
+        id: String,
+        discarded_description: String,
+        discarded_amount: Money,
+        discarded_date: String,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -141,6 +149,8 @@ pub fn merge(base: Option<&[TxRow]>, ours: &Sided, theirs: &Sided) -> MergeOutco
                 decisions.push(Decision::DuplicateDropped {
                     id: candidate.id.clone(),
                     discarded_description: candidate.description.clone(),
+                    discarded_amount: candidate.amount,
+                    discarded_date: candidate.date.to_rfc3339(),
                 });
             }
             _ => deduped.push(candidate),
@@ -400,17 +410,22 @@ mod tests {
 
         let out = merge(Some(&[]), &ours, &theirs);
 
-        let dropped_desc = out.decisions.iter().find_map(|d| match d {
-            Decision::DuplicateDropped { id, discarded_description } if id == &collision_id => {
-                Some(discarded_description.clone())
+        let dropped = out.decisions.iter().find_map(|d| match d {
+            Decision::DuplicateDropped { id, discarded_description, discarded_amount, discarded_date }
+                if id == &collision_id =>
+            {
+                Some((discarded_description.clone(), *discarded_amount, discarded_date.clone()))
             }
             _ => None,
         });
-        assert_eq!(
-            dropped_desc.as_deref(),
-            Some("should not vanish"),
-            "a duplicate id collision must be logged with what it discarded, not silent"
+        let (desc, amount, date) = dropped.expect(
+            "a duplicate id collision must be logged with what it discarded, not silent",
         );
+        assert_eq!(desc, "should not vanish");
+        // The whole point of logging the drop is that the vanished money is
+        // recoverable from the log, not just its description.
+        assert_eq!(amount, Money::from_cents(-999));
+        assert_eq!(date, "2026-01-01T00:00:00+00:00");
         assert_eq!(
             out.rows.iter().filter(|r| r.id == collision_id).count(),
             1,
@@ -451,9 +466,13 @@ mod tests {
     }
 
     // --- Important-4: wins() states its assumption and checks it ----------
-
+    //
+    // debug_assert! compiles out under --release, so this test only exists
+    // where the assertion does; without the cfg gate, `cargo test --release`
+    // fails with "did not panic as expected" even though nothing is broken.
+    #[cfg(debug_assertions)]
     #[test]
-    #[should_panic]
+    #[should_panic(expected = "identical provenance")]
     fn wins_asserts_against_fully_equal_provenance() {
         let p = Provenance { committer_epoch: 1, commit_oid: [7u8; 20] };
         let _ = wins(&p, &p);
