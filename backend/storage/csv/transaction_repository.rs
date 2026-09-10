@@ -1,17 +1,52 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 // Removed async_trait - no longer needed for synchronous operations
-use csv::{Reader, Writer};
 use log::{info, warn};
-use std::fs::{File, OpenOptions};
-use std::io::{BufReader, BufWriter};
 use crate::backend::domain::models::transaction::{
     Transaction as DomainTransaction, TransactionType as DomainTransactionType,
 };
 use allowance_core::money::Money;
-use std::str::FromStr;
+use allowance_core::row::{TxRow, TxType};
 use super::connection::CsvConnection;
 use crate::backend::storage::GitManager;
 use shared::ChildId;
+
+/// `TxRow` (the pure `allowance-core` type, produced and consumed by the
+/// single canonical codec) onto the domain `Transaction`. This boundary
+/// conversion lives here — the same way `BalanceService` converts at its own
+/// boundary — because `allowance-core` must not know about the domain model.
+fn row_to_domain(row: TxRow) -> DomainTransaction {
+    DomainTransaction {
+        id: row.id,
+        child_id: row.child_id,
+        date: row.date,
+        description: row.description,
+        amount: row.amount,
+        balance: row.balance,
+        transaction_type: match row.tx_type {
+            TxType::Allowance => DomainTransactionType::Allowance,
+            TxType::OneOffIncome => DomainTransactionType::OneOffIncome,
+            TxType::Expense => DomainTransactionType::Expense,
+            TxType::FutureAllowance => DomainTransactionType::FutureAllowance,
+        },
+    }
+}
+
+fn domain_to_row(t: &DomainTransaction) -> TxRow {
+    TxRow {
+        id: t.id.clone(),
+        child_id: t.child_id.clone(),
+        date: t.date,
+        description: t.description.clone(),
+        amount: t.amount,
+        balance: t.balance,
+        tx_type: match t.transaction_type {
+            DomainTransactionType::Allowance => TxType::Allowance,
+            DomainTransactionType::OneOffIncome => TxType::OneOffIncome,
+            DomainTransactionType::Expense => TxType::Expense,
+            DomainTransactionType::FutureAllowance => TxType::FutureAllowance,
+        },
+    }
+}
 
 /// CSV-based transaction repository
 #[derive(Clone)]
@@ -39,131 +74,58 @@ impl TransactionRepository {
 
         let file_path = self.connection.transactions_path(child_id)?;
 
-        let file = File::open(&file_path)?;
-        let reader = BufReader::new(file);
-        let mut csv_reader = Reader::from_reader(reader);
-        
-        let mut transactions = Vec::new();
-        
-        for result in csv_reader.records() {
-            let record = result?;
-            
-            // FIXED: Parse date string into DateTime object (CSV layer responsibility)
-            let date_str = record.get(2).unwrap_or("");
-            let parsed_date = self.parse_date_string(date_str)?;
-            
-            // Parse CSV record into Transaction. `Money::from_str` accepts the
-            // plain decimal strings `f64::to_string()` already wrote to disk
-            // (e.g. "5", "5.5", "-2.25"), so old rows still parse.
-            let amount = Money::from_str(record.get(4).unwrap_or("0")).unwrap_or(Money::from_cents(0));
-            let description = record.get(3).unwrap_or("");
-            let transaction = DomainTransaction {
-                id: record.get(0).unwrap_or("").to_string(),
-                child_id: record.get(1).unwrap_or("").to_string(),
-                date: parsed_date,  // Now uses parsed DateTime object
-                description: description.to_string(),
-                amount,
-                balance: Money::from_str(record.get(5).unwrap_or("0")).unwrap_or(Money::from_cents(0)),
-                transaction_type: Self::parse_transaction_type(
-                    record.get(6),  // type column (may be None for old data)
-                    description,    // description for fallback
-                    amount,         // amount for fallback
-                ),
-            };
-            
-            transactions.push(transaction);
-        }
-        
-        Ok(transactions)
-    }
-    
-    /// Parse transaction type from CSV, with backward compatibility for old data
-    fn parse_transaction_type(
-        type_field: Option<&str>,
-        description: &str,
-        amount: Money,
-    ) -> DomainTransactionType {
-        // If type column exists, use it
-        if let Some(type_str) = type_field {
-            match type_str.to_lowercase().as_str() {
-                "allowance" => return DomainTransactionType::Allowance,
-                "income" | "oneoffincome" => return DomainTransactionType::OneOffIncome,
-                "expense" => return DomainTransactionType::Expense,
-                "future_allowance" | "futureallowance" => return DomainTransactionType::FutureAllowance,
-                _ => {} // Fall through to derivation
-            }
-        }
+        let text = std::fs::read_to_string(&file_path)
+            .with_context(|| format!("reading {}", file_path.display()))?;
 
-        // Backward compatibility: derive from description/amount
-        let desc_lower = description.to_lowercase();
-        if desc_lower.contains("allowance") || desc_lower.contains("weekly") {
-            DomainTransactionType::Allowance
-        } else if amount.cents() >= 0 {
-            DomainTransactionType::OneOffIncome
-        } else {
-            DomainTransactionType::Expense
-        }
+        // The one canonical codec: no current-time fallback on an unparseable
+        // date, no chrono::Local resolution of a date-only value, and no
+        // deriving an unrecognised type from the description/amount. Any of
+        // those would make read-modify-write non-idempotent — one bad row
+        // would make the file change on every read/write cycle, and two
+        // machines syncing it would never converge. A malformed row is now a
+        // hard error surfaced to the caller (and, at startup, collected into
+        // a `StartupNotice` — see `validate_all_transaction_files` and
+        // `Backend::with_data_dir`) instead of being silently rewritten.
+        let rows = allowance_core::codec::parse_transactions(&text)
+            .with_context(|| format!("parsing {}", file_path.display()))?;
+
+        Ok(rows.into_iter().map(row_to_domain).collect())
     }
 
-    /// NEW: Parse date string into DateTime object - this is where the CSV layer handles date parsing
-    fn parse_date_string(&self, date_str: &str) -> Result<chrono::DateTime<chrono::FixedOffset>> {
-        use chrono::{DateTime, FixedOffset, NaiveDate};
-        
-        // Try parsing as RFC3339 first (most common format)
-        if let Ok(dt) = DateTime::parse_from_rfc3339(date_str) {
-            return Ok(dt);
-        }
-        
-        // Try parsing as date-only format (YYYY-MM-DD)
-        if let Ok(naive_date) = NaiveDate::parse_from_str(date_str, "%Y-%m-%d") {
-            // Convert to beginning of day in local timezone (handles DST automatically)
-            let naive_datetime = naive_date.and_hms_opt(0, 0, 0).unwrap();
-            if let Some(local_dt) = naive_datetime.and_local_timezone(chrono::Local).single() {
-                return Ok(local_dt.fixed_offset());
-            }
-        }
-        
-        // If all parsing fails, return current time as fallback
-        log::warn!("Failed to parse date '{}', using current time as fallback", date_str);
-        Ok(chrono::Utc::now().with_timezone(&FixedOffset::east_opt(0).unwrap()))
+    /// Attempt to parse every registered child's `transactions.csv`.
+    ///
+    /// The codec no longer tolerates a malformed row: an unparseable date, a
+    /// date-only value, or an unrecognised transaction type is now a hard
+    /// `Err` instead of a silently rewritten fallback. Without this check,
+    /// the first sign of that would be an error the moment someone opens the
+    /// affected child's page. Called once at startup instead, so it becomes a
+    /// `StartupNotice` in the banner up front — visible, but not fatal to the
+    /// rest of the app.
+    pub fn validate_all_transaction_files(&self) -> Vec<(String, String)> {
+        self.connection
+            .registry()
+            .entries()
+            .iter()
+            .filter_map(|entry| match self.read_transactions(&entry.id) {
+                Ok(_) => None,
+                Err(e) => Some((entry.id.to_string(), format!("{e:#}"))),
+            })
+            .collect()
     }
-    
+
     /// Write all transactions for a child to their CSV file (internal, no git commit)
     fn write_transactions_internal(&self, child_id: &ChildId, transactions: &[DomainTransaction]) -> Result<()> {
         let file_path = self.connection.transactions_path(child_id)?;
 
-        let file = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(&file_path)?;
+        // Always the canonical (date, id) order and canonical rendering,
+        // applied on every write — not only after a merge — so two machines
+        // writing the same rows produce identical bytes.
+        let rows: Vec<TxRow> = transactions.iter().map(domain_to_row).collect();
+        let text = allowance_core::codec::render_transactions(&rows);
 
-        let writer = BufWriter::new(file);
-        let mut csv_writer = Writer::from_writer(writer);
+        std::fs::write(&file_path, text)
+            .with_context(|| format!("writing {}", file_path.display()))?;
 
-        // Write header - includes "type" column for transaction type
-        csv_writer.write_record(&["id", "child_id", "date", "description", "amount", "balance", "type"])?;
-
-        // Write transactions
-        for transaction in transactions {
-            let type_str = match transaction.transaction_type {
-                DomainTransactionType::Allowance => "allowance",
-                DomainTransactionType::OneOffIncome => "income",
-                DomainTransactionType::Expense => "expense",
-                DomainTransactionType::FutureAllowance => "future_allowance",
-            };
-            csv_writer.write_record(&[
-                &transaction.id,
-                &transaction.child_id,
-                &transaction.date.to_rfc3339(),  // Convert DateTime back to string for CSV storage
-                &transaction.description,
-                &transaction.amount.render(),
-                &transaction.balance.render(),
-                type_str,
-            ])?;
-        }
-
-        csv_writer.flush()?;
         Ok(())
     }
 
@@ -471,27 +433,35 @@ mod tests {
     #[test]
     fn test_compare_dates_timezone_fix() -> Result<()> {
         let (repo, _env) = setup_test_repo()?;
-        
-        // Test the exact scenario from the bug report
+
+        // Test the exact scenario from the bug report. `compare_dates` is used
+        // only for query-parameter filtering now (date1 already comes in as a
+        // parsed `DateTime` off a `TxRow`; the codec is the only place that
+        // turns a raw string into one, and it never falls back), so both
+        // dates here are constructed directly rather than through the
+        // now-deleted `parse_date_string`.
         let cdt_transaction_date = "2025-06-15T00:00:00-05:00"; // CDT transaction
         let utc_query_end_date = "2025-06-30T23:59:59Z";       // UTC query
-        
+
         // The CDT transaction should be BEFORE the UTC end date (comparison should be < 0)
-        let result = repo.compare_dates(&repo.parse_date_string(cdt_transaction_date)?, utc_query_end_date);
+        let date1 = chrono::DateTime::parse_from_rfc3339(cdt_transaction_date)?;
+        let result = repo.compare_dates(&date1, utc_query_end_date);
         println!("Test: compare_dates('{}', '{}') = {}", cdt_transaction_date, utc_query_end_date, result);
         assert!(result < 0, "CDT transaction should be before UTC end date");
-        
+
         // Test another CDT transaction that should be included
         let cdt_transaction_june27 = "2025-06-27T07:00:00-05:00";
-        let result2 = repo.compare_dates(&repo.parse_date_string(cdt_transaction_june27)?, utc_query_end_date);
+        let date2 = chrono::DateTime::parse_from_rfc3339(cdt_transaction_june27)?;
+        let result2 = repo.compare_dates(&date2, utc_query_end_date);
         println!("Test: compare_dates('{}', '{}') = {}", cdt_transaction_june27, utc_query_end_date, result2);
         assert!(result2 < 0, "CDT June 27 transaction should be before UTC end date");
-        
-        // Test string comparison fallback with invalid dates
-        let invalid_date = "invalid-date";
-        let result3 = repo.compare_dates(&repo.parse_date_string(invalid_date)?, utc_query_end_date);
-        println!("Test: compare_dates('{}', '{}') = {} (fallback)", invalid_date, utc_query_end_date, result3);
-        
+
+        // `compare_dates` itself still falls back to string comparison when
+        // its *second* argument (a query parameter, not a stored row) fails
+        // to parse. That fallback is unrelated to the codec and stays.
+        let result3 = repo.compare_dates(&date1, "invalid-date");
+        println!("Test: compare_dates('{}', 'invalid-date') = {} (fallback)", cdt_transaction_date, result3);
+
         Ok(())
     }
     
@@ -657,29 +627,42 @@ mod tests {
     // ARCHITECTURAL INVARIANT TESTS
     // ========================================
     
+    /// The codec accepts RFC3339 only (a colon-delimited offset, or `Z`) and
+    /// refuses everything else — no `chrono::Local` resolution of a bare
+    /// date, and no silent fallback. `2024-06-15T10:30:00-0500` (no colon in
+    /// the offset) used to slide through the old `parse_date_string`'s
+    /// current-time fallback undetected; now it is a hard `CodecError::Date`.
     #[test]
-    fn test_invariant_csv_layer_parses_date_strings() -> Result<()> {
-        let (repo, _env) = setup_test_repo()?;
-        
-        // Test that CSV layer can parse various date string formats
-        let date_formats = vec![
-            "2024-06-15T10:30:00Z",           // UTC
-            "2024-06-15T10:30:00-0500",       // CDT
-            "2024-06-15T10:30:00+0000",       // UTC with offset
-            "2024-06-15T10:30:00.123Z",       // With milliseconds
-            "2024-06-15T10:30:00-05:00",      // With colon in timezone
+    fn round_trip_accepts_only_strict_rfc3339() {
+        let strict = [
+            "2024-06-15T10:30:00Z",
+            "2024-06-15T10:30:00+00:00",
+            "2024-06-15T10:30:00.123Z",
+            "2024-06-15T10:30:00-05:00",
         ];
-        
-        for (i, date_str) in date_formats.iter().enumerate() {
-            let result = repo.compare_dates(&repo.parse_date_string(date_str)?, "2024-06-15T23:59:59Z");
-            println!("CSV layer successfully parsed date format #{}: '{}'", i + 1, date_str);
-            assert!(result != 0 || result == 0, "Date parsing should not fail");
+        for date_str in strict {
+            let csv = format!(
+                "id,child_id,date,description,amount,balance,type\nx,c,{date_str},d,1.00,1.00,expense\n"
+            );
+            assert!(
+                allowance_core::codec::parse_transactions(&csv).is_ok(),
+                "expected {date_str} to parse"
+            );
         }
-        
-        Ok(())
+
+        let loose = ["2024-06-15T10:30:00-0500", "2024-06-15T10:30:00+0000", "2024-06-15"];
+        for date_str in loose {
+            let csv = format!(
+                "id,child_id,date,description,amount,balance,type\nx,c,{date_str},d,1.00,1.00,expense\n"
+            );
+            assert!(
+                allowance_core::codec::parse_transactions(&csv).is_err(),
+                "expected {date_str} to be refused, not silently normalized"
+            );
+        }
     }
-    
-    #[test] 
+
+    #[test]
     fn test_invariant_domain_models_use_datetime_objects() -> Result<()> {
         // This test will fail until we fix the domain models
         // It should verify that domain models use DateTime objects, not strings
@@ -893,7 +876,19 @@ mod tests {
         println!("Storage layer preserves timestamp precision:");
         println!("   TX1: {} (hour: {})", retrieved_tx1.date.to_rfc3339(), retrieved_tx1.date.hour());
         println!("   TX2: {} (hour: {})", retrieved_tx2.date.to_rfc3339(), retrieved_tx2.date.hour());
-        
+
         Ok(())
     }
-} 
+
+    #[test]
+    fn round_trips_a_legacy_shaped_csv_byte_for_byte() {
+        // Guards against a codec change that quietly rewrites every row and makes
+        // the first sync look like a thousand-row conflict.
+        let text = std::fs::read_to_string("tests/fixtures/transactions_legacy_shapes.csv").unwrap();
+        let once = allowance_core::codec::render_transactions(
+            &allowance_core::codec::parse_transactions(&text).unwrap());
+        let twice = allowance_core::codec::render_transactions(
+            &allowance_core::codec::parse_transactions(&once).unwrap());
+        assert_eq!(once, twice);
+    }
+}

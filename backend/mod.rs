@@ -196,6 +196,31 @@ impl Backend {
             });
         }
 
+        // Every registered child's transactions.csv must parse under the one
+        // canonical codec (allowance_core::codec): no current-time fallback on
+        // an unparseable date, no chrono::Local resolution of a date-only
+        // value, and no deriving an unrecognised transaction type from the
+        // description/amount. Before this cutover those cases were silently
+        // rewritten; now they are hard errors. Checked once here, up front,
+        // so a malformed row surfaces in the startup banner instead of only
+        // failing the moment someone opens that child's page.
+        {
+            let transaction_repository =
+                storage::csv::TransactionRepository::new((*csv_connection).clone());
+            for (child_id, reason) in transaction_repository.validate_all_transaction_files() {
+                startup_notices.push(StartupNotice {
+                    severity: NoticeSeverity::Error,
+                    title: format!("{child_id}'s transactions could not be read"),
+                    details: vec![
+                        reason,
+                        "Nothing was changed. Fix the row named above (or restore a backup) \
+                         and restart the app."
+                            .to_string(),
+                    ],
+                });
+            }
+        }
+
         // Create services using the Arc<CsvConnection> pattern
         let child_service = domain::child_service::ChildService::new(csv_connection.clone(), sync_notifier.clone());
         let allowance_service = domain::AllowanceService::new(csv_connection.clone());
@@ -353,6 +378,44 @@ mod tests {
             "the banner must name the file: {}",
             backend.startup_notices[0].title
         );
+    }
+
+    /// A malformed row in a registered child's `transactions.csv` (here, a
+    /// date the codec refuses) must launch — an app that will not start over
+    /// one bad row is worse than a startup notice — and must say so, rather
+    /// than surfacing only the moment the child's page is opened.
+    #[test]
+    fn with_data_dir_reports_an_unreadable_transactions_file_instead_of_failing_to_launch() {
+        use tempfile::TempDir;
+        let dir = TempDir::new().unwrap();
+        let child = dir.path().join("keiko_hart");
+        std::fs::create_dir_all(&child).unwrap();
+        std::fs::write(
+            child.join("child.yaml"),
+            "id: keiko_hart\nname: Keiko Hart\nbirthdate: '2010-01-01'\n\
+             created_at: '2024-01-01T00:00:00Z'\nupdated_at: '2024-01-01T00:00:00Z'\n",
+        )
+        .unwrap();
+        std::fs::write(
+            child.join("transactions.csv"),
+            "id,child_id,date,description,amount,balance,type\n\
+             x,keiko_hart,not-a-date,d,1.00,1.00,expense\n",
+        )
+        .unwrap();
+
+        let backend = Backend::with_data_dir(dir.path().to_path_buf(), None)
+            .expect("a malformed transactions.csv must not stop the app launching");
+
+        assert!(
+            !backend.csv_connection.registry().entries().is_empty(),
+            "the migration should still register the child"
+        );
+        let notice = backend
+            .startup_notices
+            .iter()
+            .find(|n| n.title.contains("keiko_hart"))
+            .expect("the unreadable transactions file must be reported");
+        assert_eq!(notice.severity, NoticeSeverity::Error);
     }
 
     /// Read-only verification gate against the REAL data directory. Never run

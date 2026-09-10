@@ -1,0 +1,8 @@
+id,child_id,date,description,amount,balance,type
+ex-4-d,keiko,2026-03-09T00:00:00-04:00,Book,-27.25,0.00,expense
+in-1-a,keiko,2026-03-01T00:00:00+00:00,Allowance,5,5,allowance
+fa-5-e,keiko,2026-03-15T00:00:00+00:00,Future allowance,5.00,5.00,future_allowance
+ex-2-b,keiko,2026-03-02T00:00:00-05:00,"Slime, and stuff",-5.5,-0.5,expense
+ex-6-f,keiko,2026-03-05T00:00:00-05:00,Correction,0,12.00,expense
+in-3-c,keiko,2026-03-08T00:00:00-04:00,Birthday gift,27.25,27.25,income
+ex-7-g,keiko,2026-03-10T00:00:00-04:00,Zero out,-27.25,0.00,expense
