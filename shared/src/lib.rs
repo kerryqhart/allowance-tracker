@@ -4,7 +4,6 @@ pub mod child_id;
 pub use child_id::ChildId;
 
 use serde::{Deserialize, Serialize};
-use std::fmt;
 use chrono::{Datelike, DateTime, FixedOffset, NaiveDate, Utc};
 
 /// A financial transaction representing money in or out.
