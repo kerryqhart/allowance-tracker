@@ -1,6 +1,5 @@
 //! Domain model for a transaction.
 use serde::{Deserialize, Serialize};
-use std::time::{SystemTime, UNIX_EPOCH};
 use chrono::{DateTime, FixedOffset};
 use allowance_core::money::Money;
 
@@ -37,8 +36,7 @@ impl Transaction {
     /// Example: in-1625846400123-af3c
     pub fn generate_id(amount: Money, timestamp_ms: u64) -> String {
         let tx_type = if amount.cents() >= 0 { "in" } else { "ex" };
-        let random_suffix = Self::generate_random_suffix(4);
-        format!("{}-{}-{}", tx_type, timestamp_ms, random_suffix)
+        format!("{}-{}-{:04x}", tx_type, timestamp_ms, rand::random::<u16>())
     }
 
     /// Parse a transaction ID to extract its type and timestamp.
@@ -54,15 +52,28 @@ impl Transaction {
         Ok((tx_type, timestamp))
     }
 
-    /// Generate a random hex suffix for transaction IDs.
-    fn generate_random_suffix(len: usize) -> String {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("Time went backwards")
-            .as_nanos();
-        format!("{:x}", now % (16_u128.pow(len as u32)))
-            .chars()
-            .take(len)
-            .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn suffixes_differ_within_one_clock_tick() {
+        // The old implementation derived the suffix from the clock, so ids minted
+        // inside one tick collided — the exact case two machines hit at once.
+        let ids: std::collections::HashSet<String> = (0..1000)
+            .map(|_| Transaction::generate_id(Money::from_cents(-500), 1_702_516_125_000))
+            .collect();
+        assert!(ids.len() > 990, "only {} distinct ids from 1000 draws", ids.len());
+    }
+
+    #[test]
+    fn format_is_unchanged_so_existing_ids_still_parse() {
+        let id = Transaction::generate_id(Money::from_cents(-500), 1_702_516_125_000);
+        let (kind, ts) = Transaction::parse_id(&id).unwrap();
+        assert_eq!(kind, "ex");
+        assert_eq!(ts, 1_702_516_125_000);
+        assert_eq!(Transaction::parse_id("in-1625846400123-af3c").unwrap().0, "in");
     }
 }
