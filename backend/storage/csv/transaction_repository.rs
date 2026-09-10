@@ -79,10 +79,10 @@ impl TransactionRepository {
     }
     
     /// Read and parse a child's `transactions.csv`, without converting to the
-    /// domain type. Shared by `read_transactions` (which only wants the rows)
-    /// and `validate_all_transaction_files` (which also wants
-    /// `rows_rounded`, to report it rather than absorb it) so there is one
-    /// place that resolves the path and calls the codec.
+    /// domain type. Shared by `read_transactions` and
+    /// `validate_all_transaction_files` so there is one place that resolves
+    /// the path and calls the codec; the two callers use the result
+    /// differently — see the note on `rows_rounded` below.
     fn parse_transactions_file(
         &self,
         child_id: &ChildId,
@@ -109,9 +109,19 @@ impl TransactionRepository {
         // like `"14.620000000000001"`, which means 1462 cents and nothing
         // else. Refusing it here would refuse the user's own history over a
         // rendering artifact. The file self-cleans — the next write emits
-        // exactly two decimals via `render_transactions` — but the count of
-        // rows that needed rounding is still reported, never silently
-        // absorbed; see `rows_rounded` on the result.
+        // exactly two decimals via `render_transactions`.
+        //
+        // `rows_rounded` on the result is NOT structurally forced on every
+        // caller — `ParsedTransactions` is a plain struct, and nothing stops
+        // a caller from dropping the count. The actual guarantee is a
+        // convention held at exactly one call site:
+        // `validate_all_transaction_files` reads it and turns it into a
+        // `StartupNotice`, once per child at startup. `read_transactions`
+        // below deliberately discards it on every ordinary read — surfacing
+        // it there too would repeat the same notice on every CRUD call,
+        // which is noise, not information. Reporting it once at launch is
+        // the right dose; the type system does not enforce that dose, this
+        // comment and the call site below are what hold it.
         allowance_core::codec::parse_transactions(&text)
             .with_context(|| format!("parsing {}", file_path.display()))
     }
@@ -122,8 +132,12 @@ impl TransactionRepository {
     /// the folder from the child's *display name*, so a rename silently
     /// resolved elsewhere and the history read back as empty.
     fn read_transactions(&self, child_id: &ChildId) -> Result<Vec<DomainTransaction>> {
-        let parsed = self.parse_transactions_file(child_id)?;
-        Ok(parsed.rows.into_iter().map(row_to_domain).collect())
+        let allowance_core::codec::ParsedTransactions { rows, rows_rounded: _ } =
+            self.parse_transactions_file(child_id)?;
+        // Rounding is reported once per child at startup; see
+        // `validate_all_transaction_files`. An ordinary read discards the
+        // count on purpose — see the comment on `parse_transactions_file`.
+        Ok(rows.into_iter().map(row_to_domain).collect())
     }
 
     /// Check every registered child's `transactions.csv` up front.

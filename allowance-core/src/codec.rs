@@ -30,10 +30,16 @@ pub const HEADER: [&str; 7] =
 /// The result of a parse: the canonically-ordered rows, plus how many needed
 /// legacy-precision rounding.
 ///
-/// `rows_rounded` exists so the caller can *tell the user* their data was
+/// `rows_rounded` exists so a caller *can* tell the user their data was
 /// rewritten, even though the rewrite is correct (rounding an f64 artifact
 /// like `"14.620000000000001"` to its real 1462 cents changes no value — see
-/// `Money::parse_rounding`). It must never be silently absorbed.
+/// `Money::parse_rounding`). This struct only carries the count; nothing here
+/// forces a caller to look at it. Whether it is worth surfacing is a
+/// per-caller decision — `allowance-tracker-egui`'s `TransactionRepository`
+/// surfaces it once per child at startup and deliberately ignores it on every
+/// other read (repeating the notice on every read would be noise); that
+/// split is a convention held at those call sites, not a guarantee this type
+/// enforces.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParsedTransactions {
     pub rows: Vec<TxRow>,
