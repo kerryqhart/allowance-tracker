@@ -215,6 +215,7 @@ mod tests {
     use crate::money::Money;
     use crate::row::{Provenance, Sided, TxRow, TxType};
     use chrono::DateTime;
+    use proptest::prelude::*;
 
     fn row(id: &str, desc: &str, cents: i64) -> TxRow {
         TxRow {
@@ -476,5 +477,67 @@ mod tests {
     fn wins_asserts_against_fully_equal_provenance() {
         let p = Provenance { committer_epoch: 1, commit_oid: [7u8; 20] };
         let _ = wins(&p, &p);
+    }
+
+    // --- DuplicateDropped: reachable only by construction ------------------
+    //
+    // `DuplicateDropped` fires only when a re-keyed row's hash-derived id
+    // happens to already be taken by another surviving id -- a 64-bit hash
+    // collision that pure random generation will not hit in any realistic
+    // test budget. This lives here, as a UNIT test inside `merge`'s own
+    // `#[cfg(test)] mod tests`, specifically so it can call the REAL
+    // `content_suffix` and `wins` directly. An external integration test
+    // (allowance-core/tests/properties.rs) can only see the crate's public
+    // API and would have to duplicate both private algorithms to predict
+    // the collision -- exactly the drift hazard this project has already
+    // been bitten by twice (two id generators, and nearly a second CSV
+    // parser). Neither function is made `pub` to solve this; a unit test
+    // can already reach them as-is.
+    proptest! {
+        #[test]
+        fn duplicate_dropped_is_reachable_and_logged(
+            ours_cents in -100_000i64..100_000,
+            theirs_cents in -100_000i64..100_000,
+            orphan_cents in -100_000i64..100_000,
+            ours_epoch in 0i64..3,
+            theirs_epoch in 0i64..3,
+            ours_oid in 0u8..80,
+            theirs_oid in 100u8..200,
+        ) {
+            let ours_row = row("p", "slime", ours_cents);
+            let theirs_row = row("p", "book", theirs_cents);
+            let ours_prov = Provenance { committer_epoch: ours_epoch, commit_oid: [ours_oid; 20] };
+            let theirs_prov = Provenance { committer_epoch: theirs_epoch, commit_oid: [theirs_oid; 20] };
+
+            // Whichever side LOSES the add/add tiebreak is the one re-keyed
+            // to "p-<hash of the losing row>". Plant an orphan at exactly
+            // that id (using the crate's REAL `content_suffix`, not a copy)
+            // so the post-loop dedupe must collide the two and log the drop.
+            let ours_wins = wins(&ours_prov, &theirs_prov);
+            let loser_row = if ours_wins { &theirs_row } else { &ours_row };
+            let collision_id = format!("p-{}", content_suffix(loser_row));
+            let mut orphan = row("placeholder", "should not vanish", orphan_cents);
+            orphan.id = collision_id.clone();
+
+            let mut ours_rows = vec![ours_row.clone()];
+            let mut theirs_rows = vec![theirs_row.clone()];
+            if ours_wins {
+                ours_rows.push(orphan);
+            } else {
+                theirs_rows.push(orphan);
+            }
+            let ours = sided(ours_rows, ours_epoch, ours_oid);
+            let theirs = sided(theirs_rows, theirs_epoch, theirs_oid);
+
+            let out = merge(Some(&[]), &ours, &theirs);
+
+            let dropped = out.decisions.iter().any(|d| matches!(
+                d,
+                Decision::DuplicateDropped { id, .. } if id == &collision_id
+            ));
+            prop_assert!(dropped, "expected a logged DuplicateDropped at {collision_id}, decisions: {:?}", out.decisions);
+            prop_assert!(!out.rows.iter().any(|r| r.description == "should not vanish"));
+            prop_assert_eq!(out.rows.iter().filter(|r| r.id == collision_id).count(), 1);
+        }
     }
 }
