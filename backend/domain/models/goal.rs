@@ -39,12 +39,6 @@ pub struct DomainGoal {
     pub updated_at: String,
 }
 
-impl DomainGoal {
-    pub fn generate_id(child_id: &str, now_millis: u64) -> String {
-        format!("goal::{}_{}", child_id, now_millis)
-    }
-}
-
 #[derive(Debug, thiserror::Error)]
 pub enum GoalValidationError {
     #[error("Description cannot be empty")]

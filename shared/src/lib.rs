@@ -488,7 +488,7 @@ pub struct Goal {
 impl Goal {
     /// Generate a unique goal ID
     pub fn generate_id(child_id: &str, timestamp_millis: u64) -> String {
-        format!("goal::{}::{}", child_id, timestamp_millis)
+        format!("goal::{}::{}::{:04x}", child_id, timestamp_millis, rand::random::<u16>())
     }
 }
 
@@ -757,5 +757,15 @@ mod tests {
         assert!(AllowanceConfig::is_valid_day_of_week(6));
         assert!(!AllowanceConfig::is_valid_day_of_week(7));
         assert!(!AllowanceConfig::is_valid_day_of_week(255));
+    }
+
+    #[test]
+    fn goal_suffixes_differ_within_one_millisecond() {
+        // Goal IDs minted in the same millisecond for the same child should differ
+        // due to random entropy suffix, not collide like the old implementation.
+        let ids: std::collections::HashSet<String> = (0..1000)
+            .map(|_| Goal::generate_id("child123", 1_702_516_125_000))
+            .collect();
+        assert!(ids.len() > 990, "only {} distinct ids from 1000 draws", ids.len());
     }
 }
