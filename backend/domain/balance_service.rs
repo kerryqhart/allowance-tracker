@@ -17,6 +17,20 @@ use allowance_core::balance::{self, BalanceMismatch};
 use allowance_core::money::Money;
 use allowance_core::row::{TxRow, TxType};
 
+/// Outcome of checking a child's stored balances.
+///
+/// Kept distinct from a bare `Vec<BalanceMismatch>` (or an empty one) so a
+/// verdict can never be misread as "no mismatches" when it actually means
+/// something else — see `BalanceService::validate_all_balances`.
+#[must_use]
+#[derive(Debug, Clone, PartialEq)]
+pub enum BalanceCheck {
+    /// Every stored balance matches the recomputed running total.
+    Ok,
+    /// Balances were read successfully and disagree.
+    Mismatches(Vec<BalanceMismatch>),
+}
+
 /// Map the domain `Transaction` onto the pure `allowance_core` row type so
 /// `recompute_running_balances`/`validate` can run over it. `allowance-core`
 /// does no I/O and knows nothing about the CSV storage layer, so this
@@ -241,10 +255,19 @@ impl BalanceService {
     ///
     /// Was `Result<Vec<String>>`, which returned Ok while reporting broken
     /// money — a `?` at the call site swallowed it entirely.
-    pub fn validate_all_balances(&self, child_id: &str) -> Result<(), Vec<BalanceMismatch>> {
-        let rows = self.load_rows(child_id).map_err(|_| Vec::new())?;
+    ///
+    /// This deviates from the spec's stated `Result<(), Vec<BalanceMismatch>>`
+    /// signature. Two channels cannot distinguish "could not read the ledger"
+    /// from "read it and it's clean" from "read it and it's wrong" — an
+    /// earlier version of this method mapped a read failure to
+    /// `Err(Vec::new())`, which a caller inspecting the mismatch list cannot
+    /// tell apart from a genuine clean validation. `BalanceCheck` gives the
+    /// verdict its own channel so the outer `Result` can carry the I/O error
+    /// (with its real cause) without ever being confused for "no mismatches".
+    pub fn validate_all_balances(&self, child_id: &str) -> Result<BalanceCheck> {
+        let rows = self.load_rows(child_id)?;
         let errors = balance::validate(&rows);
-        if errors.is_empty() { Ok(()) } else { Err(errors) }
+        Ok(if errors.is_empty() { BalanceCheck::Ok } else { BalanceCheck::Mismatches(errors) })
     }
 
     /// Get balance at or before a specific date
@@ -400,8 +423,8 @@ mod tests {
         println!("TEST: Initial balances - tx1: {}, tx2: {}, tx3: {}", tx1.balance.render(), tx2.balance.render(), tx3.balance.render());
         
         // Step 2: Verify initial balances are correct
-        let initial_result = balance_service.validate_all_balances(child_id);
-        assert!(initial_result.is_ok(), "Initial balances should be correct: {:?}", initial_result);
+        let initial_result = balance_service.validate_all_balances(child_id).unwrap();
+        assert_eq!(initial_result, BalanceCheck::Ok, "Initial balances should be correct: {:?}", initial_result);
 
         // Step 3: Insert a backdated transaction between tx1 and tx2
         let backdated_tx = create_test_transaction(&balance_service, child_id, "2025-01-12T10:00:00-05:00", "Backdated", 25.0, 125.0);
@@ -419,8 +442,8 @@ mod tests {
         assert_eq!(updated_count, 3, "Should have updated 3 transactions (backdated + 2 subsequent)");
 
         // Step 6: Validate that all balances are now correct
-        let final_result = balance_service.validate_all_balances(child_id);
-        assert!(final_result.is_ok(), "Final balance validation should pass: {:?}", final_result);
+        let final_result = balance_service.validate_all_balances(child_id).unwrap();
+        assert_eq!(final_result, BalanceCheck::Ok, "Final balance validation should pass: {:?}", final_result);
         
         println!("TEST: Balance recalculation test passed!");
     }
@@ -454,8 +477,8 @@ mod tests {
         
         create_test_transaction(&service, child_id, "2025-01-20T10:00:00-05:00", "Third", 20.0, 90.0);
 
-        let result = service.validate_all_balances(child_id);
-        assert!(result.is_ok());
+        let result = service.validate_all_balances(child_id).unwrap();
+        assert_eq!(result, BalanceCheck::Ok);
     }
 
     #[test]
@@ -465,13 +488,34 @@ mod tests {
 
         // Create transactions with intentionally incorrect balances
         create_test_transaction(&service, child_id, "2025-01-10T10:00:00-05:00", "First", 100.0, 100.0);
-        
+
         create_test_transaction(&service, child_id, "2025-01-15T10:00:00-05:00", "Second", -30.0, 75.0); // Should be 70.0
-        
+
         create_test_transaction(&service, child_id, "2025-01-20T10:00:00-05:00", "Third", 20.0, 85.0); // Should be 90.0
 
-        let errors = service.validate_all_balances(child_id).expect_err("balances are intentionally wrong");
-        assert_eq!(errors.len(), 2); // Two incorrect balances
+        let result = service.validate_all_balances(child_id).unwrap();
+        match result {
+            BalanceCheck::Mismatches(errors) => assert_eq!(errors.len(), 2), // Two incorrect balances
+            BalanceCheck::Ok => panic!("expected mismatches, balances are intentionally wrong"),
+        }
+    }
+
+    /// A read failure (unregistered child — `list_transactions_chronological`
+    /// errors rather than returning an empty list) must surface as `Err` with
+    /// its real cause, never as `Ok(BalanceCheck::Ok)` or an empty mismatch
+    /// list standing in for "could not read".
+    #[test]
+    fn validate_all_balances_propagates_a_read_failure_rather_than_reporting_clean() {
+        let (service, _temp_dir, _child_id) = create_test_service();
+
+        let result = service.validate_all_balances("no-such-child");
+
+        let err = result.expect_err("an unregistered child must fail to read, not validate as clean");
+        let message = format!("{err:#}");
+        assert!(
+            !message.is_empty(),
+            "the underlying cause must survive on the error, not be discarded"
+        );
     }
 
     #[test]
