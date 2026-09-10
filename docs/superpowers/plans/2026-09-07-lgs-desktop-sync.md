@@ -1739,7 +1739,7 @@ mod tests {
         let report = parse_status(json).unwrap();
         assert_eq!(report.daemon.state, DaemonState::Outdated);
         assert!(report.daemon.message.contains("restart the service"));
-        assert!(!report.can_claim_durability(),
+        assert!(!report.durability_data_is_fresh(),
             "a skewed daemon reads durability from disk; we must not claim backed-up");
     }
 }
@@ -1813,7 +1813,14 @@ pub struct StatusReport {
 
 impl StatusReport {
     /// Durability is only trustworthy from a daemon we can actually talk to.
-    pub fn can_claim_durability(&self) -> bool {
+    /// Whether the durability numbers in this report are FRESH — i.e. the
+    /// daemon answered rather than the values being read stale from disk.
+    /// This is report-wide and is NOT a per-project safety answer: use
+    /// `ProjectReport::is_confirmed_backed_up()` for that. Task 10's review
+    /// found this returning true for a report containing a genuinely
+    /// stranded project, which is exactly the misreading the old name
+    /// (`can_claim_durability`) invited.
+    pub fn durability_data_is_fresh(&self) -> bool {
         matches!(self.daemon.state, DaemonState::Ok)
     }
     pub fn project(&self, name: &str) -> Option<&ProjectReport> {
