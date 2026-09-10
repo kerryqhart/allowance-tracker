@@ -961,15 +961,10 @@ An unparseable row now surfaces as an error instead of being silently rewritten.
 ```rust
 // backend/storage/csv/transaction_repository.rs (in the existing #[cfg(test)] mod)
 #[test]
-fn round_trips_the_real_production_csv_byte_for_byte() {
+fn round_trips_a_legacy_shaped_csv_byte_for_byte() {
     // Guards against a codec change that quietly rewrites every row and makes
     // the first sync look like a thousand-row conflict.
-    let path = std::path::Path::new("tests/fixtures/transactions_production.csv");
-    if !path.exists() {
-        eprintln!("fixture absent; skipping");
-        return;
-    }
-    let text = std::fs::read_to_string(path).unwrap();
+    let text = std::fs::read_to_string("tests/fixtures/transactions_legacy_shapes.csv").unwrap();
     let once = allowance_core::codec::render_transactions(
         &allowance_core::codec::parse_transactions(&text).unwrap());
     let twice = allowance_core::codec::render_transactions(
@@ -978,11 +973,35 @@ fn round_trips_the_real_production_csv_byte_for_byte() {
 }
 ```
 
-Copy the real file into place, scrubbing nothing — it is the user's own data and stays local:
+**The fixture is synthesized, not copied from real data.** This repo has a
+GitHub remote, so committing a child's real `transactions.csv` would put their
+financial history — dates, descriptions, amounts — into git history permanently
+and push it to GitHub. The round-trip property holds over any input, so the
+fixture only needs to reproduce the *shapes* real data contains, not the data.
+
+Build `egui-frontend/tests/fixtures/transactions_legacy_shapes.csv` by hand to
+cover every quirk the live file actually contains — these are what a naive codec
+change silently rewrites:
+
+- money that `f64::to_string()` rendered without decimals (`5`), with one (`5.5`),
+  and with two (`27.25`), plus a negative of each
+- a zero amount and a zero balance
+- RFC3339 dates with a non-UTC offset (`-04:00`, `-05:00` — the file spans a DST
+  boundary) and at least one with `+00:00`
+- every legacy `type` value the parser accepts: `allowance`, `income`,
+  `expense`, `future_allowance`
+- a description containing a comma, so CSV quoting is exercised
+- rows deliberately out of `(date, id)` order, so the canonical re-sort is proven
+
+Additionally, as a **local, uncommitted** check, run the same round-trip against
+the real file once and report the result:
 
 ```bash
-cp "$HOME/Library/Mobile Documents/com~apple~CloudDocs/HartRoot/Parent Portal/Allowance Tracker/keiko_hart/transactions.csv" egui-frontend/tests/fixtures/transactions_production.csv
+cargo test -p allowance_tracker_egui --test codec_real_data -- --ignored
 ```
+
+Write that as an `#[ignore]`d test reading a path from the `REAL_CSV` env var, so
+the real data is exercised on the developer's machine and never enters the repo.
 
 - [ ] **Step 7: Run the suite**
 
