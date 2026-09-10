@@ -11,13 +11,20 @@
 //! The status/durability enums below carry `#[serde(other)] Unknown`
 //! catch-all variants. This is required, not defensive padding: lgs's own
 //! test suite feeds a literal `"a_variant_from_the_future"` value through
-//! this exact shape (see `local-git-sync/src/cli.rs` around line 1788), and
-//! the real fixture captured for this file already contains a `durability`
-//! state (`"stranded"`) this module does not model. A closed enum would fail
-//! the whole parse the moment lgs reports a state this app does not know
-//! about yet; modeling the field as a bare `String` would lose the ability to
-//! match on the states this app *does* understand. `#[serde(other)]` is the
-//! only shape that tolerates the future without going loose today.
+//! this exact shape (see `local-git-sync/src/cli.rs` around line 1788).
+//!
+//! `DurabilityState` models all seven of lgs's current
+//! `DurabilityHealth` wire states (`local-git-sync/src/durability/health.rs`),
+//! not just the four originally guessed at — the real fixture captured for
+//! this file already contains `"stranded"`, and `Stranded`,
+//! `WorkingRepoUnreadable`, and `BareRepoUnreadable` are all `Severity::Red`
+//! in lgs's own model. Leaving those three unmodeled would have made "your
+//! data is not backed up anywhere else" indistinguishable from "lgs added a
+//! state after we shipped" — exactly the distinction this app must not blur.
+//! `#[serde(other)] Unknown` stays as the catch-all for values lgs adds
+//! *after* this file was written; [`ProjectReport::is_confirmed_backed_up`]
+//! treats `Unknown` the same as every Red state: not safe to report as
+//! backed up.
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
 use std::path::PathBuf;
@@ -26,10 +33,21 @@ use std::process::Command;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DurabilityState {
+    /// The remote holds every branch pushed here.
     BackedUp,
+    /// A publish is in flight, or the cloud drive is offline. Transient.
     Pending,
+    /// Nothing on the remote covers this project.
     NotBackedUp,
+    /// A branch moved here and on the remote independently.
     Diverged,
+    /// Commits exist in the working repo that have never reached the bare —
+    /// they exist on exactly one disk. Red in lgs's own model.
+    Stranded,
+    /// This machine's working repo could not be measured. Red.
+    WorkingRepoUnreadable,
+    /// This machine's own bare copy of the project could not be read. Red.
+    BareRepoUnreadable,
     #[serde(other)]
     Unknown,
 }
@@ -65,6 +83,23 @@ pub struct ProjectReport {
     pub archived: bool,
 }
 
+impl ProjectReport {
+    /// True only when lgs affirmatively says this project is backed up.
+    /// Every other state — including `Unknown` — returns false: a state we
+    /// cannot interpret must never be rendered as safe.
+    ///
+    /// Three of the states this module cannot interpret today (`Stranded`,
+    /// `WorkingRepoUnreadable`, `BareRepoUnreadable`) are `Severity::Red` in
+    /// lgs's own model, and `Unknown` covers states lgs adds after this file
+    /// was written — which could be Red too. Defaulting an uninterpretable
+    /// state to "safe" would be exactly the wrong direction, so this checks
+    /// for the one state known to be safe rather than excluding the states
+    /// known to be unsafe.
+    pub fn is_confirmed_backed_up(&self) -> bool {
+        matches!(self.durability_state, DurabilityState::BackedUp)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct StatusReport {
     pub daemon: DaemonInfo,
@@ -75,13 +110,18 @@ pub struct StatusReport {
 }
 
 impl StatusReport {
-    /// Durability is only trustworthy from a daemon we can actually talk to.
+    /// Whether the durability data attached to every project in this report
+    /// is fresh enough to trust at all — NOT a per-project safety answer.
     ///
-    /// When the daemon is `outdated` (or `down`/`error`/anything unrecognized),
-    /// the durability values on each project were read from disk and may be
-    /// stale — so the app must not tell the user a project is backed up.
-    /// Reporting nothing is safer than reporting a stale "backed up ✓".
-    pub fn can_claim_durability(&self) -> bool {
+    /// This is report-wide: it says nothing about whether any *given*
+    /// project is safe, only whether the daemon that produced these
+    /// durability values was itself in a state where they can be trusted.
+    /// When the daemon is `outdated` (or `down`/`error`/anything
+    /// unrecognized), the durability values on each project were read from
+    /// disk and may be stale. For "is this specific project backed up",
+    /// use [`ProjectReport::is_confirmed_backed_up`] instead — do not use
+    /// this method as a per-project stand-in for it.
+    pub fn durability_data_is_fresh(&self) -> bool {
         matches!(self.daemon.state, DaemonState::Ok)
     }
     pub fn project(&self, name: &str) -> Option<&ProjectReport> {
@@ -203,6 +243,17 @@ mod tests {
         let report = parse_status(FIXTURE).unwrap();
         assert!(report.cloud_root.is_some());
         assert!(!report.projects.is_empty());
+
+        // Pins a real-world find: at capture time, this project's
+        // `durability.state` was `"stranded"` (commits pushed only locally,
+        // never reached the remote) — not one of the four states originally
+        // modeled. This assertion is the regression guard that turns that
+        // discovery into a permanent check rather than leaving it in prose.
+        let project = report
+            .project("allowance-tracker")
+            .expect("fixture must contain the allowance-tracker project");
+        assert_eq!(project.durability_state, DurabilityState::Stranded);
+        assert!(!project.is_confirmed_backed_up());
     }
 
     #[test]
@@ -226,7 +277,7 @@ mod tests {
         assert_eq!(report.daemon.state, DaemonState::Outdated);
         assert!(report.daemon.message.contains("restart the service"));
         assert!(
-            !report.can_claim_durability(),
+            !report.durability_data_is_fresh(),
             "a skewed daemon reads durability from disk; we must not claim backed-up"
         );
     }
@@ -262,12 +313,12 @@ mod tests {
         assert_eq!(project.failed_sync_attempts, 0);
     }
 
-    /// `can_claim_durability()` is the gate on whether the app tells the user
-    /// their data is safe: it must be true only when the daemon is `Ok`, and
-    /// false for every other state — including ones this module does not
-    /// recognize yet.
+    /// `durability_data_is_fresh()` is the gate on whether the app trusts the
+    /// durability values in this report at all: it must be true only when
+    /// the daemon is `Ok`, and false for every other state — including ones
+    /// this module does not recognize yet.
     #[test]
-    fn can_claim_durability_is_true_only_for_ok_daemon() {
+    fn durability_data_is_fresh_is_true_only_for_ok_daemon() {
         let cases: Vec<(DaemonState, bool)> = vec![
             (DaemonState::Ok, true),
             (DaemonState::Down, false),
@@ -284,9 +335,48 @@ mod tests {
                 adoptable: Vec::new(),
             };
             assert_eq!(
-                report.can_claim_durability(),
+                report.durability_data_is_fresh(),
                 expected,
                 "for daemon state {state:?}"
+            );
+        }
+    }
+
+    /// `is_confirmed_backed_up()` is the per-project safety answer: true only
+    /// for `BackedUp`, false for every other state — including three states
+    /// (`Stranded`, `WorkingRepoUnreadable`, `BareRepoUnreadable`) that are
+    /// `Severity::Red` in lgs's own model, and false for `Unknown`, which
+    /// could be Red too since it covers states lgs adds after this file was
+    /// written.
+    #[test]
+    fn is_confirmed_backed_up_is_true_only_for_backed_up() {
+        fn project_with(state: DurabilityState) -> ProjectReport {
+            ProjectReport {
+                name: "p".to_string(),
+                clone_url: "http://localhost:8418/p.git".to_string(),
+                working_repo_path: PathBuf::from("/tmp/p"),
+                durability_state: state,
+                durability_label: None,
+                failed_sync_attempts: 0,
+                archived: false,
+            }
+        }
+
+        let cases: Vec<(DurabilityState, bool)> = vec![
+            (DurabilityState::BackedUp, true),
+            (DurabilityState::Pending, false),
+            (DurabilityState::NotBackedUp, false),
+            (DurabilityState::Diverged, false),
+            (DurabilityState::Stranded, false),
+            (DurabilityState::WorkingRepoUnreadable, false),
+            (DurabilityState::BareRepoUnreadable, false),
+            (DurabilityState::Unknown, false),
+        ];
+        for (state, expected) in cases {
+            assert_eq!(
+                project_with(state).is_confirmed_backed_up(),
+                expected,
+                "for durability state {state:?}"
             );
         }
     }
