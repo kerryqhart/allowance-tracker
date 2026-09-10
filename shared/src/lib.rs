@@ -645,85 +645,13 @@ impl AllowanceConfig {
     }
 }
 
-impl Child {
-    /// Generate a child ID based on timestamp
-    pub fn generate_id(epoch_millis: u64) -> String {
-        format!("child::{}", epoch_millis)
-    }
-
-    /// Parse a child ID to extract the timestamp
-    pub fn parse_id(id: &str) -> Result<u64, ChildIdError> {
-        let parts: Vec<&str> = id.split("::").collect();
-        if parts.len() != 2 || parts[0] != "child" {
-            return Err(ChildIdError::InvalidFormat);
-        }
-
-        parts[1].parse::<u64>().map_err(|_| ChildIdError::InvalidTimestamp)
-    }
-
-    /// Extract timestamp from child ID
-    pub fn extract_timestamp(&self) -> Result<u64, ChildIdError> {
-        Self::parse_id(&self.id)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum ChildIdError {
-    InvalidFormat,
-    InvalidTimestamp,
-}
-
-impl fmt::Display for ChildIdError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ChildIdError::InvalidFormat => write!(f, "Invalid child ID format"),
-            ChildIdError::InvalidTimestamp => write!(f, "Invalid timestamp in child ID"),
-        }
-    }
-}
-
-impl std::error::Error for ChildIdError {}
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
 
-    #[test]
-    fn test_generate_child_id() {
-        let child_id = Child::generate_id(1702516122000);
-        assert_eq!(child_id, "child::1702516122000");
-    }
-
-    #[test]
-    fn test_parse_child_id() {
-        // Test valid child ID
-        let timestamp = Child::parse_id("child::1702516122000").unwrap();
-        assert_eq!(timestamp, 1702516122000);
-
-        // Test invalid format
-        assert!(Child::parse_id("invalid::format").is_err());
-        assert!(Child::parse_id("child").is_err());
-        assert!(Child::parse_id("not_child::123").is_err());
-
-        // Test invalid timestamp
-        assert!(Child::parse_id("child::not_a_number").is_err());
-    }
-
-    #[test]
-    fn test_child_extract_timestamp() {
-        let child = Child {
-            id: "child::1702516122000".to_string(),
-            name: "Test Child".to_string(),
-            birthdate: NaiveDate::from_ymd_opt(2015, 6, 15).unwrap(),  // FIXED: Use proper NaiveDate
-            created_at: DateTime::parse_from_rfc3339("2023-12-14T01:02:02.000Z").unwrap().with_timezone(&Utc),  // FIXED: Use proper DateTime
-            updated_at: DateTime::parse_from_rfc3339("2023-12-14T01:02:02.000Z").unwrap().with_timezone(&Utc),  // FIXED: Use proper DateTime
-        };
-
-        assert_eq!(child.extract_timestamp().unwrap(), 1702516122000);
-    }
-
-    #[test]
+#[test]
     fn test_allowance_config_day_names() {
         let days = [
             (0, "Sunday"),
@@ -760,12 +688,27 @@ mod tests {
     }
 
     #[test]
-    fn goal_suffixes_differ_within_one_millisecond() {
-        // Goal IDs minted in the same millisecond for the same child should differ
-        // due to random entropy suffix, not collide like the old implementation.
-        let ids: std::collections::HashSet<String> = (0..1000)
+    fn goal_suffix_is_random_not_clock_derived() {
+        // The old implementation used timestamp-only, which produced identical ids.
+        // The new implementation uses a random suffix. This test discriminates by checking
+        // ordering: clock-derived suffixes give ~0-2 descending steps (only at wraps),
+        // random gives ~50%. Counting distinctness alone cannot tell them apart.
+        let ids: Vec<String> = (0..200)
             .map(|_| Goal::generate_id("child123", 1_702_516_125_000))
             .collect();
-        assert!(ids.len() > 990, "only {} distinct ids from 1000 draws", ids.len());
+
+        let suffixes: Vec<u16> = ids.iter()
+            .map(|id| {
+                let parts: Vec<&str> = id.split("::").collect();
+                u16::from_str_radix(parts[3], 16).unwrap()
+            })
+            .collect();
+
+        let descending_steps = suffixes.windows(2)
+            .filter(|w| w[1] < w[0])
+            .count();
+
+        // Clock-derived: ~0-2. Random: ~100. Assert > 30 to be well above clock but below random.
+        assert!(descending_steps > 30, "only {} descending steps in 200 draws (expected ~100 for random)", descending_steps);
     }
 }

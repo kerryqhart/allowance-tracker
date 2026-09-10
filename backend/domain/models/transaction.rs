@@ -59,13 +59,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn suffixes_differ_within_one_clock_tick() {
-        // The old implementation derived the suffix from the clock, so ids minted
-        // inside one tick collided — the exact case two machines hit at once.
-        let ids: std::collections::HashSet<String> = (0..1000)
+    fn transaction_suffix_is_random_not_clock_derived() {
+        // The old implementation derived the suffix from SystemTime::now().as_nanos() % 65536,
+        // which produces an ascending or near-ascending sequence (nanos increment with each call).
+        // A random suffix is not correlated with call order. This test discriminates by checking
+        // ordering: clock-derived gives ~0-2 descending steps (only at wraps), random gives ~50%.
+        // Counting distinctness alone cannot tell them apart (both would pass ">990 of 1000").
+        let ids: Vec<String> = (0..200)
             .map(|_| Transaction::generate_id(Money::from_cents(-500), 1_702_516_125_000))
             .collect();
-        assert!(ids.len() > 990, "only {} distinct ids from 1000 draws", ids.len());
+
+        let suffixes: Vec<u16> = ids.iter()
+            .map(|id| {
+                let parts: Vec<&str> = id.split('-').collect();
+                u16::from_str_radix(parts[2], 16).unwrap()
+            })
+            .collect();
+
+        let descending_steps = suffixes.windows(2)
+            .filter(|w| w[1] < w[0])
+            .count();
+
+        // Clock-derived: ~0-2. Random: ~100. Assert > 30 to be well above clock but below random.
+        assert!(descending_steps > 30, "only {} descending steps in 200 draws (expected ~100 for random)", descending_steps);
     }
 
     #[test]
