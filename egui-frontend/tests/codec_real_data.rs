@@ -24,13 +24,21 @@ fn real_transactions_csv_round_trips_byte_for_byte() {
 
     let parsed_once = allowance_core::codec::parse_transactions(&text)
         .unwrap_or_else(|e| panic!("real data at {path} did not parse: {e}"));
-    println!("parsed {} rows from {path}", parsed_once.len());
+    println!(
+        "parsed {} rows from {path} ({} needed legacy-precision rounding)",
+        parsed_once.rows.len(),
+        parsed_once.rows_rounded
+    );
 
-    let rendered_once = allowance_core::codec::render_transactions(&parsed_once);
+    let rendered_once = allowance_core::codec::render_transactions(&parsed_once.rows);
 
     let parsed_twice = allowance_core::codec::parse_transactions(&rendered_once)
         .expect("re-parsing our own rendered output must succeed");
-    let rendered_twice = allowance_core::codec::render_transactions(&parsed_twice);
+    assert_eq!(
+        parsed_twice.rows_rounded, 0,
+        "the file must self-clean: nothing should need rounding on the second pass"
+    );
+    let rendered_twice = allowance_core::codec::render_transactions(&parsed_twice.rows);
 
     assert_eq!(
         rendered_once, rendered_twice,

@@ -48,6 +48,20 @@ fn domain_to_row(t: &DomainTransaction) -> TxRow {
     }
 }
 
+/// One thing about a registered child's `transactions.csv` worth surfacing at
+/// startup — see `TransactionRepository::validate_all_transaction_files` and
+/// `Backend::with_data_dir`, which turns each of these into a `StartupNotice`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum TransactionFileNotice {
+    /// The file did not parse under the codec at all (a hard error: an
+    /// unparseable date, a date-only value, or an unrecognised type).
+    ParseFailed { child_id: String, reason: String },
+    /// The file parsed, but some rows carried legacy f64-precision noise
+    /// (e.g. `"14.620000000000001"`) that was rounded to the nearest cent.
+    /// The rewrite is correct — but not silently absorbed.
+    LegacyPrecisionRounded { child_id: String, rows_rounded: usize },
+}
+
 /// CSV-based transaction repository
 #[derive(Clone)]
 pub struct TransactionRepository {
@@ -64,12 +78,15 @@ impl TransactionRepository {
         }
     }
     
-    /// Read all transactions for a child from their CSV file.
-    ///
-    /// Resolution is by immutable id through the registry. It used to derive
-    /// the folder from the child's *display name*, so a rename silently
-    /// resolved elsewhere and the history read back as empty.
-    fn read_transactions(&self, child_id: &ChildId) -> Result<Vec<DomainTransaction>> {
+    /// Read and parse a child's `transactions.csv`, without converting to the
+    /// domain type. Shared by `read_transactions` (which only wants the rows)
+    /// and `validate_all_transaction_files` (which also wants
+    /// `rows_rounded`, to report it rather than absorb it) so there is one
+    /// place that resolves the path and calls the codec.
+    fn parse_transactions_file(
+        &self,
+        child_id: &ChildId,
+    ) -> Result<allowance_core::codec::ParsedTransactions> {
         self.connection.ensure_transactions_file_exists(child_id)?;
 
         let file_path = self.connection.transactions_path(child_id)?;
@@ -86,13 +103,30 @@ impl TransactionRepository {
         // hard error surfaced to the caller (and, at startup, collected into
         // a `StartupNotice` — see `validate_all_transaction_files` and
         // `Backend::with_data_dir`) instead of being silently rewritten.
-        let rows = allowance_core::codec::parse_transactions(&text)
-            .with_context(|| format!("parsing {}", file_path.display()))?;
-
-        Ok(rows.into_iter().map(row_to_domain).collect())
+        //
+        // Money is parsed with rounding (not the strict `FromStr`): legacy
+        // data written before `Money` existed carries f64-precision noise
+        // like `"14.620000000000001"`, which means 1462 cents and nothing
+        // else. Refusing it here would refuse the user's own history over a
+        // rendering artifact. The file self-cleans — the next write emits
+        // exactly two decimals via `render_transactions` — but the count of
+        // rows that needed rounding is still reported, never silently
+        // absorbed; see `rows_rounded` on the result.
+        allowance_core::codec::parse_transactions(&text)
+            .with_context(|| format!("parsing {}", file_path.display()))
     }
 
-    /// Attempt to parse every registered child's `transactions.csv`.
+    /// Read all transactions for a child from their CSV file.
+    ///
+    /// Resolution is by immutable id through the registry. It used to derive
+    /// the folder from the child's *display name*, so a rename silently
+    /// resolved elsewhere and the history read back as empty.
+    fn read_transactions(&self, child_id: &ChildId) -> Result<Vec<DomainTransaction>> {
+        let parsed = self.parse_transactions_file(child_id)?;
+        Ok(parsed.rows.into_iter().map(row_to_domain).collect())
+    }
+
+    /// Check every registered child's `transactions.csv` up front.
     ///
     /// The codec no longer tolerates a malformed row: an unparseable date, a
     /// date-only value, or an unrecognised transaction type is now a hard
@@ -101,14 +135,28 @@ impl TransactionRepository {
     /// affected child's page. Called once at startup instead, so it becomes a
     /// `StartupNotice` in the banner up front — visible, but not fatal to the
     /// rest of the app.
-    pub fn validate_all_transaction_files(&self) -> Vec<(String, String)> {
+    ///
+    /// A file that parses but needed legacy-precision rounding (see
+    /// `Money::parse_rounding`) is reported too, as a lower-severity notice —
+    /// the rewrite is correct, but the user should still be told their data
+    /// was touched.
+    pub fn validate_all_transaction_files(&self) -> Vec<TransactionFileNotice> {
         self.connection
             .registry()
             .entries()
             .iter()
-            .filter_map(|entry| match self.read_transactions(&entry.id) {
+            .filter_map(|entry| match self.parse_transactions_file(&entry.id) {
+                Ok(parsed) if parsed.rows_rounded > 0 => {
+                    Some(TransactionFileNotice::LegacyPrecisionRounded {
+                        child_id: entry.id.to_string(),
+                        rows_rounded: parsed.rows_rounded,
+                    })
+                }
                 Ok(_) => None,
-                Err(e) => Some((entry.id.to_string(), format!("{e:#}"))),
+                Err(e) => Some(TransactionFileNotice::ParseFailed {
+                    child_id: entry.id.to_string(),
+                    reason: format!("{e:#}"),
+                }),
             })
             .collect()
     }
@@ -886,9 +934,9 @@ mod tests {
         // the first sync look like a thousand-row conflict.
         let text = std::fs::read_to_string("tests/fixtures/transactions_legacy_shapes.csv").unwrap();
         let once = allowance_core::codec::render_transactions(
-            &allowance_core::codec::parse_transactions(&text).unwrap());
+            &allowance_core::codec::parse_transactions(&text).unwrap().rows);
         let twice = allowance_core::codec::render_transactions(
-            &allowance_core::codec::parse_transactions(&once).unwrap());
+            &allowance_core::codec::parse_transactions(&once).unwrap().rows);
         assert_eq!(once, twice);
     }
 }

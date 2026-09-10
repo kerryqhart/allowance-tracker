@@ -207,16 +207,38 @@ impl Backend {
         {
             let transaction_repository =
                 storage::csv::TransactionRepository::new((*csv_connection).clone());
-            for (child_id, reason) in transaction_repository.validate_all_transaction_files() {
-                startup_notices.push(StartupNotice {
-                    severity: NoticeSeverity::Error,
-                    title: format!("{child_id}'s transactions could not be read"),
-                    details: vec![
-                        reason,
-                        "Nothing was changed. Fix the row named above (or restore a backup) \
-                         and restart the app."
-                            .to_string(),
-                    ],
+            for notice in transaction_repository.validate_all_transaction_files() {
+                startup_notices.push(match notice {
+                    storage::csv::TransactionFileNotice::ParseFailed { child_id, reason } => {
+                        StartupNotice {
+                            severity: NoticeSeverity::Error,
+                            title: format!("{child_id}'s transactions could not be read"),
+                            details: vec![
+                                reason,
+                                "Nothing was changed. Fix the row named above (or restore a \
+                                 backup) and restart the app."
+                                    .to_string(),
+                            ],
+                        }
+                    }
+                    // Legacy money written before `Money` existed (f64 noise
+                    // like "14.620000000000001") was rounded to the nearest
+                    // cent on read — a correct rewrite, not a value change,
+                    // but the user is told rather than left to notice a diff.
+                    storage::csv::TransactionFileNotice::LegacyPrecisionRounded {
+                        child_id,
+                        rows_rounded,
+                    } => StartupNotice {
+                        severity: NoticeSeverity::Warning,
+                        title: format!("{child_id}'s transactions had legacy precision normalised"),
+                        details: vec![format!(
+                            "{rows_rounded} row(s) had an amount or balance rounded to the \
+                             nearest cent — old floating-point noise (e.g. \
+                             \"14.620000000000001\"), not a change in value. This will be saved \
+                             back in the corrected form the next time something is added or \
+                             edited for this child."
+                        )],
+                    },
                 });
             }
         }
@@ -416,6 +438,50 @@ mod tests {
             .find(|n| n.title.contains("keiko_hart"))
             .expect("the unreadable transactions file must be reported");
         assert_eq!(notice.severity, NoticeSeverity::Error);
+    }
+
+    /// A row with legacy f64-precision noise (money written before `Money`
+    /// existed, e.g. `"14.620000000000001"`) must still launch — and read —
+    /// successfully: the value is rounded to the nearest cent rather than
+    /// refused. But the rewrite must not be silent: it is reported as a
+    /// (non-fatal) Warning notice rather than absorbed.
+    #[test]
+    fn with_data_dir_reports_legacy_precision_normalization_as_a_warning() {
+        use tempfile::TempDir;
+        let dir = TempDir::new().unwrap();
+        let child = dir.path().join("keiko_hart");
+        std::fs::create_dir_all(&child).unwrap();
+        std::fs::write(
+            child.join("child.yaml"),
+            "id: keiko_hart\nname: Keiko Hart\nbirthdate: '2010-01-01'\n\
+             created_at: '2024-01-01T00:00:00Z'\nupdated_at: '2024-01-01T00:00:00Z'\n",
+        )
+        .unwrap();
+        std::fs::write(
+            child.join("transactions.csv"),
+            "id,child_id,date,description,amount,balance,type\n\
+             x,keiko_hart,2024-01-01T00:00:00Z,d,1.00,14.620000000000001,expense\n",
+        )
+        .unwrap();
+
+        let backend = Backend::with_data_dir(dir.path().to_path_buf(), None)
+            .expect("legacy-precision data must not stop the app launching");
+
+        let notice = backend
+            .startup_notices
+            .iter()
+            .find(|n| n.title.contains("keiko_hart"))
+            .expect("the normalization must be reported");
+        assert_eq!(
+            notice.severity,
+            NoticeSeverity::Warning,
+            "a correct rewrite is not an error"
+        );
+        assert!(
+            notice.details.iter().any(|d| d.contains("1 row")),
+            "the notice should say how many rows were touched: {:?}",
+            notice.details
+        );
     }
 
     /// Read-only verification gate against the REAL data directory. Never run

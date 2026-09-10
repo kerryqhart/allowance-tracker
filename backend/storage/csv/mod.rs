@@ -38,7 +38,7 @@ pub mod test_utils;
 mod resolution_tests;
 
 pub use connection::CsvConnection;
-pub use transaction_repository::TransactionRepository;
+pub use transaction_repository::{TransactionRepository, TransactionFileNotice};
 pub use child_repository::ChildRepository;
 pub use allowance_repository::AllowanceRepository;
 pub use parental_control_repository::ParentalControlRepository;

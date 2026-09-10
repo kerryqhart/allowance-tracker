@@ -27,9 +27,25 @@ pub enum CodecError {
 pub const HEADER: [&str; 7] =
     ["id", "child_id", "date", "description", "amount", "balance", "type"];
 
-pub fn parse_transactions(text: &str) -> Result<Vec<TxRow>, CodecError> {
+/// The result of a parse: the canonically-ordered rows, plus how many needed
+/// legacy-precision rounding.
+///
+/// `rows_rounded` exists so the caller can *tell the user* their data was
+/// rewritten, even though the rewrite is correct (rounding an f64 artifact
+/// like `"14.620000000000001"` to its real 1462 cents changes no value — see
+/// `Money::parse_rounding`). It must never be silently absorbed.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParsedTransactions {
+    pub rows: Vec<TxRow>,
+    /// Number of rows where `amount` and/or `balance` needed rounding to the
+    /// nearest cent. A row with both fields rounded still counts once.
+    pub rows_rounded: usize,
+}
+
+pub fn parse_transactions(text: &str) -> Result<ParsedTransactions, CodecError> {
     let mut reader = csv::Reader::from_reader(text.as_bytes());
     let mut rows = Vec::new();
+    let mut rows_rounded = 0usize;
     for record in reader.records() {
         let r = record.map_err(|e| CodecError::Csv(e.to_string()))?;
         let id = r.get(0).unwrap_or_default().to_string();
@@ -42,9 +58,15 @@ pub fn parse_transactions(text: &str) -> Result<Vec<TxRow>, CodecError> {
         let date = DateTime::parse_from_rfc3339(date_raw)
             .map_err(|_| CodecError::Date { id: id.clone(), value: date_raw.to_string() })?;
 
-        let parse_money = |idx: usize| -> Result<Money, CodecError> {
+        // `Money::parse_rounding`, not the strict `FromStr`: legacy data
+        // written before `Money` existed carries f64-precision noise like
+        // "14.620000000000001", which means 1462 cents and nothing else.
+        // Rejecting it on this read path would refuse the user's own history
+        // over a rendering artifact, not a real ambiguity. `rounded` is
+        // reported back rather than absorbed — see `ParsedTransactions`.
+        let parse_money = |idx: usize| -> Result<(Money, bool), CodecError> {
             let raw = r.get(idx).unwrap_or_default();
-            raw.parse::<Money>()
+            Money::parse_rounding(raw)
                 .map_err(|_| CodecError::Money { id: id.clone(), value: raw.to_string() })
         };
 
@@ -57,18 +79,24 @@ pub fn parse_transactions(text: &str) -> Result<Vec<TxRow>, CodecError> {
             _ => return Err(CodecError::Type { id, value: type_raw.to_string() }),
         };
 
+        let (amount, amount_rounded) = parse_money(4)?;
+        let (balance, balance_rounded) = parse_money(5)?;
+        if amount_rounded || balance_rounded {
+            rows_rounded += 1;
+        }
+
         rows.push(TxRow {
             id: id.clone(),
             child_id: r.get(1).unwrap_or_default().to_string(),
             date,
             description: r.get(3).unwrap_or_default().to_string(),
-            amount: parse_money(4)?,
-            balance: parse_money(5)?,
+            amount,
+            balance,
             tx_type,
         });
     }
     rows.sort_by(|a, b| a.sort_key().cmp(&b.sort_key()));
-    Ok(rows)
+    Ok(ParsedTransactions { rows, rows_rounded })
 }
 
 /// Always emits canonical order and canonical money. This is the only writer;
@@ -105,7 +133,7 @@ in-1-a,keiko,2026-01-01T00:00:00+00:00,Allowance,10.00,10.00,allowance\n";
 
     #[test]
     fn parse_then_render_is_canonically_ordered() {
-        let rows = parse_transactions(CSV).unwrap();
+        let rows = parse_transactions(CSV).unwrap().rows;
         let out = render_transactions(&rows);
         let ids: Vec<&str> = out.lines().skip(1).map(|l| l.split(',').next().unwrap()).collect();
         assert_eq!(ids, vec!["in-1-a", "ex-2-b"], "output must be sorted by (date, id)");
@@ -113,14 +141,14 @@ in-1-a,keiko,2026-01-01T00:00:00+00:00,Allowance,10.00,10.00,allowance\n";
 
     #[test]
     fn render_is_byte_stable_across_a_round_trip() {
-        let once = render_transactions(&parse_transactions(CSV).unwrap());
-        let twice = render_transactions(&parse_transactions(&once).unwrap());
+        let once = render_transactions(&parse_transactions(CSV).unwrap().rows);
+        let twice = render_transactions(&parse_transactions(&once).unwrap().rows);
         assert_eq!(once, twice, "render(parse(x)) must be a fixed point");
     }
 
     #[test]
     fn money_renders_with_exactly_two_decimals() {
-        let out = render_transactions(&parse_transactions(CSV).unwrap());
+        let out = render_transactions(&parse_transactions(CSV).unwrap().rows);
         assert!(out.contains(",10.00,10.00,"), "got: {out}");
         assert!(out.contains(",-5.50,4.50,"), "got: {out}");
     }
@@ -149,5 +177,24 @@ x,keiko,2026-01-01T00:00:00+00:00,d,1.00,1.00,rebate\n";
         // Derivation would silently downgrade a row an older app does not know,
         // and then push it. Refuse instead.
         assert!(parse_transactions(future).is_err());
+    }
+
+    #[test]
+    fn legacy_f64_precision_is_rounded_not_refused_and_the_count_is_reported() {
+        let legacy = "id,child_id,date,description,amount,balance,type\n\
+x,keiko,2026-01-01T00:00:00+00:00,d,1.00,14.620000000000001,expense\n\
+y,keiko,2026-01-02T00:00:00+00:00,d,2.00,4.00,expense\n";
+        let parsed = parse_transactions(legacy).unwrap();
+        assert_eq!(parsed.rows_rounded, 1, "only the row with excess precision counts");
+        let row = parsed.rows.iter().find(|r| r.id == "x").unwrap();
+        assert_eq!(row.balance, Money::from_cents(1462));
+    }
+
+    #[test]
+    fn a_row_rounded_on_both_amount_and_balance_still_counts_once() {
+        let legacy = "id,child_id,date,description,amount,balance,type\n\
+x,keiko,2026-01-01T00:00:00+00:00,d,1.005,14.620000000000001,expense\n";
+        let parsed = parse_transactions(legacy).unwrap();
+        assert_eq!(parsed.rows_rounded, 1);
     }
 }

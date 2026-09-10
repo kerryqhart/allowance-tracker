@@ -27,28 +27,38 @@ impl Money {
 #[error("not a valid money value: {0}")]
 pub struct MoneyParseError(String);
 
+/// Sign/whole/fraction scanning shared by the strict `FromStr` and the
+/// rounding `parse_rounding`. Trims, strips an optional sign, splits on `.`,
+/// and validates every remaining character is a digit — everything both
+/// parsers need in common. `FromStr` additionally rejects `frac.len() > 2`;
+/// `parse_rounding` does not, and rounds instead.
+fn scan(s: &str) -> Result<(bool, &str, &str), MoneyParseError> {
+    let trimmed = s.trim();
+    let (neg, digits) = match trimmed.strip_prefix('-') {
+        Some(rest) => (true, rest),
+        None => (false, trimmed.strip_prefix('+').unwrap_or(trimmed)),
+    };
+    let (whole, frac) = match digits.split_once('.') {
+        Some((w, f)) => (w, f),
+        None => (digits, ""),
+    };
+    if whole.is_empty() && frac.is_empty() {
+        return Err(MoneyParseError(s.to_string()));
+    }
+    if !whole.chars().all(|c| c.is_ascii_digit())
+        || !frac.chars().all(|c| c.is_ascii_digit())
+    {
+        return Err(MoneyParseError(s.to_string()));
+    }
+    Ok((neg, whole, frac))
+}
+
 impl FromStr for Money {
     type Err = MoneyParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let s = s.trim();
-        let (neg, digits) = match s.strip_prefix('-') {
-            Some(rest) => (true, rest),
-            None => (false, s.strip_prefix('+').unwrap_or(s)),
-        };
-        let (whole, frac) = match digits.split_once('.') {
-            Some((w, f)) => (w, f),
-            None => (digits, ""),
-        };
-        if whole.is_empty() && frac.is_empty() {
-            return Err(MoneyParseError(s.to_string()));
-        }
+        let (neg, whole, frac) = scan(s)?;
         if frac.len() > 2 {
-            return Err(MoneyParseError(s.to_string()));
-        }
-        if !whole.chars().all(|c| c.is_ascii_digit())
-            || !frac.chars().all(|c| c.is_ascii_digit())
-        {
             return Err(MoneyParseError(s.to_string()));
         }
         let whole: i64 = if whole.is_empty() { 0 } else {
@@ -65,6 +75,60 @@ impl FromStr for Money {
             .and_then(|w| w.checked_add(frac_cents))
             .ok_or_else(|| MoneyParseError(s.to_string()))?;
         Ok(Money(if neg { -total } else { total }))
+    }
+}
+
+/// Round a fractional-digit string (digits only, arbitrary length) to whole
+/// cents (0..=100). Round half away from zero: the sign is applied by the
+/// caller, so this only ever reasons about magnitude.
+///
+/// `100` is a valid result — e.g. "995" rounds up to a full cent's carry —
+/// and the caller must fold it into the whole part.
+///
+/// Deliberately does not convert the whole fractional string to an integer:
+/// `"620000000000000001"` (18 digits, an f64 artifact) would overflow `i64`
+/// long before reaching a decimal point. Only the first two digits (the cent
+/// value) and the third (which alone decides round up vs. down, since any
+/// digit at or past position three that is `>= 5` cannot make the true
+/// remainder smaller) are ever inspected.
+fn round_frac_to_cents(frac: &str) -> (i64, bool) {
+    if frac.len() <= 2 {
+        if frac.is_empty() {
+            return (0, false);
+        }
+        // Pad a single digit: "5" means 50 cents, not 5.
+        let cents = format!("{frac:0<2}").parse::<i64>().expect("validated digits");
+        return (cents, false);
+    }
+    let base: i64 = frac[..2].parse().expect("validated digits");
+    let round_up = frac.as_bytes()[2] >= b'5';
+    (if round_up { base + 1 } else { base }, true)
+}
+
+impl Money {
+    /// Parse a decimal string, rounding to the nearest cent.
+    ///
+    /// Returns the value and whether rounding was needed. The strict
+    /// `FromStr` refuses more than two decimal places on purpose; this is the
+    /// read path for legacy data written before `Money` existed, where
+    /// `f64::to_string()` left noise like `"14.620000000000001"` that means
+    /// 1462 cents and nothing else — rejecting it on the read path would be
+    /// wrong, since the value never claimed sub-cent precision.
+    pub fn parse_rounding(s: &str) -> Result<(Money, bool), MoneyParseError> {
+        let (neg, whole, frac) = scan(s)?;
+        let mut whole: i64 = if whole.is_empty() { 0 } else {
+            whole.parse().map_err(|_| MoneyParseError(s.to_string()))?
+        };
+        let (mut frac_cents, rounded) = round_frac_to_cents(frac);
+        if frac_cents == 100 {
+            whole = whole.checked_add(1).ok_or_else(|| MoneyParseError(s.to_string()))?;
+            frac_cents = 0;
+        }
+        let total = whole
+            .checked_mul(100)
+            .and_then(|w| w.checked_add(frac_cents))
+            .ok_or_else(|| MoneyParseError(s.to_string()))?;
+        Ok((Money(if neg { -total } else { total }), rounded))
     }
 }
 
@@ -132,6 +196,51 @@ mod tests {
     #[test]
     fn rejects_more_precision_than_cents() {
         assert!("5.005".parse::<Money>().is_err());
+    }
+
+    #[test]
+    fn parse_rounding_normalizes_an_f64_precision_artifact() {
+        // The exact shape left by f64::to_string() on legacy data: means 1462
+        // cents and nothing else, not a claim to sub-cent precision.
+        assert_eq!(
+            Money::parse_rounding("14.620000000000001").unwrap(),
+            (Money::from_cents(1462), true)
+        );
+    }
+
+    #[test]
+    fn parse_rounding_rounds_half_away_from_zero() {
+        assert_eq!(Money::parse_rounding("5.005").unwrap(), (Money::from_cents(501), true));
+        assert_eq!(Money::parse_rounding("-5.005").unwrap(), (Money::from_cents(-501), true));
+    }
+
+    #[test]
+    fn parse_rounding_does_not_flag_a_value_already_at_two_decimals() {
+        assert_eq!(Money::parse_rounding("5.50").unwrap(), (Money::from_cents(550), false));
+    }
+
+    #[test]
+    fn parse_rounding_carries_a_rounded_99_into_the_next_cent() {
+        // 0.995 rounds to 1.00, not 0.100 — the carry must reach the whole part.
+        assert_eq!(Money::parse_rounding("0.995").unwrap(), (Money::from_cents(100), true));
+    }
+
+    #[test]
+    fn parse_rounding_overflow_still_returns_err() {
+        assert!(Money::parse_rounding("922337203685477581").is_err());
+        // A carry (rounding 99 -> 100) that then overflows the whole part.
+        let carries_over = format!("{}.995", i64::MAX);
+        assert!(Money::parse_rounding(&carries_over).is_err());
+    }
+
+    #[test]
+    fn strict_fromstr_and_parse_rounding_disagree_on_purpose() {
+        // The two parsers must stay distinct: strict FromStr is the write-path
+        // contract (exactly two decimals or fewer), parse_rounding is the
+        // legacy read-path escape hatch. Neither should quietly grow into the
+        // other's job.
+        assert!("5.005".parse::<Money>().is_err());
+        assert!(Money::parse_rounding("5.005").is_ok());
     }
 
     #[test]
