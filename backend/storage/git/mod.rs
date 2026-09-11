@@ -184,6 +184,64 @@ impl GitManager {
         Ok(commit_id.to_string())
     }
 
+    /// Create a merge commit (or an ordinary commit, when given a single
+    /// parent) from the current index, using the injected clock for both
+    /// author and committer.
+    ///
+    /// One commit, not two: a separate recompute commit would produce a tree
+    /// that never satisfies the merge's fixed-point property.
+    ///
+    /// `self.signature()` (not `Signature::now()`) governs the committer
+    /// timestamp here specifically so tests can construct committer-
+    /// timestamp TIES — the only way to exercise the merge's
+    /// tie-break-by-oid branch. Building this on `GitManager` rather than as
+    /// a free function (like `fetch_lgs`/`push_lgs`) is what lets it reuse
+    /// that private clock plumbing instead of duplicating it.
+    pub fn commit_merge(
+        &self,
+        repo_path: &Path,
+        message: &str,
+        parents: &[&str],
+    ) -> Result<String> {
+        if parents.is_empty() {
+            anyhow::bail!("commit_merge requires at least one parent commit; a zero-parent call would silently create a root commit");
+        }
+
+        debug!("Creating merge commit in repository: {:?} with {} parent(s)", repo_path, parents.len());
+
+        let repo = Repository::open(repo_path)?;
+        let signature = self.signature()?;
+
+        // Stage the current working state so the merge commit's tree
+        // reflects it, not whatever was left in the index from an earlier
+        // operation.
+        let mut index = repo.index()?;
+        index.add_all(["*"].iter(), IndexAddOption::DEFAULT, None)?;
+        index.write()?;
+        let tree_id = index.write_tree()?;
+        let tree = repo.find_tree(tree_id)?;
+
+        let parent_commits: Vec<git2::Commit> = parents
+            .iter()
+            .map(|oid_str| -> Result<git2::Commit> {
+                let oid = git2::Oid::from_str(oid_str)?;
+                Ok(repo.find_commit(oid)?)
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let parent_refs: Vec<&git2::Commit> = parent_commits.iter().collect();
+
+        let commit_id = repo.commit(
+            Some("HEAD"),
+            &signature,
+            &signature,
+            message,
+            &tree,
+            &parent_refs,
+        )?;
+
+        Ok(commit_id.to_string())
+    }
+
     /// Check if repository has uncommitted changes
     pub fn has_uncommitted_changes<P: AsRef<Path>>(&self, repo_path: P) -> Result<bool> {
         let repo_path = repo_path.as_ref();
@@ -590,5 +648,85 @@ mod tests {
 
         let head_commit = cloned.head().unwrap().peel_to_commit().unwrap();
         assert_eq!(head_commit.id(), oid);
+    }
+
+    #[test]
+    fn commit_merge_creates_a_two_parent_merge_commit_with_the_injected_timestamp() {
+        let dir = tempfile::tempdir().unwrap();
+        let gm = GitManager::with_clock(|| 1_700_000_500);
+        gm.init_repo(dir.path()).unwrap();
+
+        std::fs::write(dir.path().join("f1.txt"), "one").unwrap();
+        gm.add_all(dir.path()).unwrap();
+        let parent1 = gm.commit(dir.path(), "first parent").unwrap();
+
+        // A second, unrelated commit object to act as the other merge parent
+        // (as if it were the peer's tip fetched via refs/lgs-auth/*).
+        let repo = git2::Repository::open(dir.path()).unwrap();
+        let parent2_oid = commit_empty_tree(&repo, "second parent", &[]);
+        let parent2 = parent2_oid.to_string();
+
+        // The file the merge is expected to actually commit, proving the
+        // resulting tree reflects working state rather than being empty.
+        std::fs::write(dir.path().join("merged.txt"), "merged content").unwrap();
+
+        let merge_oid = gm
+            .commit_merge(dir.path(), "merge commit", &[&parent1, &parent2])
+            .unwrap();
+
+        let repo = git2::Repository::open(dir.path()).unwrap();
+        let commit = repo
+            .find_commit(git2::Oid::from_str(&merge_oid).unwrap())
+            .unwrap();
+
+        assert_eq!(commit.parent_count(), 2);
+        let parent_ids: std::collections::HashSet<String> =
+            commit.parent_ids().map(|id| id.to_string()).collect();
+        assert!(parent_ids.contains(&parent1));
+        assert!(parent_ids.contains(&parent2));
+
+        // The property Task 15's tie-break tests depend on: the committer
+        // timestamp comes from the injected clock, not wall-clock time.
+        assert_eq!(commit.committer().when().seconds(), 1_700_000_500);
+
+        let tree = commit.tree().unwrap();
+        let entry = tree
+            .get_name("merged.txt")
+            .expect("merge commit's tree must contain the file written before the call");
+        let blob = repo.find_blob(entry.id()).unwrap();
+        assert_eq!(blob.content(), b"merged content");
+    }
+
+    #[test]
+    fn commit_merge_with_a_single_parent_behaves_like_an_ordinary_commit() {
+        let dir = tempfile::tempdir().unwrap();
+        let gm = GitManager::with_clock(|| 1_700_000_600);
+        gm.init_repo(dir.path()).unwrap();
+
+        std::fs::write(dir.path().join("f1.txt"), "one").unwrap();
+        gm.add_all(dir.path()).unwrap();
+        let parent1 = gm.commit(dir.path(), "first").unwrap();
+
+        std::fs::write(dir.path().join("f2.txt"), "two").unwrap();
+        let oid = gm.commit_merge(dir.path(), "second", &[&parent1]).unwrap();
+
+        let repo = git2::Repository::open(dir.path()).unwrap();
+        let commit = repo.find_commit(git2::Oid::from_str(&oid).unwrap()).unwrap();
+        assert_eq!(commit.parent_count(), 1);
+        assert_eq!(commit.parent_id(0).unwrap().to_string(), parent1);
+    }
+
+    #[test]
+    fn commit_merge_with_zero_parents_errors_rather_than_creating_a_root_commit() {
+        let dir = tempfile::tempdir().unwrap();
+        let gm = GitManager::new();
+        gm.init_repo(dir.path()).unwrap();
+        std::fs::write(dir.path().join("f.txt"), "x").unwrap();
+
+        let result = gm.commit_merge(dir.path(), "no parents", &[]);
+        assert!(
+            result.is_err(),
+            "zero parents must error, not silently create a root commit"
+        );
     }
 }
