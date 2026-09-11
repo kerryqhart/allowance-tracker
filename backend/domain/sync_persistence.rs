@@ -1,3 +1,4 @@
+use crate::backend::sync::bootstrap::DaemonOwnership;
 use anyhow::Result;
 use shared::sync::SyncEvent;
 use serde::{Deserialize, Serialize};
@@ -12,6 +13,13 @@ pub struct SyncState {
     pub enabled: bool,
     /// Remote service URL.
     pub remote_url: Option<String>,
+    /// Whether this Mac's lgs daemon is one the app installed, or one it
+    /// found already running and adopted. `#[serde(default)]` so a
+    /// `sync_state.yaml` written before this field existed keeps loading —
+    /// it comes back as `installed_by_app: false`, the safe assumption for a
+    /// daemon this app has no record of installing.
+    #[serde(default)]
+    pub daemon_ownership: DaemonOwnership,
 }
 
 impl SyncState {
@@ -124,5 +132,40 @@ mod tests {
 
         let queue = RetryQueue::load(&path).unwrap();
         assert!(queue.events.is_empty());
+    }
+
+    #[test]
+    fn daemon_ownership_round_trips_through_sync_state_yaml() {
+        let dir = TempDir::new().unwrap();
+        let path = sync_state_path(dir.path());
+
+        let mut state = SyncState::default();
+        state.daemon_ownership = DaemonOwnership { installed_by_app: true };
+        state.save(&path).unwrap();
+
+        let loaded = SyncState::load(&path).unwrap();
+        assert!(loaded.daemon_ownership.installed_by_app);
+    }
+
+    /// A `sync_state.yaml` written before `daemon_ownership` existed must
+    /// still load — this is exactly what `#[serde(default)]` on the field is
+    /// for, proved here with a literal YAML string that omits the key
+    /// entirely rather than by round-tripping a value we just wrote.
+    #[test]
+    fn an_existing_sync_state_yaml_without_daemon_ownership_still_loads() {
+        let dir = TempDir::new().unwrap();
+        let path = sync_state_path(dir.path());
+
+        let legacy_yaml = "watermarks: {child1: 42}\nenabled: true\nremote_url: http://localhost:3030\n";
+        std::fs::write(&path, legacy_yaml).unwrap();
+
+        let loaded = SyncState::load(&path).unwrap();
+        assert!(loaded.enabled);
+        assert_eq!(loaded.remote_url.as_deref(), Some("http://localhost:3030"));
+        assert_eq!(*loaded.watermarks.get("child1").unwrap(), 42);
+        assert!(
+            !loaded.daemon_ownership.installed_by_app,
+            "a pre-existing file with no daemon_ownership key must default to installed_by_app: false"
+        );
     }
 }

@@ -1,3 +1,4 @@
+use crate::backend::sync::lgs_client::{DaemonState, LgsClient};
 use crate::backend::sync::paths::SyncPaths;
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
@@ -91,6 +92,91 @@ fn bundled_lgs_path() -> Result<PathBuf> {
         .collect::<Vec<_>>()
         .join(", ");
     anyhow::bail!("bundled lgs binary not found; tried: {tried}")
+}
+
+/// Whether this Mac's `lgs` daemon is one the app installed, or one it found
+/// already running and adopted.
+///
+/// This is the record that keeps "adopt, don't reinstall" from becoming a
+/// trap: the bundled `lgs` CLI advances with every app release, an adopted
+/// daemon never does, so `outdated` would become the permanent steady state
+/// for it — and because the app refuses to report a project as backed up
+/// while `outdated` holds (see [`crate::backend::sync::lgs_client::StatusReport::durability_data_is_fresh`]),
+/// the app would never report a project as backed up again. Recording
+/// ownership is what lets the app upgrade a daemon it installed while never
+/// touching one it did not.
+///
+/// `#[serde(default)]` on every field using this type keeps an existing
+/// `sync_state.yaml` (written before this field existed) loading as
+/// `installed_by_app: false` — the safe default, since a daemon this app has
+/// no memory of installing must be treated as adopted, not owned.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct DaemonOwnership {
+    pub installed_by_app: bool,
+}
+
+/// What to do about the daemon, decided from its reported state and whether
+/// this app owns it.
+#[derive(Debug, PartialEq, Eq)]
+pub enum DaemonAction {
+    /// Healthy; nothing to do.
+    None,
+    /// Outdated, but ours — restart it to pick up the bundled binary.
+    Restart,
+    /// Outdated, in error, or in an unrecognized state, and not ours (or we
+    /// cannot tell) — tell the user rather than act on a daemon we don't
+    /// manage.
+    ReportSkew,
+    /// No daemon running at all — install ours and take ownership.
+    InstallAndOwn,
+}
+
+/// Only a daemon this app installed should ever be upgraded.
+pub fn should_upgrade(o: &DaemonOwnership) -> bool {
+    o.installed_by_app
+}
+
+/// Decide what to do about the daemon from its reported state and ownership.
+///
+/// `Down` always installs — there is nothing running to disturb. `Outdated`
+/// is the case ownership exists for: restart it if we installed it, report
+/// skew otherwise. `Error` and `Unknown` both route to `ReportSkew` — when we
+/// cannot tell what is going on, we report rather than act.
+pub fn plan_daemon_action(state: DaemonState, owner: &DaemonOwnership) -> DaemonAction {
+    match state {
+        DaemonState::Ok => DaemonAction::None,
+        DaemonState::Down => DaemonAction::InstallAndOwn,
+        // Someone else's daemon is not ours to restart or overwrite.
+        DaemonState::Outdated if owner.installed_by_app => DaemonAction::Restart,
+        DaemonState::Outdated => DaemonAction::ReportSkew,
+        DaemonState::Error | DaemonState::Unknown => DaemonAction::ReportSkew,
+    }
+}
+
+/// `lgs install-service` writes the plist and then PRINTS the launchctl
+/// commands for a human to run — nothing loads and nothing starts until the
+/// next login. We run them ourselves, or first run hands a non-technical user
+/// a plist, no daemon, no clone URL, and a terminal command as the remedy.
+pub fn install_and_start(lgs: &LgsClient) -> Result<()> {
+    lgs.run(&["install-service"])?;
+    let uid = Command::new("id").arg("-u").output().context("running id -u")?;
+    let uid = String::from_utf8_lossy(&uid.stdout).trim().to_string();
+    let plist = dirs::home_dir()
+        .unwrap_or_default()
+        .join("Library/LaunchAgents/com.local-git-sync.daemon.plist");
+    let _ = Command::new("launchctl")
+        .args(["bootstrap", &format!("gui/{uid}"), &plist.to_string_lossy()])
+        .output();
+    let st = Command::new("launchctl")
+        .args(["kickstart", &format!("gui/{uid}/com.local-git-sync.daemon")])
+        .output()
+        .context("running launchctl kickstart")?;
+    anyhow::ensure!(
+        st.status.success(),
+        "launchctl kickstart failed: {}",
+        String::from_utf8_lossy(&st.stderr)
+    );
+    Ok(())
 }
 
 #[cfg(test)]
@@ -253,6 +339,72 @@ mod tests {
             assert!(
                 message.contains(&formatted),
                 "error message must name {formatted}; got: {message}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_adopted_daemon_is_never_upgraded() {
+        // "Adopt, don't reinstall" alone strands the daemon: the bundled CLI
+        // advances every release, `outdated` becomes permanent, and because we
+        // refuse to claim backed-up while outdated holds, the app would never
+        // report a project as backed up again. So we only upgrade what we own.
+        let mut ownership = DaemonOwnership { installed_by_app: false };
+        assert!(!should_upgrade(&ownership));
+        ownership.installed_by_app = true;
+        assert!(should_upgrade(&ownership));
+    }
+
+    #[test]
+    fn an_adopted_daemon_below_the_floor_is_reported_not_replaced() {
+        let action = plan_daemon_action(DaemonState::Outdated, &DaemonOwnership { installed_by_app: false });
+        assert_eq!(action, DaemonAction::ReportSkew);
+    }
+
+    #[test]
+    fn our_own_outdated_daemon_gets_restarted() {
+        let action = plan_daemon_action(DaemonState::Outdated, &DaemonOwnership { installed_by_app: true });
+        assert_eq!(action, DaemonAction::Restart);
+    }
+
+    #[test]
+    fn no_daemon_means_install_and_take_ownership() {
+        let action = plan_daemon_action(DaemonState::Down, &DaemonOwnership { installed_by_app: false });
+        assert_eq!(action, DaemonAction::InstallAndOwn);
+    }
+
+    /// The full decision table: all five [`DaemonState`] variants crossed with
+    /// both ownership values. This is a decision table, not a handful of
+    /// spot checks, and deserves to be tested as one — every cell pinned so a
+    /// future edit to `plan_daemon_action`'s `match` cannot silently change a
+    /// cell nothing else here happens to exercise.
+    #[test]
+    fn daemon_action_decision_table_covers_every_state_and_ownership() {
+        let owned = DaemonOwnership { installed_by_app: true };
+        let adopted = DaemonOwnership { installed_by_app: false };
+
+        let cases: Vec<(DaemonState, &DaemonOwnership, DaemonAction)> = vec![
+            // state              owner     expected action
+            (DaemonState::Ok, &owned, DaemonAction::None),
+            (DaemonState::Ok, &adopted, DaemonAction::None),
+            (DaemonState::Down, &owned, DaemonAction::InstallAndOwn),
+            (DaemonState::Down, &adopted, DaemonAction::InstallAndOwn),
+            (DaemonState::Outdated, &owned, DaemonAction::Restart),
+            (DaemonState::Outdated, &adopted, DaemonAction::ReportSkew),
+            (DaemonState::Error, &owned, DaemonAction::ReportSkew),
+            (DaemonState::Error, &adopted, DaemonAction::ReportSkew),
+            (DaemonState::Unknown, &owned, DaemonAction::ReportSkew),
+            (DaemonState::Unknown, &adopted, DaemonAction::ReportSkew),
+        ];
+
+        assert_eq!(cases.len(), 10, "must cover all 5 states x 2 ownership values");
+
+        for (state, owner, expected) in cases {
+            let actual = plan_daemon_action(state, owner);
+            assert_eq!(
+                actual, expected,
+                "state={state:?} installed_by_app={} expected={expected:?} actual={actual:?}",
+                owner.installed_by_app
             );
         }
     }

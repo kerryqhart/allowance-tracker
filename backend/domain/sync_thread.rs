@@ -1,5 +1,6 @@
 use shared::sync::*;
 use crate::backend::storage::remote::RemoteStorage;
+use crate::backend::sync::bootstrap::DaemonOwnership;
 use super::sync_manager::{SyncEngine, SyncMessage, SyncStatus, SyncCommand, UiMessenger, WakeUi};
 use super::sync_persistence::{self, SyncState, RetryQueue};
 use std::path::PathBuf;
@@ -39,10 +40,12 @@ impl SyncThreadHandle {
         }
         let retry_queue = RetryQueue { events: initial_retry_queue };
 
-        // Preserve the non-watermark fields of SyncState (enabled, remote_url) so
-        // that the persistence writes below don't clobber user configuration.
+        // Preserve the non-watermark fields of SyncState (enabled, remote_url,
+        // daemon_ownership) so that the persistence writes below don't clobber
+        // user configuration or forget which daemon this app installed.
         let sync_enabled = initial_sync_state.enabled;
         let sync_remote_url = initial_sync_state.remote_url.clone();
+        let daemon_ownership = initial_sync_state.daemon_ownership.clone();
 
         let messenger = UiMessenger::new(message_tx, wake_ui);
 
@@ -59,6 +62,7 @@ impl SyncThreadHandle {
                     data_dir,
                     sync_enabled,
                     sync_remote_url,
+                    daemon_ownership,
                     shutdown_flag,
                 );
             })
@@ -96,6 +100,7 @@ fn sync_loop(
     data_dir: PathBuf,
     sync_enabled: bool,
     sync_remote_url: Option<String>,
+    daemon_ownership: DaemonOwnership,
     shutdown: Arc<AtomicBool>,
 ) {
     loop {
@@ -175,6 +180,7 @@ fn sync_loop(
             watermarks: engine.watermarks_snapshot(),
             enabled: sync_enabled,
             remote_url: sync_remote_url.clone(),
+            daemon_ownership: daemon_ownership.clone(),
         };
         let _ = sync_state.save(&sync_persistence::sync_state_path(&data_dir));
         let _ = retry_queue.save(&sync_persistence::retry_queue_path(&data_dir));
@@ -478,6 +484,7 @@ mod tests {
             watermarks: initial_watermarks,
             enabled: true,
             remote_url: None,
+            daemon_ownership: DaemonOwnership::default(),
         };
 
         let mut handle = SyncThreadHandle::spawn(
