@@ -81,9 +81,11 @@ fn wait_for_auth_tip(
     });
     if !converged {
         panic!(
-            "{auth_ref} never converged on {expected} within {timeout:?} (retried `lgs sync {project}` \
-             on both machines each round); last observed value there: {last_seen:?} (None means the ref \
-             never appeared at all)"
+            "{auth_ref} never converged on {expected} within {timeout:?} (via `sync_both_ways`'s two \
+             confirmed phases: retried `lgs sync {project}` on the publisher alone until its own status \
+             reported backed_up, then on the ingester alone until this condition held); last observed \
+             value there: {last_seen:?} (None means the ref never appeared at all — either phase 1 never \
+             confirmed the publisher's commit landed, or phase 2 ran but the ref never showed up)"
         );
     }
     expected
