@@ -29,7 +29,11 @@ use eframe::egui;
 use crate::ui::app_state::AllowanceTrackerApp;
 use crate::ui::components::styling::{setup_kid_friendly_style, draw_image_background};
 use crate::backend::domain::{SyncCommand, SyncMessage, SyncStatus};
+use crate::backend::storage::git::push_lgs;
+use crate::backend::storage::GitManager;
+use crate::backend::sync::child_sync::goals_diverged;
 use shared::sync::EntityType;
+use shared::ChildId;
 
 /// Guard for the AWS-wire chokepoint in `read_entity_for_sync`: that path
 /// serializes the RAW domain `Transaction` directly (it never goes through
@@ -512,6 +516,9 @@ impl AllowanceTrackerApp {
                     self.sync.conflicts.push(conflict);
                     self.sync.status = SyncStatus::HasConflicts(self.sync.pending_conflict_count());
                 }
+                SyncMessage::ApplyMerge { child_id, rows, parents, decisions } => {
+                    local_state_dirty |= self.apply_merge(&child_id, rows, &parents, &decisions);
+                }
             }
         }
         // Rebuild once after draining, not once per entity during a bulk sync.
@@ -712,6 +719,122 @@ impl AllowanceTrackerApp {
                 }
             }
         }
+    }
+
+    /// Apply a merge computed off-thread by `ChildSyncEngine::cycle` (see
+    /// `backend/sync/child_sync.rs`). This is the ONE place `ApplyMerge`'s
+    /// working-tree mutation happens — on the UI thread, per the
+    /// architecture note at `sync_manager.rs:36-38` ("UI owns all repo
+    /// I/O"). `rows` already carries recomputed balances (`merge` calls
+    /// `recompute_running_balances` internally), so this writes them
+    /// verbatim rather than re-deriving anything.
+    ///
+    /// Returns whether local state should be reloaded (true on success).
+    fn apply_merge(
+        &mut self,
+        child_id: &str,
+        rows: Vec<allowance_core::row::TxRow>,
+        parents: &(String, String),
+        decisions: &[allowance_core::merge::Decision],
+    ) -> bool {
+        let id = ChildId::from(child_id);
+        let child_dir = match self.core.backend.csv_connection.child_dir(&id) {
+            Ok(dir) => dir,
+            Err(e) => {
+                log::error!("Cannot apply merge for child {child_id}: {e}");
+                return false;
+            }
+        };
+
+        let repo = match git2::Repository::open(&child_dir) {
+            Ok(repo) => repo,
+            Err(e) => {
+                log::error!("Cannot open repo for child {child_id} at {}: {e}", child_dir.display());
+                return false;
+            }
+        };
+
+        let (ours_str, theirs_str) = parents;
+        let (ours_oid, theirs_oid) = match (git2::Oid::from_str(ours_str), git2::Oid::from_str(theirs_str)) {
+            (Ok(o), Ok(t)) => (o, t),
+            _ => {
+                log::error!(
+                    "Cannot apply merge for child {child_id}: malformed parent oid(s) {ours_str}/{theirs_str}"
+                );
+                return false;
+            }
+        };
+
+        // `goals.csv` is out of scope for `allowance_core::merge` (it models
+        // no goal row — a known, recorded gap). A diverged goals.csv must
+        // never be silently resolved by picking a side: this cannot be
+        // fixed by choosing better code below (some byte content ends up in
+        // the merge commit's tree regardless, and it will be whatever is
+        // currently checked out — "ours"), so the requirement is to SAY SO
+        // loudly rather than let the merge look like a full, clean sync.
+        match goals_diverged(&repo, ours_oid, theirs_oid) {
+            Ok(true) => log::warn!(
+                "goals.csv diverged for child {child_id} between {ours_str} and {theirs_str}; \
+                 it was NOT merged and is being left exactly as it is locally. Any goal edits \
+                 made on the other machine are not reflected here and must be reconciled by hand."
+            ),
+            Ok(false) => {}
+            Err(e) => log::warn!(
+                "could not determine whether goals.csv diverged for child {child_id} \
+                 ({ours_str}/{theirs_str}): {e}"
+            ),
+        }
+
+        let csv = allowance_core::codec::render_transactions(&rows);
+        if let Err(e) = std::fs::write(child_dir.join("transactions.csv"), csv) {
+            log::error!("Failed to write merged transactions.csv for child {child_id}: {e}");
+            return false;
+        }
+
+        // Every non-trivial merge choice is logged with the child and both
+        // parent oids, so a surprising result is auditable after the fact —
+        // a row disappearing or resurrecting must never be silent.
+        for decision in decisions {
+            log::info!(
+                "[sync merge] child={child_id} parents=({ours_str}, {theirs_str}) decision={decision:?}"
+            );
+        }
+
+        let branch = match repo.head().ok().and_then(|h| h.shorthand().map(str::to_string)) {
+            Some(b) => b,
+            None => {
+                log::error!("Cannot determine checked-out branch for child {child_id}; merge commit not created");
+                return false;
+            }
+        };
+
+        let gm = GitManager::new();
+        let message = format!(
+            "sync: merge {} + {} ({} decision(s))",
+            &ours_str[..ours_str.len().min(7)],
+            &theirs_str[..theirs_str.len().min(7)],
+            decisions.len()
+        );
+        let merge_commit = match gm.commit_merge(&child_dir, &message, &[ours_str.as_str(), theirs_str.as_str()]) {
+            Ok(oid) => oid,
+            Err(e) => {
+                log::error!("Failed to create merge commit for child {child_id}: {e}");
+                return false;
+            }
+        };
+
+        if let Err(e) = push_lgs(&repo, &branch) {
+            // No retry queue is needed here: the merge commit is already on
+            // disk, durable, and the next sync cycle's push attempt carries
+            // it forward. Failing to push now must not be treated as
+            // failing to apply the merge.
+            log::warn!(
+                "Merge commit {merge_commit} created for child {child_id} but push to lgs failed \
+                 (will retry on the next cycle): {e}"
+            );
+        }
+
+        true
     }
 
     /// Refresh pending allowances if enough time has passed since last check

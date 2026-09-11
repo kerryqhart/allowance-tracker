@@ -56,6 +56,16 @@ pub enum SyncMessage {
         entity_id: String,
         event_id: String,
     },
+
+    /// A merge computed off-thread. The UI thread owns every byte in the
+    /// working tree (sync_manager.rs:36-38), so the background thread does
+    /// fetch/push only and hands the result over here.
+    ApplyMerge {
+        child_id: String,
+        rows: Vec<allowance_core::row::TxRow>,
+        parents: (String, String),
+        decisions: Vec<allowance_core::merge::Decision>,
+    },
 }
 
 impl std::fmt::Debug for SyncMessage {
@@ -98,6 +108,13 @@ impl std::fmt::Debug for SyncMessage {
                 .field("entity_type", entity_type)
                 .field("entity_id", entity_id)
                 .field("event_id", event_id)
+                .finish(),
+            SyncMessage::ApplyMerge { child_id, rows, parents, decisions } => f
+                .debug_struct("ApplyMerge")
+                .field("child_id", child_id)
+                .field("rows", &format_args!("<{} rows>", rows.len()))
+                .field("parents", parents)
+                .field("decisions", decisions)
                 .finish(),
         }
     }
