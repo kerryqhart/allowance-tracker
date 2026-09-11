@@ -31,7 +31,7 @@ use crate::ui::components::styling::{setup_kid_friendly_style, draw_image_backgr
 use crate::backend::domain::{SyncCommand, SyncMessage, SyncStatus};
 use crate::backend::storage::git::push_lgs;
 use crate::backend::storage::GitManager;
-use crate::backend::sync::child_sync::goals_diverged;
+use crate::backend::sync::child_sync::{current_branch, goals_diverged};
 use shared::sync::EntityType;
 use shared::ChildId;
 
@@ -58,6 +58,25 @@ fn transaction_is_syncable(
         ));
     }
     Ok(())
+}
+
+/// Outcome of [`AllowanceTrackerApp::apply_merge`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ApplyMergeOutcome {
+    /// The merge commit was created (a push was also attempted; a push
+    /// failure alone does not change this outcome — see the doc comment on
+    /// `apply_merge`).
+    Applied,
+    /// HEAD moved between `ChildSyncEngine::cycle` computing this merge and
+    /// this call applying it — an ordinary local write raced the background
+    /// sync. The merge was discarded rather than risk orphaning the commit
+    /// that moved HEAD; nothing was written or committed. The caller must
+    /// re-run the sync cycle from the new HEAD to pick this up.
+    StaleHead,
+    /// Anything else that stopped the merge being applied (I/O, malformed
+    /// input, a git failure). Logged and surfaced via `sync.status` at the
+    /// point of failure.
+    Failed,
 }
 
 impl eframe::App for AllowanceTrackerApp {
@@ -517,7 +536,9 @@ impl AllowanceTrackerApp {
                     self.sync.status = SyncStatus::HasConflicts(self.sync.pending_conflict_count());
                 }
                 SyncMessage::ApplyMerge { child_id, rows, parents, decisions } => {
-                    local_state_dirty |= self.apply_merge(&child_id, rows, &parents, &decisions);
+                    if self.apply_merge(&child_id, rows, &parents, &decisions) == ApplyMergeOutcome::Applied {
+                        local_state_dirty = true;
+                    }
                 }
             }
         }
@@ -729,20 +750,32 @@ impl AllowanceTrackerApp {
     /// `recompute_running_balances` internally), so this writes them
     /// verbatim rather than re-deriving anything.
     ///
-    /// Returns whether local state should be reloaded (true on success).
+    /// `parents.0` ("ours") is the HEAD `cycle()` computed this merge
+    /// against. HEAD can move between that computation (background thread)
+    /// and this call (UI thread) — an ordinary local write commits via
+    /// `commit_file_change` at any time in between. Applying a merge whose
+    /// base has gone stale would stage the merged CSV over that commit's
+    /// content and hand `commit_merge` two parents that do not include it,
+    /// orphaning it — the user's transaction would vanish with no error.
+    /// This is checked and refused before anything is written.
+    ///
+    /// Failures (and the goals.csv divergence notice) are routed through
+    /// `self.sync.status`, the same path `SyncMessage::Error` already uses
+    /// — not `log::` alone, which nobody using the app ever sees.
     fn apply_merge(
         &mut self,
         child_id: &str,
         rows: Vec<allowance_core::row::TxRow>,
         parents: &(String, String),
         decisions: &[allowance_core::merge::Decision],
-    ) -> bool {
+    ) -> ApplyMergeOutcome {
         let id = ChildId::from(child_id);
         let child_dir = match self.core.backend.csv_connection.child_dir(&id) {
             Ok(dir) => dir,
             Err(e) => {
                 log::error!("Cannot apply merge for child {child_id}: {e}");
-                return false;
+                self.sync.status = SyncStatus::Error(format!("Sync failed for {child_id}: {e}"));
+                return ApplyMergeOutcome::Failed;
             }
         };
 
@@ -750,18 +783,46 @@ impl AllowanceTrackerApp {
             Ok(repo) => repo,
             Err(e) => {
                 log::error!("Cannot open repo for child {child_id} at {}: {e}", child_dir.display());
-                return false;
+                self.sync.status =
+                    SyncStatus::Error(format!("Sync failed for {child_id}: could not open its repository"));
+                return ApplyMergeOutcome::Failed;
             }
         };
 
         let (ours_str, theirs_str) = parents;
+
+        // CRITICAL: refuse a merge computed against a HEAD that has since
+        // moved. See the doc comment above.
+        let current_head = match repo.head().and_then(|h| h.peel_to_commit()) {
+            Ok(c) => c.id().to_string(),
+            Err(e) => {
+                log::error!("Cannot read HEAD for child {child_id}: {e}");
+                self.sync.status =
+                    SyncStatus::Error(format!("Sync failed for {child_id}: could not read its current commit"));
+                return ApplyMergeOutcome::Failed;
+            }
+        };
+        if &current_head != ours_str {
+            log::warn!(
+                "Refusing to apply a merge for child {child_id}: HEAD moved from {ours_str} to \
+                 {current_head} since this merge was computed (a local write raced the sync \
+                 cycle). Discarding the stale merge — the local commit is untouched. The next \
+                 sync cycle will recompute the merge from the new HEAD."
+            );
+            self.sync.status = SyncStatus::Error(format!(
+                "{child_id}'s sync will retry — local changes were made while merging"
+            ));
+            return ApplyMergeOutcome::StaleHead;
+        }
+
         let (ours_oid, theirs_oid) = match (git2::Oid::from_str(ours_str), git2::Oid::from_str(theirs_str)) {
             (Ok(o), Ok(t)) => (o, t),
             _ => {
                 log::error!(
                     "Cannot apply merge for child {child_id}: malformed parent oid(s) {ours_str}/{theirs_str}"
                 );
-                return false;
+                self.sync.status = SyncStatus::Error(format!("Sync failed for {child_id}: malformed merge data"));
+                return ApplyMergeOutcome::Failed;
             }
         };
 
@@ -771,13 +832,19 @@ impl AllowanceTrackerApp {
         // fixed by choosing better code below (some byte content ends up in
         // the merge commit's tree regardless, and it will be whatever is
         // currently checked out — "ours"), so the requirement is to SAY SO
-        // loudly rather than let the merge look like a full, clean sync.
+        // loudly rather than let the merge look like a full, clean sync —
+        // loudly enough to reach the person whose goals did not sync, not
+        // just whoever reads the log.
         match goals_diverged(&repo, ours_oid, theirs_oid) {
-            Ok(true) => log::warn!(
-                "goals.csv diverged for child {child_id} between {ours_str} and {theirs_str}; \
-                 it was NOT merged and is being left exactly as it is locally. Any goal edits \
-                 made on the other machine are not reflected here and must be reconciled by hand."
-            ),
+            Ok(true) => {
+                let msg = format!(
+                    "{child_id}'s goals.csv diverged between machines and was NOT merged — it \
+                     was left exactly as it is here. Any goal edits made on the other machine \
+                     are not reflected and must be reconciled by hand."
+                );
+                log::warn!("{msg}");
+                self.sync.status = SyncStatus::Error(msg);
+            }
             Ok(false) => {}
             Err(e) => log::warn!(
                 "could not determine whether goals.csv diverged for child {child_id} \
@@ -788,7 +855,9 @@ impl AllowanceTrackerApp {
         let csv = allowance_core::codec::render_transactions(&rows);
         if let Err(e) = std::fs::write(child_dir.join("transactions.csv"), csv) {
             log::error!("Failed to write merged transactions.csv for child {child_id}: {e}");
-            return false;
+            self.sync.status =
+                SyncStatus::Error(format!("Sync failed for {child_id}: could not write merged transactions"));
+            return ApplyMergeOutcome::Failed;
         }
 
         // Every non-trivial merge choice is logged with the child and both
@@ -800,11 +869,13 @@ impl AllowanceTrackerApp {
             );
         }
 
-        let branch = match repo.head().ok().and_then(|h| h.shorthand().map(str::to_string)) {
-            Some(b) => b,
-            None => {
-                log::error!("Cannot determine checked-out branch for child {child_id}; merge commit not created");
-                return false;
+        let branch = match current_branch(&repo) {
+            Ok(b) => b,
+            Err(e) => {
+                log::error!("Cannot determine checked-out branch for child {child_id}: {e}");
+                self.sync.status =
+                    SyncStatus::Error(format!("Sync failed for {child_id}: could not determine its branch"));
+                return ApplyMergeOutcome::Failed;
             }
         };
 
@@ -819,7 +890,9 @@ impl AllowanceTrackerApp {
             Ok(oid) => oid,
             Err(e) => {
                 log::error!("Failed to create merge commit for child {child_id}: {e}");
-                return false;
+                self.sync.status =
+                    SyncStatus::Error(format!("Sync failed for {child_id}: could not create the merge commit"));
+                return ApplyMergeOutcome::Failed;
             }
         };
 
@@ -827,14 +900,15 @@ impl AllowanceTrackerApp {
             // No retry queue is needed here: the merge commit is already on
             // disk, durable, and the next sync cycle's push attempt carries
             // it forward. Failing to push now must not be treated as
-            // failing to apply the merge.
+            // failing to apply the merge, and must not touch the working
+            // tree or the commit just made.
             log::warn!(
                 "Merge commit {merge_commit} created for child {child_id} but push to lgs failed \
                  (will retry on the next cycle): {e}"
             );
         }
 
-        true
+        ApplyMergeOutcome::Applied
     }
 
     /// Refresh pending allowances if enough time has passed since last check
@@ -1236,5 +1310,297 @@ mod sync_guard_tests {
             transaction_is_syncable(&tx).is_ok(),
             "an ordinary, already-calculated balance must be syncable"
         );
+    }
+}
+
+/// Tests for `AllowanceTrackerApp::apply_merge` — the UI-thread half of
+/// `SyncMessage::ApplyMerge`. Everything here drives real git repos in
+/// tempdirs (created by the ordinary app write path, which git-initializes
+/// each child directory via `commit_file_change`) — no `lgs` binary, no
+/// daemon, no network, matching the same safety constraint the
+/// `child_sync` tests observe.
+#[cfg(test)]
+mod apply_merge_tests {
+    use super::{ApplyMergeOutcome, SyncStatus};
+    use crate::backend::domain::commands::child::{CreateChildCommand, SetActiveChildCommand};
+    use crate::backend::domain::commands::transactions::CreateTransactionCommand;
+    use crate::backend::Backend;
+    use crate::ui::app_state::AllowanceTrackerApp;
+    use allowance_core::money::Money;
+    use allowance_core::row::{TxRow, TxType};
+    use chrono::DateTime;
+    use git2::Repository;
+
+    /// Commit directly against a repository's object database — no working
+    /// tree or index touched — so this can plant a "peer's" commit that
+    /// never moves any ref, exactly mirroring what `ChildSyncEngine::cycle`
+    /// would have fetched into `refs/remotes/lgs-auth/main` without this
+    /// test needing a real remote at all.
+    fn commit_with_files(
+        repo: &Repository,
+        message: &str,
+        parents: &[&git2::Commit],
+        files: &[(&str, &str)],
+        timestamp: i64,
+    ) -> git2::Oid {
+        let sig =
+            git2::Signature::new("Test", "test@example.com", &git2::Time::new(timestamp, 0)).unwrap();
+        let mut builder = repo.treebuilder(None).unwrap();
+        for (name, content) in files {
+            let blob_id = repo.blob(content.as_bytes()).unwrap();
+            builder.insert(*name, blob_id, 0o100644).unwrap();
+        }
+        let tree_id = builder.write().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        repo.commit(None, &sig, &sig, message, &tree, parents).unwrap()
+    }
+
+    /// One child, with a real committed `transactions.csv` (an ordinary
+    /// transaction write initializes the git repo via `commit_file_change`,
+    /// same as production). Returns the app, the child id, and the tempdir
+    /// guard (must be held for the whole test).
+    fn app_with_git_backed_child() -> (AllowanceTrackerApp, String, tempfile::TempDir) {
+        let temp = tempfile::TempDir::new().expect("temp dir");
+        let backend = Backend::with_data_dir(temp.path().to_path_buf(), None).expect("backend");
+        let child = backend
+            .child_service
+            .create_child(CreateChildCommand {
+                name: "Test Kid".to_string(),
+                birthdate: "2015-01-01".to_string(),
+            })
+            .expect("create child")
+            .child;
+        backend
+            .child_service
+            .set_active_child(SetActiveChildCommand { child_id: child.id.clone() })
+            .expect("set active child");
+        backend
+            .transaction_service
+            .create_transaction(CreateTransactionCommand {
+                description: "Allowance".to_string(),
+                amount: 10.0,
+                date: None,
+            })
+            .expect("create transaction");
+        let app = AllowanceTrackerApp::new_for_test(backend);
+        (app, child.id, temp)
+    }
+
+    fn a_row(child_id: &str, id: &str, desc: &str, cents: i64) -> TxRow {
+        TxRow {
+            id: id.to_string(),
+            child_id: child_id.to_string(),
+            date: DateTime::parse_from_rfc3339("2026-01-01T00:00:00+00:00").unwrap(),
+            description: desc.to_string(),
+            amount: Money::from_cents(cents),
+            balance: Money::from_cents(cents),
+            tx_type: TxType::Allowance,
+        }
+    }
+
+    /// Important-3, bullet 1: a successful apply produces a real two-parent
+    /// commit whose tree holds exactly the merged CSV — not the pre-merge
+    /// content, not an empty tree.
+    #[test]
+    fn a_successful_apply_produces_a_two_parent_commit_holding_the_merged_csv() {
+        let (mut app, child_id, _temp) = app_with_git_backed_child();
+        let child_dir = app
+            .backend()
+            .csv_connection
+            .child_dir(&shared::ChildId::from(child_id.as_str()))
+            .unwrap();
+        let repo = Repository::open(&child_dir).unwrap();
+        let ours_oid = repo.head().unwrap().peel_to_commit().unwrap().id();
+        let ours_commit = repo.find_commit(ours_oid).unwrap();
+
+        // Simulates exactly what `cycle()` would have fetched as
+        // `refs/remotes/lgs-auth/main` — a commit that exists in the ODB
+        // but is reachable from no ref.
+        let theirs_oid = commit_with_files(
+            &repo,
+            "their edit",
+            &[&ours_commit],
+            &[("transactions.csv", "id,child_id,date,description,amount,balance,type\n")],
+            1_700_000_500,
+        );
+
+        let rows = vec![a_row(&child_id, "in-1-a", "Merged Allowance", 1000)];
+        let outcome = app.apply_merge(
+            &child_id,
+            rows.clone(),
+            &(ours_oid.to_string(), theirs_oid.to_string()),
+            &[],
+        );
+        assert_eq!(outcome, ApplyMergeOutcome::Applied);
+
+        let repo = Repository::open(&child_dir).unwrap();
+        let head_commit = repo.head().unwrap().peel_to_commit().unwrap();
+        assert_eq!(head_commit.parent_count(), 2, "must be a real two-parent merge commit");
+        let parent_ids: std::collections::HashSet<git2::Oid> = head_commit.parent_ids().collect();
+        assert!(parent_ids.contains(&ours_oid));
+        assert!(parent_ids.contains(&theirs_oid));
+
+        let tree = head_commit.tree().unwrap();
+        let entry = tree.get_path(std::path::Path::new("transactions.csv")).unwrap();
+        let blob = repo.find_blob(entry.id()).unwrap();
+        let content = std::str::from_utf8(blob.content()).unwrap();
+        assert_eq!(
+            content,
+            allowance_core::codec::render_transactions(&rows),
+            "the committed tree must hold exactly the merged rows, byte for byte"
+        );
+    }
+
+    /// Important-3, bullet 3 (folded into the same scenario as above): there
+    /// is no `lgs` remote configured for this repo, so `push_lgs` inside
+    /// `apply_merge` necessarily fails. The merge commit above was still
+    /// created correctly and the working tree was not corrupted by the
+    /// failed push — asserted here as its own test so a future change
+    /// cannot silently make push failure block or roll back the commit.
+    #[test]
+    fn a_push_failure_does_not_corrupt_the_working_tree_or_block_the_commit() {
+        let (mut app, child_id, _temp) = app_with_git_backed_child();
+        let child_dir = app
+            .backend()
+            .csv_connection
+            .child_dir(&shared::ChildId::from(child_id.as_str()))
+            .unwrap();
+        let repo = Repository::open(&child_dir).unwrap();
+        assert!(repo.find_remote("lgs").is_err(), "precondition: no lgs remote configured");
+        let ours_oid = repo.head().unwrap().peel_to_commit().unwrap().id();
+        let ours_commit = repo.find_commit(ours_oid).unwrap();
+        let theirs_oid = commit_with_files(
+            &repo,
+            "their edit",
+            &[&ours_commit],
+            &[("transactions.csv", "id,child_id,date,description,amount,balance,type\n")],
+            1_700_000_500,
+        );
+
+        let rows = vec![a_row(&child_id, "in-1-a", "Merged Allowance", 1000)];
+        let outcome =
+            app.apply_merge(&child_id, rows.clone(), &(ours_oid.to_string(), theirs_oid.to_string()), &[]);
+
+        // Push had nothing to push to and must have failed silently from the
+        // caller's point of view (logged, not fatal) — the apply itself
+        // still succeeded and the tree still holds the merged content.
+        assert_eq!(outcome, ApplyMergeOutcome::Applied);
+        let on_disk = std::fs::read_to_string(child_dir.join("transactions.csv")).unwrap();
+        assert_eq!(on_disk, allowance_core::codec::render_transactions(&rows));
+    }
+
+    /// Important-4 / goals.csv handling: the divergence must reach
+    /// `sync.status`, not just a log line nobody using the app ever sees.
+    #[test]
+    fn goals_csv_divergence_reaches_the_ui_via_sync_status() {
+        let (mut app, child_id, _temp) = app_with_git_backed_child();
+        let child_dir = app
+            .backend()
+            .csv_connection
+            .child_dir(&shared::ChildId::from(child_id.as_str()))
+            .unwrap();
+        let repo = Repository::open(&child_dir).unwrap();
+        let ours_oid = repo.head().unwrap().peel_to_commit().unwrap().id();
+        let ours_commit = repo.find_commit(ours_oid).unwrap();
+
+        // `theirs` carries a goals.csv that `ours` does not have at all --
+        // present on one side, absent on the other counts as diverged.
+        let theirs_oid = commit_with_files(
+            &repo,
+            "their edit",
+            &[&ours_commit],
+            &[
+                ("transactions.csv", "id,child_id,date,description,amount,balance,type\n"),
+                ("goals.csv", "id,child_id,description,target\ng1,x,Bike,100.00\n"),
+            ],
+            1_700_000_500,
+        );
+
+        let outcome =
+            app.apply_merge(&child_id, vec![], &(ours_oid.to_string(), theirs_oid.to_string()), &[]);
+        assert_eq!(outcome, ApplyMergeOutcome::Applied, "the transactions merge still succeeds");
+
+        match &app.sync.status {
+            SyncStatus::Error(msg) => {
+                assert!(msg.contains("goals.csv"), "status must name what diverged: {msg}");
+                assert!(msg.contains(&child_id), "status must name which child: {msg}");
+            }
+            other => panic!("expected the goals divergence to reach sync.status, got {other:?}"),
+        }
+    }
+
+    /// CRITICAL-2 regression: HEAD moved (an ordinary local write raced the
+    /// background sync) between when this merge's `parents.0` was computed
+    /// and this call applying it. Applying anyway would stage the merged
+    /// CSV over the interloping commit's content and hand `commit_merge`
+    /// two parents that do not include it — orphaning a real user
+    /// transaction with no error. This must be refused, not applied.
+    #[test]
+    fn refuses_a_merge_when_head_moved_since_it_was_computed() {
+        let (mut app, child_id, _temp) = app_with_git_backed_child();
+        let child_dir = app
+            .backend()
+            .csv_connection
+            .child_dir(&shared::ChildId::from(child_id.as_str()))
+            .unwrap();
+        let repo = Repository::open(&child_dir).unwrap();
+        // This is the HEAD `cycle()` would have seen and computed the merge
+        // against.
+        let ours_oid = repo.head().unwrap().peel_to_commit().unwrap().id();
+        let ours_commit = repo.find_commit(ours_oid).unwrap();
+        let theirs_oid = commit_with_files(
+            &repo,
+            "their edit",
+            &[&ours_commit],
+            &[("transactions.csv", "id,child_id,date,description,amount,balance,type\n")],
+            1_700_000_500,
+        );
+
+        // An ordinary local write races the sync cycle: HEAD advances past
+        // `ours_oid` before the already-computed merge is applied.
+        app.backend()
+            .transaction_service
+            .create_transaction(CreateTransactionCommand {
+                description: "Interloper".to_string(),
+                amount: 5.0,
+                date: None,
+            })
+            .expect("interloping transaction");
+
+        let repo_after = Repository::open(&child_dir).unwrap();
+        let interloper_head = repo_after.head().unwrap().peel_to_commit().unwrap().id();
+        assert_ne!(interloper_head, ours_oid, "precondition: HEAD must have moved");
+
+        let outcome = app.apply_merge(
+            &child_id,
+            vec![],
+            &(ours_oid.to_string(), theirs_oid.to_string()),
+            &[],
+        );
+        assert_eq!(outcome, ApplyMergeOutcome::StaleHead, "a stale-base merge must be refused");
+
+        // HEAD must be untouched: the interloping commit survives, not
+        // silently overwritten or orphaned by a merge commit that does not
+        // have it as a parent.
+        let repo_final = Repository::open(&child_dir).unwrap();
+        let final_head = repo_final.head().unwrap().peel_to_commit().unwrap().id();
+        assert_eq!(
+            final_head, interloper_head,
+            "the interloping commit must survive untouched — refusing must not rewrite HEAD"
+        );
+
+        // The interloper's transaction must still be present on disk — it
+        // was never overwritten by the stale merge's CSV.
+        let on_disk = std::fs::read_to_string(child_dir.join("transactions.csv")).unwrap();
+        assert!(
+            on_disk.contains("Interloper"),
+            "the interloping transaction must not have been overwritten: {on_disk}"
+        );
+
+        // The refusal must reach the UI, not just the log.
+        match &app.sync.status {
+            SyncStatus::Error(_) => {}
+            other => panic!("expected the stale-head refusal to be surfaced, got {other:?}"),
+        }
     }
 }

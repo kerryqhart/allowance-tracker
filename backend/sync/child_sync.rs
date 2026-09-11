@@ -43,7 +43,7 @@ use allowance_core::row::{Provenance, Sided, TxRow};
 use shared::ChildId;
 
 use crate::backend::storage::csv::CsvConnection;
-use crate::backend::storage::git::{ensure_lgs_remote, fetch_lgs};
+use crate::backend::storage::git::{ensure_lgs_remote, fetch_lgs, push_lgs};
 use crate::backend::sync::lgs_client::LgsClient;
 
 /// The ref the merge input is read from. See the module doc and
@@ -69,6 +69,24 @@ const TRANSACTIONS_FILE: &str = "transactions.csv";
 pub enum Cycle {
     UpToDate,
     FastForward,
+    /// We are strictly ahead of `auth` (`auth` is an ancestor of `ours`).
+    /// There is nothing to merge — the correct action is to push and stop.
+    ///
+    /// This is NOT a rare edge case. lgs's `reconcile` mirrors
+    /// `refs/lgs-auth/heads/<branch>` **unconditionally on every daemon
+    /// tick** (`local-git-sync/src/durability/engine.rs:458`) — `auth` is
+    /// simply "the last tip the daemon has published," not "the tip at the
+    /// last genuine divergence." Any ordinary local commit — a user adding
+    /// one transaction — puts `ours` ahead of whatever `auth` currently
+    /// reads. Treating that as `Diverged` would run an empty merge (the
+    /// `theirs` side is unchanged from `base`, so `merge` resolves to
+    /// `ours` verbatim) and create a new merge commit that leaves us one
+    /// commit further ahead — which classifies as `Diverged` again next
+    /// cycle, forever, for as long as a push is failing, the daemon is
+    /// down, or the cloud round-trip lags. That is an unbounded stream of
+    /// empty merge commits into the user's allowance history with no
+    /// brake except lgs eventually republishing our tip.
+    Ahead,
     Diverged,
 }
 
@@ -85,19 +103,20 @@ pub enum Cycle {
 ///   `FastForward`. This is equivalent to `auth` being a descendant of
 ///   `ours`: `git merge-base(ours, auth) == ours` exactly when `ours` is an
 ///   ancestor of `auth`.
-/// - Anything else -> `Diverged` (including the rare case where we are
-///   ahead of `auth` with no common history younger than the base — that
-///   drives a merge whose `theirs` side is unchanged from base, which
-///   resolves to `ours` unchanged; a safe no-op merge rather than a special
-///   case. In practice `refs/lgs-auth/*` is not written by lgs's `reconcile`
-///   unless a real divergence was detected, so this arm is not expected to
-///   fire on an ordinary "we are simply ahead" cycle.)
+/// - The peer has not moved since the merge base (we are strictly ahead) ->
+///   `Ahead`. Equivalent to `ours` being a descendant of `auth`:
+///   `git merge-base(ours, auth) == auth` exactly when `auth` is an
+///   ancestor of `ours`. See [`Cycle::Ahead`] for why this must be its own
+///   arm rather than falling into `Diverged`.
+/// - Anything else — neither side is an ancestor of the other — ->
+///   `Diverged`, a genuine three-way merge.
 pub fn classify(ours: Option<&str>, auth: Option<&str>, base: Option<&str>) -> Cycle {
     match (ours, auth) {
         (_, None) => Cycle::UpToDate,
         (None, Some(_)) => Cycle::FastForward,
         (Some(o), Some(a)) if o == a => Cycle::UpToDate,
         (Some(o), Some(_)) if base == Some(o) => Cycle::FastForward,
+        (Some(_), Some(a)) if base == Some(a) => Cycle::Ahead,
         _ => Cycle::Diverged,
     }
 }
@@ -110,6 +129,12 @@ pub enum CycleOutcome {
     /// The peer is strictly ahead. The caller should check out `to` (UI
     /// thread) and reload — no merge needed.
     FastForward { to: String },
+    /// We are strictly ahead of the peer's last published tip. Nothing to
+    /// merge — `cycle_against` has already pushed our tip (push is a
+    /// background-thread operation, same as fetch) before returning this.
+    /// See [`Cycle::Ahead`] for why this must never be treated as
+    /// `Diverged`.
+    Ahead,
     /// Histories diverged. The merge already ran (pure CPU, done here on the
     /// background thread); `rows`/`decisions` are the result and `parents`
     /// names the two commits the caller must pass to `commit_merge`.
@@ -200,6 +225,21 @@ impl ChildSyncEngine {
                 let auth_oid = auth_oid.expect("Cycle::FastForward implies classify saw Some(auth)");
                 Ok(CycleOutcome::FastForward { to: auth_oid.to_string() })
             }
+            Cycle::Ahead => {
+                // Nothing to merge — push our tip and stop. Push is a
+                // background-thread operation (same as fetch; see the
+                // module doc's thread-ownership table), so this does not
+                // violate "UI owns all working-tree I/O": nothing here
+                // touches a file, only `.git` refs/objects over the wire.
+                let branch = current_branch(&repo)?;
+                push_lgs(&repo, &branch).with_context(|| {
+                    format!(
+                        "pushing branch '{branch}' after determining we are ahead of the peer's \
+                         last published tip"
+                    )
+                })?;
+                Ok(CycleOutcome::Ahead)
+            }
             Cycle::Diverged => {
                 let auth_oid = auth_oid.expect("Cycle::Diverged implies classify saw Some(auth)");
 
@@ -236,6 +276,17 @@ impl ChildSyncEngine {
             }
         }
     }
+}
+
+/// The branch currently checked out, by shorthand name (e.g. `"main"`).
+/// Shared by `cycle_against`'s `Cycle::Ahead` push and by
+/// `app_coordinator::apply_merge`'s post-merge push, so both resolve the
+/// branch to push the same way rather than each hardcoding `"main"`.
+pub(crate) fn current_branch(repo: &Repository) -> Result<String> {
+    let head = repo.head().context("resolving current branch")?;
+    head.shorthand()
+        .map(str::to_string)
+        .ok_or_else(|| anyhow::anyhow!("HEAD is not a valid UTF-8 branch name"))
 }
 
 /// Read `transactions.csv` as of `oid`, parsed. An absent file (a commit
@@ -293,8 +344,20 @@ fn read_blob_at(repo: &Repository, oid: Oid, path: &str) -> Result<Option<Vec<u8
 fn provenance(repo: &Repository, oid: Oid) -> Result<Provenance> {
     let commit = repo.find_commit(oid).with_context(|| format!("resolving commit {oid}"))?;
     let committer_epoch = commit.committer().when().seconds();
+    let raw = oid.as_bytes();
+    if raw.len() != 20 {
+        // `Provenance::commit_oid` is a fixed 20-byte SHA-1. A SHA-256
+        // repository's `Oid` is 32 bytes; `copy_from_slice` panics on a
+        // length mismatch rather than truncating, so this must be checked
+        // and reported, not assumed.
+        anyhow::bail!(
+            "commit {oid} has a {}-byte oid, not the 20-byte SHA-1 this app's Provenance type \
+             assumes — SHA-256 repositories are not supported",
+            raw.len()
+        );
+    }
     let mut bytes = [0u8; 20];
-    bytes.copy_from_slice(oid.as_bytes());
+    bytes.copy_from_slice(raw);
     Ok(Provenance { committer_epoch, commit_oid: bytes })
 }
 
@@ -322,6 +385,28 @@ mod tests {
     #[test]
     fn classify_with_no_local_history_adopts_the_peer_outright() {
         assert_eq!(classify(None, Some("a"), None), Cycle::FastForward);
+    }
+
+    /// Regression for Critical-1: lgs mirrors `refs/lgs-auth/*`
+    /// unconditionally on every daemon tick, so `auth` is just "the peer's
+    /// last published tip," not "the tip at a genuine divergence." Being
+    /// strictly ahead of it — the ordinary state after any local commit —
+    /// must classify as `Ahead`, never `Diverged`: `Diverged` would drive an
+    /// empty merge commit every cycle, unboundedly, while a push is
+    /// pending.
+    #[test]
+    fn classify_ahead_and_fast_forward_are_true_mirror_images() {
+        // Peer ahead of us (auth is a descendant of ours) -> FastForward.
+        assert_eq!(classify(Some("a"), Some("b"), Some("a")), Cycle::FastForward);
+        // We are ahead of the peer (ours is a descendant of auth) -> Ahead,
+        // NOT Diverged.
+        assert_eq!(classify(Some("b"), Some("a"), Some("a")), Cycle::Ahead);
+    }
+
+    #[test]
+    fn classify_diverged_requires_that_neither_side_is_an_ancestor_of_the_other() {
+        // base differs from BOTH ours and auth -> a genuine divergence.
+        assert_eq!(classify(Some("a"), Some("b"), Some("base")), Cycle::Diverged);
     }
 
     // --- cycle_against: real repos, local bare remotes only ---------------
@@ -422,6 +507,48 @@ ex-3-a,keiko,2026-01-03T00:00:00+00:00,Book,-3.00,7.00,expense\n";
             CycleOutcome::FastForward { to } => assert_eq!(to, ahead_oid.to_string()),
             other => panic!("expected FastForward, got {other:?}"),
         }
+    }
+
+    /// Regression for Critical-1. Simulates the ordinary, expected case:
+    /// `auth` still reads as our OWN prior tip (lgs's unconditional mirror
+    /// has not yet caught up to a local commit we just made). This must
+    /// push and report `Ahead` — never run a merge, and never leave the
+    /// local repo diverged-looking forever.
+    #[test]
+    fn pushes_and_reports_ahead_when_we_are_strictly_ahead_of_the_published_tip() {
+        let (bare_dir, base_oid, work_dir) = setup_base();
+        let work_path = work_dir.path().join("work");
+
+        std::fs::write(work_path.join(TRANSACTIONS_FILE), TX_OURS).unwrap();
+        let gm = GitManager::with_clock(|| 1_700_000_050);
+        gm.add_all(&work_path).unwrap();
+        let ours_oid_str = gm.commit(&work_path, "ours edit").unwrap();
+
+        // `auth` mirrors our OLD tip (base_oid) -- exactly what an
+        // unconditional-mirror daemon would show right after we advanced
+        // past it locally.
+        let bare = Repository::open_bare(bare_dir.path()).unwrap();
+        bare.reference("refs/lgs-auth/heads/main", base_oid, true, "auth mirrors our old tip")
+            .unwrap();
+
+        let outcome = ChildSyncEngine::cycle_against(&work_path, bare_dir.path().to_str().unwrap())
+            .unwrap();
+        assert!(matches!(outcome, CycleOutcome::Ahead), "expected Ahead, got {outcome:?}");
+
+        // The push must have actually landed on the bare's real branch ref
+        // (not the auth mirror) -- proving this is push-and-stop, not a
+        // no-op that merely returns a status.
+        assert_eq!(
+            bare.find_reference("refs/heads/main").unwrap().target().unwrap().to_string(),
+            ours_oid_str
+        );
+
+        // No merge commit was fabricated: our local HEAD is still exactly
+        // the plain commit we made, not a two-parent merge.
+        let work_repo = Repository::open(&work_path).unwrap();
+        let head_commit = work_repo.head().unwrap().peel_to_commit().unwrap();
+        assert_eq!(head_commit.id().to_string(), ours_oid_str);
+        assert_eq!(head_commit.parent_count(), 1);
     }
 
     #[test]
