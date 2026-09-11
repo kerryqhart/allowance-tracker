@@ -23,12 +23,22 @@ pub fn copy_binary(src: &Path, dst: &Path) -> Result<()> {
     if let Some(parent) = dst.parent() {
         std::fs::create_dir_all(parent).with_context(|| format!("creating {parent:?}"))?;
     }
-    // Write to a temp name then rename, so a crash mid-copy cannot leave a
-    // truncated binary that launchd would happily keep executing.
+    // Write to a temp name in the SAME directory as the destination (not a
+    // system temp dir), so the rename below is same-filesystem and therefore
+    // atomic — a crash mid-copy cannot leave a truncated binary that launchd
+    // would happily keep executing.
     let tmp = dst.with_extension("tmp");
     std::fs::copy(src, &tmp).with_context(|| format!("copying {src:?} -> {tmp:?}"))?;
-    std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755))?;
-    std::fs::rename(&tmp, dst).with_context(|| format!("renaming into {dst:?}"))?;
+    std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755))
+        .with_context(|| format!("setting permissions on {tmp:?}"))?;
+    // If the rename fails, don't leave the `.tmp` staging file behind — but
+    // keep the rename's own error as the reported cause, not a cleanup error.
+    std::fs::rename(&tmp, dst)
+        .map_err(|err| {
+            let _ = std::fs::remove_file(&tmp);
+            err
+        })
+        .with_context(|| format!("renaming {tmp:?} into {dst:?}"))?;
     Ok(())
 }
 
@@ -39,21 +49,48 @@ pub fn ensure_lgs_binary(env: &SyncPaths) -> Result<PathBuf> {
     Ok(env.lgs_binary.clone())
 }
 
+/// Where the bundled `lgs` binary might be, checked in order.
+///
+/// Exactly where `cargo-bundle` places a `resources` entry that lives
+/// outside the crate directory (like `../target/release/lgs`) was not
+/// verified against a real produced `.app` — if `cargo-bundle` strips
+/// resource paths relative to a common ancestor instead of flattening them,
+/// `lgs` could land at `Contents/Resources/target/release/lgs` rather than
+/// the flat `Contents/Resources/lgs` a single-candidate resolver would
+/// assume. Rather than bet on one layout, this checks several plausible
+/// ones, so a packaging surprise degrades to "found it in a different spot"
+/// instead of "release builds are silently broken while every test stays
+/// green".
+fn bundled_lgs_candidates(exe_dir: &Path) -> Vec<PathBuf> {
+    vec![
+        // .app/Contents/MacOS/<exe> -> .app/Contents/Resources/lgs
+        exe_dir.join("../Resources/lgs"),
+        // In case cargo-bundle preserves the `target/release/` portion of a
+        // resource path that lives outside the crate directory.
+        exe_dir.join("../Resources/target/release/lgs"),
+        // Dev builds: target/<profile>/lgs, produced by build.rs next to the
+        // binary itself.
+        exe_dir.join("lgs"),
+    ]
+}
+
 fn bundled_lgs_path() -> Result<PathBuf> {
     let exe = std::env::current_exe().context("resolving current exe")?;
-    // .app/Contents/MacOS/<exe> -> .app/Contents/Resources/lgs
-    if let Some(macos_dir) = exe.parent() {
-        let candidate = macos_dir.join("../Resources/lgs");
+    let exe_dir = exe.parent().unwrap_or_else(|| Path::new("."));
+    let candidates = bundled_lgs_candidates(exe_dir);
+
+    for candidate in &candidates {
         if candidate.exists() {
-            return Ok(candidate);
+            return Ok(candidate.clone());
         }
     }
-    // Dev builds: target/debug/lgs, produced by build.rs.
-    let dev = exe.parent().map(|p| p.join("lgs")).unwrap_or_default();
-    if dev.exists() {
-        return Ok(dev);
-    }
-    anyhow::bail!("bundled lgs binary not found next to {exe:?}")
+
+    let tried = candidates
+        .iter()
+        .map(|p| format!("{p:?}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    anyhow::bail!("bundled lgs binary not found; tried: {tried}")
 }
 
 #[cfg(test)]
@@ -157,13 +194,66 @@ mod tests {
         );
     }
 
-    /// This does not attempt to simulate git's absence (that would require
-    /// manipulating PATH, out of scope here) — it only pins that the check
-    /// runs to completion on this machine and hands back a plain bool rather
-    /// than panicking, e.g. on a broken pipe or an unexpected exit status.
+    /// This asserts the local dev environment (git is present on this
+    /// machine) rather than simulating git's absence — that would require
+    /// manipulating PATH, out of scope here. The point is still to fail if
+    /// the function ever panics instead of returning a plain bool, e.g. on a
+    /// broken pipe or an unexpected exit status.
     #[test]
     fn git_is_available_does_not_panic() {
         let available: bool = git_is_available();
-        println!("git_is_available() = {available}");
+        assert!(available, "git is expected to be present on this dev machine");
+    }
+
+    /// A failed rename must not leave the `.tmp` staging file behind. Force
+    /// the rename to fail by making `dst`'s parent a location where `dst`
+    /// itself is a directory — `rename(tmp_file, existing_dir)` fails on
+    /// every POSIX system — then check the parent holds nothing named after
+    /// the temp file's extension.
+    #[test]
+    fn failed_rename_does_not_leave_a_temp_artifact_behind() {
+        let src_dir = TempDir::new().unwrap();
+        let dst_dir = TempDir::new().unwrap();
+        let src = src_dir.path().join("lgs");
+        std::fs::write(&src, b"binary").unwrap();
+
+        // `dst` is itself a directory, so `fs::rename(tmp, dst)` fails
+        // (cannot rename a file onto a directory).
+        let dst = dst_dir.path().join("lgs");
+        std::fs::create_dir(&dst).unwrap();
+
+        let result = copy_binary(&src, &dst);
+        assert!(result.is_err(), "renaming a file onto a directory must fail");
+
+        let tmp = dst.with_extension("tmp");
+        assert!(!tmp.exists(), "the .tmp staging file must be cleaned up on failure");
+    }
+
+    /// If none of the candidate locations have `lgs`, the error must name
+    /// every path tried — a packaging mistake (e.g. cargo-bundle placing the
+    /// binary somewhere other than the flat `Contents/Resources/lgs` this
+    /// resolver expects) must be diagnosable from the message alone.
+    #[test]
+    fn bundled_lgs_missing_error_names_every_candidate_tried() {
+        let exe = std::env::current_exe().unwrap();
+        let exe_dir = exe.parent().unwrap().to_path_buf();
+        let expected_candidates = bundled_lgs_candidates(&exe_dir);
+
+        // None of the candidates exist under the test binary's own directory
+        // (target/debug/deps/...), so this exercises the real not-found path
+        // rather than a synthetic one.
+        for c in &expected_candidates {
+            assert!(!c.exists(), "test assumption violated: {c:?} unexpectedly exists");
+        }
+
+        let err = bundled_lgs_path().expect_err("no candidate should exist here");
+        let message = format!("{err}");
+        for c in &expected_candidates {
+            let formatted = format!("{c:?}");
+            assert!(
+                message.contains(&formatted),
+                "error message must name {formatted}; got: {message}"
+            );
+        }
     }
 }
