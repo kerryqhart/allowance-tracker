@@ -36,6 +36,15 @@ use git2::{Repository, Signature, IndexAddOption};
 use log::{info, warn, debug};
 use std::path::{Path, PathBuf};
 
+/// Injectable so tests can construct committer-timestamp ties. Real usage
+/// (`GitManager::new`) points this at wall-clock time; only `with_clock`
+/// injects a fake, and only tests call `with_clock`.
+type Clock = fn() -> i64;
+
+fn real_clock() -> i64 {
+    chrono::Utc::now().timestamp()
+}
+
 /// Git manager for handling local repository operations
 #[derive(Clone, Debug)]
 pub struct GitManager {
@@ -43,6 +52,12 @@ pub struct GitManager {
     author_name: String,
     /// Default author email for commits
     author_email: String,
+    /// Source of the committer/author timestamp used in `signature()`.
+    /// Injectable only via `with_clock`, so `commit()`'s timestamps stay
+    /// real-time everywhere except tests that need to construct a
+    /// committer-timestamp tie (the tiebreak-by-oid branch of the merge
+    /// resolution rule cannot otherwise be exercised).
+    clock: Clock,
 }
 
 impl GitManager {
@@ -51,6 +66,7 @@ impl GitManager {
         Self {
             author_name: "Allowance Tracker".to_string(),
             author_email: "allowance@tracker.local".to_string(),
+            clock: real_clock,
         }
     }
 
@@ -59,7 +75,26 @@ impl GitManager {
         Self {
             author_name,
             author_email,
+            clock: real_clock,
         }
+    }
+
+    /// Create a new GitManager whose commit timestamps come from `clock`
+    /// instead of the wall clock. Exists so tests can construct committer-
+    /// timestamp ties.
+    pub fn with_clock(clock: Clock) -> Self {
+        Self {
+            author_name: "Allowance Tracker".to_string(),
+            author_email: "noreply@localhost".to_string(),
+            clock,
+        }
+    }
+
+    /// Build a signature using the injected clock rather than
+    /// `Signature::now()`, so timestamps are controllable in tests.
+    fn signature(&self) -> Result<Signature<'static>> {
+        let when = git2::Time::new((self.clock)(), 0);
+        Ok(Signature::new(&self.author_name, &self.author_email, &when)?)
     }
 
     /// Initialize a git repository in the specified directory
@@ -108,7 +143,7 @@ impl GitManager {
         debug!("Creating commit in repository: {:?} with message: {}", repo_path, message);
 
         let repo = Repository::open(repo_path)?;
-        let signature = Signature::now(&self.author_name, &self.author_email)?;
+        let signature = self.signature()?;
 
         let mut index = repo.index()?;
         let tree_id = index.write_tree()?;
@@ -256,6 +291,101 @@ impl Default for GitManager {
     }
 }
 
+// ========== REMOTE OPERATIONS (lgs sync) ==========
+//
+// These are free functions, not `GitManager` methods: they operate on an
+// already-open `git2::Repository` and need no author/clock configuration,
+// which keeps them trivially testable against a local bare repo in a
+// tempdir instead of a running lgs daemon.
+
+/// Clone a remote repository to a local path.
+///
+/// Used by migration/onboarding paths that need a plain git2 clone (as
+/// opposed to `lgs restore`, which performs its own clone and names the
+/// remote `origin` — see `ensure_lgs_remote` below).
+pub fn clone_repo<P: AsRef<Path>>(url: &str, into: P) -> Result<Repository> {
+    Ok(Repository::clone(url, into.as_ref())?)
+}
+
+/// Ensure exactly one remote, named `lgs`, points at `url`.
+///
+/// `lgs restore` clones a project with the remote named `origin`; the
+/// migration path (Task 18) names it `lgs` directly. Onboarding (Task 19)
+/// must be able to hand either layout to the sync loop and get one
+/// consistent remote name out of it. Idempotent, and self-heals a stale URL
+/// (the daemon's port is configurable, so a URL frozen into `.git/config` at
+/// migration time would otherwise break push forever after a port change).
+pub fn ensure_lgs_remote(repo: &git2::Repository, url: &str) -> Result<()> {
+    match repo.find_remote("lgs") {
+        Ok(r) if r.url() == Some(url) => Ok(()),
+        Ok(_) => Ok(repo.remote_set_url("lgs", url)?),
+        Err(_) => {
+            // `lgs restore` clones with the remote named `origin`.
+            if let Ok(origin) = repo.find_remote("origin") {
+                if origin.url() == Some(url) {
+                    repo.remote_rename("origin", "lgs")?;
+                    return Ok(());
+                }
+            }
+            repo.remote("lgs", url)?;
+            Ok(())
+        }
+    }
+}
+
+/// THE refspec. lgs's `reconcile` is documented as never moving a head
+/// backward or over a divergence (local-git-sync `durability/engine.rs:399`).
+/// When two machines have diverged, the peer's commits do NOT appear at
+/// `refs/heads/*` in the local bare — that ref still points at this
+/// machine's own tip. A fetch of `refs/heads/*` alone would therefore return
+/// our own commit, the app would conclude "up to date", and the merge would
+/// never run — both machines stall permanently and invisibly.
+///
+/// lgs writes the authoritative peer tip to `refs/lgs-auth/heads/<branch>`
+/// *before* the divergence check, and that is the ref the sync loop's merge
+/// must read from — hence `refs/remotes/lgs-auth/*` as the fetch
+/// destination, not `refs/remotes/lgs/*`.
+pub const LGS_AUTH_REFSPEC: &str = "+refs/lgs-auth/heads/*:refs/remotes/lgs-auth/*";
+/// This machine's own view of the peer's advertised heads. Fetched
+/// alongside `LGS_AUTH_REFSPEC` for completeness, but the sync loop's merge
+/// input is `refs/remotes/lgs-auth/*`, never this one — see above.
+pub const LGS_HEADS_REFSPEC: &str = "+refs/heads/*:refs/remotes/lgs/*";
+
+/// Fetch both the authoritative peer tip (`refs/lgs-auth/*`) and the remote's
+/// own `refs/heads/*` from the `lgs` remote.
+pub fn fetch_lgs(repo: &git2::Repository) -> Result<()> {
+    let mut remote = repo.find_remote("lgs")?;
+    remote.fetch(&[LGS_AUTH_REFSPEC, LGS_HEADS_REFSPEC], None, None)?;
+    Ok(())
+}
+
+/// Push `branch` to the `lgs` remote, non-forced.
+///
+/// Wires a `push_update_reference` callback and turns any per-ref rejection
+/// into an `Err`. This is not optional ceremony: libgit2's `Remote::push`
+/// returns `Ok(())` even when the server rejected an individual ref update
+/// (e.g. a non-fast-forward) unless this callback is registered — silently
+/// treating a rejected push as success is exactly the failure mode that
+/// would make sync look healthy while stalling both machines.
+pub fn push_lgs(repo: &git2::Repository, branch: &str) -> Result<()> {
+    let mut remote = repo.find_remote("lgs")?;
+    let refspec = format!("refs/heads/{branch}:refs/heads/{branch}");
+
+    let mut callbacks = git2::RemoteCallbacks::new();
+    callbacks.push_update_reference(|refname, status| match status {
+        None => Ok(()),
+        Some(msg) => Err(git2::Error::from_str(&format!(
+            "lgs rejected push of {refname}: {msg}"
+        ))),
+    });
+
+    let mut push_options = git2::PushOptions::new();
+    push_options.remote_callbacks(callbacks);
+
+    remote.push(&[refspec.as_str()], Some(&mut push_options))?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -289,5 +419,176 @@ mod tests {
         git_manager.add_file(temp_dir.path(), "test.txt").unwrap();
         let commit_id = git_manager.commit(temp_dir.path(), "Initial commit").unwrap();
         assert!(!commit_id.is_empty());
+    }
+
+    /// Creates a commit with an empty tree directly via the object database,
+    /// so it works against a bare repo (no working directory / index).
+    fn commit_empty_tree(
+        repo: &git2::Repository,
+        message: &str,
+        parents: &[&git2::Commit],
+    ) -> git2::Oid {
+        let sig =
+            git2::Signature::new("Test", "test@example.com", &git2::Time::new(1_700_000_000, 0))
+                .unwrap();
+        let tree_id = repo.treebuilder(None).unwrap().write().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        repo.commit(None, &sig, &sig, message, &tree, parents).unwrap()
+    }
+
+    #[test]
+    fn ensure_lgs_remote_is_idempotent_and_renames_origin() {
+        // `lgs restore` clones and names the remote `origin`; migration names it
+        // `lgs`. One name must exist in the system or the two paths disagree.
+        let dir = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(dir.path()).unwrap();
+        repo.remote("origin", "http://localhost:8418/p.git").unwrap();
+
+        ensure_lgs_remote(&repo, "http://localhost:8418/p.git").unwrap();
+        assert!(repo.find_remote("lgs").is_ok());
+
+        ensure_lgs_remote(&repo, "http://localhost:8418/p.git").unwrap();
+        assert!(repo.find_remote("lgs").is_ok(), "second call must not fail");
+    }
+
+    #[test]
+    fn ensure_lgs_remote_updates_a_stale_port() {
+        // clone_url carries the daemon port, which is configurable. A URL frozen
+        // into .git/config at migration time breaks push forever after a port change.
+        let dir = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(dir.path()).unwrap();
+        repo.remote("lgs", "http://localhost:8418/p.git").unwrap();
+        ensure_lgs_remote(&repo, "http://localhost:9999/p.git").unwrap();
+        assert_eq!(
+            repo.find_remote("lgs").unwrap().url().unwrap(),
+            "http://localhost:9999/p.git"
+        );
+    }
+
+    #[test]
+    fn ensure_lgs_remote_when_both_origin_and_lgs_already_exist() {
+        // Migration and onboarding must never collide: if a repo somehow has
+        // both remotes (e.g. re-run migration after a restore), `lgs` wins and
+        // `origin` is left untouched.
+        let dir = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(dir.path()).unwrap();
+        repo.remote("origin", "http://localhost:8418/other.git").unwrap();
+        repo.remote("lgs", "http://localhost:8418/p.git").unwrap();
+
+        ensure_lgs_remote(&repo, "http://localhost:9999/p.git").unwrap();
+
+        assert_eq!(
+            repo.find_remote("lgs").unwrap().url().unwrap(),
+            "http://localhost:9999/p.git"
+        );
+        assert_eq!(
+            repo.find_remote("origin").unwrap().url().unwrap(),
+            "http://localhost:8418/other.git",
+            "origin must be left alone when lgs already exists"
+        );
+    }
+
+    #[test]
+    fn commit_uses_the_injected_clock_so_ties_are_constructible() {
+        // With Signature::now() hardcoded, no test can build a committer-timestamp
+        // tie, so the tiebreak-by-oid branch of the resolution rule ships uncovered.
+        let dir = tempfile::tempdir().unwrap();
+        let gm = GitManager::with_clock(|| 1_700_000_000);
+        gm.init_repo(dir.path()).unwrap();
+        std::fs::write(dir.path().join("f.txt"), "x").unwrap();
+        gm.add_all(dir.path()).unwrap();
+        let oid = gm.commit(dir.path(), "m").unwrap();
+        let repo = git2::Repository::open(dir.path()).unwrap();
+        let commit = repo.find_commit(git2::Oid::from_str(&oid).unwrap()).unwrap();
+        assert_eq!(commit.committer().when().seconds(), 1_700_000_000);
+    }
+
+    #[test]
+    fn fetch_lgs_lands_the_auth_ref_at_refs_remotes_lgs_auth() {
+        // This is the test that would have caught the refspec bug: lgs writes
+        // the authoritative peer tip to refs/lgs-auth/heads/<branch>, never to
+        // refs/heads/<branch>, so a fetch using the wrong refspec would report
+        // success while landing nothing the merge can actually read.
+        let bare_dir = tempfile::tempdir().unwrap();
+        let bare = git2::Repository::init_bare(bare_dir.path()).unwrap();
+        let auth_oid = commit_empty_tree(&bare, "authoritative peer tip", &[]);
+        bare.reference("refs/lgs-auth/heads/main", auth_oid, true, "test")
+            .unwrap();
+
+        let work_dir = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(work_dir.path()).unwrap();
+        repo.remote("lgs", bare_dir.path().to_str().unwrap()).unwrap();
+
+        fetch_lgs(&repo).unwrap();
+
+        let landed = repo
+            .find_reference("refs/remotes/lgs-auth/main")
+            .expect("refs/lgs-auth/heads/main must land at refs/remotes/lgs-auth/main");
+        assert_eq!(landed.target().unwrap(), auth_oid);
+    }
+
+    #[test]
+    fn push_lgs_fails_when_the_server_rejects_a_non_fast_forward() {
+        // libgit2's `Remote::push` returns `Ok(())` on a per-ref rejection
+        // unless a `push_update_reference` callback is wired — a real trap
+        // that would make a stalled sync look healthy. Force a rejection by
+        // advancing the remote's `main` independently of the local repo (as
+        // if a peer had pushed), then pushing a non-fast-forward local tip.
+        let bare_dir = tempfile::tempdir().unwrap();
+        let bare = git2::Repository::init_bare(bare_dir.path()).unwrap();
+
+        let work_dir = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(work_dir.path()).unwrap();
+        repo.remote("lgs", bare_dir.path().to_str().unwrap()).unwrap();
+
+        let base_oid = commit_empty_tree(&repo, "base", &[]);
+        repo.reference("refs/heads/main", base_oid, true, "init").unwrap();
+
+        // First push: a brand-new remote branch, always a fast-forward.
+        push_lgs(&repo, "main").unwrap();
+        assert_eq!(
+            bare.find_reference("refs/heads/main").unwrap().target().unwrap(),
+            base_oid
+        );
+
+        // Simulate a peer pushing independently: advance the bare's main to an
+        // unrelated commit that our local repo knows nothing about.
+        let peer_oid = commit_empty_tree(&bare, "peer's independent commit", &[]);
+        bare.reference("refs/heads/main", peer_oid, true, "peer push")
+            .unwrap();
+
+        // Advance our local main from the old base — this is now a
+        // non-fast-forward relative to the remote's current tip.
+        let base_commit = repo.find_commit(base_oid).unwrap();
+        let local_child_oid = commit_empty_tree(&repo, "our diverged commit", &[&base_commit]);
+        repo.reference("refs/heads/main", local_child_oid, true, "advance local")
+            .unwrap();
+
+        let result = push_lgs(&repo, "main");
+        assert!(
+            result.is_err(),
+            "a non-fast-forward push must surface as Err, not a silent Ok"
+        );
+        assert_eq!(
+            bare.find_reference("refs/heads/main").unwrap().target().unwrap(),
+            peer_oid,
+            "the rejected push must not have moved the remote ref"
+        );
+    }
+
+    #[test]
+    fn clone_repo_clones_from_a_local_bare_repo() {
+        let bare_dir = tempfile::tempdir().unwrap();
+        let bare = git2::Repository::init_bare(bare_dir.path()).unwrap();
+        let oid = commit_empty_tree(&bare, "seed", &[]);
+        bare.reference("refs/heads/main", oid, true, "init").unwrap();
+        bare.set_head("refs/heads/main").unwrap();
+
+        let dest_dir = tempfile::tempdir().unwrap();
+        let dest_path = dest_dir.path().join("clone");
+        let cloned = clone_repo(bare_dir.path().to_str().unwrap(), &dest_path).unwrap();
+
+        let head_commit = cloned.head().unwrap().peel_to_commit().unwrap();
+        assert_eq!(head_commit.id(), oid);
     }
 }
