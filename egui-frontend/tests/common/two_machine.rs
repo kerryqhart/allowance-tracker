@@ -28,6 +28,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
+use std::time::{Duration, Instant};
 use tempfile::TempDir;
 
 /// Ports for the two test daemons. Never 8418 — that is the user's real,
@@ -96,11 +97,117 @@ impl TwoMachineHarness {
         m.run(args)
     }
 
-    /// Publish A, ingest into B, publish B, ingest into A.
-    pub fn sync_both_ways(&self, project: &str) {
-        self.lgs(&self.a, &["sync", project]);
-        self.lgs(&self.b, &["sync", project]);
-        self.lgs(&self.a, &["sync", project]);
+    /// Converge a divergent project from `publisher` to `ingester`, in two
+    /// **confirmed, sequential** phases — not a fixed sequence, and not a
+    /// single loop that nudges both machines every round. Returns whether
+    /// `condition` became true within `timeout` (phase 2's budget; phase 1
+    /// gets its own full `timeout` too, so the worst case is up to `2 *
+    /// timeout`).
+    ///
+    ///   1. Retry `lgs sync <project>` on `publisher` alone until
+    ///      `publisher`'s own `lgs status --json` reports
+    ///      `durability.state == "backed_up"` — i.e., until its publish has
+    ///      actually *landed* in the cloud, not merely been acknowledged.
+    ///   2. Only then retry `lgs sync <project>` on `ingester` alone until
+    ///      the caller's `condition` holds (typically: `ingester`'s
+    ///      `refs/remotes/lgs-auth/*` now mirrors `publisher`'s tip).
+    ///
+    /// # Why two *confirmed* phases, not one interleaved retry loop
+    ///
+    /// This function has had two previous, both-wrong shapes, in order:
+    ///
+    /// - **v1: a fixed three-call sequence** (sync A, sync B, sync A) with no
+    ///   check at all. `lgs sync` only *acknowledges* the daemon's async
+    ///   nudge (`local-git-sync/src/cli.rs`'s `sync()` sends
+    ///   `Request::SyncNow` and returns on acknowledgement, not completion),
+    ///   so a fixed sequence can race a slower publish and simply not have
+    ///   finished when the sequence ends. Found via review once
+    ///   `poll_interval_secs` was pinned high enough (see
+    ///   [`NO_AMBIENT_TICKS_POLL_INTERVAL_SECS`]) to stop a 30s ambient tick
+    ///   from quietly papering over it.
+    /// - **v2: a single loop nudging *both* machines every round.** This
+    ///   fixed v1's bug (retrying until the condition holds, rather than
+    ///   trusting a fixed sequence) but introduced a *different* one:
+    ///   interleaving `publisher`'s and `ingester`'s sync attempts gives
+    ///   `ingester`'s own divergent commit a real chance to reach the
+    ///   cloud's single branch slot *before* `publisher`'s does. When that
+    ///   happens, `publisher` — not `ingester` — ends up the "diverged"
+    ///   side, and `ingester`'s `refs/lgs-auth/*` mirror never resolves to
+    ///   `publisher`'s tip at all, because `publisher` never won the
+    ///   publish there is nothing to mirror. This was not a timing
+    ///   fluke: five consecutive real runs of v2 included both outcomes
+    ///   (which side "won" varied run to run), confirmed by instrumenting
+    ///   each round with both machines' `durability.state` — one run showed
+    ///   `publisher` stuck at `"diverged"` for the entire 60s bound while
+    ///   `ingester` sat at `"backed_up"`, the exact reverse of what the test
+    ///   needs and asserts.
+    ///
+    /// This (v3) version closes that window by construction: `publisher` is
+    /// confirmed to have already won the publish race, observed via its own
+    /// status, before `ingester`'s sync is ever triggered. There is no
+    /// remaining interval during which both sides are racing for the same
+    /// slot.
+    ///
+    /// The retry interval (2s) is measured, not guessed: a 250ms interval
+    /// was tried first, on the interleaved v2 design, and made its flake
+    /// *worse* — the daemon drains `Request::SyncNow` nudges one at a time
+    /// through a single bounded channel (`mpsc::channel::<Nudge>(8)`,
+    /// `local-git-sync/src/daemon/sync.rs`), awaiting each full reconcile
+    /// pass (observed on the order of 1-2s) before pulling the next; renudging
+    /// every 250ms floods that channel far faster than it drains. 2s avoids
+    /// that without being so slow it eats into the bound.
+    pub fn sync_both_ways(
+        &self,
+        project: &str,
+        publisher: &Machine,
+        ingester: &Machine,
+        timeout: Duration,
+        condition: impl FnMut() -> bool,
+    ) -> bool {
+        if !self.retry_sync_until(publisher, project, timeout, || {
+            self.is_backed_up(publisher, project)
+        }) {
+            return false;
+        }
+        self.retry_sync_until(ingester, project, timeout, condition)
+    }
+
+    /// Retry `lgs sync <project>` on `m` alone until `condition` holds or
+    /// `timeout` elapses.
+    fn retry_sync_until(
+        &self,
+        m: &Machine,
+        project: &str,
+        timeout: Duration,
+        mut condition: impl FnMut() -> bool,
+    ) -> bool {
+        let deadline = Instant::now() + timeout;
+        loop {
+            self.lgs(m, &["sync", project]);
+            if condition() {
+                return true;
+            }
+            if Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(2000));
+        }
+    }
+
+    /// Whether `m`'s own `lgs status --json` reports `project` as
+    /// `durability.state == "backed_up"` right now (no retrying — see
+    /// `retry_sync_until`, which polls this).
+    fn is_backed_up(&self, m: &Machine, project: &str) -> bool {
+        let json = self.lgs(m, &["status", "--json"]);
+        let v: serde_json::Value = match serde_json::from_str(&json) {
+            Ok(v) => v,
+            Err(_) => return false,
+        };
+        v["projects"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(|p| p["name"] == project && p["durability"]["state"] == "backed_up")
     }
 
     #[allow(dead_code)] // part of the harness's public surface; not every caller needs it

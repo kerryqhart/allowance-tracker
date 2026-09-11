@@ -43,38 +43,50 @@ fn wait_until_backed_up(h: &TwoMachineHarness, m: &Machine, project: &str, timeo
     }
 }
 
-/// Poll (fetching `refs/lgs-auth/*` from `url` into `repo` each attempt) until
-/// `refs/remotes/lgs-auth/<branch>` resolves to `expected`, or panic with a
-/// clear, non-vacuous message once `timeout` elapses. Never weakens to "the
-/// ref merely exists" — a stale or wrong-machine value at that ref would pass
+/// Converge machine `a`'s divergent tip onto machine `b` (via
+/// `TwoMachineHarness::sync_both_ways`'s two confirmed phases — `a`'s publish
+/// is confirmed backed-up before `b`'s sync is ever triggered, so `b`'s own
+/// divergent push cannot win the race to the cloud's branch slot instead),
+/// then poll until `refs/remotes/lgs-auth/<branch>` on `repo` (opened against
+/// `b`'s working copy) resolves to `expected`, or panic with a clear,
+/// non-vacuous message once `timeout` elapses. Never weakens to "the ref
+/// merely exists" — a stale or wrong-machine value at that ref would pass
 /// that check and prove nothing about *this* divergence.
+///
+/// The condition closure does the `fetch_lgs` itself, each round: `lgs sync`
+/// only nudges the daemon (see `sync_both_ways`'s doc comment), and a fetch
+/// pulls whatever that nudge has landed *so far* on `b`'s own bare repo into
+/// the local `refs/remotes/lgs-auth/*` mirror the check reads.
 fn wait_for_auth_tip(
+    h: &TwoMachineHarness,
+    project: &str,
+    a: &Machine,
+    b: &Machine,
     repo: &git2::Repository,
     branch: &str,
     expected: git2::Oid,
     timeout: Duration,
 ) -> git2::Oid {
-    let deadline = Instant::now() + timeout;
     let mut last_seen: Option<git2::Oid> = None;
-    loop {
-        fetch_lgs(repo).expect("fetch refs/lgs-auth/* and refs/heads/* from the lgs remote");
-        let auth_ref = format!("refs/remotes/lgs-auth/{branch}");
+    let auth_ref = format!("refs/remotes/lgs-auth/{branch}");
+    let converged = h.sync_both_ways(project, a, b, timeout, || {
+        let _ = fetch_lgs(repo);
         if let Ok(r) = repo.find_reference(&auth_ref) {
             if let Some(oid) = r.target() {
                 last_seen = Some(oid);
-                if oid == expected {
-                    return oid;
-                }
+                return oid == expected;
             }
         }
-        if Instant::now() >= deadline {
-            panic!(
-                "refs/remotes/lgs-auth/{branch} never converged on {expected} within {timeout:?}; \
-                 last observed value there: {last_seen:?} (None means the ref never appeared at all)"
-            );
-        }
-        std::thread::sleep(Duration::from_millis(300));
+        false
+    });
+    if !converged {
+        panic!(
+            "{auth_ref} never converged on {expected} within {timeout:?} (retried `lgs sync {project}` \
+             on both machines each round); last observed value there: {last_seen:?} (None means the ref \
+             never appeared at all)"
+        );
     }
+    expected
 }
 
 /// Write `content` to `file` under `work`, stage, and commit via `gm`.
@@ -151,12 +163,20 @@ fn concurrent_edits_are_visible_through_the_lgs_auth_mirror() {
         .expect("point B's working repo at its own lgs remote (renaming restore's `origin`)");
     push_lgs(&repo_b, "main").expect("push B's divergent commit into B's own bare");
 
-    // --- Publish A, ingest into B, publish B, ingest into A. ---
-    h.sync_both_ways(project);
-
-    // reconcile is asynchronous relative to the CLI call that triggers it, so
-    // poll (bounded) rather than assume `sync_both_ways` alone was enough.
-    let landed = wait_for_auth_tip(&repo_b, "main", a_tip, Duration::from_secs(60));
+    // --- Retry-sync both machines until B's mirror of A's tip converges. ---
+    // `lgs sync` only nudges the daemon (see `sync_both_ways`'s doc comment),
+    // so this is a bounded retry loop, not a fixed sequence assumed to be
+    // enough.
+    let landed = wait_for_auth_tip(
+        &h,
+        project,
+        &h.a,
+        &h.b,
+        &repo_b,
+        "main",
+        a_tip,
+        Duration::from_secs(60),
+    );
     assert_eq!(
         landed, a_tip,
         "refs/remotes/lgs-auth/main on B must resolve to A's tip"
