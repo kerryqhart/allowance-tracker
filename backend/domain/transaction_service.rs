@@ -566,8 +566,14 @@ impl TransactionService {
     /// Delete a transaction by ID without firing the sync notifier.
     /// Used to apply remote deletes locally. Idempotent: a remote delete for a
     /// transaction that doesn't exist locally is logged but not an error.
+    ///
+    /// **Also critical:** does NOT go through `delete_transaction` (which
+    /// commits to git) — same reasoning as `upsert_transaction_from_sync`.
+    /// `DeleteLocalEntity` is the sibling of `ApplyRemoteEntity` in the same
+    /// sync-message match; a remote delete must not double-commit any more
+    /// than a remote write does.
     pub fn delete_transaction_by_id(&self, child_id: &str, transaction_id: &str) -> Result<()> {
-        let removed = self.transaction_repository.delete_transaction(child_id, transaction_id)?;
+        let removed = self.transaction_repository.delete_transaction_no_commit(child_id, transaction_id)?;
         if !removed {
             log::debug!("delete_transaction_by_id: {transaction_id} not found for {child_id}; skipping");
         }

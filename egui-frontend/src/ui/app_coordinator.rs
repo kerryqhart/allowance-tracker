@@ -784,6 +784,13 @@ impl AllowanceTrackerApp {
                 // this path would destroy the shared iCloud folder out from
                 // under the first. Forgetting the child locally is the whole
                 // of what a remote delete can safely mean.
+                //
+                // This also means no double-commit risk here (audited as
+                // part of the AWS-coexistence fixes above): this arm never
+                // touches `ChildRepository::delete_child` or any per-child
+                // git repo at all — it only edits the top-level
+                // `children.yaml` registry, which no per-child git repo
+                // contains.
                 let id = shared::ChildId::from(child_id);
                 if self.core.backend.csv_connection.registry().path_for(&id).is_none() {
                     log::debug!("Remote delete for child {} which is not registered here", child_id);
@@ -2135,6 +2142,156 @@ mod coexist_tests {
         assert!(
             on_disk.contains("Renamed Kid"),
             "the remote child rename must still be written to disk: {on_disk}"
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // DeleteLocalEntity: the sibling of ApplyRemoteEntity in the same sync
+    // match. Same bug shape as the applies above — the committing
+    // `delete_transaction` / `delete_goal_by_id` produced an independent
+    // commit on every machine for the same logical delete.
+    // ------------------------------------------------------------------
+
+    /// `delete_transaction` (the committing variant) was reachable from
+    /// `DeleteLocalEntity` via `TransactionService::delete_transaction_by_id`
+    /// — same defect as the transaction apply, third instance overall.
+    #[test]
+    fn deleting_a_local_transaction_via_remote_delete_does_not_create_a_git_commit() {
+        let (mut app, child_id, _temp) = app_with_git_backed_child(None);
+        let existing = app
+            .backend()
+            .transaction_service
+            .list_all_transactions_for_child(&child_id)
+            .expect("list transactions");
+        assert_eq!(existing.len(), 1, "precondition: one seed transaction");
+        let tx_id = existing[0].id.clone();
+
+        let child_dir = app
+            .backend()
+            .csv_connection
+            .child_dir(&ChildId::from(child_id.as_str()))
+            .unwrap();
+        let before = Repository::open(&child_dir)
+            .unwrap()
+            .head()
+            .unwrap()
+            .peel_to_commit()
+            .unwrap()
+            .id();
+
+        app.delete_local_entity(&child_id, &EntityType::Transaction, &tx_id, "evt-del-tx");
+
+        let after = Repository::open(&child_dir)
+            .unwrap()
+            .head()
+            .unwrap()
+            .peel_to_commit()
+            .unwrap()
+            .id();
+        assert_eq!(before, after, "the lgs merge produces the commit, not the delete path");
+
+        // Only the commit is suppressed — the row itself must actually be
+        // gone, never just the commit.
+        let remaining = app
+            .backend()
+            .transaction_service
+            .list_all_transactions_for_child(&child_id)
+            .expect("list transactions");
+        assert!(remaining.is_empty(), "the deleted transaction must actually be removed from disk");
+    }
+
+    /// `write_goals` (the committing variant, via `delete_goal_by_id`) was
+    /// reachable from `DeleteLocalEntity` via `GoalService::delete_goal_by_id`
+    /// — same defect, fourth instance overall (transaction apply, goal
+    /// apply, child apply, now this).
+    #[test]
+    fn deleting_a_local_goal_via_remote_delete_does_not_create_a_git_commit() {
+        use crate::backend::domain::commands::goal::CreateGoalCommand;
+
+        let (mut app, child_id, _temp) = app_with_git_backed_child(None);
+        let created = app
+            .backend()
+            .goal_service
+            .create_goal(CreateGoalCommand {
+                child_id: None,
+                description: "Bike".to_string(),
+                target_amount: 100.0,
+            })
+            .expect("create goal")
+            .goal;
+
+        let child_dir = app
+            .backend()
+            .csv_connection
+            .child_dir(&ChildId::from(child_id.as_str()))
+            .unwrap();
+        let before = Repository::open(&child_dir)
+            .unwrap()
+            .head()
+            .unwrap()
+            .peel_to_commit()
+            .unwrap()
+            .id();
+
+        app.delete_local_entity(&child_id, &EntityType::Goal, &created.id, "evt-del-goal");
+
+        let after = Repository::open(&child_dir)
+            .unwrap()
+            .head()
+            .unwrap()
+            .peel_to_commit()
+            .unwrap()
+            .id();
+        assert_eq!(before, after, "the lgs merge produces the commit, not the delete path");
+
+        let on_disk = std::fs::read_to_string(child_dir.join("goals.csv")).unwrap();
+        assert!(
+            !on_disk.contains("Bike"),
+            "the deleted goal must actually be removed from disk: {on_disk}"
+        );
+    }
+
+    /// `EntityType::Child`'s delete arm never touches `ChildRepository::delete_child`
+    /// or any per-child git repo — it only deregisters in the top-level
+    /// `children.yaml` registry (see the comment in `delete_local_entity`).
+    /// This proves that definitively via real git inspection rather than by
+    /// reading the code, and doubles as confirmation that a remote child
+    /// delete never touches the shared folder (already covered by
+    /// `a_remote_child_delete_deregisters_without_touching_the_folder` in
+    /// `refresh_allowance_tests`).
+    #[test]
+    fn deleting_a_local_child_via_remote_delete_does_not_create_a_git_commit() {
+        let (mut app, child_id, _temp) = app_with_git_backed_child(None);
+        let child_dir = app
+            .backend()
+            .csv_connection
+            .child_dir(&ChildId::from(child_id.as_str()))
+            .unwrap();
+        let before = Repository::open(&child_dir)
+            .unwrap()
+            .head()
+            .unwrap()
+            .peel_to_commit()
+            .unwrap()
+            .id();
+
+        app.delete_local_entity(&child_id, &EntityType::Child, &child_id, "evt-del-child");
+
+        let after = Repository::open(&child_dir)
+            .unwrap()
+            .head()
+            .unwrap()
+            .peel_to_commit()
+            .unwrap()
+            .id();
+        assert_eq!(before, after, "a remote child delete must never touch the child's own git repo");
+
+        // Deregistered, but the folder (and its git repo) must survive —
+        // it may still be in use on another machine.
+        assert!(child_dir.join("child.yaml").exists(), "the shared folder must not be removed");
+        assert!(
+            app.backend().csv_connection.registry().path_for(&ChildId::from(child_id.as_str())).is_none(),
+            "the child must be deregistered locally"
         );
     }
 }

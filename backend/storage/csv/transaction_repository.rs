@@ -233,6 +233,28 @@ impl TransactionRepository {
         }
         self.write_transactions_internal(&child_id, &transactions)
     }
+
+    /// Delete a single transaction WITHOUT creating a git commit.
+    ///
+    /// Used exclusively by the AWS-apply path (`DeleteLocalEntity`, the
+    /// sibling of `ApplyRemoteEntity` — see
+    /// `upsert_transaction_no_commit`'s doc comment for the shared
+    /// rationale). Returns `true` if a row was found and removed, `false`
+    /// if it was already absent (idempotent, same as the committing
+    /// `delete_transaction`).
+    pub(crate) fn delete_transaction_no_commit(&self, child_id: &str, transaction_id: &str) -> Result<bool> {
+        let child_id = ChildId::from(child_id);
+        let mut transactions = self.read_transactions(&child_id)?;
+        let original_len = transactions.len();
+        transactions.retain(|t| t.id != transaction_id);
+
+        if transactions.len() < original_len {
+            self.write_transactions_internal(&child_id, &transactions)?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
 }
 
 impl TransactionRepository {

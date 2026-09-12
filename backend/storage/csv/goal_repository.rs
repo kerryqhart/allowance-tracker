@@ -230,6 +230,25 @@ impl GoalRepository {
         Ok(true)
     }
 
+    /// Remove a goal record by id WITHOUT creating a git commit.
+    ///
+    /// Used exclusively by the AWS-apply path (`DeleteLocalEntity`, the
+    /// sibling of `ApplyRemoteEntity` — see
+    /// `TransactionRepository::upsert_transaction_no_commit`'s doc comment
+    /// for the shared rationale). Returns `true` if a row was found and
+    /// removed, `false` if it was already absent (idempotent, same as the
+    /// committing `delete_goal_by_id`).
+    pub(crate) fn delete_goal_no_commit(&self, child_id: &str, goal_id: &str) -> Result<bool> {
+        let mut goals = self.read_goals(child_id)?;
+        let before = goals.len();
+        goals.retain(|g| g.id != goal_id);
+        if goals.len() == before {
+            return Ok(false);
+        }
+        self.write_goals_internal(child_id, &goals)?;
+        Ok(true)
+    }
+
     /// Check if a child has an active goal
     pub fn has_active_goal(&self, child_id: &str) -> Result<bool> {
         let goals = self.read_goals(child_id)?;

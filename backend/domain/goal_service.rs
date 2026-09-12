@@ -633,8 +633,14 @@ impl GoalService {
     /// Delete a goal by ID without firing the sync notifier.
     /// Used to apply remote deletes locally. Idempotent: a remote delete for a
     /// goal that doesn't exist locally is not an error.
+    ///
+    /// **Also critical:** does NOT go through the committing
+    /// `GoalRepository::delete_goal_by_id` — same reasoning as
+    /// `upsert_goal_from_sync`. `DeleteLocalEntity` is the sibling of
+    /// `ApplyRemoteEntity` in the same sync-message match; a remote delete
+    /// must not double-commit any more than a remote write does.
     pub fn delete_goal_by_id(&self, child_id: &str, goal_id: &str) -> Result<()> {
-        let removed = self.goal_repository.delete_goal_by_id(child_id, goal_id)?;
+        let removed = self.goal_repository.delete_goal_no_commit(child_id, goal_id)?;
         if !removed {
             log::debug!("delete_goal_by_id: {goal_id} not found for {child_id}; skipping");
         }
