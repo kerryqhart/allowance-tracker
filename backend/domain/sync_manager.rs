@@ -17,6 +17,23 @@ pub enum SyncCommand {
     Shutdown,
 }
 
+/// A `goals.csv` divergence a merge could not resolve (`allowance_core`
+/// models no goal row — a known, recorded gap; see
+/// `backend/sync/child_sync.rs`'s "Scope" doc). Deliberately a distinct
+/// type from `SyncStatus`, not a string folded into it: `SyncStatus` is
+/// last-writer-wins state (the next `StatusChanged` or `Error` overwrites
+/// whatever was there), so routing a notice through it means the notice is
+/// erased by the very next unrelated sync event — useless for something the
+/// user needs to still see after their goals failed to merge. This type is
+/// meant to be held (e.g. in `SyncUiState::goals_diverged`) until a future
+/// UI dismisses it, not glanced at once and discarded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GoalsDivergedNotice {
+    pub child_id: String,
+    pub ours_oid: String,
+    pub theirs_oid: String,
+}
+
 /// Messages from the sync background thread to the UI.
 pub enum SyncMessage {
     StatusChanged(SyncStatus),
@@ -66,6 +83,11 @@ pub enum SyncMessage {
         parents: (String, String),
         decisions: Vec<allowance_core::merge::Decision>,
     },
+
+    /// `goals.csv` diverged during a merge and was left unmerged. See
+    /// [`GoalsDivergedNotice`] — this is a NOTICE (something that happened,
+    /// held until dismissed), never routed through `SyncStatus`.
+    GoalsDiverged { child_id: String, ours_oid: String, theirs_oid: String },
 }
 
 impl std::fmt::Debug for SyncMessage {
@@ -115,6 +137,12 @@ impl std::fmt::Debug for SyncMessage {
                 .field("rows", &format_args!("<{} rows>", rows.len()))
                 .field("parents", parents)
                 .field("decisions", decisions)
+                .finish(),
+            SyncMessage::GoalsDiverged { child_id, ours_oid, theirs_oid } => f
+                .debug_struct("GoalsDiverged")
+                .field("child_id", child_id)
+                .field("ours_oid", ours_oid)
+                .field("theirs_oid", theirs_oid)
                 .finish(),
         }
     }

@@ -12,7 +12,7 @@
 //! making it easier to add sync UI features (status indicators, conflict modals, etc.)
 //! in the future without cluttering the core app state.
 
-use crate::backend::domain::sync_manager::{SyncMessage, SyncStatus};
+use crate::backend::domain::sync_manager::{GoalsDivergedNotice, SyncMessage, SyncStatus};
 use shared::sync::SyncConflict;
 use std::sync::mpsc;
 
@@ -24,6 +24,13 @@ pub struct SyncUiState {
     /// List of detected conflicts awaiting resolution
     pub conflicts: Vec<SyncConflict>,
 
+    /// `goals.csv` divergences a merge could not resolve, held until a
+    /// future UI dismisses them. Deliberately NOT folded into `status`:
+    /// `status` is last-writer-wins (see `SyncMessage::GoalsDiverged`'s doc
+    /// comment), so a notice routed through it would be erased by the very
+    /// next unrelated sync event.
+    pub goals_diverged: Vec<GoalsDivergedNotice>,
+
     /// Receiver for messages from the background sync thread
     pub message_rx: Option<mpsc::Receiver<SyncMessage>>,
 }
@@ -34,6 +41,7 @@ impl SyncUiState {
         Self {
             status: SyncStatus::Disabled,
             conflicts: Vec::new(),
+            goals_diverged: Vec::new(),
             message_rx: None,
         }
     }
@@ -43,8 +51,17 @@ impl SyncUiState {
         Self {
             status: SyncStatus::Idle,
             conflicts: Vec::new(),
+            goals_diverged: Vec::new(),
             message_rx: Some(rx),
         }
+    }
+
+    /// Record (or refresh) a goals-divergence notice for a child. Replaces
+    /// any existing notice for the same child rather than accumulating a
+    /// duplicate every cycle the divergence remains unresolved.
+    pub fn record_goals_diverged(&mut self, notice: GoalsDivergedNotice) {
+        self.goals_diverged.retain(|n| n.child_id != notice.child_id);
+        self.goals_diverged.push(notice);
     }
 
     /// Try to receive the next sync message from the background thread.

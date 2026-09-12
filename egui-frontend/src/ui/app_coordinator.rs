@@ -28,7 +28,7 @@
 use eframe::egui;
 use crate::ui::app_state::AllowanceTrackerApp;
 use crate::ui::components::styling::{setup_kid_friendly_style, draw_image_background};
-use crate::backend::domain::{SyncCommand, SyncMessage, SyncStatus};
+use crate::backend::domain::{GoalsDivergedNotice, SyncCommand, SyncMessage, SyncStatus};
 use crate::backend::storage::git::push_lgs;
 use crate::backend::storage::GitManager;
 use crate::backend::sync::child_sync::{current_branch, goals_diverged};
@@ -525,7 +525,7 @@ impl AllowanceTrackerApp {
                     self.sync.status = SyncStatus::Error(error);
                 }
                 SyncMessage::PushFailed { event_id, error } => {
-                    log::warn!("Sync push failed for event {}: {}", event_id, error);
+                    self.record_push_failed(&event_id, &error);
                 }
                 SyncMessage::EntitiesUpdated { .. } => {
                     // Entity updates are applied inline via ApplyRemoteEntity; this is
@@ -539,6 +539,14 @@ impl AllowanceTrackerApp {
                     if self.apply_merge(&child_id, rows, &parents, &decisions) == ApplyMergeOutcome::Applied {
                         local_state_dirty = true;
                     }
+                }
+                SyncMessage::GoalsDiverged { child_id, ours_oid, theirs_oid } => {
+                    // A NOTICE, not a status — see `GoalsDivergedNotice`'s
+                    // doc comment. Held until a future UI dismisses it,
+                    // never folded into `self.sync.status` (last-writer-wins,
+                    // and would be erased by the very next unrelated sync
+                    // event).
+                    self.sync.record_goals_diverged(GoalsDivergedNotice { child_id, ours_oid, theirs_oid });
                 }
             }
         }
@@ -759,9 +767,20 @@ impl AllowanceTrackerApp {
     /// orphaning it — the user's transaction would vanish with no error.
     /// This is checked and refused before anything is written.
     ///
-    /// Failures (and the goals.csv divergence notice) are routed through
-    /// `self.sync.status`, the same path `SyncMessage::Error` already uses
-    /// — not `log::` alone, which nobody using the app ever sees.
+    /// Hard failures are routed through `self.sync.status`
+    /// (`SyncStatus::Error`), the same path `SyncMessage::Error` already
+    /// uses. Two things are deliberately NOT reported that way, because a
+    /// STATUS says what the system currently IS (freely overwritten by the
+    /// next status change) while these describe something that HAPPENED and
+    /// must not be silently clobbered:
+    /// - A stale-HEAD refusal is the safety guard working as designed, not
+    ///   a fault — it is logged and answered with an immediate
+    ///   `SyncCommand::PollNow`, never `SyncStatus::Error`.
+    /// - A goals.csv divergence is reported via
+    ///   `SyncUiState::record_goals_diverged` (backed by
+    ///   `SyncMessage::GoalsDiverged`), which persists until a future UI
+    ///   dismisses it — `SyncStatus` is last-writer-wins and would erase it
+    ///   on the very next unrelated sync event.
     fn apply_merge(
         &mut self,
         child_id: &str,
@@ -803,15 +822,34 @@ impl AllowanceTrackerApp {
             }
         };
         if &current_head != ours_str {
+            // This is the safety guard working exactly as designed —
+            // expected, self-healing, and about to be retried. It is NOT a
+            // fault, so it must never be reported as `SyncStatus::Error`:
+            // doing so would teach the first consumer (and eventually the
+            // user) that a correctly functioning safety check is a
+            // problem. Log it and trigger an immediate re-poll instead —
+            // without that, the refused merge would simply be dropped
+            // until the next timer tick.
             log::warn!(
                 "Refusing to apply a merge for child {child_id}: HEAD moved from {ours_str} to \
                  {current_head} since this merge was computed (a local write raced the sync \
-                 cycle). Discarding the stale merge — the local commit is untouched. The next \
-                 sync cycle will recompute the merge from the new HEAD."
+                 cycle). Discarding the stale merge — the local commit is untouched. Requesting \
+                 an immediate re-poll so the merge is recomputed against the new HEAD."
             );
-            self.sync.status = SyncStatus::Error(format!(
-                "{child_id}'s sync will retry — local changes were made while merging"
-            ));
+            match &self.sync_command_tx {
+                Some(tx) => {
+                    if let Err(e) = tx.send(SyncCommand::PollNow) {
+                        log::warn!(
+                            "Could not request an immediate re-poll for child {child_id} after a \
+                             stale-head merge refusal (sync command channel closed): {e}"
+                        );
+                    }
+                }
+                None => log::warn!(
+                    "No sync command channel available to request a re-poll for child {child_id} \
+                     after a stale-head merge refusal"
+                ),
+            }
             return ApplyMergeOutcome::StaleHead;
         }
 
@@ -832,18 +870,24 @@ impl AllowanceTrackerApp {
         // fixed by choosing better code below (some byte content ends up in
         // the merge commit's tree regardless, and it will be whatever is
         // currently checked out — "ours"), so the requirement is to SAY SO
-        // loudly rather than let the merge look like a full, clean sync —
-        // loudly enough to reach the person whose goals did not sync, not
-        // just whoever reads the log.
+        // rather than let the merge look like a full, clean sync. This is a
+        // NOTICE (something that happened, needing to stay visible until
+        // dismissed), not a status — folding it into `self.sync.status`
+        // would let it be silently erased by the very next unrelated sync
+        // event (a `StatusChanged`, an `Error`, even another child's
+        // conflict). See `GoalsDivergedNotice`'s doc comment.
         match goals_diverged(&repo, ours_oid, theirs_oid) {
             Ok(true) => {
-                let msg = format!(
-                    "{child_id}'s goals.csv diverged between machines and was NOT merged — it \
-                     was left exactly as it is here. Any goal edits made on the other machine \
-                     are not reflected and must be reconciled by hand."
+                log::warn!(
+                    "{child_id}'s goals.csv diverged between {ours_str} and {theirs_str} and \
+                     was NOT merged — it was left exactly as it is here. Any goal edits made on \
+                     the other machine are not reflected and must be reconciled by hand."
                 );
-                log::warn!("{msg}");
-                self.sync.status = SyncStatus::Error(msg);
+                self.sync.record_goals_diverged(GoalsDivergedNotice {
+                    child_id: child_id.to_string(),
+                    ours_oid: ours_str.clone(),
+                    theirs_oid: theirs_str.clone(),
+                });
             }
             Ok(false) => {}
             Err(e) => log::warn!(
@@ -901,14 +945,27 @@ impl AllowanceTrackerApp {
             // disk, durable, and the next sync cycle's push attempt carries
             // it forward. Failing to push now must not be treated as
             // failing to apply the merge, and must not touch the working
-            // tree or the commit just made.
-            log::warn!(
-                "Merge commit {merge_commit} created for child {child_id} but push to lgs failed \
-                 (will retry on the next cycle): {e}"
+            // tree or the commit just made. Routed through the same shape
+            // as every other push failure (`SyncMessage::PushFailed`)
+            // rather than a bespoke log line, so one kind of failure has
+            // one representation for whatever eventually consumes it.
+            self.record_push_failed(
+                &merge_commit,
+                &format!("push to lgs failed for child {child_id} (will retry on the next cycle): {e}"),
             );
         }
 
         ApplyMergeOutcome::Applied
+    }
+
+    /// Record a push failure — shared by the ordinary AWS-style
+    /// `SyncMessage::PushFailed` arm and `apply_merge`'s post-merge push, so
+    /// both kinds of push failure funnel through one representation. Purely
+    /// a log line today (matching the pre-existing `PushFailed` handling);
+    /// not a `SyncStatus` write, since a push failure is a transient,
+    /// automatically-retried condition, not a durable state description.
+    fn record_push_failed(&mut self, event_id: &str, error: &str) {
+        log::warn!("Sync push failed for event {}: {}", event_id, error);
     }
 
     /// Refresh pending allowances if enough time has passed since last check
@@ -1324,6 +1381,7 @@ mod apply_merge_tests {
     use super::{ApplyMergeOutcome, SyncStatus};
     use crate::backend::domain::commands::child::{CreateChildCommand, SetActiveChildCommand};
     use crate::backend::domain::commands::transactions::CreateTransactionCommand;
+    use crate::backend::domain::SyncCommand;
     use crate::backend::Backend;
     use crate::ui::app_state::AllowanceTrackerApp;
     use allowance_core::money::Money;
@@ -1489,10 +1547,13 @@ mod apply_merge_tests {
         assert_eq!(on_disk, allowance_core::codec::render_transactions(&rows));
     }
 
-    /// Important-4 / goals.csv handling: the divergence must reach
-    /// `sync.status`, not just a log line nobody using the app ever sees.
+    /// Goals.csv handling: the divergence must reach the UI as a durable
+    /// NOTICE (`sync.goals_diverged`), never as `sync.status` — a status is
+    /// last-writer-wins and would be erased by the very next unrelated sync
+    /// event, which is exactly wrong for something the user still needs to
+    /// see after their goals failed to merge.
     #[test]
-    fn goals_csv_divergence_reaches_the_ui_via_sync_status() {
+    fn goals_csv_divergence_is_recorded_as_a_persistent_notice_not_a_status() {
         let (mut app, child_id, _temp) = app_with_git_backed_child();
         let child_dir = app
             .backend()
@@ -1516,17 +1577,77 @@ mod apply_merge_tests {
             1_700_000_500,
         );
 
+        // Status starts as something a goals notice must not disturb.
+        app.sync.status = SyncStatus::Idle;
+
         let outcome =
             app.apply_merge(&child_id, vec![], &(ours_oid.to_string(), theirs_oid.to_string()), &[]);
         assert_eq!(outcome, ApplyMergeOutcome::Applied, "the transactions merge still succeeds");
 
-        match &app.sync.status {
-            SyncStatus::Error(msg) => {
-                assert!(msg.contains("goals.csv"), "status must name what diverged: {msg}");
-                assert!(msg.contains(&child_id), "status must name which child: {msg}");
-            }
-            other => panic!("expected the goals divergence to reach sync.status, got {other:?}"),
-        }
+        assert_eq!(
+            app.sync.status,
+            SyncStatus::Idle,
+            "a goals notice must never be reported through sync.status"
+        );
+
+        let notice = app
+            .sync
+            .goals_diverged
+            .iter()
+            .find(|n| n.child_id == child_id)
+            .expect("the goals divergence must be recorded as a persistent notice");
+        assert_eq!(notice.ours_oid, ours_oid.to_string());
+        assert_eq!(notice.theirs_oid, theirs_oid.to_string());
+    }
+
+    /// A second, later divergence for the SAME child replaces its notice
+    /// rather than piling up duplicates while the condition remains
+    /// unresolved across repeated sync cycles.
+    #[test]
+    fn a_repeated_goals_divergence_for_the_same_child_replaces_its_notice() {
+        let (mut app, child_id, _temp) = app_with_git_backed_child();
+        let child_dir = app
+            .backend()
+            .csv_connection
+            .child_dir(&shared::ChildId::from(child_id.as_str()))
+            .unwrap();
+        let repo = Repository::open(&child_dir).unwrap();
+        let ours_oid = repo.head().unwrap().peel_to_commit().unwrap().id();
+        let ours_commit = repo.find_commit(ours_oid).unwrap();
+        let theirs_oid = commit_with_files(
+            &repo,
+            "their edit",
+            &[&ours_commit],
+            &[
+                ("transactions.csv", "id,child_id,date,description,amount,balance,type\n"),
+                ("goals.csv", "id,child_id,description,target\ng1,x,Bike,100.00\n"),
+            ],
+            1_700_000_500,
+        );
+        app.apply_merge(&child_id, vec![], &(ours_oid.to_string(), theirs_oid.to_string()), &[]);
+        assert_eq!(app.sync.goals_diverged.iter().filter(|n| n.child_id == child_id).count(), 1);
+
+        // A later cycle re-detects the (still unresolved) divergence at a
+        // new pair of tips.
+        let repo2 = Repository::open(&child_dir).unwrap();
+        let head_oid = repo2.head().unwrap().peel_to_commit().unwrap().id();
+        let head_commit = repo2.find_commit(head_oid).unwrap();
+        let theirs2_oid = commit_with_files(
+            &repo2,
+            "their second edit",
+            &[&head_commit],
+            &[
+                ("transactions.csv", "id,child_id,date,description,amount,balance,type\n"),
+                ("goals.csv", "id,child_id,description,target\ng1,x,Skateboard,60.00\n"),
+            ],
+            1_700_000_600,
+        );
+        app.apply_merge(&child_id, vec![], &(head_oid.to_string(), theirs2_oid.to_string()), &[]);
+
+        let matches: Vec<_> =
+            app.sync.goals_diverged.iter().filter(|n| n.child_id == child_id).collect();
+        assert_eq!(matches.len(), 1, "must replace, not accumulate, duplicate notices");
+        assert_eq!(matches[0].theirs_oid, theirs2_oid.to_string());
     }
 
     /// CRITICAL-2 regression: HEAD moved (an ordinary local write raced the
@@ -1571,6 +1692,13 @@ mod apply_merge_tests {
         let interloper_head = repo_after.head().unwrap().peel_to_commit().unwrap().id();
         assert_ne!(interloper_head, ours_oid, "precondition: HEAD must have moved");
 
+        // A status a stale-head refusal must not disturb -- it is not an
+        // error, so it must not clobber whatever status already holds.
+        app.sync.status = SyncStatus::Idle;
+
+        let (cmd_tx, cmd_rx) = std::sync::mpsc::channel::<SyncCommand>();
+        app.sync_command_tx = Some(cmd_tx);
+
         let outcome = app.apply_merge(
             &child_id,
             vec![],
@@ -1578,6 +1706,21 @@ mod apply_merge_tests {
             &[],
         );
         assert_eq!(outcome, ApplyMergeOutcome::StaleHead, "a stale-base merge must be refused");
+
+        // Item 1: the refusal must trigger an immediate re-poll, or the
+        // refused merge is simply dropped until the next timer tick.
+        assert!(
+            matches!(cmd_rx.try_recv(), Ok(SyncCommand::PollNow)),
+            "a stale-head refusal must send SyncCommand::PollNow to re-run the cycle"
+        );
+
+        // Item 2: this is the safety guard working as designed, not a
+        // fault -- it must NOT be reported as SyncStatus::Error.
+        assert_eq!(
+            app.sync.status,
+            SyncStatus::Idle,
+            "a stale-head refusal must never be reported as SyncStatus::Error"
+        );
 
         // HEAD must be untouched: the interloping commit survives, not
         // silently overwritten or orphaned by a merge commit that does not
@@ -1596,11 +1739,45 @@ mod apply_merge_tests {
             on_disk.contains("Interloper"),
             "the interloping transaction must not have been overwritten: {on_disk}"
         );
+    }
 
-        // The refusal must reach the UI, not just the log.
-        match &app.sync.status {
-            SyncStatus::Error(_) => {}
-            other => panic!("expected the stale-head refusal to be surfaced, got {other:?}"),
-        }
+    /// If no `sync_command_tx` is wired (e.g. sync disabled), a stale-head
+    /// refusal must still refuse the merge safely rather than panicking on
+    /// the missing channel.
+    #[test]
+    fn stale_head_refusal_is_safe_with_no_command_channel_wired() {
+        let (mut app, child_id, _temp) = app_with_git_backed_child();
+        let child_dir = app
+            .backend()
+            .csv_connection
+            .child_dir(&shared::ChildId::from(child_id.as_str()))
+            .unwrap();
+        let repo = Repository::open(&child_dir).unwrap();
+        let ours_oid = repo.head().unwrap().peel_to_commit().unwrap().id();
+        let ours_commit = repo.find_commit(ours_oid).unwrap();
+        let theirs_oid = commit_with_files(
+            &repo,
+            "their edit",
+            &[&ours_commit],
+            &[("transactions.csv", "id,child_id,date,description,amount,balance,type\n")],
+            1_700_000_500,
+        );
+        app.backend()
+            .transaction_service
+            .create_transaction(CreateTransactionCommand {
+                description: "Interloper".to_string(),
+                amount: 5.0,
+                date: None,
+            })
+            .expect("interloping transaction");
+
+        assert!(app.sync_command_tx.is_none(), "precondition: no channel wired");
+        let outcome = app.apply_merge(
+            &child_id,
+            vec![],
+            &(ours_oid.to_string(), theirs_oid.to_string()),
+            &[],
+        );
+        assert_eq!(outcome, ApplyMergeOutcome::StaleHead);
     }
 }
