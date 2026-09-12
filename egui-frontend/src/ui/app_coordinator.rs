@@ -32,6 +32,7 @@ use crate::backend::domain::{GoalsDivergedNotice, SyncCommand, SyncMessage, Sync
 use crate::backend::storage::git::push_lgs;
 use crate::backend::storage::GitManager;
 use crate::backend::sync::child_sync::{current_branch, goals_diverged};
+use crate::ui::state::{StaleHeadPollAction, STALE_HEAD_REFUSAL_LIMIT};
 use shared::sync::EntityType;
 use shared::ChildId;
 
@@ -830,25 +831,49 @@ impl AllowanceTrackerApp {
             // problem. Log it and trigger an immediate re-poll instead —
             // without that, the refused merge would simply be dropped
             // until the next timer tick.
+            //
+            // The re-poll itself is debounced (`note_stale_head_refusal`):
+            // if HEAD keeps moving faster than one fetch+classify+push
+            // round-trip (a user typing several transactions in a row),
+            // sending `PollNow` on every single refusal would ping-pong
+            // continuously between this thread and the background thread —
+            // safe (nothing here writes), but a hot machine and needless
+            // load on the lgs daemon for no benefit, since the merge is
+            // simply recomputed and reapplied once writes settle anyway.
             log::warn!(
                 "Refusing to apply a merge for child {child_id}: HEAD moved from {ours_str} to \
                  {current_head} since this merge was computed (a local write raced the sync \
-                 cycle). Discarding the stale merge — the local commit is untouched. Requesting \
-                 an immediate re-poll so the merge is recomputed against the new HEAD."
+                 cycle). Discarding the stale merge — the local commit is untouched."
             );
-            match &self.sync_command_tx {
-                Some(tx) => {
-                    if let Err(e) = tx.send(SyncCommand::PollNow) {
-                        log::warn!(
-                            "Could not request an immediate re-poll for child {child_id} after a \
-                             stale-head merge refusal (sync command channel closed): {e}"
-                        );
+            match self.sync.note_stale_head_refusal(std::time::Instant::now()) {
+                StaleHeadPollAction::Send => match &self.sync_command_tx {
+                    Some(tx) => {
+                        if let Err(e) = tx.send(SyncCommand::PollNow) {
+                            log::warn!(
+                                "Could not request an immediate re-poll for child {child_id} \
+                                 after a stale-head merge refusal (sync command channel \
+                                 closed): {e}"
+                            );
+                        }
                     }
-                }
-                None => log::warn!(
-                    "No sync command channel available to request a re-poll for child {child_id} \
-                     after a stale-head merge refusal"
+                    None => log::warn!(
+                        "No sync command channel available to request a re-poll for child \
+                         {child_id} after a stale-head merge refusal"
+                    ),
+                },
+                StaleHeadPollAction::Debounced => log::debug!(
+                    "Skipping an immediate re-poll for child {child_id} after a stale-head \
+                     refusal (within the debounce window) — the ordinary sync timer will pick \
+                     this up."
                 ),
+                StaleHeadPollAction::LimitReached => log::warn!(
+                    "Child {child_id} has had {STALE_HEAD_REFUSAL_LIMIT} consecutive stale-head \
+                     merge refusals; giving up on immediate re-polling for now and letting the \
+                     ordinary sync timer handle it."
+                ),
+                StaleHeadPollAction::Suppressed => {
+                    // Already logged at LimitReached above for this streak.
+                }
             }
             return ApplyMergeOutcome::StaleHead;
         }
@@ -955,6 +980,11 @@ impl AllowanceTrackerApp {
             );
         }
 
+        // The stale-head streak (if any) is over — a fresh bout of races
+        // later starts its debounce and cap from a clean state rather than
+        // staying suppressed forever.
+        self.sync.note_applied();
+
         ApplyMergeOutcome::Applied
     }
 
@@ -964,8 +994,15 @@ impl AllowanceTrackerApp {
     /// a log line today (matching the pre-existing `PushFailed` handling);
     /// not a `SyncStatus` write, since a push failure is a transient,
     /// automatically-retried condition, not a durable state description.
-    fn record_push_failed(&mut self, event_id: &str, error: &str) {
-        log::warn!("Sync push failed for event {}: {}", event_id, error);
+    ///
+    /// `reference` names whatever this failure is about — an AWS-style
+    /// sync event id from the `PushFailed` arm, or a git merge-commit oid
+    /// string from `apply_merge`. Deliberately NOT named `event_id`: that
+    /// name implies one specific shape (the AWS event-sourcing id), and the
+    /// git case is not that — the next reader parsing this value on the
+    /// assumption it is always an event id would be wrong.
+    fn record_push_failed(&mut self, reference: &str, error: &str) {
+        log::warn!("Sync push failed for {}: {}", reference, error);
     }
 
     /// Refresh pending allowances if enough time has passed since last check
