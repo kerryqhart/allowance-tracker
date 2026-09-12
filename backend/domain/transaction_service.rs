@@ -553,8 +553,14 @@ impl TransactionService {
     ///
     /// **Critical:** does NOT call `notify_sync` — writing a remote-sourced entity
     /// back through the notifier would create a sync loop.
+    ///
+    /// **Also critical:** does NOT go through `store_transaction` (which
+    /// commits to git). The lgs merge is now the thing that produces
+    /// commits for this file; if this path committed too, one MCP-server
+    /// write would produce a separate, divergent commit on every machine
+    /// running the MCP server. See `TransactionRepository::upsert_transaction_no_commit`.
     pub fn upsert_transaction_from_sync(&self, transaction: &DomainTransaction) -> Result<()> {
-        self.transaction_repository.store_transaction(transaction)
+        self.transaction_repository.upsert_transaction_no_commit(transaction)
     }
 
     /// Delete a transaction by ID without firing the sync notifier.

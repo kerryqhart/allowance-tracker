@@ -206,6 +206,33 @@ impl TransactionRepository {
 
         Ok(())
     }
+
+    /// Store or update a single transaction WITHOUT creating a git commit.
+    ///
+    /// Used exclusively by the AWS-apply path (`ApplyRemoteEntity`, applied
+    /// on the UI thread in `egui-frontend/src/ui/app_coordinator.rs`). Two
+    /// transports now write this same file — the old AWS event-sourcing
+    /// path and the new lgs (local git sync) path — and if the AWS path
+    /// also committed here, ONE MCP-server write would produce a SEPARATE
+    /// git commit on EACH machine for the same logical change. Divergence
+    /// would stop being an exception and become the steady state whenever
+    /// the MCP server is active, which defeats the point of the lgs merge:
+    /// it would be merging constantly for no reason.
+    ///
+    /// The commit for this change is produced later — by whatever ordinary
+    /// local edit or lgs merge next touches `transactions.csv` on this
+    /// machine — not by this call.
+    pub(crate) fn upsert_transaction_no_commit(&self, transaction: &DomainTransaction) -> Result<()> {
+        reject_pending_balance(transaction)?;
+        let child_id = ChildId::from(transaction.child_id.as_str());
+        let mut transactions = self.read_transactions(&child_id)?;
+        if let Some(pos) = transactions.iter().position(|t| t.id == transaction.id) {
+            transactions[pos] = transaction.clone();
+        } else {
+            transactions.push(transaction.clone());
+        }
+        self.write_transactions_internal(&child_id, &transactions)
+    }
 }
 
 impl TransactionRepository {

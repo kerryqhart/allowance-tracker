@@ -28,7 +28,7 @@
 use eframe::egui;
 use crate::ui::app_state::AllowanceTrackerApp;
 use crate::ui::components::styling::{setup_kid_friendly_style, draw_image_background};
-use crate::backend::domain::{GoalsDivergedNotice, SyncCommand, SyncMessage, SyncStatus};
+use crate::backend::domain::{BalanceService, GoalsDivergedNotice, SyncCommand, SyncMessage, SyncStatus};
 use crate::backend::storage::git::push_lgs;
 use crate::backend::storage::GitManager;
 use crate::backend::sync::child_sync::{current_branch, goals_diverged};
@@ -505,6 +505,19 @@ impl AllowanceTrackerApp {
                         .collect();
                     let _ = response_tx.send(ids);
                 }
+                // KNOWN GAP (deferred to the AWS spec, documented here so it
+                // is not accidentally missing): a transaction deleted on
+                // machine A, and correctly dropped by the lgs git merge on
+                // machine B, can be RE-CREATED on both machines by a later
+                // AWS replay of the old Created event (AWS's event log has
+                // no notion that a git merge already resolved this). Once
+                // re-created it has no base entry in the next git merge, so
+                // that merge reads it as a fresh add on both sides and keeps
+                // it. The deleted transaction comes back and stays. Nothing
+                // here detects or heals this — closing it requires AWS-side
+                // changes (e.g. an AWS-side tombstone or event
+                // invalidation), which are out of scope for the lgs
+                // coexistence work in this task.
                 SyncMessage::ApplyRemoteEntity { child_id, entity_type, entity_id, entity_json, event_id } => {
                     // A remote child change can rename the child or arrive for
                     // one we have cached; re-walk so the picker and the cached
@@ -655,6 +668,13 @@ impl AllowanceTrackerApp {
 
     /// Apply a remote entity to local storage. Called when the sync thread pulls a
     /// remote change. Does NOT fire SyncNotifier (Option A — prevents sync loops).
+    ///
+    /// Also does NOT create a git commit for the transaction case — see
+    /// `upsert_transaction_from_sync`'s doc comment. The old AWS transport
+    /// and the new lgs transport both write `transactions.csv`; if this path
+    /// committed too, one MCP-server write would produce an independent
+    /// commit on every machine, making divergence the steady state whenever
+    /// the MCP server is active. The lgs merge produces the commit instead.
     fn apply_remote_entity(
         &mut self,
         child_id: &str,
@@ -671,8 +691,38 @@ impl AllowanceTrackerApp {
             EntityType::Transaction => {
                 match serde_json::from_str::<DomainTransaction>(entity_json) {
                     Ok(transaction) => {
+                        let from_date = transaction.date.to_rfc3339();
                         if let Err(e) = self.core.backend.transaction_service.upsert_transaction_from_sync(&transaction) {
                             log::error!("Failed to apply remote transaction {}: {}", entity_id, e);
+                        } else {
+                            // A remote transaction can be backdated relative
+                            // to rows already on this machine, which leaves
+                            // their stored running balances stale — the same
+                            // situation the normal local-insert path fixes
+                            // with `recalculate_balances_from_date`. Reusing
+                            // the shared, AWS-wired `balance_service` here
+                            // would do that, but `recalculate_balances_from_date`
+                            // emits one `Updated` SyncEvent per changed row:
+                            // a single apply that rebalances 40 rows would
+                            // push 40 events back out at AWS, from BOTH
+                            // machines, after every apply — write
+                            // amplification with no new information in it.
+                            // A `BalanceService` built fresh here with
+                            // `.with_sync_notifier(None)` recalculates the
+                            // same way but can never notify, regardless of
+                            // what the shared instance is wired to.
+                            let merge_safe_balances =
+                                BalanceService::new(self.core.backend.csv_connection.clone())
+                                    .with_sync_notifier(None);
+                            if let Err(e) = merge_safe_balances
+                                .recalculate_balances_from_date(child_id, &from_date)
+                            {
+                                log::error!(
+                                    "Failed to recalculate balances for child {} after applying \
+                                     remote transaction {}: {}",
+                                    child_id, entity_id, e
+                                );
+                            }
                         }
                     }
                     Err(e) => {
@@ -1816,5 +1866,174 @@ mod apply_merge_tests {
             &[],
         );
         assert_eq!(outcome, ApplyMergeOutcome::StaleHead);
+    }
+}
+
+/// Task 16 (AWS coexistence): the OLD AWS event-sourcing transport and the
+/// NEW lgs (local git sync) transport now both write the same CSV files.
+/// Without these two fixes, ONE MCP-server write produces a SEPARATE git
+/// commit on EACH machine for the same logical change (divergence becomes
+/// the steady state whenever the MCP server is active), and a downstream
+/// balance recalculation after applying it would echo events back out at
+/// AWS from both machines. See `apply_remote_entity`'s doc comment.
+#[cfg(test)]
+mod coexist_tests {
+    use super::AllowanceTrackerApp;
+    use crate::backend::domain::commands::child::{CreateChildCommand, SetActiveChildCommand};
+    use crate::backend::domain::commands::transactions::CreateTransactionCommand;
+    use crate::backend::domain::models::transaction::{Transaction as DomainTransaction, TransactionType};
+    use crate::backend::domain::{sync_channel, SyncNotifier};
+    use crate::backend::Backend;
+    use allowance_core::money::Money;
+    use git2::Repository;
+    use shared::sync::EntityType;
+    use shared::ChildId;
+
+    /// One child with a real, git-initialized folder (an ordinary local
+    /// transaction write initializes the repo via `commit_file_change`,
+    /// same as production) and one existing transaction dated 2026-01-10,
+    /// so a backdated remote transaction has a real downstream row to
+    /// disturb. `sync_notifier` is wired to a real channel when the test
+    /// needs to observe what does or does not get notified.
+    fn app_with_git_backed_child(
+        sync_notifier: Option<SyncNotifier>,
+    ) -> (AllowanceTrackerApp, String, tempfile::TempDir) {
+        let temp = tempfile::TempDir::new().expect("temp dir");
+        let backend = Backend::with_data_dir(temp.path().to_path_buf(), sync_notifier)
+            .expect("backend");
+        let child = backend
+            .child_service
+            .create_child(CreateChildCommand {
+                name: "Test Kid".to_string(),
+                birthdate: "2015-01-01".to_string(),
+            })
+            .expect("create child")
+            .child;
+        backend
+            .child_service
+            .set_active_child(SetActiveChildCommand { child_id: child.id.clone() })
+            .expect("set active child");
+        backend
+            .transaction_service
+            .create_transaction(CreateTransactionCommand {
+                description: "Allowance".to_string(),
+                amount: 10.0,
+                date: Some(chrono::DateTime::parse_from_rfc3339("2026-01-10T12:00:00Z").unwrap()),
+            })
+            .expect("create transaction");
+        let app = AllowanceTrackerApp::new_for_test(backend);
+        (app, child.id, temp)
+    }
+
+    /// A transaction as it would arrive over the wire from the other
+    /// machine — already carrying the balance computed there.
+    fn sample_transaction(
+        child_id: &str,
+        date: &str,
+        description: &str,
+        amount_cents: i64,
+        balance_cents: i64,
+    ) -> DomainTransaction {
+        let amount = Money::from_cents(amount_cents);
+        DomainTransaction {
+            id: DomainTransaction::generate_id(amount, 1),
+            child_id: child_id.to_string(),
+            date: chrono::DateTime::parse_from_rfc3339(date).unwrap(),
+            description: description.to_string(),
+            amount,
+            balance: Money::from_cents(balance_cents),
+            transaction_type: if amount_cents >= 0 { TransactionType::OneOffIncome } else { TransactionType::Expense },
+        }
+    }
+
+    /// Fix 1: one MCP-server write otherwise produces an independent commit
+    /// on EACH machine for the same logical change — divergence becomes the
+    /// steady state whenever the MCP server is active, defeating the whole
+    /// purpose of the lgs merge. `ApplyRemoteEntity` must write through the
+    /// non-committing path; the lgs merge produces the commit, not this call.
+    ///
+    /// Dated after the existing local transaction so no downstream balance
+    /// recalculation is triggered either — this test isolates fix 1 only.
+    #[test]
+    fn applying_a_remote_entity_does_not_create_a_git_commit() {
+        let (mut app, child_id, _temp) = app_with_git_backed_child(None);
+        let child_dir = app
+            .backend()
+            .csv_connection
+            .child_dir(&ChildId::from(child_id.as_str()))
+            .unwrap();
+        let before = Repository::open(&child_dir)
+            .unwrap()
+            .head()
+            .unwrap()
+            .peel_to_commit()
+            .unwrap()
+            .id();
+
+        let remote_tx = sample_transaction(&child_id, "2026-02-01T12:00:00Z", "Remote gift", 500, 1500);
+        let json = serde_json::to_string(&remote_tx).unwrap();
+        app.apply_remote_entity(&child_id, &EntityType::Transaction, &remote_tx.id, &json, "evt-1");
+
+        let after = Repository::open(&child_dir)
+            .unwrap()
+            .head()
+            .unwrap()
+            .peel_to_commit()
+            .unwrap()
+            .id();
+        assert_eq!(before, after, "the lgs merge produces the commit, not the apply path");
+
+        // The write itself must still have landed on disk — only the commit
+        // is suppressed, not the data.
+        let on_disk = std::fs::read_to_string(child_dir.join("transactions.csv")).unwrap();
+        assert!(
+            on_disk.contains("Remote gift"),
+            "the remote transaction must still be written to disk: {on_disk}"
+        );
+    }
+
+    /// Fix 2: a remote transaction can be backdated relative to rows already
+    /// on this machine, which requires recalculating their stored running
+    /// balances downstream — but `recalculate_balances_from_date` emits one
+    /// `Updated` SyncEvent per changed row. Reusing the shared, AWS-wired
+    /// balance service for that recalculation would push those events back
+    /// out at AWS, from both machines, after every apply. It must go
+    /// through a `BalanceService` built with `.with_sync_notifier(None)` so
+    /// it can never notify, regardless of what the shared instance is
+    /// wired to.
+    #[test]
+    fn applying_a_backdated_remote_entity_recalculates_balances_without_notifying() {
+        let (tx, rx) = sync_channel();
+        let (mut app, child_id, _temp) = app_with_git_backed_child(Some(tx));
+
+        // Drain the Created event from the local setup transaction above —
+        // this test is only about what the *apply* path itself notifies.
+        while rx.try_recv().is_ok() {}
+
+        // Backdated relative to the existing "Allowance" transaction
+        // (2026-01-10), so applying it forces a downstream recalculation of
+        // that later row's stored balance: 2.00 + 10.00 = 12.00.
+        let remote_tx = sample_transaction(&child_id, "2026-01-05T12:00:00Z", "Backdated remote gift", 200, 200);
+        let json = serde_json::to_string(&remote_tx).unwrap();
+        app.apply_remote_entity(&child_id, &EntityType::Transaction, &remote_tx.id, &json, "evt-2");
+
+        // Precondition: the recalculation actually ran and changed the
+        // downstream row's balance — otherwise "no events" would hold for
+        // the trivial reason that nothing happened.
+        let child_dir = app
+            .backend()
+            .csv_connection
+            .child_dir(&ChildId::from(child_id.as_str()))
+            .unwrap();
+        let on_disk = std::fs::read_to_string(child_dir.join("transactions.csv")).unwrap();
+        assert!(
+            on_disk.contains("12.00"),
+            "precondition: the downstream row's balance must have been recalculated to 12.00: {on_disk}"
+        );
+
+        assert!(
+            rx.try_recv().is_err(),
+            "merge-safe recalculation after an AWS apply must not notify AWS"
+        );
     }
 }
