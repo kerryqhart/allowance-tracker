@@ -100,6 +100,34 @@ impl ChildRepository {
 
     /// Write `child.yaml` into an already-resolved child folder.
     fn write_child_yaml(&self, child: &DomainChild, child_dir: &Path) -> Result<()> {
+        self.write_child_yaml_internal(child, child_dir)?;
+
+        // Git commit the child.yaml change
+        let action_description = format!("Updated child profile: {}", child.name);
+        let _ = self.git_manager.commit_file_change(
+            child_dir,
+            "child.yaml",
+            &action_description
+        );
+
+        Ok(())
+    }
+
+    /// Write `child.yaml` into an already-resolved child folder WITHOUT
+    /// creating a git commit.
+    ///
+    /// Used exclusively by the AWS-apply path (`ApplyRemoteEntity`, applied
+    /// on the UI thread in `egui-frontend/src/ui/app_coordinator.rs`). See
+    /// `TransactionRepository::upsert_transaction_no_commit` for the full
+    /// rationale — two transports now write this same file, and if the AWS
+    /// path also committed here, one MCP-server write would produce a
+    /// separate, divergent commit on every machine running the MCP server.
+    ///
+    /// Only the commit is suppressed: this still does the atomic
+    /// write-then-rename and the registry label refresh, so `child.yaml` on
+    /// disk (and the cached picker label) are exactly as correct as they
+    /// are on the committing path.
+    fn write_child_yaml_internal(&self, child: &DomainChild, child_dir: &Path) -> Result<()> {
         let yaml_child = YamlChild {
             id: child.id.clone(),
             name: child.name.clone(),
@@ -117,14 +145,6 @@ impl ChildRepository {
         fs::rename(&temp_path, &yaml_path)?;
 
         info!("Saved child {} to directory: {}", child.name, child_dir.display());
-
-        // Git commit the child.yaml change
-        let action_description = format!("Updated child profile: {}", child.name);
-        let _ = self.git_manager.commit_file_change(
-            child_dir,
-            "child.yaml",
-            &action_description
-        );
 
         // Keep the registry's display cache in step with `child.yaml`.
         let id = ChildId::from(child.id.as_str());
@@ -154,6 +174,30 @@ impl ChildRepository {
         }
 
         Ok(())
+    }
+
+    /// Store or update a child WITHOUT creating a git commit — the
+    /// AWS-apply equivalent of `store_child`/`update_child` combined
+    /// (mirroring the same "register if unregistered, then write" lifecycle
+    /// `store_child` uses, since a remote child can arrive here before this
+    /// machine has ever seen it). Used exclusively by
+    /// `ChildService::upsert_child_from_sync`.
+    pub(crate) fn upsert_child_no_commit(&self, child: &DomainChild) -> Result<()> {
+        let id = ChildId::from(child.id.as_str());
+
+        if self.connection.registry().path_for(&id).is_none() {
+            let folder = self.connection.base_directory().join(child.id.as_str());
+            fs::create_dir_all(&folder)?;
+            let entry = RegistryEntry {
+                id: id.clone(),
+                path: folder,
+                label: child.name.clone(),
+            };
+            self.connection.update_registry(|reg| reg.register(entry))?;
+        }
+
+        let dir = self.connection.child_dir_for_create(&id)?;
+        self.write_child_yaml_internal(child, &dir)
     }
 }
 

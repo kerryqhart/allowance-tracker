@@ -92,6 +92,34 @@ impl GoalRepository {
     }
 
     fn write_goals(&self, child_id: &str, goals: &[DomainGoal]) -> Result<()> {
+        let file_path = self.write_goals_internal(child_id, goals)?;
+
+        // Git commit the goals file change
+        if let Some(parent_dir) = file_path.parent() {
+            let action_description = format!("Updated goals for child directory: {}", child_id);
+            let _ = self.git_manager.commit_file_change(
+                parent_dir,
+                "goals.csv",
+                &action_description
+            );
+        }
+
+        Ok(())
+    }
+
+    /// Write goals WITHOUT creating a git commit. Returns the file path so
+    /// the committing `write_goals` above can find its parent directory
+    /// without re-resolving it.
+    ///
+    /// Used exclusively by the AWS-apply path (`ApplyRemoteEntity`, applied
+    /// on the UI thread in `egui-frontend/src/ui/app_coordinator.rs`). See
+    /// `TransactionRepository::upsert_transaction_no_commit` for the full
+    /// rationale: two transports now write this same file, and if the AWS
+    /// path also committed here, one MCP-server write would produce a
+    /// separate, divergent git commit on every machine running the MCP
+    /// server. The commit for this change is produced later, by whatever
+    /// ordinary local edit or lgs merge next touches `goals.csv`.
+    fn write_goals_internal(&self, child_id: &str, goals: &[DomainGoal]) -> Result<std::path::PathBuf> {
         // No `create_dir_all` here: `goals_path` resolves through the registry
         // and has already proven the child's folder is present. Creating it
         // would be manufacturing a folder for a child whose data is elsewhere.
@@ -105,16 +133,20 @@ impl GoalRepository {
         }
         wtr.flush()?;
 
-        // Git commit the goals file change
-        if let Some(parent_dir) = file_path.parent() {
-            let action_description = format!("Updated goals for child directory: {}", child_id);
-            let _ = self.git_manager.commit_file_change(
-                parent_dir,
-                "goals.csv",
-                &action_description
-            );
-        }
+        Ok(file_path)
+    }
 
+    /// Upsert a goal WITHOUT creating a git commit — the AWS-apply
+    /// equivalent of `store_goal`/`update_goal` combined. Used exclusively
+    /// by `GoalService::upsert_goal_from_sync`.
+    pub(crate) fn upsert_goal_no_commit(&self, goal: &DomainGoal) -> Result<()> {
+        let mut goals = self.read_goals(&goal.child_id)?;
+        if let Some(existing) = goals.iter_mut().find(|g| g.id == goal.id) {
+            *existing = goal.clone();
+        } else {
+            goals.push(goal.clone());
+        }
+        self.write_goals_internal(&goal.child_id, &goals)?;
         Ok(())
     }
 }

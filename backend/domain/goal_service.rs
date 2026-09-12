@@ -621,14 +621,13 @@ impl GoalService {
     ///
     /// **Critical:** does NOT call `notify_sync` — writing a remote-sourced entity
     /// back through the notifier would create a sync loop.
+    ///
+    /// **Also critical:** does NOT go through `store_goal`/`update_goal`
+    /// (both commit to git). See `TransactionRepository::upsert_transaction_no_commit`
+    /// for the rationale — the lgs merge produces commits for this file now,
+    /// not this path.
     pub fn upsert_goal_from_sync(&self, goal: &DomainGoal) -> Result<()> {
-        let goals = self.goal_repository.list_goals(&goal.child_id, None)?;
-        let exists = goals.iter().any(|g| g.id == goal.id);
-        if exists {
-            self.goal_repository.update_goal(goal)
-        } else {
-            self.goal_repository.store_goal(goal)
-        }
+        self.goal_repository.upsert_goal_no_commit(goal)
     }
 
     /// Delete a goal by ID without firing the sync notifier.

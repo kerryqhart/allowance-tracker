@@ -1881,6 +1881,8 @@ mod coexist_tests {
     use super::AllowanceTrackerApp;
     use crate::backend::domain::commands::child::{CreateChildCommand, SetActiveChildCommand};
     use crate::backend::domain::commands::transactions::CreateTransactionCommand;
+    use crate::backend::domain::models::child::Child as DomainChild;
+    use crate::backend::domain::models::goal::{DomainGoal, DomainGoalState};
     use crate::backend::domain::models::transaction::{Transaction as DomainTransaction, TransactionType};
     use crate::backend::domain::{sync_channel, SyncNotifier};
     use crate::backend::Backend;
@@ -2034,6 +2036,105 @@ mod coexist_tests {
         assert!(
             rx.try_recv().is_err(),
             "merge-safe recalculation after an AWS apply must not notify AWS"
+        );
+    }
+
+    /// Same bug, same fix, different entity type: `GoalRepository::store_goal`
+    /// and `update_goal` both commit unconditionally, exactly as
+    /// `store_transaction` used to. `ApplyRemoteEntity`'s Goal arm must use
+    /// the non-committing path too, or one MCP-server goal write still
+    /// produces an independent commit on every machine.
+    #[test]
+    fn applying_a_remote_goal_does_not_create_a_git_commit() {
+        let (mut app, child_id, _temp) = app_with_git_backed_child(None);
+        let child_dir = app
+            .backend()
+            .csv_connection
+            .child_dir(&ChildId::from(child_id.as_str()))
+            .unwrap();
+        let before = Repository::open(&child_dir)
+            .unwrap()
+            .head()
+            .unwrap()
+            .peel_to_commit()
+            .unwrap()
+            .id();
+
+        let goal = DomainGoal {
+            id: "goal-1".to_string(),
+            child_id: child_id.clone(),
+            description: "New bike".to_string(),
+            target_amount: 150.0,
+            state: DomainGoalState::Active,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+        let json = serde_json::to_string(&goal).unwrap();
+        app.apply_remote_entity(&child_id, &EntityType::Goal, &goal.id, &json, "evt-goal-1");
+
+        let after = Repository::open(&child_dir)
+            .unwrap()
+            .head()
+            .unwrap()
+            .peel_to_commit()
+            .unwrap()
+            .id();
+        assert_eq!(before, after, "the lgs merge produces the commit, not the apply path");
+
+        let on_disk = std::fs::read_to_string(child_dir.join("goals.csv")).unwrap();
+        assert!(
+            on_disk.contains("New bike"),
+            "the remote goal must still be written to disk: {on_disk}"
+        );
+    }
+
+    /// Same bug, same fix, different entity type again: `ChildRepository::store_child`
+    /// and `update_child` both commit unconditionally against `child.yaml`
+    /// itself — the child's own record. `ApplyRemoteEntity`'s Child arm must
+    /// use the non-committing path too. The write must still be correct:
+    /// only the commit is suppressed, never the write.
+    #[test]
+    fn applying_a_remote_child_does_not_create_a_git_commit() {
+        let (mut app, child_id, _temp) = app_with_git_backed_child(None);
+        let child_dir = app
+            .backend()
+            .csv_connection
+            .child_dir(&ChildId::from(child_id.as_str()))
+            .unwrap();
+        let before = Repository::open(&child_dir)
+            .unwrap()
+            .head()
+            .unwrap()
+            .peel_to_commit()
+            .unwrap()
+            .id();
+
+        // A rename arriving from the other machine.
+        let renamed = DomainChild {
+            id: child_id.clone(),
+            name: "Renamed Kid".to_string(),
+            birthdate: chrono::NaiveDate::from_ymd_opt(2015, 1, 1).unwrap(),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+        let json = serde_json::to_string(&renamed).unwrap();
+        app.apply_remote_entity(&child_id, &EntityType::Child, &child_id, &json, "evt-child-1");
+
+        let after = Repository::open(&child_dir)
+            .unwrap()
+            .head()
+            .unwrap()
+            .peel_to_commit()
+            .unwrap()
+            .id();
+        assert_eq!(before, after, "the lgs merge produces the commit, not the apply path");
+
+        // Only the commit is suppressed — child.yaml itself must still be
+        // written correctly, since it is the child's own record.
+        let on_disk = std::fs::read_to_string(child_dir.join("child.yaml")).unwrap();
+        assert!(
+            on_disk.contains("Renamed Kid"),
+            "the remote child rename must still be written to disk: {on_disk}"
         );
     }
 }
