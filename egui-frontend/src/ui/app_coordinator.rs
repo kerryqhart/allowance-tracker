@@ -29,9 +29,10 @@ use eframe::egui;
 use crate::ui::app_state::AllowanceTrackerApp;
 use crate::ui::components::styling::{setup_kid_friendly_style, draw_image_background};
 use crate::backend::domain::{BalanceService, GoalsDivergedNotice, SyncCommand, SyncMessage, SyncStatus};
-use crate::backend::storage::git::push_lgs;
 use crate::backend::storage::GitManager;
-use crate::backend::sync::child_sync::{current_branch, goals_diverged};
+use crate::backend::sync::child_sync::{
+    current_branch, goals_diverged, push_with_retry, recover_if_dirty, Recovered,
+};
 use crate::ui::state::{StaleHeadPollAction, STALE_HEAD_REFUSAL_LIMIT};
 use shared::sync::EntityType;
 use shared::ChildId;
@@ -866,6 +867,40 @@ impl AllowanceTrackerApp {
             }
         };
 
+        // Recover from a crash between a previous `apply_merge` writing
+        // `transactions.csv` and it creating the follow-up merge commit —
+        // see `recover_if_dirty`'s doc comment for why discarding (never
+        // salvaging) a dirty tree is safe here: the merge that produced it
+        // is a pure function of `(base, ours, theirs)`, and both `ours`
+        // (HEAD, untouched by a dirty working tree) and `theirs` (already
+        // in the object database) are still exactly what they were, so
+        // whatever runs next reproduces the same rows byte for byte. Doing
+        // this before the HEAD check below, not after: a dirty tree never
+        // moves HEAD, so it cannot change that check's answer, and starting
+        // from a clean tree keeps everything that follows (the write, the
+        // stage-and-commit) operating on known-good state.
+        match recover_if_dirty(&repo) {
+            Ok(Recovered::Clean) => {}
+            Ok(Recovered::DiscardedAndReMerged) => {
+                log::warn!(
+                    "Child {child_id}'s working tree was dirty before applying this merge \
+                     (likely a crash between a previous merge's file write and its commit); \
+                     discarded the dirty state — this apply recomputes transactions.csv from \
+                     scratch, so nothing is lost."
+                );
+            }
+            Err(e) => {
+                log::error!(
+                    "Cannot check/recover child {child_id}'s working tree before applying a \
+                     merge: {e}"
+                );
+                self.sync.status = SyncStatus::Error(format!(
+                    "Sync failed for {child_id}: could not verify its working tree was clean"
+                ));
+                return ApplyMergeOutcome::Failed;
+            }
+        }
+
         let (ours_str, theirs_str) = parents;
 
         // CRITICAL: refuse a merge computed against a HEAD that has since
@@ -1022,7 +1057,7 @@ impl AllowanceTrackerApp {
             }
         };
 
-        if let Err(e) = push_lgs(&repo, &branch) {
+        if let Err(e) = push_with_retry(&repo, &branch, 3) {
             // No retry queue is needed here: the merge commit is already on
             // disk, durable, and the next sync cycle's push attempt carries
             // it forward. Failing to push now must not be treated as
@@ -1600,6 +1635,64 @@ mod apply_merge_tests {
             content,
             allowance_core::codec::render_transactions(&rows),
             "the committed tree must hold exactly the merged rows, byte for byte"
+        );
+    }
+
+    /// Task 17 crash recovery: a working tree left dirty by a crash between
+    /// a PREVIOUS `apply_merge`'s file write and its commit must not corrupt
+    /// or block the NEXT `apply_merge` call — the dirty content is
+    /// discarded (`recover_if_dirty`) and this call's own write/commit
+    /// proceeds exactly as if the tree had been clean all along.
+    #[test]
+    fn a_dirty_tree_from_a_prior_crash_is_recovered_before_applying_the_next_merge() {
+        let (mut app, child_id, _temp) = app_with_git_backed_child();
+        let child_dir = app
+            .backend()
+            .csv_connection
+            .child_dir(&shared::ChildId::from(child_id.as_str()))
+            .unwrap();
+        let repo = Repository::open(&child_dir).unwrap();
+        let ours_oid = repo.head().unwrap().peel_to_commit().unwrap().id();
+        let ours_commit = repo.find_commit(ours_oid).unwrap();
+        let theirs_oid = commit_with_files(
+            &repo,
+            "their edit",
+            &[&ours_commit],
+            &[("transactions.csv", "id,child_id,date,description,amount,balance,type\n")],
+            1_700_000_500,
+        );
+
+        // Simulate a crash left over from an earlier, unrelated merge apply:
+        // `transactions.csv` was overwritten but the commit that should have
+        // followed never happened. HEAD is untouched (still `ours_oid`).
+        std::fs::write(child_dir.join("transactions.csv"), "garbage-from-a-crash").unwrap();
+        assert_eq!(
+            repo.head().unwrap().peel_to_commit().unwrap().id(),
+            ours_oid,
+            "precondition: the dirty write must not have moved HEAD"
+        );
+
+        let rows = vec![a_row(&child_id, "in-1-a", "Merged Allowance", 1000)];
+        let outcome = app.apply_merge(
+            &child_id,
+            rows.clone(),
+            &(ours_oid.to_string(), theirs_oid.to_string()),
+            &[],
+        );
+        assert_eq!(
+            outcome,
+            ApplyMergeOutcome::Applied,
+            "a dirty tree from a prior crash must not block this merge from applying"
+        );
+
+        let repo = Repository::open(&child_dir).unwrap();
+        let head_commit = repo.head().unwrap().peel_to_commit().unwrap();
+        assert_eq!(head_commit.parent_count(), 2, "must be a real two-parent merge commit");
+        let on_disk = std::fs::read_to_string(child_dir.join("transactions.csv")).unwrap();
+        assert_eq!(
+            on_disk,
+            allowance_core::codec::render_transactions(&rows),
+            "the crash's garbage must be gone, replaced by this call's own merged content"
         );
     }
 

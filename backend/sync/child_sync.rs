@@ -35,7 +35,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use git2::{Oid, Repository};
 
 use allowance_core::merge::{merge, Decision};
@@ -55,6 +55,12 @@ const LGS_AUTH_MAIN: &str = "refs/remotes/lgs-auth/main";
 /// "Scope" section.
 const GOALS_FILE: &str = "goals.csv";
 const TRANSACTIONS_FILE: &str = "transactions.csv";
+
+/// How many times [`cycle_against`]'s `Ahead` push, and `apply_merge`'s
+/// post-merge push (`app_coordinator.rs`), each retry before giving up for
+/// this cycle. See [`push_with_retry_inner`] for why bounded rather than
+/// unbounded.
+const PUSH_RETRY_MAX: u8 = 3;
 
 /// The outcome of comparing `ours`, the authoritative peer tip (`auth`), and
 /// their merge base.
@@ -232,10 +238,10 @@ impl ChildSyncEngine {
                 // violate "UI owns all working-tree I/O": nothing here
                 // touches a file, only `.git` refs/objects over the wire.
                 let branch = current_branch(&repo)?;
-                push_lgs(&repo, &branch).with_context(|| {
+                push_with_retry(&repo, &branch, PUSH_RETRY_MAX).with_context(|| {
                     format!(
                         "pushing branch '{branch}' after determining we are ahead of the peer's \
-                         last published tip"
+                         last published tip (retried up to {PUSH_RETRY_MAX} times)"
                     )
                 })?;
                 Ok(CycleOutcome::Ahead)
@@ -287,6 +293,98 @@ pub(crate) fn current_branch(repo: &Repository) -> Result<String> {
     head.shorthand()
         .map(str::to_string)
         .ok_or_else(|| anyhow::anyhow!("HEAD is not a valid UTF-8 branch name"))
+}
+
+/// Outcome of [`recover_if_dirty`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Recovered {
+    /// The working tree already matched HEAD — nothing to recover.
+    Clean,
+    /// The working tree was dirty and has been hard-reset back to HEAD. The
+    /// caller must treat this exactly like starting fresh: re-fetch,
+    /// re-classify, and (if still diverged) re-merge and re-apply.
+    DiscardedAndReMerged,
+}
+
+/// Recover a child repo whose working tree is dirty for a reason that must
+/// never happen in ordinary operation: a crash between `apply_merge`
+/// writing `transactions.csv` and it creating the follow-up merge commit
+/// (`app_coordinator.rs`). Call this before writing anything, so a leftover
+/// half-written file from a previous crash can never be mistaken for
+/// legitimate content or committed alongside a new merge's tree.
+///
+/// # Why discarding — never salvaging — the dirty state is safe
+///
+/// The instinct on finding unexpected uncommitted content is to inspect and
+/// try to recover it. Do not do that here. `allowance_core::merge` is a
+/// pure, deterministic function of `(base, ours, theirs)`: `ours` is still
+/// exactly `HEAD` (a dirty working tree never moves `HEAD`), and `theirs`
+/// is still sitting in the object database whether or not this attempt to
+/// apply it survives. So re-running the *same* cycle from those two inputs
+/// reproduces byte-for-byte the same rows the crashed attempt was in the
+/// middle of writing — there is nothing recoverable on disk that a clean
+/// re-run cannot recompute exactly. What IS on disk after an unclean
+/// shutdown, by contrast, could be a torn write (a partial `fs::write`), or
+/// — if the crash landed mid-stage — an index that disagrees with either
+/// the old committed content or the new merged content. Treating that as
+/// salvageable risks committing exactly the kind of corrupted or
+/// half-applied row this whole design exists to prevent. Discard it and let
+/// the deterministic merge regenerate it; do not replace this function with
+/// an attempt to inspect or keep any part of the dirty state.
+pub fn recover_if_dirty(repo: &Repository) -> Result<Recovered> {
+    let mut opts = git2::StatusOptions::new();
+    opts.include_untracked(false);
+    if repo
+        .statuses(Some(&mut opts))
+        .context("checking child repo status before applying a merge")?
+        .is_empty()
+    {
+        return Ok(Recovered::Clean);
+    }
+    let head = repo
+        .head()
+        .context("resolving HEAD to recover a dirty working tree")?
+        .peel_to_commit()
+        .context("peeling HEAD to a commit to recover a dirty working tree")?;
+    repo.reset(head.as_object(), git2::ResetType::Hard, None)
+        .context("hard-resetting a dirty working tree back to HEAD")?;
+    Ok(Recovered::DiscardedAndReMerged)
+}
+
+/// Attempt `attempt` up to `max` times, returning at the first success.
+///
+/// Deliberately bounded, and deliberately with no sleep or backoff between
+/// attempts. `lgs` mirrors `refs/lgs-auth/*` on every daemon tick
+/// independently of this process (see [`Cycle::Ahead`]'s doc comment), so a
+/// push rejected because the remote moved under us is not a condition that
+/// retrying *this* call harder is likely to fix — it needs a fresh
+/// fetch+classify, which is the next scheduled cycle's job. Retrying
+/// without a bound would spin this call forever whenever a push keeps
+/// losing that race, or whenever the daemon is simply down.
+pub fn push_with_retry_inner<F>(max: u8, mut attempt: F) -> Result<()>
+where
+    F: FnMut() -> Result<()>,
+{
+    let mut last = None;
+    for _ in 0..max {
+        match attempt() {
+            Ok(()) => return Ok(()),
+            Err(e) => last = Some(e),
+        }
+    }
+    // Leaving it for the next scheduled cycle is correct, not a data-loss
+    // risk: the commit this push is trying to publish is already durable on
+    // this machine's disk (in the repo's object database), so nothing is
+    // lost by stopping here. The next cycle's fetch+classify will see us
+    // `Ahead` (or fast-forwardable) again and try the push again.
+    Err(last.unwrap_or_else(|| anyhow!("push failed")))
+}
+
+/// Push `branch` to the `lgs` remote, retrying up to `max` times before
+/// giving up for this cycle. See [`push_with_retry_inner`] for why this is
+/// bounded rather than unbounded or backed off with a sleep.
+pub fn push_with_retry(repo: &Repository, branch: &str, max: u8) -> Result<()> {
+    push_with_retry_inner(max, || push_lgs(repo, branch))
 }
 
 /// Read `transactions.csv` as of `oid`, parsed. An absent file (a commit
@@ -657,5 +755,80 @@ ex-3-a,keiko,2026-01-03T00:00:00+00:00,Book,-3.00,7.00,expense\n";
         let theirs_prov = provenance(&work_repo, theirs_oid).unwrap();
         assert_ne!(ours_prov, theirs_prov);
         assert_eq!(theirs_prov.committer_epoch, 1_700_000_999);
+    }
+
+    // --- recover_if_dirty and push_with_retry ------------------------------
+
+    /// A standalone repo (no remote) with one committed `transactions.csv`.
+    fn repo_with_commit() -> (Repository, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = Repository::init(dir.path()).unwrap();
+        std::fs::write(dir.path().join(TRANSACTIONS_FILE), TX_A).unwrap();
+        let gm = GitManager::with_clock(|| 1_700_000_000);
+        gm.add_all(dir.path()).unwrap();
+        gm.commit(dir.path(), "init").unwrap();
+        (repo, dir)
+    }
+
+    #[test]
+    fn a_clean_tree_is_reported_clean_and_left_untouched() {
+        let (repo, _dir) = repo_with_commit();
+        assert_eq!(recover_if_dirty(&repo).unwrap(), Recovered::Clean);
+        let text = std::fs::read_to_string(repo.workdir().unwrap().join(TRANSACTIONS_FILE)).unwrap();
+        assert_eq!(text, TX_A, "a clean tree must not be touched");
+    }
+
+    /// Crash between writing merged CSVs and the merge commit. Re-running is
+    /// safe precisely because the merge is deterministic — see
+    /// `recover_if_dirty`'s doc comment for why discarding (never
+    /// salvaging) the dirty content is the correct move here.
+    #[test]
+    fn a_dirty_tree_on_a_diverged_branch_is_discarded_and_re_merged() {
+        let (repo, _dir) = repo_with_commit();
+        std::fs::write(repo.workdir().unwrap().join(TRANSACTIONS_FILE), "garbage").unwrap();
+        let recovered = recover_if_dirty(&repo).unwrap();
+        assert_eq!(recovered, Recovered::DiscardedAndReMerged);
+        let text = std::fs::read_to_string(repo.workdir().unwrap().join(TRANSACTIONS_FILE)).unwrap();
+        assert_ne!(text, "garbage");
+        assert_eq!(text, TX_A, "must be reset to exactly the last committed content");
+    }
+
+    /// An untracked file (never committed, so never part of HEAD) does not
+    /// count as "dirty" here — `StatusOptions::include_untracked(false)`
+    /// deliberately excludes it. Only a modification to tracked content
+    /// (the crash-mid-write scenario this function exists for) triggers a
+    /// reset.
+    #[test]
+    fn an_untracked_file_alone_is_not_treated_as_dirty() {
+        let (repo, dir) = repo_with_commit();
+        std::fs::write(dir.path().join("some_other_file.txt"), "not part of any commit").unwrap();
+        assert_eq!(recover_if_dirty(&repo).unwrap(), Recovered::Clean);
+        assert!(dir.path().join("some_other_file.txt").exists(), "untracked files are left alone");
+    }
+
+    #[test]
+    fn push_retry_is_bounded() {
+        let attempts = std::cell::Cell::new(0);
+        let result = push_with_retry_inner(3, || {
+            attempts.set(attempts.get() + 1);
+            Err(anyhow!("moved"))
+        });
+        assert!(result.is_err());
+        assert_eq!(attempts.get(), 3, "must not spin forever when the remote keeps moving");
+    }
+
+    #[test]
+    fn push_retry_stops_at_the_first_success() {
+        let attempts = std::cell::Cell::new(0);
+        let result = push_with_retry_inner(3, || {
+            attempts.set(attempts.get() + 1);
+            if attempts.get() < 2 {
+                Err(anyhow!("transient"))
+            } else {
+                Ok(())
+            }
+        });
+        assert!(result.is_ok());
+        assert_eq!(attempts.get(), 2, "must not keep retrying once it has succeeded");
     }
 }
