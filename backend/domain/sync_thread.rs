@@ -462,7 +462,11 @@ fn poll_remote(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backend::domain::commands::child::{CreateChildCommand, SetActiveChildCommand};
+    use crate::backend::domain::commands::transactions::CreateTransactionCommand;
     use crate::backend::storage::mock_remote::MockRemoteClient;
+    use crate::backend::sync::lgs_client::LgsClient;
+    use crate::backend::Backend;
     use std::collections::HashMap;
     use std::time::Duration;
     use tempfile::TempDir;
@@ -632,5 +636,230 @@ mod tests {
         assert!(found, "Expected ApplyRemoteEntity for tx_remote");
 
         handle.shutdown();
+    }
+
+    // --- Task 17, Part B: the lgs scheduling loop --------------------------
+    //
+    // No `lgs` binary and no daemon anywhere below — `LgsClient` just shells
+    // out to whatever binary path it is given, so a tiny shell script that
+    // prints canned `lgs status --json` output is a fake, not the real CLI.
+    // The "remote" is a local bare repo in a tempdir, exactly like
+    // `child_sync.rs`'s own tests. This matches the safety constraint: no
+    // launchctl, no real lgs command, no live daemon required.
+
+    /// A real, git-backed child (created the same way `Backend`'s ordinary
+    /// write path does it) whose lgs "auth" tip has diverged from an
+    /// unrelated peer bare repo. `ChildSyncEngine::cycle` for this child
+    /// must therefore return `CycleOutcome::Merged` — `classify`'s
+    /// catch-all arm treats "no common ancestor at all" the same as any
+    /// other divergence (see `child_sync::classify`'s doc comment), so the
+    /// peer repo does not need to share any history with the child's repo.
+    struct DivergedChildFixture {
+        engine: ChildSyncEngine,
+        child_id: String,
+        ours_oid: git2::Oid,
+        theirs_oid: git2::Oid,
+        // Held only for their Drop (tempdir cleanup) — never read directly.
+        _data_dir: TempDir,
+        _bare_dir: TempDir,
+        _script_dir: TempDir,
+    }
+
+    fn diverged_child_fixture() -> DivergedChildFixture {
+        let data_dir = TempDir::new().unwrap();
+        let backend = Backend::with_data_dir(data_dir.path().to_path_buf(), None).unwrap();
+        let child = backend
+            .child_service
+            .create_child(CreateChildCommand {
+                name: "Test Kid".to_string(),
+                birthdate: "2015-01-01".to_string(),
+            })
+            .unwrap()
+            .child;
+        backend
+            .child_service
+            .set_active_child(SetActiveChildCommand { child_id: child.id.clone() })
+            .unwrap();
+        backend
+            .transaction_service
+            .create_transaction(CreateTransactionCommand {
+                description: "Allowance".to_string(),
+                amount: 10.0,
+                date: None,
+            })
+            .unwrap();
+
+        let child_dir = backend.csv_connection.child_dir(&shared::ChildId::from(child.id.as_str())).unwrap();
+        let repo = git2::Repository::open(&child_dir).unwrap();
+        let ours_oid = repo.head().unwrap().peel_to_commit().unwrap().id();
+
+        // An unrelated "peer" bare repo standing in for lgs's cloud copy,
+        // with one commit made directly against its object database (no
+        // working tree needed) advertised as the authoritative tip.
+        let bare_dir = TempDir::new().unwrap();
+        let bare = git2::Repository::init_bare(bare_dir.path()).unwrap();
+        let sig =
+            git2::Signature::new("Peer", "peer@example.com", &git2::Time::new(1_700_000_500, 0)).unwrap();
+        let mut builder = bare.treebuilder(None).unwrap();
+        let blob = bare
+            .blob(
+                b"id,child_id,date,description,amount,balance,type\n\
+                  in-peer-a,x,2026-01-02T00:00:00+00:00,Peer Allowance,5.00,5.00,allowance\n",
+            )
+            .unwrap();
+        builder.insert("transactions.csv", blob, 0o100644).unwrap();
+        let tree_id = builder.write().unwrap();
+        let tree = bare.find_tree(tree_id).unwrap();
+        let theirs_oid = bare.commit(None, &sig, &sig, "peer edit", &tree, &[]).unwrap();
+        bare.reference("refs/lgs-auth/heads/main", theirs_oid, true, "auth tip").unwrap();
+
+        // A fake `lgs status --json`: a shell script (never the real `lgs`
+        // binary) that always prints one project pointing at the bare repo
+        // above.
+        let script_dir = TempDir::new().unwrap();
+        let script_path = script_dir.path().join("lgs");
+        let json = format!(
+            r#"{{"projects":[{{"name":"allowance-{}","clone_url":"{}","working_repo_path":"{}"}}]}}"#,
+            child.id,
+            bare_dir.path().to_str().unwrap(),
+            child_dir.to_str().unwrap(),
+        );
+        std::fs::write(&script_path, format!("#!/bin/sh\ncat <<'JSON'\n{json}\nJSON\n")).unwrap();
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&script_path).unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&script_path, perms).unwrap();
+        }
+
+        let lgs = LgsClient::new(script_path);
+        let engine = ChildSyncEngine::new(lgs, backend.csv_connection.clone());
+
+        DivergedChildFixture {
+            engine,
+            child_id: child.id,
+            ours_oid,
+            theirs_oid,
+            _data_dir: data_dir,
+            _bare_dir: bare_dir,
+            _script_dir: script_dir,
+        }
+    }
+
+    /// Drain `message_rx` until either the expected `ApplyMerge` for
+    /// `expect_child_id` arrives (answering every `GetChildIdsRequest` along
+    /// the way with `respond_ids`) or the deadline passes.
+    fn wait_for_apply_merge(
+        message_rx: &mpsc::Receiver<SyncMessage>,
+        respond_ids: Vec<String>,
+        expect_child_id: &str,
+        timeout: Duration,
+    ) -> Option<(Vec<allowance_core::row::TxRow>, (String, String))> {
+        let deadline = std::time::Instant::now() + timeout;
+        while std::time::Instant::now() < deadline {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            match message_rx.recv_timeout(remaining) {
+                Ok(SyncMessage::GetChildIdsRequest { response_tx }) => {
+                    let _ = response_tx.send(respond_ids.clone());
+                }
+                Ok(SyncMessage::ApplyMerge { child_id, rows, parents, .. }) if child_id == expect_child_id => {
+                    return Some((rows, parents));
+                }
+                Ok(_) => continue,
+                Err(_) => break,
+            }
+        }
+        None
+    }
+
+    /// Task 17, Part B: nothing called `ChildSyncEngine::cycle()` or sent
+    /// `ApplyMerge` at runtime before this task. This proves the scheduling
+    /// loop actually runs a cycle for a registered child on a tick (here,
+    /// the unconditional first-iteration poll right after spawn — "startup"
+    /// in the brief's list of triggers) and that a genuine divergence
+    /// produces a real `SyncMessage::ApplyMerge` carrying the merged rows.
+    #[test]
+    fn child_sync_cycle_runs_on_startup_and_sends_apply_merge() {
+        let fixture = diverged_child_fixture();
+        let child_id = fixture.child_id.clone();
+        let ours_oid = fixture.ours_oid;
+        let theirs_oid = fixture.theirs_oid;
+
+        let (_event_tx, event_rx) = mpsc::channel::<SyncEvent>();
+        let (_command_tx, command_rx) = mpsc::channel::<SyncCommand>();
+        let (message_tx, message_rx) = mpsc::channel::<SyncMessage>();
+        let dir = TempDir::new().unwrap();
+
+        let mut handle = SyncThreadHandle::spawn(
+            Arc::new(MockRemoteClient::new()),
+            event_rx,
+            command_rx,
+            message_tx,
+            noop_wake(),
+            SyncState::default(),
+            vec![],
+            dir.path().to_path_buf(),
+            Some(fixture.engine),
+        );
+
+        let result = wait_for_apply_merge(
+            &message_rx,
+            vec![child_id.clone()],
+            &child_id,
+            Duration::from_secs(10),
+        );
+        handle.shutdown();
+
+        let (rows, parents) = result.expect("expected ApplyMerge for the registered child on startup");
+        assert_eq!(parents, (ours_oid.to_string(), theirs_oid.to_string()));
+        let ids: Vec<&str> = rows.iter().map(|r| r.id.as_str()).collect();
+        assert!(ids.contains(&"in-peer-a"), "the merge must include the peer's row: {ids:?}");
+    }
+
+    /// Task 17, Part B's explicit requirement: "a failure syncing ONE child
+    /// must not abort the others." A bogus, unregistered child id ahead of
+    /// the real one in the roster response makes `ChildSyncEngine::cycle`
+    /// fail immediately (its `work_dir` lookup errors — no such child is
+    /// registered in `CsvConnection`). That failure must be logged and
+    /// skipped, not stop the loop: the real, diverged child after it must
+    /// still get its cycle and its `ApplyMerge`.
+    #[test]
+    fn one_childs_failed_cycle_does_not_block_another_childs_cycle() {
+        let fixture = diverged_child_fixture();
+        let child_id = fixture.child_id.clone();
+
+        let (_event_tx, event_rx) = mpsc::channel::<SyncEvent>();
+        let (_command_tx, command_rx) = mpsc::channel::<SyncCommand>();
+        let (message_tx, message_rx) = mpsc::channel::<SyncMessage>();
+        let dir = TempDir::new().unwrap();
+
+        let mut handle = SyncThreadHandle::spawn(
+            Arc::new(MockRemoteClient::new()),
+            event_rx,
+            command_rx,
+            message_tx,
+            noop_wake(),
+            SyncState::default(),
+            vec![],
+            dir.path().to_path_buf(),
+            Some(fixture.engine),
+        );
+
+        // The bogus id is listed FIRST, so its failure happens before the
+        // real child's cycle is even attempted — proving a failure earlier
+        // in the loop does not short-circuit the rest of it.
+        let result = wait_for_apply_merge(
+            &message_rx,
+            vec!["nonexistent-child".to_string(), child_id.clone()],
+            &child_id,
+            Duration::from_secs(10),
+        );
+        handle.shutdown();
+
+        assert!(
+            result.is_some(),
+            "the registered child's cycle must still run and produce an ApplyMerge despite the \
+             other (nonexistent) child's cycle failing"
+        );
     }
 }
