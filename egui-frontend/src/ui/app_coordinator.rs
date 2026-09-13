@@ -33,7 +33,7 @@ use crate::backend::storage::GitManager;
 use crate::backend::sync::child_sync::{
     current_branch, goals_diverged, push_with_retry, recover_if_dirty, Recovered,
 };
-use crate::ui::state::{StaleHeadPollAction, STALE_HEAD_REFUSAL_LIMIT};
+use crate::ui::state::{FastForwardBlockedNotice, StaleHeadPollAction, STALE_HEAD_REFUSAL_LIMIT};
 use shared::sync::EntityType;
 use shared::ChildId;
 
@@ -96,17 +96,26 @@ enum ApplyFastForwardOutcome {
     /// Refused rather than risk rewriting history backward or sideways;
     /// nothing was written. The next cycle re-classifies from the new HEAD.
     StaleHead,
-    /// The safe (non-force) checkout would have overwritten uncommitted
-    /// local content — most notably, the AWS transport's
+    /// Review Important-1: the safe (non-force) checkout hit a genuine
+    /// conflict (`GIT_ECONFLICT`) — uncommitted local content would have
+    /// been overwritten, most notably the AWS transport's
     /// `upsert_transaction_from_sync` writing `transactions.csv` without
-    /// committing (see `apply_remote_entity`'s doc comment). Refused rather
-    /// than force through it and silently discard that content; nothing was
-    /// written. Retried on the next cycle once the local write settles or
-    /// commits.
-    WouldOverwriteLocalChanges,
+    /// committing (see `apply_remote_entity`'s doc comment). Neither
+    /// forcing through it (destroying that content) nor refusing forever
+    /// (this design's own AWS-dirty steady state means a machine that only
+    /// ever receives MCP writes would then NEVER ingest peer data — an
+    /// indefinite livelock, not a rare edge case) is acceptable. The dirty
+    /// tree was instead committed as an ordinary local commit — see
+    /// `AllowanceTrackerApp::commit_dirty_tree_to_unblock_fast_forward`'s
+    /// doc comment for why that is bounded and safe. `sync.fast_forward_blocked`
+    /// now holds a notice for this, and an immediate re-poll was requested
+    /// so the resulting divergence is picked up promptly rather than
+    /// waiting for the next 30s timer tick.
+    CommittedLocalChangesToUnblock,
     /// Anything else that stopped the fast-forward being applied (I/O, a
-    /// malformed oid, a git failure). Logged and surfaced via `sync.status`
-    /// at the point of failure.
+    /// malformed oid, a corrupt object, a permissions problem, or any git
+    /// failure that was NOT a checkout conflict). Logged and surfaced via
+    /// `sync.status` at the point of failure.
     Failed,
 }
 
@@ -1144,6 +1153,11 @@ impl AllowanceTrackerApp {
         // `SyncUiState`'s doc comments): another child's independent streak
         // must not be reset by, or ever confused with, this one.
         self.sync.note_applied(child_id);
+        // If a prior fast-forward for this child was blocked and resolved
+        // by committing (Review Important-1), THIS merge succeeding is what
+        // actually resolves the divergence that commit deliberately
+        // created — the notice can be cleared.
+        self.sync.clear_fast_forward_blocked(child_id);
 
         ApplyMergeOutcome::Applied
     }
@@ -1186,6 +1200,23 @@ impl AllowanceTrackerApp {
     ///   comment for the same point made about `recover_if_dirty`), so a
     ///   force-checkout that clobbered it would be a data-loss bug, not a
     ///   convenience.
+    ///
+    /// # Review Important-1: refusing forever would livelock this design's
+    ///   own steady state
+    ///
+    /// A safe-checkout refusal cannot simply be left as "retry next cycle"
+    /// the way it first looks. `classify` (`child_sync.rs`) returns
+    /// `FastForward` precisely because THIS machine made no local commit —
+    /// which is exactly what "only ever receiving MCP writes" looks like
+    /// under Task 16's fix (`upsert_transaction_from_sync` deliberately
+    /// never commits). So on a machine that only receives, nothing ever
+    /// changes between cycles: the checkout refuses, the tree stays dirty,
+    /// `classify` returns `FastForward` again next tick, forever. That
+    /// machine would never ingest another byte of peer data. The refusal
+    /// itself is correct (it must never force-discard real data); the
+    /// missing next step was. See
+    /// `commit_dirty_tree_to_unblock_fast_forward`'s doc comment for the
+    /// resolution.
     fn apply_fast_forward(&mut self, child_id: &str, to: &str) -> ApplyFastForwardOutcome {
         let id = ChildId::from(child_id);
         let child_dir = match self.core.backend.csv_connection.child_dir(&id) {
@@ -1310,12 +1341,23 @@ impl AllowanceTrackerApp {
         // Deliberately NOT `.force()` — see this function's doc comment.
         let mut checkout_opts = git2::build::CheckoutBuilder::new();
         if let Err(e) = repo.checkout_tree(target_tree.as_object(), Some(&mut checkout_opts)) {
-            log::warn!(
-                "Refusing to fast-forward child {child_id} to {to}: a safe (non-force) checkout \
-                 would overwrite uncommitted local changes, or otherwise failed: {e}. Will retry \
-                 on the next cycle once the local write settles or commits."
-            );
-            return ApplyFastForwardOutcome::WouldOverwriteLocalChanges;
+            // Review Minor-3: only `GIT_ECONFLICT` genuinely means "would
+            // overwrite uncommitted local changes." Anything else (I/O, a
+            // corrupt object, a permissions problem) is a real failure and
+            // must reach `sync.status`, not be silently treated as the
+            // same benign, self-resolving condition.
+            if e.code() == git2::ErrorCode::Conflict {
+                log::warn!(
+                    "Fast-forward checkout for child {child_id} to {to} would overwrite \
+                     uncommitted local changes: {e}."
+                );
+                return self.commit_dirty_tree_to_unblock_fast_forward(child_id, &repo, to);
+            }
+            log::error!("Fast-forward checkout failed for child {child_id} to {to}: {e}");
+            self.sync.status = SyncStatus::Error(format!(
+                "Sync failed for {child_id}: could not check out synced data ({e})"
+            ));
+            return ApplyFastForwardOutcome::Failed;
         }
 
         let branch = match current_branch(&repo) {
@@ -1351,6 +1393,105 @@ impl AllowanceTrackerApp {
         self.sync.note_applied(child_id);
 
         ApplyFastForwardOutcome::Applied
+    }
+
+    /// Resolve a fast-forward blocked by uncommitted local content (see
+    /// `apply_fast_forward`'s "Review Important-1" doc section) by
+    /// committing that content as an ordinary, single-parent local commit.
+    ///
+    /// # Why committing here is safe, bounded, and NOT a reintroduction of
+    ///   what Task 16 fixed
+    ///
+    /// Task 16's fix was about the ROUTINE path: `apply_remote_entity`
+    /// creating a commit on EVERY machine for EVERY MCP write would make
+    /// divergence the permanent steady state whenever the MCP server is
+    /// active. This function is not that path and does not run on every
+    /// write — it runs only when a fast-forward has been SPECIFICALLY
+    /// blocked, which requires uncommitted local content to already exist.
+    /// It fires once per blockage, not once per write.
+    ///
+    /// The content being committed is not garbage: it is exactly what
+    /// `apply_remote_entity`/`upsert_transaction_from_sync` already wrote
+    /// to `transactions.csv` (and already applied to this app's in-memory
+    /// state via the ordinary AWS entity-apply path) — this call only
+    /// catches up this child's GIT HISTORY to match what the working tree
+    /// (and this app's own state) already say. Once committed, the new
+    /// commit and the fast-forward's `to` are both descendants of the SAME
+    /// old HEAD, so the next cycle's `classify` sees a genuine divergence
+    /// (never `FastForward` again against this same `to`) and routes
+    /// through `ChildSyncEngine`'s ordinary merge path — whose
+    /// `allowance_core::merge` already de-duplicates rows that are
+    /// `intrinsic_eq` on both sides, so a row this machine and the peer
+    /// both independently ended up holding is not doubled.
+    fn commit_dirty_tree_to_unblock_fast_forward(
+        &mut self,
+        child_id: &str,
+        repo: &git2::Repository,
+        to: &str,
+    ) -> ApplyFastForwardOutcome {
+        let child_dir = match repo.workdir() {
+            Some(d) => d.to_path_buf(),
+            None => {
+                log::error!(
+                    "Cannot commit child {child_id}'s dirty tree to unblock a fast-forward: its \
+                     repository has no working directory"
+                );
+                self.sync.status = SyncStatus::Error(format!(
+                    "Sync failed for {child_id}: its repository has no working directory"
+                ));
+                return ApplyFastForwardOutcome::Failed;
+            }
+        };
+
+        let gm = GitManager::new();
+        if let Err(e) = gm.add_all(&child_dir) {
+            log::error!("Cannot stage child {child_id}'s dirty tree to unblock a fast-forward: {e}");
+            self.sync.status = SyncStatus::Error(format!(
+                "Sync failed for {child_id}: could not stage its local changes"
+            ));
+            return ApplyFastForwardOutcome::Failed;
+        }
+
+        let message = format!("sync: commit local changes blocking a fast-forward to {to}");
+        match gm.commit(&child_dir, &message) {
+            Ok(oid) => {
+                log::warn!(
+                    "Child {child_id}'s fast-forward to {to} was blocked by uncommitted local \
+                     changes (this app's normal steady state under the AWS transport — see \
+                     apply_remote_entity's doc comment, not a crash); committed them as {oid} so \
+                     the next cycle reclassifies this as a genuine divergence and the merge path \
+                     resolves it. Deliberate and bounded — not the routine per-write commit Task \
+                     16 removed."
+                );
+                self.sync.record_fast_forward_blocked(FastForwardBlockedNotice {
+                    child_id: child_id.to_string(),
+                    to: to.to_string(),
+                });
+                if let Some(tx) = &self.sync_command_tx {
+                    if let Err(e) = tx.send(SyncCommand::PollNow) {
+                        log::warn!(
+                            "Could not request an immediate re-poll for child {child_id} after \
+                             committing to unblock a fast-forward: {e}"
+                        );
+                    }
+                } else {
+                    log::warn!(
+                        "No sync command channel available to request a re-poll for child \
+                         {child_id} after committing to unblock a fast-forward"
+                    );
+                }
+                ApplyFastForwardOutcome::CommittedLocalChangesToUnblock
+            }
+            Err(e) => {
+                log::error!(
+                    "Cannot commit child {child_id}'s dirty tree to unblock a fast-forward: {e}"
+                );
+                self.sync.status = SyncStatus::Error(format!(
+                    "Sync failed for {child_id}: could not commit its local changes"
+                ));
+                ApplyFastForwardOutcome::Failed
+            }
+        }
     }
 
     /// Record a push failure — shared by the ordinary AWS-style
@@ -2327,6 +2468,7 @@ mod apply_fast_forward_tests {
     use super::{ApplyFastForwardOutcome, SyncStatus};
     use crate::backend::domain::commands::child::{CreateChildCommand, SetActiveChildCommand};
     use crate::backend::domain::commands::transactions::CreateTransactionCommand;
+    use crate::backend::domain::SyncCommand;
     use crate::backend::Backend;
     use crate::ui::app_state::AllowanceTrackerApp;
     use git2::Repository;
@@ -2500,7 +2642,7 @@ mod apply_fast_forward_tests {
     /// incoming tree must be left alone, not silently discarded by a forced
     /// checkout.
     #[test]
-    fn a_fast_forward_is_refused_rather_than_overwrite_uncommitted_local_changes() {
+    fn a_fast_forward_blocked_by_uncommitted_local_changes_commits_them_rather_than_discarding_or_forcing() {
         let (mut app, child_id, _temp) = app_with_git_backed_child();
         let child_dir = app
             .backend()
@@ -2528,16 +2670,103 @@ mod apply_fast_forward_tests {
         std::fs::write(child_dir.join("transactions.csv"), "uncommitted-aws-row-in-progress").unwrap();
 
         let outcome = app.apply_fast_forward(&child_id, &ahead_oid.to_string());
-        assert_eq!(outcome, ApplyFastForwardOutcome::WouldOverwriteLocalChanges);
+        assert_eq!(outcome, ApplyFastForwardOutcome::CommittedLocalChangesToUnblock);
 
-        // Nothing must have been silently discarded: HEAD unchanged, the
-        // uncommitted content still on disk exactly as it was.
+        // Nothing was silently discarded, and nothing was force-checked-out
+        // over: the uncommitted content is still exactly what it was, now
+        // safely committed on top of the old HEAD.
         let repo_final = Repository::open(&child_dir).unwrap();
-        assert_eq!(repo_final.head().unwrap().peel_to_commit().unwrap().id(), ours_oid);
+        let new_head = repo_final.head().unwrap().peel_to_commit().unwrap();
+        assert_ne!(new_head.id(), ours_oid, "a new commit must have been created");
+        assert_ne!(new_head.id(), ahead_oid, "must not have jumped straight to the fast-forward target");
+        assert_eq!(
+            new_head.parent_id(0).unwrap(),
+            ours_oid,
+            "the new commit's parent must be the old HEAD"
+        );
         assert_eq!(
             std::fs::read_to_string(child_dir.join("transactions.csv")).unwrap(),
             "uncommitted-aws-row-in-progress",
-            "the uncommitted local content must survive a refused fast-forward untouched"
+            "the uncommitted local content must land in the commit byte for byte"
+        );
+    }
+
+    /// Review Important-1's explicit ask: prove this resolves rather than
+    /// looping forever. The AWS transport's dirty-without-committing write
+    /// is this design's own STEADY STATE (Task 16), so a machine that only
+    /// ever receives MCP writes would hit `Cycle::FastForward` and a
+    /// checkout refusal on every single tick if nothing changed the
+    /// classification — an indefinite livelock. This asserts three things
+    /// together: the blockage is surfaced (a notice, not silence), an
+    /// immediate re-poll is requested (not left to the 30s timer), and —
+    /// the actual proof of "does not loop forever" — the very next
+    /// `classify` call for the same target now says `Diverged`, never
+    /// `FastForward` again.
+    #[test]
+    fn a_dirty_tree_blocking_a_fast_forward_resolves_instead_of_refusing_forever() {
+        use crate::backend::sync::child_sync::{classify, Cycle};
+
+        let (mut app, child_id, _temp) = app_with_git_backed_child();
+        let child_dir = app
+            .backend()
+            .csv_connection
+            .child_dir(&shared::ChildId::from(child_id.as_str()))
+            .unwrap();
+        let repo = Repository::open(&child_dir).unwrap();
+        let ours_oid = repo.head().unwrap().peel_to_commit().unwrap().id();
+        let ours_commit = repo.find_commit(ours_oid).unwrap();
+
+        let ahead_oid = commit_with_files(
+            &repo,
+            "peer advanced",
+            &[&ours_commit],
+            &[(
+                "transactions.csv",
+                "id,child_id,date,description,amount,balance,type\nin-peer-a,x,2026-01-02T00:00:00+00:00,Peer,5.00,5.00,allowance\n",
+            )],
+            1_700_000_500,
+        );
+        std::fs::write(child_dir.join("transactions.csv"), "uncommitted-aws-row").unwrap();
+
+        let (cmd_tx, cmd_rx) = std::sync::mpsc::channel::<SyncCommand>();
+        app.sync_command_tx = Some(cmd_tx);
+
+        let outcome = app.apply_fast_forward(&child_id, &ahead_oid.to_string());
+        assert_eq!(outcome, ApplyFastForwardOutcome::CommittedLocalChangesToUnblock);
+
+        // Surfaced: a visible notice, not just a log line.
+        assert!(
+            app.sync
+                .fast_forward_blocked
+                .iter()
+                .any(|n| n.child_id == child_id && n.to == ahead_oid.to_string()),
+            "a blocked-and-resolved fast-forward must be recorded as a visible notice"
+        );
+
+        // Prompt, not left to the 30s timer.
+        assert!(
+            matches!(cmd_rx.try_recv(), Ok(SyncCommand::PollNow)),
+            "committing to unblock a fast-forward must trigger an immediate re-poll"
+        );
+
+        // The actual "does not loop forever" proof: the next cycle's
+        // classification against this SAME target must be Diverged, never
+        // FastForward again — this is what routes to the merge path
+        // instead of hitting the identical refusal on every future tick.
+        let repo_final = Repository::open(&child_dir).unwrap();
+        let new_head_oid = repo_final.head().unwrap().peel_to_commit().unwrap().id();
+        let base = repo_final.merge_base(new_head_oid, ahead_oid).unwrap();
+        assert_eq!(base, ours_oid, "precondition: both tips still share the original commit as their base");
+        let next = classify(
+            Some(&new_head_oid.to_string()),
+            Some(&ahead_oid.to_string()),
+            Some(&base.to_string()),
+        );
+        assert_eq!(
+            next,
+            Cycle::Diverged,
+            "the next cycle must classify as Diverged (merge path), not FastForward again — \
+             otherwise this livelocks exactly as Review Important-1 described"
         );
     }
 }

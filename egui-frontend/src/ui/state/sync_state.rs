@@ -53,6 +53,17 @@ pub enum StaleHeadPollAction {
     Suppressed,
 }
 
+/// A fast-forward that was blocked by uncommitted local content and
+/// resolved by committing it — see `SyncUiState::fast_forward_blocked`'s
+/// doc comment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FastForwardBlockedNotice {
+    pub child_id: String,
+    /// The fast-forward target this child was trying to reach when the
+    /// block occurred.
+    pub to: String,
+}
+
 /// UI state for sync operations
 pub struct SyncUiState {
     /// Current sync status
@@ -67,6 +78,20 @@ pub struct SyncUiState {
     /// comment), so a notice routed through it would be erased by the very
     /// next unrelated sync event.
     pub goals_diverged: Vec<GoalsDivergedNotice>,
+
+    /// Fast-forwards that were blocked by uncommitted local content and
+    /// resolved by committing it (Review Important-1 on Task 17 — see
+    /// `AllowanceTrackerApp::commit_dirty_tree_to_unblock_fast_forward`'s
+    /// doc comment for why committing there is safe and bounded). Held
+    /// until a future UI dismisses it or a subsequent successful merge for
+    /// the same child resolves the resulting divergence (see
+    /// [`SyncUiState::clear_fast_forward_blocked`]). Deliberately NOT
+    /// folded into `status`, for the exact reason `goals_diverged` isn't:
+    /// `status` is last-writer-wins, and the `StatusChanged(Idle)` that
+    /// `run_child_sync_cycles` sends right after this event — drained in
+    /// the SAME batch on the UI thread — would erase a status write before
+    /// a single frame ever rendered it.
+    pub fast_forward_blocked: Vec<FastForwardBlockedNotice>,
 
     /// When a `SyncCommand::PollNow` was last sent in response to a
     /// stale-head merge refusal, keyed by child id. Missing means either
@@ -105,6 +130,7 @@ impl SyncUiState {
             status: SyncStatus::Disabled,
             conflicts: Vec::new(),
             goals_diverged: Vec::new(),
+            fast_forward_blocked: Vec::new(),
             last_stale_head_pollnow_at: HashMap::new(),
             consecutive_stale_head_refusals: HashMap::new(),
             message_rx: None,
@@ -117,6 +143,7 @@ impl SyncUiState {
             status: SyncStatus::Idle,
             conflicts: Vec::new(),
             goals_diverged: Vec::new(),
+            fast_forward_blocked: Vec::new(),
             last_stale_head_pollnow_at: HashMap::new(),
             consecutive_stale_head_refusals: HashMap::new(),
             message_rx: Some(rx),
@@ -129,6 +156,20 @@ impl SyncUiState {
     pub fn record_goals_diverged(&mut self, notice: GoalsDivergedNotice) {
         self.goals_diverged.retain(|n| n.child_id != notice.child_id);
         self.goals_diverged.push(notice);
+    }
+
+    /// Record (or refresh) a fast-forward-blocked notice for a child —
+    /// same replace-not-accumulate behavior as [`Self::record_goals_diverged`].
+    pub fn record_fast_forward_blocked(&mut self, notice: FastForwardBlockedNotice) {
+        self.fast_forward_blocked.retain(|n| n.child_id != notice.child_id);
+        self.fast_forward_blocked.push(notice);
+    }
+
+    /// Clear a child's fast-forward-blocked notice. Call once a subsequent
+    /// merge for that child succeeds — that is what actually resolves the
+    /// divergence the blocking commit deliberately created.
+    pub fn clear_fast_forward_blocked(&mut self, child_id: &str) {
+        self.fast_forward_blocked.retain(|n| n.child_id != child_id);
     }
 
     /// Record one stale-head merge refusal for `child_id` at `now` and
