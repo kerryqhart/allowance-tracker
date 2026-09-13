@@ -27,8 +27,10 @@
 //! backed up.
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
+use std::io::Read;
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -191,6 +193,16 @@ pub fn parse_status(json: &str) -> Result<StatusReport> {
     })
 }
 
+/// How long [`LgsClient::run`] waits for `lgs` before killing it and
+/// returning an error. Review Critical-2: `Command::output()` has no
+/// built-in bound, so a hung daemon or a stalled local IPC call used to
+/// block the call forever — and `run_child_sync_cycles` calls this
+/// synchronously on the background sync thread, so an unbounded `run` would
+/// have blocked the AWS poll, the 30s timer, AND shutdown, indefinitely.
+/// 10 seconds is generous for what is always a local process talking to a
+/// daemon on the same machine.
+const LGS_RUN_TIMEOUT: Duration = Duration::from_secs(10);
+
 pub struct LgsClient {
     binary: PathBuf,
 }
@@ -201,18 +213,71 @@ impl LgsClient {
     }
 
     pub fn run(&self, args: &[&str]) -> Result<String> {
-        let out = Command::new(&self.binary)
+        self.run_with_timeout(args, LGS_RUN_TIMEOUT)
+    }
+
+    /// The actual implementation behind [`Self::run`], with the timeout
+    /// exposed so tests can drive the expiry path in milliseconds instead
+    /// of waiting out the real 10s bound.
+    ///
+    /// Spawns rather than uses `Command::output()` so a bound can be placed
+    /// on the wait. stdout/stderr are drained on their own threads
+    /// concurrently with the wait loop below — reading them only after the
+    /// process exits would risk the classic pipe deadlock (the child blocks
+    /// writing to a full OS pipe buffer; the parent blocks waiting for it to
+    /// exit without ever reading that pipe).
+    fn run_with_timeout(&self, args: &[&str], timeout: Duration) -> Result<String> {
+        let mut child = Command::new(&self.binary)
             .args(args)
-            .output()
-            .with_context(|| format!("running {:?} {:?}", self.binary, args))?;
-        if !out.status.success() {
-            bail!(
-                "lgs {:?} failed: {}",
-                args,
-                String::from_utf8_lossy(&out.stderr).trim()
-            );
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .with_context(|| format!("spawning {:?} {:?}", self.binary, args))?;
+
+        let mut stdout_pipe = child.stdout.take().expect("stdout was piped");
+        let mut stderr_pipe = child.stderr.take().expect("stderr was piped");
+        let stdout_thread = std::thread::spawn(move || {
+            let mut buf = String::new();
+            let _ = stdout_pipe.read_to_string(&mut buf);
+            buf
+        });
+        let stderr_thread = std::thread::spawn(move || {
+            let mut buf = String::new();
+            let _ = stderr_pipe.read_to_string(&mut buf);
+            buf
+        });
+
+        let deadline = Instant::now() + timeout;
+        let status = loop {
+            match child
+                .try_wait()
+                .with_context(|| format!("waiting for {:?} {:?}", self.binary, args))?
+            {
+                Some(status) => break status,
+                None if Instant::now() >= deadline => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    bail!(
+                        "lgs {:?} did not complete within {:?} and was killed — the daemon may be \
+                         hung or unreachable",
+                        args,
+                        timeout
+                    );
+                }
+                None => std::thread::sleep(Duration::from_millis(20)),
+            }
+        };
+
+        // Best-effort: a reader thread panicking would be a bug in this
+        // function, not in `lgs`, but must not propagate as a panic from
+        // here — fall back to an empty capture rather than unwrap.
+        let stdout = stdout_thread.join().unwrap_or_default();
+        let stderr = stderr_thread.join().unwrap_or_default();
+
+        if !status.success() {
+            bail!("lgs {:?} failed: {}", args, stderr.trim());
         }
-        Ok(String::from_utf8_lossy(&out.stdout).to_string())
+        Ok(stdout)
     }
 
     pub fn status(&self) -> Result<StatusReport> {
@@ -237,6 +302,62 @@ mod tests {
     use super::*;
 
     const FIXTURE: &str = include_str!("../../egui-frontend/tests/fixtures/lgs_status.json");
+
+    /// Review Critical-2: `LgsClient::run` must not block forever on a
+    /// hung/stalled `lgs` process. Drives a fake script that sleeps far
+    /// longer than a short test timeout, and asserts both that it errors
+    /// out (rather than hanging) and that it does so close to the timeout,
+    /// not close to the script's full sleep duration — proving the process
+    /// was actually killed, not merely that `run` gave up waiting on it.
+    #[test]
+    fn run_times_out_and_kills_a_hung_process_instead_of_blocking_forever() {
+        let dir = tempfile::tempdir().unwrap();
+        let script_path = dir.path().join("lgs");
+        std::fs::write(&script_path, "#!/bin/sh\nsleep 5\necho too-late\n").unwrap();
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&script_path).unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&script_path, perms).unwrap();
+        }
+
+        let client = LgsClient::new(script_path);
+        let start = std::time::Instant::now();
+        let result = client.run_with_timeout(&["status", "--json"], Duration::from_millis(200));
+        let elapsed = start.elapsed();
+
+        let err = result.expect_err("a hung process must be reported as an error, not hang the caller");
+        assert!(
+            format!("{err}").contains("did not complete"),
+            "error must say the process was killed for timing out: {err}"
+        );
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "run_with_timeout must return close to its 200ms bound, not wait out the process's \
+             full 5s sleep: took {elapsed:?}"
+        );
+    }
+
+    /// The ordinary success path still works with the spawn+timeout
+    /// implementation (not just the old `Command::output()` one) — output
+    /// is captured correctly and a fast, well-behaved process is not
+    /// mistaken for a hang.
+    #[test]
+    fn run_captures_stdout_for_a_well_behaved_process() {
+        let dir = tempfile::tempdir().unwrap();
+        let script_path = dir.path().join("lgs");
+        std::fs::write(&script_path, "#!/bin/sh\necho '{\"projects\":[]}'\n").unwrap();
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&script_path).unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&script_path, perms).unwrap();
+        }
+
+        let client = LgsClient::new(script_path);
+        let out = client.run(&["status", "--json"]).unwrap();
+        assert_eq!(out.trim(), r#"{"projects":[]}"#);
+    }
 
     #[test]
     fn parses_the_real_fixture() {

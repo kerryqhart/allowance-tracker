@@ -653,6 +653,10 @@ impl AllowanceTrackerApp {
                 if self.active_child_id().as_ref() == Some(&pending.id) {
                     self.clear_active_child();
                 }
+                // Minor from Task 17 review: don't leave a lingering entry
+                // in the per-child stale-head debounce maps for a child
+                // that no longer exists here.
+                self.sync.forget_child(pending.id.as_str());
                 self.settings.children_form.set_success(format!(
                     "{} is no longer registered here. Their data is untouched at {}.",
                     pending.label,

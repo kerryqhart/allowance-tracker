@@ -81,6 +81,35 @@ enum ApplyMergeOutcome {
     Failed,
 }
 
+/// Outcome of [`AllowanceTrackerApp::apply_fast_forward`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ApplyFastForwardOutcome {
+    /// HEAD and the working tree were advanced to the fetched peer tip.
+    Applied,
+    /// Nothing to do — HEAD already matches the target (another apply, or
+    /// an intervening merge, already got us there).
+    AlreadyUpToDate,
+    /// HEAD moved since `cycle_with_status` decided this was a
+    /// fast-forward, in a way that would no longer make `to` a descendant
+    /// of the current tip (an ordinary local write raced the background
+    /// sync, or a local commit turned this into a genuine divergence).
+    /// Refused rather than risk rewriting history backward or sideways;
+    /// nothing was written. The next cycle re-classifies from the new HEAD.
+    StaleHead,
+    /// The safe (non-force) checkout would have overwritten uncommitted
+    /// local content — most notably, the AWS transport's
+    /// `upsert_transaction_from_sync` writing `transactions.csv` without
+    /// committing (see `apply_remote_entity`'s doc comment). Refused rather
+    /// than force through it and silently discard that content; nothing was
+    /// written. Retried on the next cycle once the local write settles or
+    /// commits.
+    WouldOverwriteLocalChanges,
+    /// Anything else that stopped the fast-forward being applied (I/O, a
+    /// malformed oid, a git failure). Logged and surfaced via `sync.status`
+    /// at the point of failure.
+    Failed,
+}
+
 impl eframe::App for AllowanceTrackerApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // log::info!("APP UPDATE called - main render loop"); // Commented out - too verbose
@@ -555,6 +584,11 @@ impl AllowanceTrackerApp {
                         local_state_dirty = true;
                     }
                 }
+                SyncMessage::ApplyFastForward { child_id, to } => {
+                    if self.apply_fast_forward(&child_id, &to) == ApplyFastForwardOutcome::Applied {
+                        local_state_dirty = true;
+                    }
+                }
                 SyncMessage::GoalsDiverged { child_id, ours_oid, theirs_oid } => {
                     // A NOTICE, not a status — see `GoalsDivergedNotice`'s
                     // doc comment. Held until a future UI dismisses it,
@@ -804,6 +838,13 @@ impl AllowanceTrackerApp {
                     .update_registry(|reg| reg.deregister(&id))
                 {
                     log::error!("Failed to deregister child {} after remote delete: {}", child_id, e);
+                } else {
+                    // Minor from Task 17 review: a deregistered child must
+                    // not leave a lingering entry in the per-child
+                    // stale-head debounce maps (`SyncUiState`) — harmless
+                    // memory growth today, and a latent trap if the same id
+                    // is ever reused later.
+                    self.sync.forget_child(child_id);
                 }
             }
         }
@@ -1105,6 +1146,211 @@ impl AllowanceTrackerApp {
         self.sync.note_applied(child_id);
 
         ApplyMergeOutcome::Applied
+    }
+
+    /// Apply a plain fast-forward computed off-thread by
+    /// `ChildSyncEngine::cycle_with_status` (`Cycle::FastForward` — the
+    /// peer is strictly ahead with no local commits to reconcile; see that
+    /// enum variant's doc comment in `child_sync.rs`). This is the ONE
+    /// place `ApplyFastForward`'s working-tree mutation happens — on the UI
+    /// thread, per the same architecture note as `apply_merge`
+    /// (`sync_manager.rs:36-40`, "UI owns all repo I/O").
+    ///
+    /// Unlike `apply_merge`, a fast-forward checks out the WHOLE target
+    /// tree, not just `transactions.csv` — `goals.csv` and anything else
+    /// tracked comes along for free, so there is no separate goals-scope
+    /// concern here.
+    ///
+    /// No crash-recovery marker is needed for THIS function's own crash
+    /// window (unlike `apply_merge`'s): `checkout_tree` below is called
+    /// with the target tree, not derived from HEAD, so a crash mid-checkout
+    /// leaves HEAD still at the OLD commit (the ref move happens after,
+    /// only once checkout succeeds) — the next cycle re-classifies as the
+    /// same fast-forward and safely re-runs `checkout_tree` toward the same
+    /// target, which only ever writes what is still missing. `recover_if_dirty`
+    /// is still called first here purely to clean up a DIFFERENT crash's
+    /// leftover marker+dirty state (an unrelated `apply_merge` that crashed
+    /// earlier), not this function's own.
+    ///
+    /// Safety-checked twice before anything is written:
+    /// - HEAD must still make `to` a genuine fast-forward — an ordinary
+    ///   local write, or a merge applied in between, can race this exactly
+    ///   the way it races `apply_merge` (see `ApplyFastForwardOutcome::StaleHead`).
+    /// - The checkout itself is deliberately NON-FORCE (`git2`'s default
+    ///   "safe" checkout): it refuses rather than silently discard
+    ///   uncommitted local content — most notably the AWS transport's
+    ///   `upsert_transaction_from_sync`, which deliberately writes
+    ///   `transactions.csv` without committing (see `apply_remote_entity`'s
+    ///   doc comment). A dirty tree here is this app's normal steady state,
+    ///   not a crash (see `child_sync::MERGE_IN_PROGRESS_MARKER`'s doc
+    ///   comment for the same point made about `recover_if_dirty`), so a
+    ///   force-checkout that clobbered it would be a data-loss bug, not a
+    ///   convenience.
+    fn apply_fast_forward(&mut self, child_id: &str, to: &str) -> ApplyFastForwardOutcome {
+        let id = ChildId::from(child_id);
+        let child_dir = match self.core.backend.csv_connection.child_dir(&id) {
+            Ok(dir) => dir,
+            Err(e) => {
+                log::error!("Cannot apply fast-forward for child {child_id}: {e}");
+                self.sync.status = SyncStatus::Error(format!("Sync failed for {child_id}: {e}"));
+                return ApplyFastForwardOutcome::Failed;
+            }
+        };
+
+        let repo = match git2::Repository::open(&child_dir) {
+            Ok(repo) => repo,
+            Err(e) => {
+                log::error!("Cannot open repo for child {child_id} at {}: {e}", child_dir.display());
+                self.sync.status =
+                    SyncStatus::Error(format!("Sync failed for {child_id}: could not open its repository"));
+                return ApplyFastForwardOutcome::Failed;
+            }
+        };
+
+        // Clean up any leftover marker+dirty state from a DIFFERENT,
+        // earlier crashed `apply_merge` before doing anything else here —
+        // see this function's doc comment for why fast-forward itself needs
+        // no marker of its own.
+        match recover_if_dirty(&repo) {
+            Ok(Recovered::Clean) => {}
+            Ok(Recovered::DiscardedAndReMerged) => {
+                log::warn!(
+                    "Child {child_id}'s working tree was dirty before applying this \
+                     fast-forward (a crash-recovery marker from an earlier merge apply was \
+                     present); discarded the dirty state before checking out {to}."
+                );
+            }
+            Err(e) => {
+                log::error!(
+                    "Cannot check/recover child {child_id}'s working tree before applying a \
+                     fast-forward: {e}"
+                );
+                self.sync.status = SyncStatus::Error(format!(
+                    "Sync failed for {child_id}: could not verify its working tree was clean"
+                ));
+                return ApplyFastForwardOutcome::Failed;
+            }
+        }
+
+        let to_oid = match git2::Oid::from_str(to) {
+            Ok(oid) => oid,
+            Err(e) => {
+                log::error!(
+                    "Cannot apply fast-forward for child {child_id}: malformed target oid {to}: {e}"
+                );
+                self.sync.status =
+                    SyncStatus::Error(format!("Sync failed for {child_id}: malformed sync data"));
+                return ApplyFastForwardOutcome::Failed;
+            }
+        };
+
+        let current_head = match repo.head().and_then(|h| h.peel_to_commit()) {
+            Ok(c) => c.id(),
+            Err(e) => {
+                log::error!("Cannot read HEAD for child {child_id}: {e}");
+                self.sync.status =
+                    SyncStatus::Error(format!("Sync failed for {child_id}: could not read its current commit"));
+                return ApplyFastForwardOutcome::Failed;
+            }
+        };
+
+        if current_head == to_oid {
+            return ApplyFastForwardOutcome::AlreadyUpToDate;
+        }
+
+        // CRITICAL: refuse a fast-forward whose ancestry no longer holds —
+        // see the doc comment above. A local commit made since
+        // `cycle_with_status` classified this can turn a genuine
+        // fast-forward into a real divergence, which this function must
+        // never paper over by moving the ref anyway.
+        match repo.graph_descendant_of(to_oid, current_head) {
+            Ok(true) => {}
+            Ok(false) => {
+                log::warn!(
+                    "Refusing to fast-forward child {child_id} to {to}: HEAD moved to \
+                     {current_head} since this was classified as a fast-forward, and \
+                     {current_head} is no longer an ancestor of {to} — this is no longer a \
+                     genuine fast-forward. Discarding; the next cycle will re-classify from the \
+                     new HEAD."
+                );
+                return ApplyFastForwardOutcome::StaleHead;
+            }
+            Err(e) => {
+                log::error!("Cannot verify ancestry for child {child_id}'s fast-forward to {to}: {e}");
+                self.sync.status = SyncStatus::Error(format!(
+                    "Sync failed for {child_id}: could not verify fast-forward ancestry"
+                ));
+                return ApplyFastForwardOutcome::Failed;
+            }
+        }
+
+        let target_commit = match repo.find_commit(to_oid) {
+            Ok(c) => c,
+            Err(e) => {
+                log::error!(
+                    "Cannot resolve fast-forward target commit {to} for child {child_id}: {e}"
+                );
+                self.sync.status = SyncStatus::Error(format!(
+                    "Sync failed for {child_id}: could not resolve its sync target"
+                ));
+                return ApplyFastForwardOutcome::Failed;
+            }
+        };
+        let target_tree = match target_commit.tree() {
+            Ok(t) => t,
+            Err(e) => {
+                log::error!("Cannot read tree for fast-forward target {to} for child {child_id}: {e}");
+                self.sync.status = SyncStatus::Error(format!(
+                    "Sync failed for {child_id}: could not read its sync target"
+                ));
+                return ApplyFastForwardOutcome::Failed;
+            }
+        };
+
+        // Deliberately NOT `.force()` — see this function's doc comment.
+        let mut checkout_opts = git2::build::CheckoutBuilder::new();
+        if let Err(e) = repo.checkout_tree(target_tree.as_object(), Some(&mut checkout_opts)) {
+            log::warn!(
+                "Refusing to fast-forward child {child_id} to {to}: a safe (non-force) checkout \
+                 would overwrite uncommitted local changes, or otherwise failed: {e}. Will retry \
+                 on the next cycle once the local write settles or commits."
+            );
+            return ApplyFastForwardOutcome::WouldOverwriteLocalChanges;
+        }
+
+        let branch = match current_branch(&repo) {
+            Ok(b) => b,
+            Err(e) => {
+                log::error!("Cannot determine checked-out branch for child {child_id}: {e}");
+                self.sync.status =
+                    SyncStatus::Error(format!("Sync failed for {child_id}: could not determine its branch"));
+                return ApplyFastForwardOutcome::Failed;
+            }
+        };
+
+        // Move the branch ref (and HEAD) to the new tip only AFTER the
+        // checkout above succeeded — see this function's doc comment for
+        // why that order is what makes a crash between them self-healing.
+        let refname = format!("refs/heads/{branch}");
+        if let Err(e) = repo.reference(&refname, to_oid, true, "sync: fast-forward") {
+            log::error!("Cannot move {refname} to {to} for child {child_id}: {e}");
+            self.sync.status =
+                SyncStatus::Error(format!("Sync failed for {child_id}: could not update its branch"));
+            return ApplyFastForwardOutcome::Failed;
+        }
+        if let Err(e) = repo.set_head(&refname) {
+            log::error!("Cannot set HEAD to {refname} for child {child_id}: {e}");
+            self.sync.status = SyncStatus::Error(format!("Sync failed for {child_id}: could not update HEAD"));
+            return ApplyFastForwardOutcome::Failed;
+        }
+
+        log::info!("[sync fast-forward] child={child_id} {current_head} -> {to}");
+
+        // Same as a successful merge apply: any stale-head streak for this
+        // child is over.
+        self.sync.note_applied(child_id);
+
+        ApplyFastForwardOutcome::Applied
     }
 
     /// Record a push failure — shared by the ordinary AWS-style
@@ -2064,6 +2310,235 @@ mod apply_merge_tests {
             &[],
         );
         assert_eq!(outcome, ApplyMergeOutcome::StaleHead);
+    }
+}
+
+/// Review Critical-1: `CycleOutcome::FastForward` used to have no consumer
+/// at all (a `log::warn!` and nothing else) even though it is the ORDINARY
+/// case — `classify` returns it whenever the peer advanced and we made no
+/// local commits, which is what happens on every machine that is not the
+/// one editing right now. These tests exercise `apply_fast_forward`
+/// directly (mirroring `apply_merge_tests`'s own style — real git repos in
+/// tempdirs, no `lgs` binary, no daemon, no network) and check the ACTUAL
+/// working-tree file content on disk, not merely that a message shape was
+/// produced.
+#[cfg(test)]
+mod apply_fast_forward_tests {
+    use super::{ApplyFastForwardOutcome, SyncStatus};
+    use crate::backend::domain::commands::child::{CreateChildCommand, SetActiveChildCommand};
+    use crate::backend::domain::commands::transactions::CreateTransactionCommand;
+    use crate::backend::Backend;
+    use crate::ui::app_state::AllowanceTrackerApp;
+    use git2::Repository;
+
+    /// Commit directly against a repository's object database (no working
+    /// tree or index touched) — plants a "peer's" further commit without
+    /// ever checking it out, exactly mirroring what `fetch_lgs` would have
+    /// landed at `refs/remotes/lgs-auth/main` in production.
+    fn commit_with_files(
+        repo: &Repository,
+        message: &str,
+        parents: &[&git2::Commit],
+        files: &[(&str, &str)],
+        timestamp: i64,
+    ) -> git2::Oid {
+        let sig =
+            git2::Signature::new("Test", "test@example.com", &git2::Time::new(timestamp, 0)).unwrap();
+        let mut builder = repo.treebuilder(None).unwrap();
+        for (name, content) in files {
+            let blob_id = repo.blob(content.as_bytes()).unwrap();
+            builder.insert(*name, blob_id, 0o100644).unwrap();
+        }
+        let tree_id = builder.write().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        repo.commit(None, &sig, &sig, message, &tree, parents).unwrap()
+    }
+
+    fn app_with_git_backed_child() -> (AllowanceTrackerApp, String, tempfile::TempDir) {
+        let temp = tempfile::TempDir::new().expect("temp dir");
+        let backend = Backend::with_data_dir(temp.path().to_path_buf(), None).expect("backend");
+        let child = backend
+            .child_service
+            .create_child(CreateChildCommand {
+                name: "Test Kid".to_string(),
+                birthdate: "2015-01-01".to_string(),
+            })
+            .expect("create child")
+            .child;
+        backend
+            .child_service
+            .set_active_child(SetActiveChildCommand { child_id: child.id.clone() })
+            .expect("set active child");
+        backend
+            .transaction_service
+            .create_transaction(CreateTransactionCommand {
+                description: "Allowance".to_string(),
+                amount: 10.0,
+                date: None,
+            })
+            .expect("create transaction");
+        let app = AllowanceTrackerApp::new_for_test(backend);
+        (app, child.id, temp)
+    }
+
+    /// The coordinator's explicit ask: prove a fast-forward genuinely
+    /// updates the working tree, not merely that a message was handled.
+    /// The peer's commit content must land on disk byte for byte, and HEAD
+    /// must move to it.
+    #[test]
+    fn a_fast_forward_checks_out_the_new_tree_onto_disk() {
+        let (mut app, child_id, _temp) = app_with_git_backed_child();
+        let child_dir = app
+            .backend()
+            .csv_connection
+            .child_dir(&shared::ChildId::from(child_id.as_str()))
+            .unwrap();
+        let repo = Repository::open(&child_dir).unwrap();
+        let ours_oid = repo.head().unwrap().peel_to_commit().unwrap().id();
+        let ours_commit = repo.find_commit(ours_oid).unwrap();
+
+        let peer_content =
+            "id,child_id,date,description,amount,balance,type\nin-peer-a,x,2026-01-02T00:00:00+00:00,Peer Allowance,5.00,5.00,allowance\n";
+        let ahead_oid = commit_with_files(
+            &repo,
+            "peer advanced",
+            &[&ours_commit],
+            &[("transactions.csv", peer_content)],
+            1_700_000_500,
+        );
+
+        let outcome = app.apply_fast_forward(&child_id, &ahead_oid.to_string());
+        assert_eq!(outcome, ApplyFastForwardOutcome::Applied);
+
+        let repo = Repository::open(&child_dir).unwrap();
+        let head_oid = repo.head().unwrap().peel_to_commit().unwrap().id();
+        assert_eq!(head_oid, ahead_oid, "HEAD must move to the fast-forward target");
+
+        let on_disk = std::fs::read_to_string(child_dir.join("transactions.csv")).unwrap();
+        assert_eq!(
+            on_disk, peer_content,
+            "the peer's committed content must actually be checked out onto disk"
+        );
+    }
+
+    #[test]
+    fn fast_forwarding_to_the_current_head_is_a_no_op() {
+        let (mut app, child_id, _temp) = app_with_git_backed_child();
+        let child_dir = app
+            .backend()
+            .csv_connection
+            .child_dir(&shared::ChildId::from(child_id.as_str()))
+            .unwrap();
+        let repo = Repository::open(&child_dir).unwrap();
+        let ours_oid = repo.head().unwrap().peel_to_commit().unwrap().id();
+
+        let outcome = app.apply_fast_forward(&child_id, &ours_oid.to_string());
+        assert_eq!(outcome, ApplyFastForwardOutcome::AlreadyUpToDate);
+    }
+
+    /// Same race `apply_merge` guards against: HEAD moved (a local commit
+    /// was made) between `cycle_with_status` classifying this as a
+    /// fast-forward and this call applying it, so `to` is no longer a
+    /// descendant of the current tip. Must be refused, not applied blindly
+    /// (which would silently discard the interloping local commit).
+    #[test]
+    fn a_fast_forward_is_refused_when_head_moved_since_it_was_classified() {
+        let (mut app, child_id, _temp) = app_with_git_backed_child();
+        let child_dir = app
+            .backend()
+            .csv_connection
+            .child_dir(&shared::ChildId::from(child_id.as_str()))
+            .unwrap();
+        let repo = Repository::open(&child_dir).unwrap();
+        let ours_oid = repo.head().unwrap().peel_to_commit().unwrap().id();
+        let ours_commit = repo.find_commit(ours_oid).unwrap();
+
+        // The "peer" commit is a sibling of an INTERLOPING local commit,
+        // not a descendant of it — once the interloper lands, the peer's
+        // commit is no longer reachable by fast-forwarding from HEAD.
+        let ahead_oid = commit_with_files(
+            &repo,
+            "peer advanced",
+            &[&ours_commit],
+            &[("transactions.csv", "id,child_id,date,description,amount,balance,type\n")],
+            1_700_000_500,
+        );
+
+        app.backend()
+            .transaction_service
+            .create_transaction(CreateTransactionCommand {
+                description: "Interloper".to_string(),
+                amount: 5.0,
+                date: None,
+            })
+            .expect("interloping transaction");
+        let repo_after = Repository::open(&child_dir).unwrap();
+        let interloper_head = repo_after.head().unwrap().peel_to_commit().unwrap().id();
+        assert_ne!(interloper_head, ours_oid, "precondition: HEAD must have moved");
+
+        app.sync.status = SyncStatus::Idle;
+        let outcome = app.apply_fast_forward(&child_id, &ahead_oid.to_string());
+        assert_eq!(outcome, ApplyFastForwardOutcome::StaleHead);
+
+        let repo_final = Repository::open(&child_dir).unwrap();
+        assert_eq!(
+            repo_final.head().unwrap().peel_to_commit().unwrap().id(),
+            interloper_head,
+            "the interloping commit must survive untouched"
+        );
+        assert!(
+            std::fs::read_to_string(child_dir.join("transactions.csv"))
+                .unwrap()
+                .contains("Interloper"),
+            "the interloping transaction must not have been overwritten"
+        );
+    }
+
+    /// Task 17 Important-3's theme applied to fast-forward: an uncommitted
+    /// local write (the AWS transport's ordinary steady state — see
+    /// `apply_remote_entity`'s doc comment) that would conflict with the
+    /// incoming tree must be left alone, not silently discarded by a forced
+    /// checkout.
+    #[test]
+    fn a_fast_forward_is_refused_rather_than_overwrite_uncommitted_local_changes() {
+        let (mut app, child_id, _temp) = app_with_git_backed_child();
+        let child_dir = app
+            .backend()
+            .csv_connection
+            .child_dir(&shared::ChildId::from(child_id.as_str()))
+            .unwrap();
+        let repo = Repository::open(&child_dir).unwrap();
+        let ours_oid = repo.head().unwrap().peel_to_commit().unwrap().id();
+        let ours_commit = repo.find_commit(ours_oid).unwrap();
+
+        let ahead_oid = commit_with_files(
+            &repo,
+            "peer advanced",
+            &[&ours_commit],
+            &[(
+                "transactions.csv",
+                "id,child_id,date,description,amount,balance,type\nin-peer-a,x,2026-01-02T00:00:00+00:00,Peer,5.00,5.00,allowance\n",
+            )],
+            1_700_000_500,
+        );
+
+        // Simulate the AWS transport's ordinary uncommitted write:
+        // transactions.csv modified on disk, HEAD untouched, no
+        // crash-recovery marker (this is not a crash).
+        std::fs::write(child_dir.join("transactions.csv"), "uncommitted-aws-row-in-progress").unwrap();
+
+        let outcome = app.apply_fast_forward(&child_id, &ahead_oid.to_string());
+        assert_eq!(outcome, ApplyFastForwardOutcome::WouldOverwriteLocalChanges);
+
+        // Nothing must have been silently discarded: HEAD unchanged, the
+        // uncommitted content still on disk exactly as it was.
+        let repo_final = Repository::open(&child_dir).unwrap();
+        assert_eq!(repo_final.head().unwrap().peel_to_commit().unwrap().id(), ours_oid);
+        assert_eq!(
+            std::fs::read_to_string(child_dir.join("transactions.csv")).unwrap(),
+            "uncommitted-aws-row-in-progress",
+            "the uncommitted local content must survive a refused fast-forward untouched"
+        );
     }
 }
 

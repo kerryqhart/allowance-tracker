@@ -178,6 +178,19 @@ impl SyncUiState {
         self.consecutive_stale_head_refusals.remove(child_id);
     }
 
+    /// Forget everything this per-child debounce state remembers about
+    /// `child_id`. Call when a child is deregistered (removed from
+    /// `children.yaml`, on this machine or via a remote delete) — without
+    /// this, a deregistered child's entries linger in these maps forever:
+    /// harmless memory growth on their own, but a latent trap if the same
+    /// id is ever reused (e.g. the child is re-registered later) and
+    /// inherits a stale debounce/cap state that has nothing to do with its
+    /// new registration.
+    pub fn forget_child(&mut self, child_id: &str) {
+        self.last_stale_head_pollnow_at.remove(child_id);
+        self.consecutive_stale_head_refusals.remove(child_id);
+    }
+
     /// Try to receive the next sync message from the background thread.
     /// Returns None if there are no pending messages or no receiver is set.
     /// Used by `app_coordinator::handle_sync_messages` to drain the channel.
@@ -322,6 +335,33 @@ mod stale_head_debounce_tests {
             state.note_stale_head_refusal("b", t1),
             StaleHeadPollAction::Send,
             "child b's first-ever refusal must send even though child a just sent 50ms ago"
+        );
+    }
+
+    /// Minor from Task 17 review: deregistering a child must not leave its
+    /// debounce/cap state lingering forever — a later refusal for the SAME
+    /// id (e.g. after re-registration) must behave exactly like a brand new
+    /// child, not inherit a capped streak from before.
+    #[test]
+    fn forget_child_clears_both_the_debounce_timestamp_and_the_counter() {
+        let mut state = SyncUiState::new();
+        let t = Instant::now();
+        for _ in 0..6 {
+            state.note_stale_head_refusal("gone", t);
+        }
+        assert_eq!(
+            state.note_stale_head_refusal("gone", t),
+            StaleHeadPollAction::Suppressed,
+            "precondition: the streak must be capped before forgetting"
+        );
+
+        state.forget_child("gone");
+
+        assert_eq!(
+            state.note_stale_head_refusal("gone", t),
+            StaleHeadPollAction::Send,
+            "after forget_child, the next refusal for the same id must send again, not stay \
+             suppressed by state that should have been cleared"
         );
     }
 }

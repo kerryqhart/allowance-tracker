@@ -84,6 +84,14 @@ pub enum SyncMessage {
         decisions: Vec<allowance_core::merge::Decision>,
     },
 
+    /// The peer is strictly ahead with no local commits to reconcile
+    /// (`Cycle::FastForward` in `child_sync.rs`) — `to` is the commit the
+    /// background thread already fetched into `refs/remotes/lgs-auth/*`.
+    /// Checking it out is a working-tree write, so — same rule as
+    /// `ApplyMerge` — the background thread only detects this and hands it
+    /// here; `app_coordinator.rs`'s `apply_fast_forward` does the checkout.
+    ApplyFastForward { child_id: String, to: String },
+
     /// `goals.csv` diverged during a merge and was left unmerged. See
     /// [`GoalsDivergedNotice`] — this is a NOTICE (something that happened,
     /// held until dismissed), never routed through `SyncStatus`.
@@ -137,6 +145,11 @@ impl std::fmt::Debug for SyncMessage {
                 .field("rows", &format_args!("<{} rows>", rows.len()))
                 .field("parents", parents)
                 .field("decisions", decisions)
+                .finish(),
+            SyncMessage::ApplyFastForward { child_id, to } => f
+                .debug_struct("ApplyFastForward")
+                .field("child_id", child_id)
+                .field("to", to)
                 .finish(),
             SyncMessage::GoalsDiverged { child_id, ours_oid, theirs_oid } => f
                 .debug_struct("GoalsDiverged")
