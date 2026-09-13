@@ -13,52 +13,64 @@
 //!   the final step in the plan, and [`run_lgs_migration`] executes steps in
 //!   order, stopping at the first failure. Nothing after a failed step runs,
 //!   which means `children.yaml` still names the old folder and the app keeps
-//!   working exactly as it did before the migration was attempted — the old
-//!   folder is the fallback for as long as it isn't deleted.
+//!   working exactly as it did before the migration was attempted.
 //! - **Adopt before init.** Two machines can both decide to migrate the same
 //!   child on different days. If this machine's `lgs status` already shows
 //!   the project as `adoptable` (created and pushed by the other machine),
 //!   this module runs `lgs restore` and builds on top of that history
-//!   instead of `git init`-ing an unrelated root. Without this check, the
-//!   second machine's fresh history has no common ancestor with the first
-//!   machine's, and a later merge treats the empty root as the common base —
-//!   which resurrects any row the first machine had already deleted.
+//!   instead of `git init`-ing an unrelated root.
+//! - **Never overwrite an adopted (or resumed) history with a stale local
+//!   copy.** [`run_copy_data_files`] and [`run_canonicalize`] never blindly
+//!   replace whatever already sits at `new_dir` — that is exactly how an
+//!   earlier version of this module lost data (see the task-18 review's
+//!   Critical-1: cloning a peer's history and then overwriting it with this
+//!   machine's stale iCloud copy silently deletes every row the peer wrote
+//!   after it migrated, because the deletion has real ancestry and
+//!   fast-forwards cleanly). `transactions.csv` is instead reconciled with
+//!   `allowance_core::merge::merge(None, ours, theirs)` — the same
+//!   property-tested three-way merge the ordinary sync path uses, with an
+//!   empty base. An empty base means no common ancestor, which means
+//!   nothing can be shown to have been *deleted* on either side, so the
+//!   union keeps every row from both. `child.yaml`, `allowance_config.yaml`,
+//!   and `goals.csv` are simpler (`allowance_core::merge` does not model
+//!   them): whatever already exists at `new_dir` is kept outright, and a
+//!   [`StartupNotice`] names any file where the two copies actually differ,
+//!   rather than silently preferring one.
+//! - **Re-runnable after a partial failure.** [`plan_lgs_migration`] checks
+//!   `status.projects`, not only `status.adoptable`: a project already
+//!   registered with lgs (because an earlier attempt got as far as
+//!   `Step::LgsAdd` before failing later) is not `lgs add`ed a second time —
+//!   that call fails permanently, with no path back, for an already-named
+//!   project. Because Copy/Canonicalize/Commit are all safe to re-run (the
+//!   union above is idempotent, and `commit_if_changed` is a no-op when
+//!   nothing changed), a retry after a failure at *any* step converges to
+//!   the same result rather than getting stuck.
 //!
 //! Mirrors the plan/report/run split in
 //! `backend::storage::csv::migration::{plan_migration, MigrationReport}`:
-//! [`plan_lgs_migration`] only reads (`lgs status`'s already-fetched result,
-//! nothing more) and decides; [`run_lgs_migration`] is the only thing that
-//! writes, executes strictly in [`LgsMigrationPlan::steps`] order, and
-//! produces an [`LgsMigrationReport`] that always says whether it failed and
-//! where.
+//! [`plan_lgs_migration`] only reads and decides; [`run_lgs_migration`] is
+//! the only thing that writes, executes strictly in
+//! [`LgsMigrationPlan::steps`] order, and produces an [`LgsMigrationReport`]
+//! that always says whether it failed and where.
 //!
-//! `plan_lgs_migration` takes a slice of registry entries because that is the
-//! shape the caller already holds (`ChildRegistry::entries()`), but this
-//! module plans and runs one migration at a time — the one real install this
-//! ships for has exactly one child. A future multi-child rollout would call
-//! this once per child rather than teaching `Step` to carry per-child payload
-//! for steps that don't need one.
+//! `plan_lgs_migration` takes one [`RegistryEntry`] because this module
+//! plans and runs one migration at a time — the one real install this ships
+//! for has exactly one child. A future multi-child rollout would call this
+//! once per child.
 
-use crate::backend::storage::csv::{ChildRegistry, RegistryEntry, REGISTRY_FILENAME};
+use crate::backend::storage::csv::{ChildRegistry, RegistryEntry};
 use crate::backend::storage::git::{ensure_lgs_remote, push_lgs, GitManager};
-use crate::backend::sync::child_sync::current_branch;
-use crate::backend::sync::lgs_client::LgsClient;
-use crate::backend::sync::paths::{is_cloud_synced, Reason, SyncPaths};
-pub use crate::backend::sync::lgs_client::StatusReport;
+use crate::backend::sync::child_sync::{current_branch, provenance};
+use crate::backend::sync::lgs_client::{LgsClient, StatusReport};
+use crate::backend::sync::paths::{is_cloud_synced, Reason, SyncPaths, FILES_THIS_APP_OWNS};
 use crate::backend::{NoticeSeverity, StartupNotice};
+use allowance_core::merge::{merge, Decision};
+use allowance_core::row::{Provenance, Sided};
 use anyhow::{Context, Result};
 use shared::ChildId;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-/// Files this app owns and copies byte-for-byte during migration.
-/// `transactions.csv` is deliberately NOT in this list — it is read, parsed,
-/// and re-rendered by [`Step::Canonicalize`] instead of copied verbatim,
-/// since the whole point of that step is to rewrite it canonically. This
-/// mirrors (but does not import, across the frontend/backend boundary) the
-/// `FILES_THIS_APP_OWNS` list in `egui-frontend/src/ui/app_coordinator.rs`;
-/// keep the two in sync if either changes.
-const DATA_FILES: &[&str] = &["child.yaml", "allowance_config.yaml", "goals.csv"];
 const TRANSACTIONS_FILE: &str = "transactions.csv";
 
 fn project_name(id: &ChildId) -> String {
@@ -74,27 +86,32 @@ pub enum Step {
     /// Adopt an already-existing lgs project via `lgs restore` rather than
     /// starting an unrelated history.
     RestoreExisting { name: String },
-    /// Nothing adoptable exists yet: `git init` a fresh root, to be `lgs
-    /// add`ed below.
+    /// Nothing adoptable exists yet: `git init` a fresh root (idempotent —
+    /// also the branch taken to *resume* a fresh migration that already got
+    /// this far in an earlier, failed attempt).
     InitAndPush { name: String },
-    /// Copy `child.yaml`, `allowance_config.yaml`, `goals.csv` verbatim.
-    /// Never copies `.git`.
+    /// Bring `child.yaml`, `allowance_config.yaml`, `goals.csv` into
+    /// `new_dir`. Never overwrites a file already there — see the module
+    /// doc comment. Never copies `.git`.
     CopyDataFiles,
-    /// Read `old_dir/transactions.csv` through the canonical codec and write
-    /// it back out through `render_transactions` — canonical row order and
-    /// two-decimal money, at the new location.
+    /// Reconcile `old_dir/transactions.csv` with whatever is already at
+    /// `new_dir/transactions.csv` (if anything) through
+    /// `allowance_core::merge::merge` and write the result back out
+    /// through `render_transactions` — canonical row order, two-decimal
+    /// money, and no dropped rows.
     Canonicalize,
     /// Commit the copied + canonicalized files. A no-op (not an error) if
     /// staging produced no change.
     Commit,
-    /// Register the fresh repo with lgs. Only present when the plan's first
-    /// step is [`Step::InitAndPush`] — an adopted project is already
-    /// registered.
+    /// Register the fresh repo with lgs. Present only when the project is
+    /// neither adoptable nor already registered — an adopted project is
+    /// already registered by `lgs restore`, and a resumed one was already
+    /// registered by an earlier attempt's successful `lgs add`.
     LgsAdd,
     /// Point the repo's `lgs` remote at the right URL: read from the
     /// restored repo's `origin` when adopting, or resolved via a fresh `lgs
-    /// status` lookup (the URL is assigned by the daemon and cannot be
-    /// known before `lgs add` runs) when this is a fresh project.
+    /// status` lookup otherwise (self-healing a stale URL either way — see
+    /// `ensure_lgs_remote`'s own doc comment).
     EnsureLgsRemote,
     /// Push the current branch to the `lgs` remote.
     Push,
@@ -104,11 +121,6 @@ pub enum Step {
 }
 
 /// The decided, not-yet-executed shape of one child's migration.
-///
-/// Carries everything [`run_lgs_migration`] needs to execute — including the
-/// path to the (possibly fake, in tests) `lgs` binary — so that function's
-/// signature can stay `run_lgs_migration(plan) -> LgsMigrationReport` with no
-/// extra collaborators to thread through.
 #[derive(Debug)]
 pub struct LgsMigrationPlan {
     pub child_id: ChildId,
@@ -122,29 +134,35 @@ pub struct LgsMigrationPlan {
     pub data_dir: PathBuf,
     pub lgs_binary: PathBuf,
     pub steps: Vec<Step>,
-    /// `Some` when [`is_cloud_synced`] rejected `new_dir`. When set, `steps`
+    /// `Some` when [`is_cloud_synced`] rejected `new_dir` (or `new_dir`
+    /// could not even be canonicalized enough to check). When set, `steps`
     /// is empty and [`run_lgs_migration`] does nothing but report the
-    /// refusal — this is the safety gate the module doc comment describes,
-    /// and it fires before any decision about adopting vs. initializing.
+    /// refusal.
     pub blocked: Option<Reason>,
 }
 
-/// Outcome of [`run_lgs_migration`]. Always tells the caller whether it
-/// failed and, if so, at which step — never leaves that to be inferred from
-/// a bare `Result`, because "which step" is exactly what determines whether
-/// the old folder and the registry are still intact (answer: always yes,
-/// but the report says why nothing further happened).
+/// Outcome of [`run_lgs_migration`].
 #[derive(Debug, Default)]
 pub struct LgsMigrationReport {
     pub completed_steps: Vec<Step>,
     pub failed_step: Option<Step>,
     pub error: Option<String>,
     /// How many transaction rows needed legacy f64-precision rounding
-    /// (`Money::parse_rounding`) while being canonicalized. The rewrite is
-    /// correct, not a value change — but the user is financially affected
-    /// data and must be told, not left to notice a diff. See
-    /// `ParsedTransactions::rows_rounded`.
+    /// (`Money::parse_rounding`) while being canonicalized, summed across
+    /// whatever was already at `new_dir` and `old_dir`. The rewrite is
+    /// correct, not a value change — but the user's financial data is
+    /// affected and must be told, not left to notice a diff.
     pub legacy_precision_rows_rounded: usize,
+    /// Non-trivial choices `allowance_core::merge::merge` made while
+    /// reconciling `transactions.csv` — see `Decision`'s own doc comment.
+    /// Empty on the ordinary first-time path, where there is nothing at
+    /// `new_dir` yet to reconcile against.
+    pub merge_decisions: Vec<Decision>,
+    /// Names of owned files (other than `transactions.csv`, which is always
+    /// merged, not compared) where what was already at `new_dir` differed
+    /// from `old_dir`'s copy. The `new_dir` version was kept in every case;
+    /// this is not a failure, only something to look at by hand.
+    pub discrepancies: Vec<String>,
     /// User-visible outcomes. On success, always names the old folder's
     /// path so the user knows it is being kept as a backup, not lost.
     pub notices: Vec<StartupNotice>,
@@ -156,32 +174,35 @@ impl LgsMigrationReport {
     }
 }
 
-/// Decide what a migration for the first entry in `children` would do.
-/// Reads only — `status` is the caller's already-fetched `lgs status
-/// --json`, and this function performs no I/O of its own beyond the cheap,
-/// best-effort `~/Documents` symlink check `is_cloud_synced` needs (see its
-/// doc comment for why that observation is the caller's job, not that
-/// function's).
-pub fn plan_lgs_migration(
-    children: &[RegistryEntry],
-    paths: &SyncPaths,
-    status: &StatusReport,
-) -> LgsMigrationPlan {
-    let entry = children
-        .first()
-        .expect("plan_lgs_migration requires at least one child entry");
-
+/// Decide what a migration for `entry` would do. Reads only — `status` is
+/// the caller's already-fetched `lgs status --json`, and this function
+/// performs no I/O of its own beyond the cheap, best-effort filesystem
+/// probes described below.
+pub fn plan_lgs_migration(entry: &RegistryEntry, paths: &SyncPaths, status: &StatusReport) -> LgsMigrationPlan {
     let child_id = entry.id.clone();
     let name = project_name(&child_id);
     let old_dir = entry.path.clone();
     let new_dir = paths.children_root.join(child_id.as_str());
 
-    // The absolute safety gate: refuse a target this migration's own guard
-    // would flag, before deciding anything else about adopt-vs-init.
     let documents_is_symlink = fs::symlink_metadata(paths.home.join("Documents"))
         .map(|m| m.file_type().is_symlink())
         .unwrap_or(false);
-    if let Some(reason) = is_cloud_synced(&new_dir, paths, documents_is_symlink) {
+
+    // `is_cloud_synced`'s own doc comment states plainly that resolving
+    // symlinks in the candidate is the CALLER's job, not something the pure
+    // guard can do. `new_dir` does not exist yet at plan time (it is
+    // created during migration), so a plain `fs::canonicalize` on it would
+    // almost always fail with `NotFound` — `canonicalize_as_far_as_possible`
+    // resolves whatever ancestor of it actually exists (e.g. a symlinked
+    // `children_root`) and re-appends the not-yet-existing tail. A
+    // candidate that cannot be verified at all fails closed, exactly like
+    // `is_cloud_synced`'s own `NotNormalisable` case.
+    let blocked = match canonicalize_as_far_as_possible(&new_dir) {
+        Some(canonical) => is_cloud_synced(&canonical, paths, documents_is_symlink),
+        None => Some(Reason::NotNormalisable),
+    };
+
+    if let Some(reason) = blocked {
         return LgsMigrationPlan {
             child_id,
             old_dir,
@@ -195,6 +216,12 @@ pub fn plan_lgs_migration(
     }
 
     let adopt = status.adoptable.iter().any(|n| n == &name);
+    // Critical-2 fix: a project already registered with lgs (typically
+    // because an earlier attempt at THIS SAME migration got as far as
+    // `Step::LgsAdd` before failing at a later step) must never be
+    // `lgs add`ed again — that call fails permanently for an
+    // already-existing name, stranding the user with no way to finish.
+    let already_registered = status.project(&name).is_some();
 
     let mut steps = Vec::new();
     if adopt {
@@ -205,9 +232,7 @@ pub fn plan_lgs_migration(
     steps.push(Step::CopyDataFiles);
     steps.push(Step::Canonicalize);
     steps.push(Step::Commit);
-    if !adopt {
-        // An adopted project is already registered with lgs; only a fresh
-        // one needs `lgs add`.
+    if !adopt && !already_registered {
         steps.push(Step::LgsAdd);
     }
     steps.push(Step::EnsureLgsRemote);
@@ -226,13 +251,35 @@ pub fn plan_lgs_migration(
     }
 }
 
+/// Resolve symlinks in `candidate` as far as the filesystem allows: walk up
+/// to the nearest ancestor that actually exists, canonicalize THAT, then
+/// re-append the (necessarily still-nonexistent) tail untouched.
+///
+/// Returns `None` only when nothing on the path exists at all, which does
+/// not happen on a real filesystem (`/` always exists) but is handled
+/// explicitly rather than assumed, matching `is_cloud_synced`'s own
+/// fail-closed posture for a path it cannot reason about.
+fn canonicalize_as_far_as_possible(candidate: &Path) -> Option<PathBuf> {
+    let mut existing = candidate;
+    let mut tail: Vec<&std::ffi::OsStr> = Vec::new();
+    while !existing.exists() {
+        tail.push(existing.file_name()?);
+        existing = existing.parent()?;
+    }
+    let mut resolved = fs::canonicalize(existing).ok()?;
+    for name in tail.into_iter().rev() {
+        resolved.push(name);
+    }
+    Some(resolved)
+}
+
 /// Execute `plan`'s steps strictly in order, stopping at the first failure.
 ///
-/// Every step before [`Step::RepointRegistry`] only touches `new_dir` (a
-/// brand-new location) or reads `old_dir`. `children.yaml` is never opened
-/// for writing until every earlier step has already succeeded — so a
-/// failure anywhere leaves both the registry and the old folder exactly as
-/// they were.
+/// Every step before [`Step::RepointRegistry`] only touches `new_dir` (never
+/// deleting anything already there) or reads `old_dir`. `children.yaml` is
+/// never opened for writing until every earlier step has already succeeded
+/// — so a failure anywhere leaves both the registry and the old folder
+/// exactly as they were.
 pub fn run_lgs_migration(plan: LgsMigrationPlan) -> LgsMigrationReport {
     let mut report = LgsMigrationReport::default();
 
@@ -251,12 +298,15 @@ pub fn run_lgs_migration(plan: LgsMigrationPlan) -> LgsMigrationReport {
     let adopting = matches!(plan.steps.first(), Some(Step::RestoreExisting { .. }));
 
     for step in plan.steps.clone() {
-        let outcome = match &step {
+        let outcome: Result<()> = match &step {
             Step::RestoreExisting { name } => run_restore_existing(&plan, &lgs, name),
             Step::InitAndPush { .. } => run_init(&plan, &git),
-            Step::CopyDataFiles => run_copy_data_files(&plan),
-            Step::Canonicalize => run_canonicalize(&plan).map(|rows_rounded| {
+            Step::CopyDataFiles => run_copy_data_files(&plan).map(|discrepancies| {
+                report.discrepancies = discrepancies;
+            }),
+            Step::Canonicalize => run_canonicalize(&plan).map(|(rows_rounded, decisions)| {
                 report.legacy_precision_rows_rounded = rows_rounded;
+                report.merge_decisions = decisions;
             }),
             Step::Commit => run_commit(&plan, &git),
             Step::LgsAdd => run_lgs_add(&plan, &lgs),
@@ -273,6 +323,33 @@ pub fn run_lgs_migration(plan: LgsMigrationPlan) -> LgsMigrationReport {
                 return report;
             }
         }
+    }
+
+    if !report.discrepancies.is_empty() {
+        report.notices.push(StartupNotice {
+            severity: NoticeSeverity::Warning,
+            title: format!("{}'s migrated data disagrees with the old folder in some files", plan.child_id),
+            details: report
+                .discrepancies
+                .iter()
+                .map(|f| {
+                    format!(
+                        "{f} differs between the migrated copy and the old folder's copy at {}. \
+                         The migrated version was kept; review {f} by hand if the old folder's \
+                         changes need to be reconciled.",
+                        plan.old_dir.join(f).display()
+                    )
+                })
+                .collect(),
+        });
+    }
+    if !report.merge_decisions.is_empty() {
+        log::warn!(
+            "migrating {}: reconciling transactions.csv made {} non-trivial decision(s): {:?}",
+            plan.child_id,
+            report.merge_decisions.len(),
+            report.merge_decisions
+        );
     }
 
     let mut details = vec![format!(
@@ -297,8 +374,7 @@ pub fn run_lgs_migration(plan: LgsMigrationPlan) -> LgsMigrationReport {
 
 fn run_restore_existing(plan: &LgsMigrationPlan, lgs: &LgsClient, name: &str) -> Result<()> {
     if let Some(parent) = plan.new_dir.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("creating {}", parent.display()))?;
+        fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
     }
     let path = plan
         .new_dir
@@ -310,44 +386,111 @@ fn run_restore_existing(plan: &LgsMigrationPlan, lgs: &LgsClient, name: &str) ->
 fn run_init(plan: &LgsMigrationPlan, git: &GitManager) -> Result<()> {
     fs::create_dir_all(&plan.new_dir)
         .with_context(|| format!("creating {}", plan.new_dir.display()))?;
+    // `Repository::init` on an already-initialized repo is a safe no-op —
+    // this is also the branch a RESUME of a fresh migration takes, and it
+    // must not disturb whatever `new_dir` already has.
     git.init_repo(&plan.new_dir)
 }
 
-fn run_copy_data_files(plan: &LgsMigrationPlan) -> Result<()> {
-    for name in DATA_FILES {
+fn read_optional(path: &Path) -> Result<String> {
+    if path.exists() {
+        fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))
+    } else {
+        Ok(String::new())
+    }
+}
+
+/// Bring `child.yaml`, `allowance_config.yaml`, `goals.csv` into `new_dir`.
+/// Never overwrites a file already there (an adopted history's file, or
+/// this same migration's own prior partial attempt) — only speaks up, via
+/// the returned discrepancy names, when the two versions actually differ.
+/// `transactions.csv` is deliberately excluded: it is always reconciled by
+/// [`run_canonicalize`], never a plain copy.
+fn run_copy_data_files(plan: &LgsMigrationPlan) -> Result<Vec<String>> {
+    let mut discrepancies = Vec::new();
+    for name in FILES_THIS_APP_OWNS.iter().filter(|f| **f != TRANSACTIONS_FILE) {
         let src = plan.old_dir.join(name);
+        let dst = plan.new_dir.join(name);
+
+        if dst.exists() {
+            if src.exists() {
+                let existing = fs::read(&dst).with_context(|| format!("reading {}", dst.display()))?;
+                let local = fs::read(&src).with_context(|| format!("reading {}", src.display()))?;
+                if existing != local {
+                    discrepancies.push(name.to_string());
+                }
+            }
+            continue;
+        }
+
         if !src.exists() {
             // Not every child has every file yet (e.g. no goal was ever
             // created) — absence is not an error.
             continue;
         }
-        let dst = plan.new_dir.join(name);
         fs::copy(&src, &dst)
             .with_context(|| format!("copying {} to {}", src.display(), dst.display()))?;
     }
-    Ok(())
+    Ok(discrepancies)
 }
 
-fn run_canonicalize(plan: &LgsMigrationPlan) -> Result<usize> {
-    let src = plan.old_dir.join(TRANSACTIONS_FILE);
-    let text = if src.exists() {
-        fs::read_to_string(&src).with_context(|| format!("reading {}", src.display()))?
-    } else {
-        String::new()
+/// Reconcile `old_dir/transactions.csv` with whatever is already at
+/// `new_dir/transactions.csv` (an adopted history, a resumed attempt's own
+/// prior commit, or nothing at all on the ordinary first-time path) through
+/// `allowance_core::merge::merge` with an empty base, and write the result
+/// back canonically. See the module doc comment for why this must always be
+/// a merge and never a blind overwrite.
+///
+/// Returns the total legacy-precision row count (summed across both sides)
+/// and the merge's non-trivial decisions, if any.
+fn run_canonicalize(plan: &LgsMigrationPlan) -> Result<(usize, Vec<Decision>)> {
+    let old_path = plan.old_dir.join(TRANSACTIONS_FILE);
+    let old_parsed = allowance_core::codec::parse_transactions(&read_optional(&old_path)?)
+        .with_context(|| format!("parsing {}", old_path.display()))?;
+
+    let new_path = plan.new_dir.join(TRANSACTIONS_FILE);
+    let existing_parsed = allowance_core::codec::parse_transactions(&read_optional(&new_path)?)
+        .with_context(|| format!("parsing {}", new_path.display()))?;
+
+    // `ours`'s provenance is the new location's real commit when one
+    // exists (an adopted history, or a resumed attempt's own prior
+    // commit); a distinct synthetic sentinel otherwise (nothing committed
+    // there yet — the ordinary first-time path, where `existing_parsed` is
+    // empty anyway and never reaches the tiebreak that provenance feeds).
+    // `theirs` (the old folder, never a git commit) gets its OWN distinct
+    // sentinel — `merge`'s `wins()` asserts the two sides' provenance are
+    // never equal, so even the fully-synthetic case (both sides sentinel)
+    // must not collide.
+    let existing_provenance = match git2::Repository::open(&plan.new_dir) {
+        Ok(repo) => {
+            let head_oid = repo.head().ok().and_then(|h| h.peel_to_commit().ok()).map(|c| c.id());
+            match head_oid {
+                Some(oid) => provenance(&repo, oid)?,
+                None => Provenance { committer_epoch: 0, commit_oid: [0u8; 20] },
+            }
+        }
+        Err(_) => Provenance { committer_epoch: 0, commit_oid: [0u8; 20] },
     };
 
-    let parsed = allowance_core::codec::parse_transactions(&text)
-        .with_context(|| format!("parsing {}", src.display()))?;
-    let rendered = allowance_core::codec::render_transactions(&parsed.rows);
+    let ours = Sided { rows: existing_parsed.rows, provenance: existing_provenance };
+    let theirs = Sided {
+        rows: old_parsed.rows,
+        provenance: Provenance { committer_epoch: -1, commit_oid: [1u8; 20] },
+    };
 
-    let dst = plan.new_dir.join(TRANSACTIONS_FILE);
-    fs::write(&dst, rendered).with_context(|| format!("writing {}", dst.display()))?;
+    let outcome = merge(None, &ours, &theirs);
+    let rendered = allowance_core::codec::render_transactions(&outcome.rows);
+    fs::write(&new_path, rendered).with_context(|| format!("writing {}", new_path.display()))?;
 
-    Ok(parsed.rows_rounded)
+    Ok((old_parsed.rows_rounded + existing_parsed.rows_rounded, outcome.decisions))
 }
 
 fn run_commit(plan: &LgsMigrationPlan, git: &GitManager) -> Result<()> {
-    git.add_all(&plan.new_dir)?;
+    for name in FILES_THIS_APP_OWNS {
+        if plan.new_dir.join(name).exists() {
+            git.add_file(&plan.new_dir, name)?;
+        }
+    }
     git.commit_if_changed(&plan.new_dir, "Migrate to lgs-backed repo")
         .map(|_| ())
 }
@@ -365,25 +508,20 @@ fn run_ensure_remote(plan: &LgsMigrationPlan, lgs: &LgsClient, adopting: bool) -
         .with_context(|| format!("opening {}", plan.new_dir.display()))?;
 
     let url = if adopting {
-        // `lgs restore` clones with the remote named `origin`; that URL is
-        // already correct, no need to ask lgs again.
         repo.find_remote("origin")
             .context("the restored repo has no `origin` remote")?
             .url()
             .context("the restored repo's `origin` remote has no URL")?
             .to_string()
     } else {
-        // The URL for a brand-new project is assigned by the daemon and
-        // cannot be known before `lgs add` ran — a fresh `lgs status` call
-        // is the only way to learn it.
         let fresh_status = lgs
             .status()
-            .context("querying `lgs status` to resolve the new project's clone_url")?;
+            .context("querying `lgs status` to resolve the project's clone_url")?;
         fresh_status
             .project(&plan.project_name)
             .with_context(|| {
                 format!(
-                    "`lgs add` succeeded but '{}' did not appear in `lgs status`",
+                    "'{}' did not appear in `lgs status` — has it been `lgs add`ed yet?",
                     plan.project_name
                 )
             })?
@@ -410,8 +548,8 @@ fn run_repoint_registry(plan: &LgsMigrationPlan) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::sync::lgs_client::DaemonInfo;
-    use std::path::Path;
+    use crate::backend::sync::lgs_client::{DaemonInfo, DurabilityState, ProjectReport};
+    use crate::backend::storage::csv::REGISTRY_FILENAME;
     use tempfile::TempDir;
 
     fn child(id: &str) -> RegistryEntry {
@@ -442,7 +580,28 @@ mod tests {
         }
     }
 
-    // --- The four tests specified in the task brief, verbatim. ---
+    fn status_with_projects(entries: &[(&str, &str)]) -> StatusReport {
+        StatusReport {
+            daemon: DaemonInfo::default(),
+            cloud_root: None,
+            cloud_root_exists: false,
+            projects: entries
+                .iter()
+                .map(|(name, clone_url)| ProjectReport {
+                    name: name.to_string(),
+                    clone_url: clone_url.to_string(),
+                    working_repo_path: PathBuf::from("/tmp/x"),
+                    durability_state: DurabilityState::Unknown,
+                    durability_label: None,
+                    failed_sync_attempts: 0,
+                    archived: false,
+                })
+                .collect(),
+            adoptable: Vec::new(),
+        }
+    }
+
+    // --- The four tests specified in the task brief. ---
 
     #[test]
     fn adopts_an_existing_project_instead_of_creating_an_unrelated_root() {
@@ -450,33 +609,40 @@ mod tests {
         // `git init`, the histories are unrelated, and any row A deleted in
         // that window resurrects through the empty-base union.
         let status = status_with_adoptable(&["allowance-keiko_hart"]);
-        let plan = plan_lgs_migration(&[child("keiko_hart")], &paths(), &status);
+        let plan = plan_lgs_migration(&child("keiko_hart"), &paths(), &status);
         assert_eq!(plan.steps[0], Step::RestoreExisting { name: "allowance-keiko_hart".into() });
     }
 
     #[test]
     fn creates_a_fresh_repo_when_nothing_is_adoptable() {
-        let plan = plan_lgs_migration(&[child("keiko_hart")], &paths(), &status_with_adoptable(&[]));
+        let plan = plan_lgs_migration(&child("keiko_hart"), &paths(), &status_with_adoptable(&[]));
         assert_eq!(plan.steps[0], Step::InitAndPush { name: "allowance-keiko_hart".into() });
     }
 
     #[test]
     fn registry_is_repointed_only_after_every_other_step_succeeds() {
-        let plan = plan_lgs_migration(&[child("keiko_hart")], &paths(), &status_with_adoptable(&[]));
+        let plan = plan_lgs_migration(&child("keiko_hart"), &paths(), &status_with_adoptable(&[]));
         assert_eq!(*plan.steps.last().unwrap(), Step::RepointRegistry);
     }
 
     #[test]
     fn a_failure_leaves_the_registry_and_the_old_folder_untouched() {
         let env = TestEnvironment::new().unwrap();
-        let before = fs::read_to_string(env.registry_path()).unwrap();
+        let before_registry = fs::read_to_string(env.registry_path()).unwrap();
+        let before_old = snapshot_old_dir(&env);
+
         let report = run_lgs_migration(plan_that_fails_at_push(&env));
+
         assert!(report.failed());
-        assert_eq!(fs::read_to_string(env.registry_path()).unwrap(), before);
-        assert!(env.old_child_dir().exists(), "the old folder is never deleted");
+        // Pin exactly where this fails, not merely that it fails somewhere
+        // — a bug that degrades this into failing at an earlier step must
+        // not pass silently.
+        assert_eq!(report.failed_step, Some(Step::Push));
+        assert_eq!(fs::read_to_string(env.registry_path()).unwrap(), before_registry);
+        assert_eq!(snapshot_old_dir(&env), before_old, "the old folder's bytes must be unchanged");
     }
 
-    // --- Supporting fixture for the execution-level tests. ---
+    // --- Supporting fixture. ---
 
     /// A tempdir-backed fixture standing in for the real machine: an old
     /// (pre-migration) child folder with real-shaped data (including one
@@ -506,13 +672,21 @@ mod tests {
             )?;
             fs::write(old_child_dir.join("allowance_config.yaml"), "amount: 5.0\n")?;
             fs::write(old_child_dir.join("goals.csv"), "id,child_id,description\n")?;
-            // One row carries legacy f64-precision noise, matching what was
-            // actually found in the real transactions.csv this migration is
-            // written for.
+            // One row carries legacy f64-precision noise on `amount`,
+            // matching what was actually found in the real
+            // transactions.csv this migration is written for (there,
+            // it was 57 of 93 rows). `balance` is written as the correct
+            // running total for a single row (its own amount) so that
+            // `merge`'s unconditional `recompute_running_balances` (see
+            // `run_canonicalize`'s doc comment — Canonicalize is always a
+            // merge, even with nothing to merge against) reproduces the
+            // exact same value rather than changing it — this fixture is
+            // about precision-rounding, not about exercising balance
+            // recomputation across multiple rows.
             fs::write(
                 old_child_dir.join("transactions.csv"),
                 "id,child_id,date,description,amount,balance,type\n\
-                 tx-1,keiko_hart,2024-01-01T00:00:00Z,Allowance,5.00,14.620000000000001,allowance\n",
+                 tx-1,keiko_hart,2024-01-01T00:00:00Z,Allowance,14.620000000000001,14.62,allowance\n",
             )?;
 
             let mut registry = ChildRegistry::default();
@@ -551,9 +725,9 @@ mod tests {
         }
 
         /// A `SyncPaths` whose `home` deliberately does not exist on disk
-        /// (so the `~/Documents` symlink probe just resolves to `false`) and
-        /// is nowhere near iCloud, so it never trips the cloud-sync guard on
-        /// its own.
+        /// (so the `~/Documents` symlink probe just resolves to `false`)
+        /// and is nowhere near iCloud, so it never trips the cloud-sync
+        /// guard on its own.
         fn paths(&self, lgs_binary: PathBuf) -> SyncPaths {
             SyncPaths {
                 data_dir: self.base_dir(),
@@ -563,6 +737,21 @@ mod tests {
                 home: self.scratch.path().join("not_a_real_home"),
             }
         }
+    }
+
+    /// Read every file directly inside `env.old_child_dir()`, sorted by
+    /// name, as raw bytes — a content-level pin, not merely an existence
+    /// check. A bug that truncated or rewrote a file in place would pass an
+    /// `.exists()` check but must fail this one.
+    fn snapshot_old_dir(env: &TestEnvironment) -> Vec<(String, Vec<u8>)> {
+        let dir = env.old_child_dir();
+        let mut names: Vec<String> = fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .collect();
+        names.sort();
+        names.into_iter().map(|n| (n.clone(), fs::read(dir.join(&n)).unwrap())).collect()
     }
 
     /// Write an executable fake `lgs` binary at `dir/lgs` whose body is
@@ -579,8 +768,8 @@ mod tests {
         path
     }
 
-    /// A fake `lgs status --json` response naming one project with the given
-    /// `clone_url`. `add` always succeeds.
+    /// A fake `lgs status --json` response naming one project with the
+    /// given `clone_url`. `add` always succeeds.
     fn status_json(clone_url: &str) -> String {
         format!(
             "{{\"daemon_running\":true,\"cloud_root\":null,\"cloud_root_exists\":false,\
@@ -604,7 +793,7 @@ mod tests {
             ),
         );
         let paths = env.paths(script);
-        plan_lgs_migration(&[env.entry()], &paths, &status_with_adoptable(&[]))
+        plan_lgs_migration(&env.entry(), &paths, &status_with_adoptable(&[]))
     }
 
     #[test]
@@ -615,15 +804,17 @@ mod tests {
             "case \"$1\" in\n  add) echo boom >&2; exit 1 ;;\nesac\n",
         );
         let paths = env.paths(script);
-        let plan = plan_lgs_migration(&[env.entry()], &paths, &status_with_adoptable(&[]));
+        let plan = plan_lgs_migration(&env.entry(), &paths, &status_with_adoptable(&[]));
 
-        let before = fs::read_to_string(env.registry_path()).unwrap();
+        let before_registry = fs::read_to_string(env.registry_path()).unwrap();
+        let before_old = snapshot_old_dir(&env);
+
         let report = run_lgs_migration(plan);
 
         assert!(report.failed());
         assert_eq!(report.failed_step, Some(Step::LgsAdd));
-        assert_eq!(fs::read_to_string(env.registry_path()).unwrap(), before);
-        assert!(env.old_child_dir().exists());
+        assert_eq!(fs::read_to_string(env.registry_path()).unwrap(), before_registry);
+        assert_eq!(snapshot_old_dir(&env), before_old);
     }
 
     #[test]
@@ -638,8 +829,10 @@ mod tests {
         fs::write(&blocker, "x").unwrap();
         paths.children_root = blocker.join("children");
 
-        let plan = plan_lgs_migration(&[env.entry()], &paths, &status_with_adoptable(&[]));
-        let before = fs::read_to_string(env.registry_path()).unwrap();
+        let plan = plan_lgs_migration(&env.entry(), &paths, &status_with_adoptable(&[]));
+        let before_registry = fs::read_to_string(env.registry_path()).unwrap();
+        let before_old = snapshot_old_dir(&env);
+
         let report = run_lgs_migration(plan);
 
         assert!(report.failed());
@@ -647,28 +840,39 @@ mod tests {
             report.failed_step,
             Some(Step::InitAndPush { name: "allowance-keiko_hart".into() })
         );
-        assert_eq!(fs::read_to_string(env.registry_path()).unwrap(), before);
-        assert!(env.old_child_dir().exists());
+        assert_eq!(fs::read_to_string(env.registry_path()).unwrap(), before_registry);
+        assert_eq!(snapshot_old_dir(&env), before_old);
     }
 
     #[test]
     fn refuses_a_target_inside_a_cloud_synced_path() {
         let env = TestEnvironment::new().unwrap();
         let cloud_root = TempDir::new().unwrap();
-        let mut paths = env.paths(PathBuf::from("/fake/bin/lgs-not-used"));
-        paths.children_root = cloud_root.path().join("children");
-        paths.cloud_root = Some(cloud_root.path().to_path_buf());
+        // Canonicalize the tempdir path before using it as `cloud_root`:
+        // on macOS, `/var/folders/...` (what `TempDir` hands back) is
+        // itself a symlink to `/private/var/folders/...`, and the
+        // production fix under test canonicalizes the CANDIDATE before
+        // comparing — so the reference point must be in the same resolved
+        // form for the comparison to land, exactly as it would in
+        // production if `SyncPaths::cloud_root` is already realpath'd.
+        let cloud_root_canonical = cloud_root.path().canonicalize().unwrap();
 
-        let plan = plan_lgs_migration(&[env.entry()], &paths, &status_with_adoptable(&[]));
+        let mut paths = env.paths(PathBuf::from("/fake/bin/lgs-not-used"));
+        paths.children_root = cloud_root_canonical.join("children");
+        paths.cloud_root = Some(cloud_root_canonical);
+
+        let plan = plan_lgs_migration(&env.entry(), &paths, &status_with_adoptable(&[]));
         assert!(plan.steps.is_empty(), "a refused target must plan no steps to run");
         assert_eq!(plan.blocked, Some(Reason::InsideCloudRoot));
 
-        let before = fs::read_to_string(env.registry_path()).unwrap();
+        let before_registry = fs::read_to_string(env.registry_path()).unwrap();
+        let before_old = snapshot_old_dir(&env);
+
         let report = run_lgs_migration(plan);
 
         assert!(report.failed());
-        assert_eq!(fs::read_to_string(env.registry_path()).unwrap(), before);
-        assert!(env.old_child_dir().exists());
+        assert_eq!(fs::read_to_string(env.registry_path()).unwrap(), before_registry);
+        assert_eq!(snapshot_old_dir(&env), before_old);
     }
 
     #[test]
@@ -686,7 +890,7 @@ mod tests {
         );
         let paths = env.paths(script);
         let new_dir = paths.children_root.join("keiko_hart");
-        let plan = plan_lgs_migration(&[env.entry()], &paths, &status_with_adoptable(&[]));
+        let plan = plan_lgs_migration(&env.entry(), &paths, &status_with_adoptable(&[]));
 
         let report = run_lgs_migration(plan);
 
@@ -709,22 +913,265 @@ mod tests {
             report.notices
         );
 
-        // The registry now points at the new folder — only reachable
-        // because RepointRegistry was the last step to run, i.e. every
-        // earlier step succeeded.
         let registry = ChildRegistry::load(&env.base_dir()).unwrap();
         assert_eq!(registry.path_for(&ChildId::from("keiko_hart")), Some(new_dir.as_path()));
 
-        // The canonicalized file at the new location has real, 2-decimal
-        // money, not the legacy f64 noise.
         let migrated = fs::read_to_string(new_dir.join("transactions.csv")).unwrap();
         assert!(migrated.contains("14.62"), "got: {migrated}");
         assert!(!migrated.contains("14.620000000000001"), "got: {migrated}");
 
-        // The old folder is untouched — still there, still holding the
-        // original (unrounded) bytes.
         assert!(env.old_child_dir().exists());
         let original = fs::read_to_string(env.old_child_dir().join("transactions.csv")).unwrap();
         assert!(original.contains("14.620000000000001"));
+    }
+
+    // --- Critical-2: re-runnable after a partial failure. ---
+
+    #[test]
+    fn resumes_after_a_failure_at_lgs_add() {
+        let env = TestEnvironment::new().unwrap();
+
+        // Attempt 1: `add` fails outright.
+        let script1 = fake_lgs_script(
+            env.scratch_dir(),
+            "case \"$1\" in\n  add) echo boom >&2; exit 1 ;;\nesac\n",
+        );
+        let paths1 = env.paths(script1);
+        let plan1 = plan_lgs_migration(&env.entry(), &paths1, &status_with_adoptable(&[]));
+        let report1 = run_lgs_migration(plan1);
+        assert!(report1.failed());
+        assert_eq!(report1.failed_step, Some(Step::LgsAdd));
+
+        // Attempt 2 (resume): a fresh `lgs status` now shows the project
+        // already registered — as it would be if `add` actually landed on
+        // the daemon despite this process seeing a failure. The retry must
+        // skip `LgsAdd` (calling it again fails permanently) and push
+        // straight through.
+        let bare_dir = TempDir::new().unwrap();
+        git2::Repository::init_bare(bare_dir.path()).unwrap();
+        let clone_url = bare_dir.path().to_string_lossy().to_string();
+        let script2 = fake_lgs_script(
+            env.scratch_dir(),
+            &format!(
+                "case \"$1\" in\n  status) cat <<'JSON'\n{}\nJSON\n  ;;\nesac\n",
+                status_json(&clone_url)
+            ),
+        );
+        let paths2 = env.paths(script2);
+        let status2 = status_with_projects(&[("allowance-keiko_hart", &clone_url)]);
+        let plan2 = plan_lgs_migration(&env.entry(), &paths2, &status2);
+        assert!(
+            !plan2.steps.contains(&Step::LgsAdd),
+            "a project already in `lgs status` must not be `lgs add`ed again: {:?}",
+            plan2.steps
+        );
+
+        let report2 = run_lgs_migration(plan2);
+        assert!(!report2.failed(), "resume must succeed: {:?}", report2.error);
+
+        let new_dir = paths2.children_root.join("keiko_hart");
+        let registry = ChildRegistry::load(&env.base_dir()).unwrap();
+        assert_eq!(registry.path_for(&ChildId::from("keiko_hart")), Some(new_dir.as_path()));
+    }
+
+    #[test]
+    fn resumes_after_a_failure_at_ensure_remote() {
+        let env = TestEnvironment::new().unwrap();
+
+        // Attempt 1: `add` succeeds, but `status` (needed to resolve the
+        // clone_url) fails.
+        let script1 = fake_lgs_script(
+            env.scratch_dir(),
+            "case \"$1\" in\n  add) exit 0 ;;\n  status) echo boom >&2; exit 1 ;;\nesac\n",
+        );
+        let paths1 = env.paths(script1);
+        let plan1 = plan_lgs_migration(&env.entry(), &paths1, &status_with_adoptable(&[]));
+        let report1 = run_lgs_migration(plan1);
+        assert!(report1.failed());
+        assert_eq!(report1.failed_step, Some(Step::EnsureLgsRemote));
+
+        // Attempt 2: `add` already ran, so `status` now shows the project
+        // registered, and this time actually resolves — a real bare repo.
+        let bare_dir = TempDir::new().unwrap();
+        git2::Repository::init_bare(bare_dir.path()).unwrap();
+        let clone_url = bare_dir.path().to_string_lossy().to_string();
+        let script2 = fake_lgs_script(
+            env.scratch_dir(),
+            &format!(
+                "case \"$1\" in\n  status) cat <<'JSON'\n{}\nJSON\n  ;;\nesac\n",
+                status_json(&clone_url)
+            ),
+        );
+        let paths2 = env.paths(script2);
+        let status2 = status_with_projects(&[("allowance-keiko_hart", &clone_url)]);
+        let plan2 = plan_lgs_migration(&env.entry(), &paths2, &status2);
+        assert!(!plan2.steps.contains(&Step::LgsAdd));
+
+        let report2 = run_lgs_migration(plan2);
+        assert!(!report2.failed(), "resume must succeed: {:?}", report2.error);
+
+        let new_dir = paths2.children_root.join("keiko_hart");
+        let registry = ChildRegistry::load(&env.base_dir()).unwrap();
+        assert_eq!(registry.path_for(&ChildId::from("keiko_hart")), Some(new_dir.as_path()));
+    }
+
+    #[test]
+    fn resumes_after_a_failure_at_push() {
+        let env = TestEnvironment::new().unwrap();
+
+        // Attempt 1: `add` and `status` both succeed, but the resolved
+        // clone_url is bogus, so `Push` fails.
+        let json1 = status_json("/nonexistent/bogus-remote.git");
+        let script1 = fake_lgs_script(
+            env.scratch_dir(),
+            &format!(
+                "case \"$1\" in\n  add) exit 0 ;;\n  status) cat <<'JSON'\n{json1}\nJSON\n  ;;\nesac\n"
+            ),
+        );
+        let paths1 = env.paths(script1);
+        let plan1 = plan_lgs_migration(&env.entry(), &paths1, &status_with_adoptable(&[]));
+        let report1 = run_lgs_migration(plan1);
+        assert!(report1.failed());
+        assert_eq!(report1.failed_step, Some(Step::Push));
+
+        // Attempt 2: the daemon now reports a real, reachable clone_url —
+        // `ensure_lgs_remote` self-heals the stale URL from attempt 1 — and
+        // the project is already registered, so `LgsAdd` is skipped.
+        let bare_dir = TempDir::new().unwrap();
+        git2::Repository::init_bare(bare_dir.path()).unwrap();
+        let clone_url = bare_dir.path().to_string_lossy().to_string();
+        let script2 = fake_lgs_script(
+            env.scratch_dir(),
+            &format!(
+                "case \"$1\" in\n  status) cat <<'JSON'\n{}\nJSON\n  ;;\nesac\n",
+                status_json(&clone_url)
+            ),
+        );
+        let paths2 = env.paths(script2);
+        let status2 = status_with_projects(&[("allowance-keiko_hart", &clone_url)]);
+        let plan2 = plan_lgs_migration(&env.entry(), &paths2, &status2);
+        assert!(!plan2.steps.contains(&Step::LgsAdd));
+
+        let report2 = run_lgs_migration(plan2);
+        assert!(!report2.failed(), "resume must succeed: {:?}", report2.error);
+
+        let new_dir = paths2.children_root.join("keiko_hart");
+        let registry = ChildRegistry::load(&env.base_dir()).unwrap();
+        assert_eq!(registry.path_for(&ChildId::from("keiko_hart")), Some(new_dir.as_path()));
+    }
+
+    // --- Critical-1: adopting must merge, never overwrite. ---
+
+    /// Seed a bare repo with two commits, as if machine A had already
+    /// migrated this child (commit 1: `tx-a1`) and then, independently,
+    /// written and pushed one more transaction after migrating (commit 2:
+    /// `tx-a2`). Returns the branch name actually used, so the caller does
+    /// not have to guess "main" vs "master".
+    fn seed_bare_with_machine_as_history(bare_path: &Path) {
+        let work = TempDir::new().unwrap();
+        let repo = git2::Repository::init(work.path()).unwrap();
+        let git = GitManager::new();
+
+        fs::write(
+            work.path().join("child.yaml"),
+            "id: keiko_hart\nname: Keiko Hart\nbirthdate: '2010-01-01'\n\
+             created_at: '2024-01-01T00:00:00Z'\nupdated_at: '2024-01-01T00:00:00Z'\n",
+        )
+        .unwrap();
+        fs::write(work.path().join("allowance_config.yaml"), "amount: 5.0\n").unwrap();
+        fs::write(work.path().join("goals.csv"), "id,child_id,description\n").unwrap();
+        fs::write(
+            work.path().join("transactions.csv"),
+            "id,child_id,date,description,amount,balance,type\n\
+             tx-a1,keiko_hart,2024-01-01T00:00:00Z,A's first row,5.00,5.00,allowance\n",
+        )
+        .unwrap();
+        git.add_all(work.path()).unwrap();
+        git.commit(work.path(), "A: initial migration").unwrap();
+
+        // The row A wrote AFTER migrating — this is the row a broken
+        // overwrite-on-adopt would silently delete.
+        fs::write(
+            work.path().join("transactions.csv"),
+            "id,child_id,date,description,amount,balance,type\n\
+             tx-a1,keiko_hart,2024-01-01T00:00:00Z,A's first row,5.00,5.00,allowance\n\
+             tx-a2,keiko_hart,2024-01-02T00:00:00Z,A's row after migrating,3.00,8.00,allowance\n",
+        )
+        .unwrap();
+        git.add_all(work.path()).unwrap();
+        git.commit(work.path(), "A: a row written after migrating").unwrap();
+
+        repo.remote("origin", bare_path.to_str().unwrap()).unwrap();
+        let branch = current_branch(&repo).unwrap();
+        let mut remote = repo.find_remote("origin").unwrap();
+        remote
+            .push(&[format!("refs/heads/{branch}:refs/heads/{branch}")], None)
+            .unwrap();
+    }
+
+    #[test]
+    fn adopting_merges_the_restored_history_with_the_stale_local_copy_instead_of_overwriting_it() {
+        let env = TestEnvironment::new().unwrap();
+
+        // B's own stale local row, distinct from anything A has, plus a
+        // goals.csv that deliberately DIFFERS from what A's restored
+        // history has — proving the discrepancy is reported, not silently
+        // resolved by picking B's copy.
+        fs::write(
+            env.old_child_dir().join("transactions.csv"),
+            "id,child_id,date,description,amount,balance,type\n\
+             tx-b1,keiko_hart,2024-01-03T00:00:00Z,B's own row,2.00,2.00,allowance\n",
+        )
+        .unwrap();
+        fs::write(env.old_child_dir().join("goals.csv"), "id,child_id,description\nb-goal,keiko_hart,Bike\n").unwrap();
+
+        let bare_dir = TempDir::new().unwrap();
+        git2::Repository::init_bare(bare_dir.path()).unwrap();
+        seed_bare_with_machine_as_history(bare_dir.path());
+
+        let script = fake_lgs_script(
+            env.scratch_dir(),
+            &format!(
+                "case \"$1\" in\n  restore) git clone --quiet \"{}\" \"$3\" ;;\nesac\n",
+                bare_dir.path().display()
+            ),
+        );
+        let paths = env.paths(script);
+        let new_dir = paths.children_root.join("keiko_hart");
+        let status = status_with_adoptable(&["allowance-keiko_hart"]);
+        let plan = plan_lgs_migration(&env.entry(), &paths, &status);
+        assert_eq!(plan.steps[0], Step::RestoreExisting { name: "allowance-keiko_hart".into() });
+
+        let report = run_lgs_migration(plan);
+        assert!(!report.failed(), "expected success, got: {:?}", report.error);
+
+        // Both the row A wrote after migrating, and the row only B has,
+        // survive — nothing was dropped by the adoption.
+        let migrated = fs::read_to_string(new_dir.join("transactions.csv")).unwrap();
+        assert!(migrated.contains("tx-a1"), "got: {migrated}");
+        assert!(migrated.contains("tx-a2"), "A's post-migration row must survive adoption: {migrated}");
+        assert!(migrated.contains("tx-b1"), "B's own row must survive adoption: {migrated}");
+
+        // goals.csv differed between the restored history and B's stale
+        // copy; the restored (already-synced) version was kept, and the
+        // discrepancy was surfaced rather than silently resolved.
+        let restored_goals = fs::read_to_string(new_dir.join("goals.csv")).unwrap();
+        assert!(!restored_goals.contains("Bike"), "B's stale goals.csv must not silently win: {restored_goals}");
+        assert!(report.discrepancies.contains(&"goals.csv".to_string()), "got: {:?}", report.discrepancies);
+        assert!(
+            report
+                .notices
+                .iter()
+                .any(|n| n.details.iter().any(|d| d.contains("goals.csv"))),
+            "the discrepancy must reach a StartupNotice: {:?}",
+            report.notices
+        );
+
+        // The old folder itself is still exactly what it was — read-only
+        // throughout.
+        assert!(env.old_child_dir().exists());
+        let original = fs::read_to_string(env.old_child_dir().join("transactions.csv")).unwrap();
+        assert!(original.contains("tx-b1"));
+        assert!(!original.contains("tx-a1"), "the old folder must never be written into");
     }
 }

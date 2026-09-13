@@ -1,5 +1,26 @@
 use std::path::{Path, PathBuf};
 
+/// Filenames this app owns inside a child's per-child git repo.
+///
+/// The single source of truth for "what does this app write into a child's
+/// directory" — shared by
+/// `AllowanceTrackerApp::commit_dirty_tree_to_unblock_fast_forward`
+/// (`egui-frontend/src/ui/app_coordinator.rs`), which stages only these into
+/// its unblock commit rather than `add_all(["*"])` (which would pick up
+/// whatever untracked strays happen to be sitting in the child's data
+/// directory — `.DS_Store`, editor swap files, anything macOS or an editor
+/// drops there — and commit them into this child's synced history
+/// permanently once pushed), and by `backend::sync::migration_lgs`'s commit
+/// step, for the same reason. This project has already been misled by
+/// duplicate definitions of lists like this drifting apart; keep it to one.
+///
+/// `parental_control_attempts.csv` is also owned by this system and lives in
+/// the same per-child directory, but is deliberately NOT included here: see
+/// the call sites for why each excludes it (a later merge commit still
+/// captures it, or migration handles it separately/not at all yet).
+pub(crate) const FILES_THIS_APP_OWNS: &[&str] =
+    &["transactions.csv", "goals.csv", "child.yaml", "allowance_config.yaml"];
+
 /// The set of paths the sync-safety guard needs, all explicitly injected by
 /// the caller rather than resolved internally.
 ///

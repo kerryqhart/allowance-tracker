@@ -553,7 +553,10 @@ fn read_blob_at(repo: &Repository, oid: Oid, path: &str) -> Result<Option<Vec<u8
 /// `wins()` has `debug_assert!(ours != theirs)`; synthesising one
 /// `Provenance` for both sides would panic in debug builds the moment an
 /// add/add collision needs a tiebreak.
-fn provenance(repo: &Repository, oid: Oid) -> Result<Provenance> {
+///
+/// `pub(crate)`: `backend::sync::migration_lgs`'s adopt-branch merge reuses
+/// this rather than re-deriving a commit's `Provenance` a second time.
+pub(crate) fn provenance(repo: &Repository, oid: Oid) -> Result<Provenance> {
     let commit = repo.find_commit(oid).with_context(|| format!("resolving commit {oid}"))?;
     let committer_epoch = commit.committer().when().seconds();
     let raw = oid.as_bytes();

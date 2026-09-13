@@ -33,6 +33,7 @@ use crate::backend::storage::GitManager;
 use crate::backend::sync::child_sync::{
     current_branch, goals_diverged, push_with_retry, recover_if_dirty, Recovered,
 };
+use crate::backend::sync::paths::FILES_THIS_APP_OWNS;
 use crate::ui::state::{
     FastForwardBlockedNotice, StaleHeadPollAction, SyncFailureNotice, STALE_HEAD_REFUSAL_LIMIT,
 };
@@ -83,27 +84,11 @@ enum ApplyMergeOutcome {
     Failed,
 }
 
-/// Filenames this app owns inside a child's per-child git repo, and the
-/// ONLY ones [`AllowanceTrackerApp::commit_dirty_tree_to_unblock_fast_forward`]
-/// stages into its unblock commit.
-///
-/// Review round 4, Important-1: that function used to stage with
-/// `add_all(["*"])`, which picks up whatever untracked strays happen to be
-/// sitting in the child's data directory — `.DS_Store`, editor swap files,
-/// anything macOS or an editor drops there — and commits them into this
-/// child's synced history, where they propagate to the other machine
-/// permanently once pushed. This list is deliberately narrower than that:
-/// only files this system itself writes.
-///
-/// `parental_control_attempts.csv` is also owned by this system and lives
-/// in the same per-child directory, but is deliberately NOT included here:
-/// if it happens to be dirty when a fast-forward is blocked, the
-/// SUBSEQUENT merge commit (`GitManager::commit_merge`, a separate,
-/// pre-existing code path with its own staging) still captures it when
-/// that merge lands — this list only needs to cover what THIS unblock
-/// commit itself must not leave behind or omit.
-const FILES_THIS_APP_OWNS: &[&str] =
-    &["transactions.csv", "goals.csv", "child.yaml", "allowance_config.yaml"];
+// `FILES_THIS_APP_OWNS` now lives in `backend::sync::paths` (imported
+// above) — it is the ONLY list `commit_dirty_tree_to_unblock_fast_forward`
+// stages into its unblock commit; see that constant's doc comment for why
+// (Review round 4, Important-1) and why `parental_control_attempts.csv` is
+// deliberately excluded.
 
 /// Outcome of [`AllowanceTrackerApp::apply_fast_forward`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
