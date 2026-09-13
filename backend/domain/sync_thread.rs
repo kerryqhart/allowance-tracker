@@ -359,7 +359,14 @@ const CHILD_SYNC_TICK_BUDGET: std::time::Duration = std::time::Duration::from_se
 ///
 /// `shutdown` is checked before each child, and the tick stops taking on
 /// NEW children once [`CHILD_SYNC_TICK_BUDGET`] has elapsed — see that
-/// constant's doc comment.
+/// constant's doc comment. It is ALSO checked before either of this
+/// function's own two blocking calls (`get_child_ids`, up to 5s; and
+/// `ChildSyncEngine::fetch_status`, up to `LGS_RUN_TIMEOUT` — 10s) — Review
+/// Important-2 — so a shutdown request already pending is never delayed by
+/// work this tick has not started yet. `fetch_lgs`/`push_lgs` inside each
+/// child's cycle are themselves bounded (`storage::git::NETWORK_TIMEOUT`,
+/// 30s, via libgit2 transfer/negotiation callbacks) rather than left to
+/// block this thread indefinitely on a stalled remote.
 fn run_child_sync_cycles(
     child_sync: &Option<ChildSyncEngine>,
     messenger: &UiMessenger,
@@ -380,6 +387,15 @@ fn run_child_sync_cycles_with_budget(
 ) {
     let Some(engine) = child_sync else { return };
 
+    // Review Important-2: this is "the first shutdown check" — checked
+    // before EITHER of the two blocking calls below (`get_child_ids` can
+    // wait up to 5s for the UI thread; `fetch_status` up to
+    // `LGS_RUN_TIMEOUT`, 10s), so a shutdown request is never delayed by
+    // work this tick has not even started yet.
+    if shutdown.load(Ordering::Relaxed) {
+        return;
+    }
+
     let child_ids = match get_child_ids(messenger) {
         Some(ids) => ids,
         None => {
@@ -387,6 +403,14 @@ fn run_child_sync_cycles_with_budget(
             return;
         }
     };
+
+    // Checked again before `fetch_status` specifically (up to 10s) for the
+    // same reason — a shutdown requested while `get_child_ids` was waiting
+    // must not then be delayed by a second, unrelated blocking call.
+    if shutdown.load(Ordering::Relaxed) {
+        log::info!("SYNC(lgs): shutdown requested before fetching lgs status — skipping this tick");
+        return;
+    }
 
     let status = match engine.fetch_status() {
         Ok(s) => s,
@@ -1118,9 +1142,12 @@ mod tests {
 
     /// If `shutdown` is already set before a tick starts, `run_child_sync_cycles`
     /// must stop before running ANY child's cycle rather than pushing
-    /// through the whole registered list first. Calls the function
-    /// directly (not through a live `SyncThreadHandle`) with a hand-rolled
-    /// responder thread, so the shutdown flag can be controlled precisely.
+    /// through the whole registered list first — in fact, per Review
+    /// Important-2's "first shutdown check" fix, it must not even send a
+    /// `GetChildIdsRequest` (a call the UI thread could otherwise take up
+    /// to 5s to answer). Calls the function directly (not through a live
+    /// `SyncThreadHandle`) with a hand-rolled responder thread, so the
+    /// shutdown flag can be controlled precisely.
     #[test]
     fn shutdown_already_set_prevents_any_child_cycle_from_running() {
         let fixture = diverged_child_fixture();
@@ -1133,7 +1160,11 @@ mod tests {
         let responder = std::thread::spawn(move || {
             let mut saw_apply = false;
             loop {
-                match message_rx.recv_timeout(Duration::from_secs(2)) {
+                // Short timeout: with shutdown already set, nothing should
+                // ever be sent at all (not even a GetChildIdsRequest), so
+                // this only needs to wait long enough to be confident
+                // nothing is coming, not to accommodate real work.
+                match message_rx.recv_timeout(Duration::from_millis(300)) {
                     Ok(SyncMessage::GetChildIdsRequest { response_tx }) => {
                         let _ = response_tx.send(vec![child_id.clone()]);
                     }

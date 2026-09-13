@@ -31,10 +31,11 @@
 //! }
 //! ```
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use git2::{Repository, Signature, IndexAddOption};
 use log::{info, warn, debug};
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 /// Injectable so tests can construct committer-timestamp ties. Real usage
 /// (`GitManager::new`) points this at wall-clock time; only `with_clock`
@@ -409,11 +410,51 @@ pub const LGS_AUTH_REFSPEC: &str = "+refs/lgs-auth/heads/*:refs/remotes/lgs-auth
 /// input is `refs/remotes/lgs-auth/*`, never this one — see above.
 pub const LGS_HEADS_REFSPEC: &str = "+refs/heads/*:refs/remotes/lgs/*";
 
+/// Review Important-2: the per-tick budget/shutdown check in
+/// `run_child_sync_cycles` (`sync_thread.rs`) only gates STARTING a child's
+/// cycle — it cannot interrupt a fetch or push already in flight. A fetch
+/// wedged on a stalled cloud-drive path, or a push to a daemon that stopped
+/// responding mid-transfer, would otherwise block this one libgit2 call
+/// forever, and since this all runs synchronously on the one background
+/// sync thread, that takes the AWS poll, the 30s timer, and shutdown down
+/// with it. This is what actually bounds those calls: a deadline captured
+/// right before the call, checked from inside libgit2's own progress
+/// callbacks, with `false`/`Err` telling libgit2 to abort the transfer.
+/// 30s is generous for what is always local-machine-to-local-daemon
+/// traffic.
+const NETWORK_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// Fetch both the authoritative peer tip (`refs/lgs-auth/*`) and the remote's
 /// own `refs/heads/*` from the `lgs` remote.
 pub fn fetch_lgs(repo: &git2::Repository) -> Result<()> {
+    fetch_lgs_with_deadline(repo, Instant::now() + NETWORK_TIMEOUT)
+}
+
+/// The actual implementation behind [`fetch_lgs`], with the deadline
+/// exposed so a test can assert the abort path with a deadline that has
+/// already elapsed, rather than waiting out the real 30s bound.
+fn fetch_lgs_with_deadline(repo: &git2::Repository, deadline: Instant) -> Result<()> {
     let mut remote = repo.find_remote("lgs")?;
-    remote.fetch(&[LGS_AUTH_REFSPEC, LGS_HEADS_REFSPEC], None, None)?;
+
+    let mut callbacks = git2::RemoteCallbacks::new();
+    // `transfer_progress` is invoked repeatedly as the indexer receives and
+    // processes objects — the one periodic, bool-returning hook libgit2
+    // gives fetch. Returning `false` here is what actually aborts an
+    // in-flight transfer, not merely "gives up waiting" the way a
+    // `Command`-level timeout would for a process it does not control the
+    // internals of.
+    callbacks.transfer_progress(move |_progress| Instant::now() < deadline);
+    // Belt and suspenders: textual sideband progress (when the remote sends
+    // any) is checked the same way, in case a stall happens before the
+    // indexer has anything to report.
+    callbacks.sideband_progress(move |_msg| Instant::now() < deadline);
+
+    let mut fetch_options = git2::FetchOptions::new();
+    fetch_options.remote_callbacks(callbacks);
+
+    remote
+        .fetch(&[LGS_AUTH_REFSPEC, LGS_HEADS_REFSPEC], Some(&mut fetch_options), None)
+        .with_context(|| format!("fetching from lgs (bounded to {NETWORK_TIMEOUT:?})"))?;
     Ok(())
 }
 
@@ -426,6 +467,33 @@ pub fn fetch_lgs(repo: &git2::Repository) -> Result<()> {
 /// treating a rejected push as success is exactly the failure mode that
 /// would make sync look healthy while stalling both machines.
 pub fn push_lgs(repo: &git2::Repository, branch: &str) -> Result<()> {
+    push_lgs_with_deadline(repo, branch, Instant::now() + NETWORK_TIMEOUT)
+}
+
+/// The actual implementation behind [`push_lgs`], with the deadline exposed
+/// for the same reason as [`fetch_lgs_with_deadline`].
+///
+/// # Push has weaker cancellation coverage than fetch
+///
+/// Unlike fetch's `transfer_progress`, libgit2 (and the git2-rs bindings
+/// over it) exposes no periodic, bool-returning progress callback for the
+/// push side: `push_transfer_progress` and `pack_progress` are both
+/// `FnMut(..)` with NO return value — they cannot abort anything, only
+/// observe. The two hooks wired below are the strongest the API surface
+/// allows:
+/// - `sideband_progress` CAN return `false` to cancel, and fires for both
+///   fetch and push — but only if the remote actually sends textual
+///   sideband progress messages, which a bare `git http-backend` (what lgs
+///   runs) is not guaranteed to do.
+/// - `push_negotiation` fires exactly once, between negotiation and the
+///   actual upload, so a deadline already passed by then still aborts
+///   before any data is sent. It cannot interrupt a transfer already under
+///   way.
+///
+/// Net effect: a push that hangs mid-upload against a remote that never
+/// emits sideband text is NOT guaranteed to be caught by this. Reported
+/// plainly in this task's report rather than left implicit.
+fn push_lgs_with_deadline(repo: &git2::Repository, branch: &str, deadline: Instant) -> Result<()> {
     let mut remote = repo.find_remote("lgs")?;
     let refspec = format!("refs/heads/{branch}:refs/heads/{branch}");
 
@@ -436,11 +504,23 @@ pub fn push_lgs(repo: &git2::Repository, branch: &str) -> Result<()> {
             "lgs rejected push of {refname}: {msg}"
         ))),
     });
+    callbacks.sideband_progress(move |_msg| Instant::now() < deadline);
+    callbacks.push_negotiation(move |_updates| {
+        if Instant::now() < deadline {
+            Ok(())
+        } else {
+            Err(git2::Error::from_str(
+                "push aborted: network timeout exceeded before negotiation completed",
+            ))
+        }
+    });
 
     let mut push_options = git2::PushOptions::new();
     push_options.remote_callbacks(callbacks);
 
-    remote.push(&[refspec.as_str()], Some(&mut push_options))?;
+    remote
+        .push(&[refspec.as_str()], Some(&mut push_options))
+        .with_context(|| format!("pushing to lgs (bounded to {NETWORK_TIMEOUT:?})"))?;
     Ok(())
 }
 
@@ -632,6 +712,117 @@ mod tests {
             peer_oid,
             "the rejected push must not have moved the remote ref"
         );
+    }
+
+    // --- Review Important-2: bounded fetch/push -----------------------------
+    //
+    // Honest limitation, stated rather than hidden: these local, in-process
+    // bare-repo remotes transfer their (tiny) content essentially instantly,
+    // so there is no way to construct a genuinely SLOW local remote here to
+    // prove a transfer already in flight gets interrupted mid-transfer —
+    // doing that for real would need a deliberately slow network-level
+    // remote (e.g. a custom smart-HTTP server that stalls mid-response),
+    // which is out of scope for a unit test and out of bounds for this
+    // task's "local bare repos in tempdirs only" safety constraint. What IS
+    // both real and reliably testable without any of that: a deadline that
+    // has ALREADY elapsed before the call starts must abort rather than
+    // silently completing — proving the callbacks are actually wired to the
+    // real libgit2 call (not merely present in the source) and that
+    // `Instant::now() < deadline` really does return `false` and really
+    // does propagate as an aborted transfer, not swallowed.
+
+    #[test]
+    fn fetch_aborts_when_the_deadline_has_already_elapsed() {
+        let bare_dir = tempfile::tempdir().unwrap();
+        let bare = git2::Repository::init_bare(bare_dir.path()).unwrap();
+        let auth_oid = commit_empty_tree(&bare, "authoritative peer tip", &[]);
+        bare.reference("refs/lgs-auth/heads/main", auth_oid, true, "test").unwrap();
+
+        let work_dir = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(work_dir.path()).unwrap();
+        repo.remote("lgs", bare_dir.path().to_str().unwrap()).unwrap();
+
+        let already_past = Instant::now() - Duration::from_secs(1);
+        let result = fetch_lgs_with_deadline(&repo, already_past);
+
+        assert!(
+            result.is_err(),
+            "a fetch whose deadline already elapsed before the call must abort, not complete \
+             normally as if unbounded"
+        );
+        assert!(
+            repo.find_reference("refs/remotes/lgs-auth/main").is_err(),
+            "an aborted fetch must not have landed the auth ref"
+        );
+    }
+
+    #[test]
+    fn fetch_with_a_generous_deadline_still_succeeds() {
+        // The other half: the deadline check must not be so eager that it
+        // breaks the ordinary, fast, well-within-budget case.
+        let bare_dir = tempfile::tempdir().unwrap();
+        let bare = git2::Repository::init_bare(bare_dir.path()).unwrap();
+        let auth_oid = commit_empty_tree(&bare, "authoritative peer tip", &[]);
+        bare.reference("refs/lgs-auth/heads/main", auth_oid, true, "test").unwrap();
+
+        let work_dir = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(work_dir.path()).unwrap();
+        repo.remote("lgs", bare_dir.path().to_str().unwrap()).unwrap();
+
+        let generous = Instant::now() + Duration::from_secs(30);
+        fetch_lgs_with_deadline(&repo, generous).unwrap();
+
+        assert_eq!(
+            repo.find_reference("refs/remotes/lgs-auth/main").unwrap().target().unwrap(),
+            auth_oid
+        );
+    }
+
+    #[test]
+    fn push_aborts_when_the_deadline_has_already_elapsed() {
+        // `push_negotiation` fires exactly once, unconditionally, for every
+        // push — unlike fetch's `transfer_progress`, this does not depend
+        // on how much data ends up moving, so an already-past deadline is
+        // guaranteed to be observed here.
+        let bare_dir = tempfile::tempdir().unwrap();
+        git2::Repository::init_bare(bare_dir.path()).unwrap();
+
+        let work_dir = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(work_dir.path()).unwrap();
+        repo.remote("lgs", bare_dir.path().to_str().unwrap()).unwrap();
+        let base_oid = commit_empty_tree(&repo, "base", &[]);
+        repo.reference("refs/heads/main", base_oid, true, "init").unwrap();
+
+        let already_past = Instant::now() - Duration::from_secs(1);
+        let result = push_lgs_with_deadline(&repo, "main", already_past);
+
+        assert!(
+            result.is_err(),
+            "a push whose deadline already elapsed before negotiation must abort"
+        );
+        let bare = git2::Repository::open_bare(bare_dir.path()).unwrap();
+        assert!(
+            bare.find_reference("refs/heads/main").is_err(),
+            "an aborted push must not have landed anything on the remote"
+        );
+    }
+
+    #[test]
+    fn push_with_a_generous_deadline_still_succeeds() {
+        let bare_dir = tempfile::tempdir().unwrap();
+        git2::Repository::init_bare(bare_dir.path()).unwrap();
+
+        let work_dir = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(work_dir.path()).unwrap();
+        repo.remote("lgs", bare_dir.path().to_str().unwrap()).unwrap();
+        let base_oid = commit_empty_tree(&repo, "base", &[]);
+        repo.reference("refs/heads/main", base_oid, true, "init").unwrap();
+
+        let generous = Instant::now() + Duration::from_secs(30);
+        push_lgs_with_deadline(&repo, "main", generous).unwrap();
+
+        let bare = git2::Repository::open_bare(bare_dir.path()).unwrap();
+        assert_eq!(bare.find_reference("refs/heads/main").unwrap().target().unwrap(), base_oid);
     }
 
     #[test]
