@@ -126,7 +126,7 @@ impl AllowanceTrackerApp {
         // `load` returns Ok(default) when the file is absent, so an Err here means
         // the file exists but failed to parse — surface it as a warning rather than
         // silently resetting, so a typo'd manual config is diagnosable.
-        let sync_state = SyncState::load(&sync_state_path(&data_dir)).unwrap_or_else(|e| {
+        let mut sync_state = SyncState::load(&sync_state_path(&data_dir)).unwrap_or_else(|e| {
             warn!("Failed to parse sync_state.yaml ({}); starting with sync disabled", e);
             SyncState::default()
         });
@@ -135,21 +135,65 @@ impl AllowanceTrackerApp {
             RetryQueue::default()
         });
 
-        let will_spawn_sync = sync_state.enabled
+        let will_spawn_aws = sync_state.enabled
             && sync_state.remote_url.as_ref().map_or(false, |u| is_valid_http_url(u));
+        // The lgs (desktop-to-desktop) transport is configured once first
+        // run has completed on this machine — `cloud_root` is `None` until
+        // then. Either transport being configured is reason enough to run
+        // the background sync thread; see the combined gate below.
+        let lgs_configured = sync_state.cloud_root.is_some();
+        let will_spawn_sync = will_spawn_aws || lgs_configured;
 
-        let (sync_notifier, event_rx) = if will_spawn_sync {
-            let (n, rx) = sync_channel();
-            (Some(n), Some(rx))
-        } else {
-            (None, None)
-        };
+        // The event channel is always created so `SyncThreadHandle::spawn`
+        // (which takes a plain `Receiver`, not an `Option`) has one to take
+        // when the thread spawns for an lgs-only installation with no AWS
+        // transport. When AWS is off, `sync_notifier` is simply never handed
+        // to `Backend`, so nothing ever sends into it — an idle, empty
+        // channel is indistinguishable from none existing at all.
+        let (notifier, event_rx) = sync_channel();
+        let sync_notifier = if will_spawn_aws { Some(notifier) } else { None };
 
         let mut backend = crate::backend::Backend::new(sync_notifier)?;
 
+        // ── lgs (desktop-to-desktop) bootstrap ─────────────────────────────
+        //
+        // Best-effort and non-fatal: a failure here must never keep the app
+        // from launching — it degrades to "lgs sync did not start this run"
+        // plus a StartupNotice, not a crash. Runs before `startup_banner` is
+        // built below so a bootstrap failure lands in the same banner as
+        // every other startup notice, rather than being lost.
+        let mut child_sync: Option<crate::backend::sync::ChildSyncEngine> = None;
+        if lgs_configured {
+            match bootstrap_lgs_child_sync(
+                data_dir.clone(),
+                sync_state.cloud_root.clone(),
+                &sync_state.daemon_ownership,
+                backend.csv_connection.clone(),
+            ) {
+                Ok((engine, ownership)) => {
+                    child_sync = Some(engine);
+                    if ownership.installed_by_app != sync_state.daemon_ownership.installed_by_app {
+                        sync_state.daemon_ownership = ownership;
+                        if let Err(e) = sync_state.save(&sync_state_path(&data_dir)) {
+                            warn!("Could not persist daemon ownership after installing lgs: {e}");
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!("lgs sync could not start this run: {e}");
+                    backend.startup_notices.push(crate::backend::StartupNotice {
+                        severity: crate::backend::NoticeSeverity::Warning,
+                        title: "Sync with another Mac did not start".to_string(),
+                        details: vec![e.to_string()],
+                    });
+                }
+            }
+        }
+
         // Take what startup wants to tell the user before `backend` is moved
-        // into `CoreAppState`. Migration orphans, migration skips, and a
-        // registry file that would not parse were all log-only until now.
+        // into `CoreAppState`. Migration orphans, migration skips, a
+        // registry file that would not parse, and the lgs bootstrap outcome
+        // above were all log-only until now.
         let startup_banner = crate::ui::components::startup_banner::StartupBanner::new(
             std::mem::take(&mut backend.startup_notices),
         );
@@ -190,15 +234,25 @@ impl AllowanceTrackerApp {
         let _current_month = now.month();
         let _current_year = now.year();
 
-        // Spawn the sync thread if (and only if) sync is enabled with a valid URL.
-        // When sync is off, `event_rx` is already None and the Backend was given
-        // `None` for the notifier, so no events are emitted and no warn-spam occurs.
+        // Spawn the sync thread if (and only if) EITHER transport is
+        // configured: AWS (enabled with a valid URL) or lgs (a cloud root
+        // persisted from a completed first run). Before Task 19 this was
+        // gated on AWS alone, which meant an installation that only ever
+        // configured lgs — the ordinary case, since AWS is a legacy/optional
+        // transport — never spawned this thread at all, and so never ran
+        // `child_sync` regardless of whether it was wired below. `remote`
+        // is `NullRemoteStorage` in the lgs-only case: a safe no-op stand-in
+        // for the AWS transport this installation never configured, needed
+        // only because `SyncThreadHandle::spawn` requires the type.
         let (sync, sync_command_tx, sync_thread) = if will_spawn_sync {
-            let url = sync_state.remote_url.as_ref().expect("checked by will_spawn_sync");
-            let rx = event_rx.expect("created with will_spawn_sync");
-            info!("Sync enabled — connecting to remote: {}", url);
-            let remote: Arc<dyn crate::backend::storage::RemoteStorage> =
-                Arc::new(HttpRemoteClient::new(url.clone()));
+            let remote: Arc<dyn crate::backend::storage::RemoteStorage> = if will_spawn_aws {
+                let url = sync_state.remote_url.as_ref().expect("checked by will_spawn_aws");
+                info!("Sync enabled — connecting to remote: {}", url);
+                Arc::new(HttpRemoteClient::new(url.clone()))
+            } else {
+                info!("AWS sync not configured — lgs (desktop-to-desktop) sync only");
+                Arc::new(crate::backend::storage::NullRemoteStorage)
+            };
             let (message_tx, message_rx) = std::sync::mpsc::channel();
             let (cmd_tx, cmd_rx) = std::sync::mpsc::channel::<SyncCommand>();
 
@@ -210,26 +264,16 @@ impl AllowanceTrackerApp {
             let wake_ui: crate::backend::domain::WakeUi =
                 std::sync::Arc::new(move || ctx_for_wake.request_repaint());
 
-            // `child_sync: None` — the lgs (desktop-to-desktop) transport is
-            // not wired up here yet. Building the `ChildSyncEngine` this
-            // thread would need requires resolving a live `LgsClient`
-            // (bundled-binary path, daemon adopt-or-install decision — see
-            // `backend/sync/bootstrap.rs`) and deciding per-registration
-            // which children have an lgs project at all; none of that
-            // exists in this startup path yet (it belongs to the plan's
-            // Phase 4 "User-facing" tasks — migration/onboarding). Passing
-            // `None` here keeps this call site's behavior identical to
-            // before Task 17: only the AWS-transport poll below runs.
             let handle = SyncThreadHandle::spawn(
                 remote,
-                rx,
+                event_rx,
                 cmd_rx,
                 message_tx,
                 wake_ui,
                 sync_state.clone(),
                 retry_queue.events.clone(),
                 data_dir.clone(),
-                None,
+                child_sync,
             );
 
             (SyncUiState::with_receiver(message_rx), Some(cmd_tx), Some(handle))
@@ -242,7 +286,7 @@ impl AllowanceTrackerApp {
             } else if sync_state.enabled {
                 warn!("Sync enabled but remote_url is missing — sync disabled");
             } else {
-                info!("Sync disabled (no sync_state.yaml or enabled=false)");
+                info!("Sync disabled — no AWS remote_url configured and lgs has not completed first run");
             }
             (SyncUiState::new(), None, None)
         };
@@ -1172,6 +1216,46 @@ fn is_valid_http_url(url: &str) -> bool {
     let trimmed = url.trim();
     (trimmed.starts_with("http://") || trimmed.starts_with("https://"))
         && trimmed.len() > "https://".len()
+}
+
+/// Build the real `ChildSyncEngine` for a machine that has already completed
+/// lgs first run (`cloud_root` is `Some`).
+///
+/// This is the composition point that makes the lgs desktop-to-desktop
+/// transport actually reachable from the shipped app: it resolves
+/// production `SyncPaths` (canonicalizing `home`/`cloud_root` — see
+/// `SyncPaths::for_production`'s doc comment), refreshes the bundled `lgs`
+/// binary at its stable path, and adopts-or-installs the daemon via
+/// `ensure_daemon` — never reinstalling or repointing one this app did not
+/// install.
+///
+/// Returns the engine plus the (possibly updated) `DaemonOwnership` so the
+/// caller can persist it — this function has no persistence of its own.
+/// Errors here are always non-fatal to the caller: see the call site in
+/// [`AllowanceTrackerApp::new`].
+fn bootstrap_lgs_child_sync(
+    data_dir: std::path::PathBuf,
+    cloud_root: Option<std::path::PathBuf>,
+    ownership: &crate::backend::sync::DaemonOwnership,
+    csv_connection: Arc<crate::backend::CsvConnection>,
+) -> anyhow::Result<(crate::backend::sync::ChildSyncEngine, crate::backend::sync::DaemonOwnership)> {
+    use crate::backend::sync::{ensure_daemon, ensure_lgs_binary, ChildSyncEngine, DaemonOutcome, LgsClient, SyncPaths};
+
+    let paths = SyncPaths::for_production(data_dir, cloud_root)?;
+    ensure_lgs_binary(&paths)?;
+    let lgs = LgsClient::new(paths.lgs_binary.clone());
+
+    let mut ownership = ownership.clone();
+    match ensure_daemon(&lgs, &ownership)? {
+        DaemonOutcome::InstalledAndOwned => ownership.installed_by_app = true,
+        DaemonOutcome::Skewed(message) => {
+            warn!("lgs daemon is outdated and not owned by this app: {message}");
+        }
+        DaemonOutcome::Healthy | DaemonOutcome::Restarted => {}
+    }
+
+    let engine = ChildSyncEngine::new(lgs, csv_connection);
+    Ok((engine, ownership))
 }
 
 impl Drop for AllowanceTrackerApp {

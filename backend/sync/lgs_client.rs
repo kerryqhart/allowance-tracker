@@ -102,13 +102,30 @@ impl ProjectReport {
     }
 }
 
+/// One entry in `lgs status --json`'s `adoptable` list: a project this
+/// machine has not registered, discovered by scanning the cloud root
+/// directly (`local-git-sync`'s `discover_adoptable`).
+///
+/// `archived` and `note` mirror lgs's own `AdoptableEntry` shape
+/// (`local-git-sync/src/ipc.rs`) — an archived project is still offered here
+/// (never hidden), and `note` carries the human-written reason, when there is
+/// one, so onboarding can label rather than silently skip it.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct AdoptableEntry {
+    pub name: String,
+    #[serde(default)]
+    pub archived: bool,
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct StatusReport {
     pub daemon: DaemonInfo,
     pub cloud_root: Option<PathBuf>,
     pub cloud_root_exists: bool,
     pub projects: Vec<ProjectReport>,
-    pub adoptable: Vec<String>,
+    pub adoptable: Vec<AdoptableEntry>,
 }
 
 impl StatusReport {
@@ -153,6 +170,10 @@ pub fn parse_status(json: &str) -> Result<StatusReport> {
     #[derive(Deserialize)]
     struct RawAdoptable {
         name: String,
+        #[serde(default)]
+        archived: bool,
+        #[serde(default)]
+        note: Option<String>,
     }
     #[derive(Deserialize)]
     struct Raw {
@@ -189,7 +210,11 @@ pub fn parse_status(json: &str) -> Result<StatusReport> {
                 archived: p.archived,
             })
             .collect(),
-        adoptable: raw.adoptable.into_iter().map(|a| a.name).collect(),
+        adoptable: raw
+            .adoptable
+            .into_iter()
+            .map(|a| AdoptableEntry { name: a.name, archived: a.archived, note: a.note })
+            .collect(),
     })
 }
 

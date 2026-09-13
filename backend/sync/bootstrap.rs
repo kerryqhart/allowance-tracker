@@ -153,6 +153,81 @@ pub fn plan_daemon_action(state: DaemonState, owner: &DaemonOwnership) -> Daemon
     }
 }
 
+/// What happened when [`ensure_daemon`] resolved the daemon's state.
+#[derive(Debug, PartialEq, Eq)]
+pub enum DaemonOutcome {
+    /// Already `Ok`; nothing was done.
+    Healthy,
+    /// Was outdated and ours; restarted to pick up the bundled binary.
+    Restarted,
+    /// Nothing was running; installed and took ownership.
+    InstalledAndOwned,
+    /// Outdated/errored/unrecognized and not ours (or we cannot tell) — the
+    /// daemon's own message, relayed verbatim per the design constraint that
+    /// an `outdated` daemon's `message` is never re-worded.
+    Skewed(String),
+}
+
+/// Composition point for [`plan_daemon_action`] + [`install_and_start`]:
+/// query the daemon's current state, decide what (if anything) to do about
+/// it, and do it — never reinstalling or repointing a daemon this app did
+/// not install (see [`plan_daemon_action`]'s doc comment).
+///
+/// Callers that get back [`DaemonOutcome::InstalledAndOwned`] must persist
+/// `installed_by_app: true` into their `DaemonOwnership` record — this
+/// function only decides and acts, it does not own persistence.
+///
+/// Not exercised in this module's own tests beyond the state-decision table
+/// already covered by [`plan_daemon_action`]'s tests: the `Restart` and
+/// `InstallAndOwn` branches call [`install_and_start`], which runs real
+/// `launchctl` commands against the single system-wide
+/// `com.local-git-sync.daemon` — invoking that from an automated test would
+/// risk disturbing a real, already-running daemon backing up real projects,
+/// which is exactly the hazard `install_and_start`'s own tests already avoid
+/// for the same reason. Verify those two branches by hand against a
+/// throwaway `HOME`.
+pub fn ensure_daemon(lgs: &LgsClient, ownership: &DaemonOwnership) -> Result<DaemonOutcome> {
+    let status = lgs.status().context("running `lgs status --json`")?;
+    match plan_daemon_action(status.daemon.state, ownership) {
+        DaemonAction::None => Ok(DaemonOutcome::Healthy),
+        DaemonAction::Restart => {
+            install_and_start(lgs)?;
+            Ok(DaemonOutcome::Restarted)
+        }
+        DaemonAction::InstallAndOwn => {
+            install_and_start(lgs)?;
+            Ok(DaemonOutcome::InstalledAndOwned)
+        }
+        DaemonAction::ReportSkew => Ok(DaemonOutcome::Skewed(status.daemon.message)),
+    }
+}
+
+/// The first-run sequence's gate: `lgs` shells out to `git` for every
+/// repository operation (init, restore, commit, push, fetch — all of it),
+/// so bundling the `lgs` binary does not remove the dependency on a working
+/// `git`. Checked and refused FIRST, before anything else in first run
+/// touches disk or the daemon — a missing git surfacing instead as an
+/// opaque failure three steps into `lgs init` would leave a user with no
+/// idea what to fix. `git_available` is injected (rather than this function
+/// calling [`git_is_available`] itself) so a test can drive the refusal
+/// path without needing to actually uninstall git.
+///
+/// On success, runs `lgs init --cloud-root <cloud_root>` — the one step of
+/// first run that is safe to unit-test against a fake `lgs` binary, since it
+/// has no real side effects beyond the (fake) process call itself. The
+/// daemon adopt-or-install step and child registration are separate,
+/// later steps of first run (see [`ensure_daemon`] and
+/// `crate::backend::sync::migration_lgs::adopt_child`), deliberately not
+/// folded into this function so a git-missing refusal can never have
+/// already run `lgs init` by the time the caller sees it.
+pub fn run_first_run(lgs: &LgsClient, cloud_root: &Path, git_available: bool) -> Result<()> {
+    anyhow::ensure!(git_available, "{GIT_MISSING_MESSAGE}");
+    let cloud_root_str = cloud_root
+        .to_str()
+        .context("the cloud root path is not valid UTF-8")?;
+    lgs.init(cloud_root_str).context("running `lgs init --cloud-root`")
+}
+
 /// `lgs install-service` writes the plist and then PRINTS the launchctl
 /// commands for a human to run — nothing loads and nothing starts until the
 /// next login. We run them ourselves, or first run hands a non-technical user
@@ -407,5 +482,86 @@ mod tests {
                 owner.installed_by_app
             );
         }
+    }
+
+    fn fake_lgs_script(dir: &Path, body: &str) -> PathBuf {
+        let path = dir.join("lgs");
+        std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(&path).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&path, perms).unwrap();
+        path
+    }
+
+    // --- `ensure_daemon`: only the branches that never touch a real daemon. ---
+    // See `ensure_daemon`'s doc comment for why `Restart`/`InstallAndOwn` are
+    // not exercised here.
+
+    #[test]
+    fn ensure_daemon_does_nothing_when_already_healthy() {
+        let dir = TempDir::new().unwrap();
+        let script = fake_lgs_script(
+            dir.path(),
+            "case \"$1\" in\n  status) echo '{\"daemon\":{\"state\":\"ok\"},\"projects\":[],\"adoptable\":[]}' ;;\nesac\n",
+        );
+        let lgs = LgsClient::new(script);
+        let outcome = ensure_daemon(&lgs, &DaemonOwnership { installed_by_app: false }).unwrap();
+        assert_eq!(outcome, DaemonOutcome::Healthy);
+    }
+
+    #[test]
+    fn ensure_daemon_reports_skew_verbatim_for_an_adopted_outdated_daemon() {
+        let dir = TempDir::new().unwrap();
+        let script = fake_lgs_script(
+            dir.path(),
+            "case \"$1\" in\n  status) echo '{\"daemon\":{\"state\":\"outdated\",\"message\":\"restart the service to pick up the new binary\"},\"projects\":[],\"adoptable\":[]}' ;;\nesac\n",
+        );
+        let lgs = LgsClient::new(script);
+        let outcome = ensure_daemon(&lgs, &DaemonOwnership { installed_by_app: false }).unwrap();
+        assert_eq!(
+            outcome,
+            DaemonOutcome::Skewed("restart the service to pick up the new binary".to_string())
+        );
+    }
+
+    // --- `run_first_run`: the git-availability gate. ---
+
+    #[test]
+    fn first_run_refuses_before_touching_lgs_when_git_is_absent() {
+        // A binary path that does not exist: if `run_first_run` invoked it
+        // before checking `git_available`, the failure would be a spawn
+        // error naming this bogus path, not `GIT_MISSING_MESSAGE` — so this
+        // also proves the gate runs FIRST, not merely that it can fail.
+        let lgs = LgsClient::new(PathBuf::from("/nonexistent/lgs-should-not-be-invoked"));
+        let cloud_root = PathBuf::from("/tmp/wherever");
+        let err = run_first_run(&lgs, &cloud_root, false).unwrap_err();
+        assert_eq!(err.to_string(), GIT_MISSING_MESSAGE);
+    }
+
+    #[test]
+    fn first_run_runs_lgs_init_when_git_is_available() {
+        let dir = TempDir::new().unwrap();
+        let script = fake_lgs_script(dir.path(), "case \"$1\" in\n  init) exit 0 ;;\nesac\n");
+        let lgs = LgsClient::new(script);
+        let cloud_root = TempDir::new().unwrap();
+        run_first_run(&lgs, cloud_root.path(), true).unwrap();
+    }
+
+    #[test]
+    fn first_run_surfaces_a_genuine_lgs_init_failure() {
+        let dir = TempDir::new().unwrap();
+        let script = fake_lgs_script(
+            dir.path(),
+            "case \"$1\" in\n  init) echo 'cloud root is not empty' >&2; exit 1 ;;\nesac\n",
+        );
+        let lgs = LgsClient::new(script);
+        let cloud_root = TempDir::new().unwrap();
+        let err = run_first_run(&lgs, cloud_root.path(), true).unwrap_err();
+        let full_message = err.chain().map(|c| c.to_string()).collect::<Vec<_>>().join(": ");
+        assert!(
+            full_message.contains("cloud root is not empty"),
+            "got: {full_message}"
+        );
     }
 }

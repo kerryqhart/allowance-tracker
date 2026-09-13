@@ -1,3 +1,5 @@
+use anyhow::{Context, Result};
+use std::fs;
 use std::path::{Path, PathBuf};
 
 /// Filenames this app owns inside a child's per-child git repo.
@@ -39,6 +41,61 @@ pub struct SyncPaths {
     pub lgs_binary: PathBuf,
     pub cloud_root: Option<PathBuf>,
     pub home: PathBuf,
+}
+
+impl SyncPaths {
+    /// Build the real `SyncPaths` for a production run, rooted at `home` and
+    /// `cloud_root` (if any lgs cloud root has been configured yet).
+    ///
+    /// **Both `home` and `cloud_root` are canonicalized here** — not just
+    /// resolved as far as possible, since both are expected to already
+    /// exist on a real machine. This is the fix for a Task 18 handoff: every
+    /// caller of [`is_cloud_synced`] canonicalizes its CANDIDATE path before
+    /// checking it (see `migration_lgs::canonicalize_as_far_as_possible`),
+    /// but `starts_with_ignore_case` only catches a hazard when the
+    /// candidate and the reference point (`env.home`, `env.cloud_root`) are
+    /// in the SAME resolved form. A symlinked `$HOME` — not exotic on macOS,
+    /// e.g. a home directory relocated onto another volume — would leave
+    /// `env.home` un-resolved while every candidate arrives already
+    /// resolved, so `MobileDocuments`/`DocumentsSyncOn` would never fire:
+    /// the guard fails OPEN for exactly the case it exists to catch. The
+    /// same reasoning applies to `cloud_root`, which is why it is
+    /// canonicalized here too rather than left to whatever form the caller
+    /// (a folder picker, a persisted config value) happened to hand in.
+    ///
+    /// The testable core is [`Self::for_production_with_home`], with `home`
+    /// injected — a test can then prove the canonicalization against a
+    /// symlinked temp home without touching the real `$HOME`.
+    pub fn for_production(data_dir: PathBuf, cloud_root: Option<PathBuf>) -> Result<Self> {
+        let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("could not resolve the home directory"))?;
+        Self::for_production_with_home(data_dir, cloud_root, home)
+    }
+
+    /// The testable core of [`Self::for_production`]. See its doc comment
+    /// for why `home` and `cloud_root` are both canonicalized.
+    pub fn for_production_with_home(
+        data_dir: PathBuf,
+        cloud_root: Option<PathBuf>,
+        home: PathBuf,
+    ) -> Result<Self> {
+        let home = fs::canonicalize(&home)
+            .with_context(|| format!("canonicalizing home directory {}", home.display()))?;
+        let cloud_root = match cloud_root {
+            Some(root) => Some(
+                fs::canonicalize(&root)
+                    .with_context(|| format!("canonicalizing cloud root {}", root.display()))?,
+            ),
+            None => None,
+        };
+        let app_support = home.join("Library/Application Support/Allowance Tracker");
+        Ok(Self {
+            data_dir,
+            children_root: app_support.join("children"),
+            lgs_binary: app_support.join("bin/lgs"),
+            cloud_root,
+            home,
+        })
+    }
 }
 
 /// Which rule fired when [`is_cloud_synced`] rejects a candidate path.
@@ -218,6 +275,7 @@ pub fn is_cloud_synced(
 mod tests {
     use super::*;
     use std::path::PathBuf;
+    use tempfile::TempDir;
 
     fn env() -> SyncPaths {
         SyncPaths {
@@ -405,5 +463,75 @@ mod tests {
         e.home = PathBuf::from("/x/home");
         let candidate = PathBuf::from("/x/CODEOTHER/child");
         assert_eq!(is_cloud_synced(&candidate, &e, false), None);
+    }
+
+    // --- `SyncPaths::for_production_with_home`: Task 18 handoff. ---
+    //
+    // A symlinked home must come back canonicalized, not verbatim — proving
+    // `is_cloud_synced`'s home-relative guards cannot fail open the way
+    // described in `for_production`'s doc comment.
+
+    #[test]
+    fn for_production_canonicalizes_a_symlinked_home() {
+        use std::os::unix::fs::symlink;
+
+        let real_home = TempDir::new().unwrap();
+        let real_home_canonical = real_home.path().canonicalize().unwrap();
+
+        let link_parent = TempDir::new().unwrap();
+        let symlinked_home = link_parent.path().join("home_link");
+        symlink(real_home.path(), &symlinked_home).unwrap();
+
+        let data_dir = PathBuf::from("/fake/data");
+        let paths = SyncPaths::for_production_with_home(data_dir, None, symlinked_home.clone()).unwrap();
+
+        assert_eq!(paths.home, real_home_canonical);
+        assert_ne!(paths.home, symlinked_home, "the symlink itself must not be handed back verbatim");
+        assert_eq!(
+            paths.children_root,
+            real_home_canonical.join("Library/Application Support/Allowance Tracker/children")
+        );
+    }
+
+    #[test]
+    fn for_production_canonicalizes_a_symlinked_cloud_root_too() {
+        use std::os::unix::fs::symlink;
+
+        let real_home = TempDir::new().unwrap();
+        let real_cloud_root = TempDir::new().unwrap();
+        let real_cloud_root_canonical = real_cloud_root.path().canonicalize().unwrap();
+
+        let link_parent = TempDir::new().unwrap();
+        let symlinked_cloud_root = link_parent.path().join("cloud_link");
+        symlink(real_cloud_root.path(), &symlinked_cloud_root).unwrap();
+
+        let paths = SyncPaths::for_production_with_home(
+            PathBuf::from("/fake/data"),
+            Some(symlinked_cloud_root.clone()),
+            real_home.path().to_path_buf(),
+        )
+        .unwrap();
+
+        assert_eq!(paths.cloud_root, Some(real_cloud_root_canonical));
+        assert_ne!(paths.cloud_root, Some(symlinked_cloud_root));
+    }
+
+    #[test]
+    fn for_production_with_no_cloud_root_configured_yet_leaves_it_none() {
+        let real_home = TempDir::new().unwrap();
+        let paths = SyncPaths::for_production_with_home(
+            PathBuf::from("/fake/data"),
+            None,
+            real_home.path().to_path_buf(),
+        )
+        .unwrap();
+        assert_eq!(paths.cloud_root, None);
+    }
+
+    #[test]
+    fn for_production_refuses_a_home_that_does_not_exist() {
+        let missing = PathBuf::from("/this/does/not/exist/anywhere");
+        let result = SyncPaths::for_production_with_home(PathBuf::from("/fake/data"), None, missing);
+        assert!(result.is_err(), "a home that cannot be canonicalized must fail closed, not guess");
     }
 }

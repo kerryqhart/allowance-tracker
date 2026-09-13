@@ -56,6 +56,7 @@ impl SyncThreadHandle {
         let sync_enabled = initial_sync_state.enabled;
         let sync_remote_url = initial_sync_state.remote_url.clone();
         let daemon_ownership = initial_sync_state.daemon_ownership.clone();
+        let sync_cloud_root = initial_sync_state.cloud_root.clone();
 
         let messenger = UiMessenger::new(message_tx, wake_ui);
 
@@ -73,6 +74,7 @@ impl SyncThreadHandle {
                     sync_enabled,
                     sync_remote_url,
                     daemon_ownership,
+                    sync_cloud_root,
                     shutdown_flag,
                     child_sync,
                 );
@@ -112,6 +114,7 @@ fn sync_loop(
     sync_enabled: bool,
     sync_remote_url: Option<String>,
     daemon_ownership: DaemonOwnership,
+    sync_cloud_root: Option<PathBuf>,
     shutdown: Arc<AtomicBool>,
     child_sync: Option<ChildSyncEngine>,
 ) {
@@ -194,6 +197,7 @@ fn sync_loop(
             enabled: sync_enabled,
             remote_url: sync_remote_url.clone(),
             daemon_ownership: daemon_ownership.clone(),
+            cloud_root: sync_cloud_root.clone(),
         };
         let _ = sync_state.save(&sync_persistence::sync_state_path(&data_dir));
         let _ = retry_queue.save(&sync_persistence::retry_queue_path(&data_dir));
@@ -697,6 +701,7 @@ mod tests {
             enabled: true,
             remote_url: None,
             daemon_ownership: DaemonOwnership::default(),
+            cloud_root: None,
         };
 
         let mut handle = SyncThreadHandle::spawn(

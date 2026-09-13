@@ -20,6 +20,14 @@ pub struct SyncState {
     /// daemon this app has no record of installing.
     #[serde(default)]
     pub daemon_ownership: DaemonOwnership,
+    /// The lgs cloud root chosen at first run (`lgs init --cloud-root
+    /// <path>`), persisted so later launches know the lgs (desktop-to-desktop)
+    /// transport is already set up and can build a real `ChildSyncEngine`
+    /// without re-running first run. `None` before first run has ever
+    /// completed — the safe default; `#[serde(default)]` so a
+    /// `sync_state.yaml` written before this field existed keeps loading.
+    #[serde(default)]
+    pub cloud_root: Option<PathBuf>,
 }
 
 impl SyncState {

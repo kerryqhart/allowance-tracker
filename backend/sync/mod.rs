@@ -13,8 +13,16 @@ pub mod lgs_client;
 pub mod migration_lgs;
 pub mod paths;
 
-pub use bootstrap::{copy_binary, ensure_lgs_binary, git_is_available, GIT_MISSING_MESSAGE};
+pub use bootstrap::{
+    copy_binary, ensure_daemon, ensure_lgs_binary, git_is_available, run_first_run, DaemonAction,
+    DaemonOutcome, DaemonOwnership, GIT_MISSING_MESSAGE,
+};
 pub use child_sync::{classify, ChildSyncEngine, Cycle, CycleOutcome};
-pub use lgs_client::{DaemonInfo, DaemonState, DurabilityState, LgsClient, ProjectReport, StatusReport};
-pub use migration_lgs::{plan_lgs_migration, run_lgs_migration, LgsMigrationPlan, LgsMigrationReport};
+pub use lgs_client::{
+    AdoptableEntry, DaemonInfo, DaemonState, DurabilityState, LgsClient, ProjectReport, StatusReport,
+};
+pub use migration_lgs::{
+    adopt_child, adoptable_children, interpret_restore_result, plan_lgs_migration, run_lgs_migration,
+    AdoptableChild, LgsMigrationPlan, LgsMigrationReport, RestoreOutcome,
+};
 pub use paths::{is_cloud_synced, Reason, SyncPaths};

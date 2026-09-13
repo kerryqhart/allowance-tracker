@@ -16,6 +16,7 @@
 use std::sync::mpsc;
 use crate::backend::domain::sync_manager::BackfillProgress;
 use crate::ui::components::settings::children_modal::ChildrenFormState;
+pub use crate::ui::components::settings::lgs_sync_modal::LgsSyncFormState;
 
 /// Export type selection for export modal
 #[derive(Debug, Clone, PartialEq)]
@@ -563,6 +564,12 @@ pub struct SettingsState {
 
     /// Backfill form state
     pub backfill_form: BackfillFormState,
+
+    /// Whether the "Sync with another Mac" modal is visible
+    pub show_lgs_sync_modal: bool,
+
+    /// Sync-with-another-Mac form state
+    pub lgs_sync_form: LgsSyncFormState,
 }
 
 impl SettingsState {
@@ -581,6 +588,8 @@ impl SettingsState {
             allowance_config_form: AllowanceConfigFormState::new(),
             show_backfill_modal: false,
             backfill_form: BackfillFormState::new(),
+            show_lgs_sync_modal: false,
+            lgs_sync_form: LgsSyncFormState::new(),
         }
     }
 
@@ -592,6 +601,7 @@ impl SettingsState {
         self.show_children_modal = false;
         self.show_allowance_config_modal = false;
         self.show_backfill_modal = false;
+        self.show_lgs_sync_modal = false;
     }
 
     /// Reset all form states
@@ -602,6 +612,7 @@ impl SettingsState {
         self.children_form.clear();
         self.allowance_config_form.clear();
         self.backfill_form.clear();
+        self.lgs_sync_form.clear();
     }
 }
 

@@ -220,6 +220,7 @@ enum Action {
     AskRemove(ChildId),
     ConfirmRemove,
     CancelRemove,
+    OpenLgsSync,
     Close,
 }
 
@@ -429,6 +430,9 @@ impl AllowanceTrackerApp {
             if movable.is_none() {
                 move_button.on_hover_text("Select a child that is Ready to move its data.");
             }
+            if ui.button("Sync with another Mac…").clicked() {
+                *action = Some(Action::OpenLgsSync);
+            }
             if ui.button("Close").clicked() {
                 *action = Some(Action::Close);
             }
@@ -496,6 +500,13 @@ impl AllowanceTrackerApp {
             }
             Action::ConfirmRemove => self.remove_child_from_machine(),
             Action::CancelRemove => self.settings.children_form.pending_removal = None,
+            Action::OpenLgsSync => {
+                self.settings.show_children_modal = false;
+                self.settings.children_form.clear();
+                self.settings.lgs_sync_form.clear();
+                self.settings.lgs_sync_form.just_opened = true;
+                self.settings.show_lgs_sync_modal = true;
+            }
             Action::Close => {
                 self.settings.show_children_modal = false;
                 self.settings.children_form.clear();

@@ -59,7 +59,7 @@
 //! once per child.
 
 use crate::backend::storage::csv::{ChildRegistry, RegistryEntry};
-use crate::backend::storage::git::{ensure_lgs_remote, push_lgs, GitManager};
+use crate::backend::storage::git::{clone_repo, ensure_lgs_remote, fetch_lgs, push_lgs, GitManager};
 use crate::backend::sync::child_sync::{current_branch, provenance};
 use crate::backend::sync::lgs_client::{LgsClient, StatusReport};
 use crate::backend::sync::paths::{is_cloud_synced, Reason, SyncPaths, FILES_THIS_APP_OWNS};
@@ -74,7 +74,7 @@ use std::path::{Path, PathBuf};
 const TRANSACTIONS_FILE: &str = "transactions.csv";
 
 fn project_name(id: &ChildId) -> String {
-    format!("allowance-{}", id.as_str())
+    format!("{PROJECT_PREFIX}{}", id.as_str())
 }
 
 /// One step of an [`LgsMigrationPlan`]. Deliberately carries no per-step
@@ -215,7 +215,7 @@ pub fn plan_lgs_migration(entry: &RegistryEntry, paths: &SyncPaths, status: &Sta
         };
     }
 
-    let adopt = status.adoptable.iter().any(|n| n == &name);
+    let adopt = status.adoptable.iter().any(|a| a.name == name);
     // Critical-2 fix: a project already registered with lgs (typically
     // because an earlier attempt at THIS SAME migration got as far as
     // `Step::LgsAdd` before failing at a later step) must never be
@@ -545,6 +545,183 @@ fn run_repoint_registry(plan: &LgsMigrationPlan) -> Result<()> {
     registry.save(&plan.data_dir)
 }
 
+// ============================================================================
+// Task 19: onboarding a second machine.
+//
+// Everything below reads a project this machine has never seen — either
+// `lgs status --json`'s `adoptable` list (discovered by scanning the cloud
+// root; nothing here has been registered on THIS machine yet) or a project
+// this machine already registered independently, on a day it was set up
+// without any peer's history to adopt. Both are legitimate "second machine"
+// shapes and neither is an error.
+// ============================================================================
+
+/// One `allowance-<id>` project this machine has not adopted yet, ready to
+/// show as a checklist row.
+///
+/// `archived` and `note` are carried through, never dropped — an archived
+/// project is a real project (its data still exists and is still readable),
+/// just read-only going forward (see the module doc's push-refusal note), so
+/// onboarding labels it rather than hiding it from the list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdoptableChild {
+    pub child_id: String,
+    pub project_name: String,
+    pub archived: bool,
+    pub note: Option<String>,
+}
+
+/// lgs project names for this app are always `allowance-<child_id>` — see
+/// [`project_name`].
+const PROJECT_PREFIX: &str = "allowance-";
+
+/// Filter `status`'s adoptable list down to this app's own projects, and
+/// recover each one's `child_id` from its project name.
+///
+/// A cloud root shared with other, unrelated lgs projects (the ordinary case
+/// — this app is not the only thing a user backs up with lgs) must not
+/// surface those as if they were children to onboard.
+pub fn adoptable_children(status: &StatusReport) -> Vec<AdoptableChild> {
+    status
+        .adoptable
+        .iter()
+        .filter_map(|entry| {
+            entry.name.strip_prefix(PROJECT_PREFIX).map(|child_id| AdoptableChild {
+                child_id: child_id.to_string(),
+                project_name: entry.name.clone(),
+                archived: entry.archived,
+                note: entry.note.clone(),
+            })
+        })
+        .collect()
+}
+
+/// What [`LgsClient::restore`]'s result means for onboarding.
+#[derive(Debug, PartialEq, Eq)]
+pub enum RestoreOutcome {
+    /// `restore` cloned the project; the working copy is at the requested
+    /// path with lgs's own remote (`origin`) already configured.
+    Restored,
+    /// `restore` refused because this machine already has a project by this
+    /// name registered — the "both machines set up independently" case, not
+    /// an error. The caller falls through to a plain clone-or-pull instead.
+    AlreadyPresentUsePull,
+    /// A genuine failure — anything `restore` can fail with other than the
+    /// already-registered refusal above.
+    Failed(String),
+}
+
+/// `lgs restore`'s refusal for an already-registered project is a plain
+/// string match against its error message — `local-git-sync/src/cli.rs`
+/// gives it no distinct error type, so this is the only seam available.
+/// Matched narrowly (`"already exists"`) rather than the whole message, so
+/// small wording changes upstream don't silently start treating this as a
+/// hard failure.
+pub fn interpret_restore_result(result: Result<String>) -> RestoreOutcome {
+    match result {
+        Ok(_) => RestoreOutcome::Restored,
+        Err(e) => {
+            let message = e.to_string();
+            if message.contains("already exists") {
+                RestoreOutcome::AlreadyPresentUsePull
+            } else {
+                RestoreOutcome::Failed(message)
+            }
+        }
+    }
+}
+
+/// Adopt one `allowance-<id>` project onto this machine.
+///
+/// `project_name` is the full lgs project name (e.g. `allowance-keiko_hart`),
+/// as listed by [`adoptable_children`] or already present in
+/// `status.projects`.
+///
+/// - **Ordinary adopt**: `lgs restore` clones the project (it refuses a
+///   non-empty non-repo directory itself — see `ensure_working_copy`,
+///   `local-git-sync/src/cli.rs:700-733` — so this never clones a second
+///   time). The clone's remote is named `origin`; [`ensure_lgs_remote`]
+///   renames it to `lgs` so one remote name exists in the system regardless
+///   of whether a child arrived via onboarding or via migration.
+/// - **Already registered here**: `restore`'s refusal is not an error (see
+///   [`RestoreOutcome::AlreadyPresentUsePull`]) — both machines were set up
+///   independently. Falls through to a plain clone-or-pull: clone if nothing
+///   is at the target directory yet, otherwise fetch and let the ordinary
+///   sync engine (`ChildSyncEngine`) reconcile on its next cycle rather than
+///   merging here.
+///
+/// Registers the child in `children.yaml` if it is not there already; never
+/// touches an existing entry.
+pub fn adopt_child(lgs: &LgsClient, project_name: &str, paths: &SyncPaths) -> Result<()> {
+    let child_id_str = project_name
+        .strip_prefix(PROJECT_PREFIX)
+        .with_context(|| format!("'{project_name}' is not an allowance-tracker project"))?;
+    let child_id = ChildId::from(child_id_str);
+    let new_dir = paths.children_root.join(child_id.as_str());
+
+    let restore_path = new_dir
+        .to_str()
+        .context("the child directory path is not valid UTF-8")?;
+    let outcome = interpret_restore_result(lgs.restore(project_name, restore_path));
+
+    match outcome {
+        RestoreOutcome::Restored => {
+            let repo = git2::Repository::open(&new_dir)
+                .with_context(|| format!("opening {}", new_dir.display()))?;
+            let url = repo
+                .find_remote("origin")
+                .context("the restored repo has no `origin` remote")?
+                .url()
+                .context("the restored repo's `origin` remote has no URL")?
+                .to_string();
+            ensure_lgs_remote(&repo, &url)?;
+        }
+        RestoreOutcome::AlreadyPresentUsePull => {
+            let status = lgs
+                .status()
+                .context("running `lgs status --json` to resolve the clone_url")?;
+            let url = status
+                .project(project_name)
+                .with_context(|| {
+                    format!("'{project_name}' is registered here but not reported by `lgs status`")
+                })?
+                .clone_url
+                .clone();
+
+            if git2::Repository::open(&new_dir).is_ok() {
+                let repo = git2::Repository::open(&new_dir)?;
+                ensure_lgs_remote(&repo, &url)?;
+                // Land the peer's tip so the ordinary sync engine has
+                // something to reconcile against on its next cycle — never
+                // merge or check out here, that is `ChildSyncEngine`'s job.
+                fetch_lgs(&repo)?;
+            } else {
+                if let Some(parent) = new_dir.parent() {
+                    fs::create_dir_all(parent)
+                        .with_context(|| format!("creating {}", parent.display()))?;
+                }
+                let repo = clone_repo(&url, &new_dir)?;
+                ensure_lgs_remote(&repo, &url)?;
+            }
+        }
+        RestoreOutcome::Failed(message) => {
+            anyhow::bail!("{message}");
+        }
+    }
+
+    let mut registry = ChildRegistry::load(&paths.data_dir)?;
+    if registry.path_for(&child_id).is_none() {
+        registry.register(RegistryEntry {
+            id: child_id.clone(),
+            path: new_dir.clone(),
+            label: child_id.as_str().to_string(),
+        })?;
+        registry.save(&paths.data_dir)?;
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -576,7 +753,14 @@ mod tests {
             cloud_root: None,
             cloud_root_exists: false,
             projects: Vec::new(),
-            adoptable: names.iter().map(|s| s.to_string()).collect(),
+            adoptable: names
+                .iter()
+                .map(|s| crate::backend::sync::lgs_client::AdoptableEntry {
+                    name: s.to_string(),
+                    archived: false,
+                    note: None,
+                })
+                .collect(),
         }
     }
 
@@ -1225,5 +1409,280 @@ mod tests {
         let original = fs::read_to_string(env.old_child_dir().join("transactions.csv")).unwrap();
         assert!(original.contains("tx-b1"));
         assert!(!original.contains("tx-a1"), "the old folder must never be written into");
+    }
+}
+
+/// Task 19: onboarding a second machine. Module name deliberately contains
+/// "onboard" so `cargo test -p allowance-tracker-egui onboard` selects
+/// exactly this set.
+#[cfg(test)]
+mod onboarding_tests {
+    use super::*;
+    use crate::backend::sync::lgs_client::{AdoptableEntry, DaemonInfo};
+    use std::path::Path;
+    use tempfile::TempDir;
+
+    fn status_with_adoptable_entries(entries: Vec<AdoptableEntry>) -> StatusReport {
+        StatusReport {
+            daemon: DaemonInfo::default(),
+            cloud_root: None,
+            cloud_root_exists: false,
+            projects: Vec::new(),
+            adoptable: entries,
+        }
+    }
+
+    fn status_with_adoptable(names: &[&str]) -> StatusReport {
+        status_with_adoptable_entries(
+            names
+                .iter()
+                .map(|n| AdoptableEntry { name: n.to_string(), archived: false, note: None })
+                .collect(),
+        )
+    }
+
+    fn status_with_archived_adoptable(name: &str, note: &str) -> StatusReport {
+        status_with_adoptable_entries(vec![AdoptableEntry {
+            name: name.to_string(),
+            archived: true,
+            note: Some(note.to_string()),
+        }])
+    }
+
+    // --- The three tests specified in the task brief. ---
+
+    #[test]
+    fn lists_only_allowance_projects() {
+        let status = status_with_adoptable(&["allowance-keiko_hart", "weathertop-data"]);
+        let found = adoptable_children(&status);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].child_id, "keiko_hart");
+    }
+
+    #[test]
+    fn an_archived_project_is_labelled_rather_than_hidden() {
+        let status = status_with_archived_adoptable("allowance-keiko_hart", "finished with this child");
+        let found = adoptable_children(&status);
+        assert!(found[0].archived);
+        assert_eq!(found[0].note.as_deref(), Some("finished with this child"));
+    }
+
+    #[test]
+    fn a_refusal_because_it_is_already_registered_falls_through_to_pull() {
+        let outcome = interpret_restore_result(Err(anyhow::anyhow!(
+            "project 'allowance-keiko_hart' already exists"
+        )));
+        assert_eq!(outcome, RestoreOutcome::AlreadyPresentUsePull);
+    }
+
+    // --- Supplementary coverage for `adopt_child` and `interpret_restore_result`. ---
+
+    #[test]
+    fn a_genuine_restore_failure_is_reported_as_failed() {
+        let outcome = interpret_restore_result(Err(anyhow::anyhow!("daemon unreachable")));
+        assert_eq!(outcome, RestoreOutcome::Failed("daemon unreachable".to_string()));
+    }
+
+    #[test]
+    fn a_successful_restore_is_reported_as_restored() {
+        let outcome = interpret_restore_result(Ok("cloned".to_string()));
+        assert_eq!(outcome, RestoreOutcome::Restored);
+    }
+
+    fn fake_lgs_script(dir: &Path, body: &str) -> PathBuf {
+        let path = dir.join("lgs");
+        fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&path).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&path, perms).unwrap();
+        path
+    }
+
+    fn status_json(project_name: &str, clone_url: &str) -> String {
+        format!(
+            "{{\"daemon_running\":true,\"cloud_root\":null,\"cloud_root_exists\":false,\
+             \"projects\":[{{\"name\":\"{project_name}\",\
+             \"working_repo_path\":\"/tmp/x\",\"clone_url\":\"{clone_url}\",\
+             \"archived\":false}}],\"adoptable\":[]}}"
+        )
+    }
+
+    fn onboarding_paths(scratch: &Path, children_root: PathBuf, data_dir: PathBuf, lgs_binary: PathBuf) -> SyncPaths {
+        SyncPaths {
+            data_dir,
+            children_root,
+            lgs_binary,
+            cloud_root: None,
+            home: scratch.join("not_a_real_home"),
+        }
+    }
+
+    fn seed_bare_repo() -> (TempDir, String) {
+        let bare_dir = TempDir::new().unwrap();
+        let bare = git2::Repository::init_bare(bare_dir.path()).unwrap();
+        let work = TempDir::new().unwrap();
+        let repo = git2::Repository::init(work.path()).unwrap();
+        fs::write(work.path().join("child.yaml"), "id: keiko_hart\nname: Keiko Hart\n").unwrap();
+        let git = GitManager::new();
+        git.add_all(work.path()).unwrap();
+        let _ = bare; // keep the bare repo alive via bare_dir; commit lands via push below.
+        git.commit(work.path(), "seed").unwrap();
+        repo.remote("origin", bare_dir.path().to_str().unwrap()).unwrap();
+        let branch = current_branch(&repo).unwrap();
+        let mut remote = repo.find_remote("origin").unwrap();
+        remote.push(&[format!("refs/heads/{branch}:refs/heads/{branch}")], None).unwrap();
+        (bare_dir, branch)
+    }
+
+    /// Ordinary adopt: `restore` succeeds (clones), and the clone's `origin`
+    /// remote is renamed to `lgs` — no second clone is ever attempted.
+    #[test]
+    fn adopt_child_restores_and_renames_origin_to_lgs() {
+        let (bare_dir, _branch) = seed_bare_repo();
+        let scratch = TempDir::new().unwrap();
+        let children_root = TempDir::new().unwrap();
+        let data_dir = TempDir::new().unwrap();
+
+        let script = fake_lgs_script(
+            scratch.path(),
+            &format!(
+                "case \"$1\" in\n  restore) git clone --quiet \"{}\" \"$3\" ;;\nesac\n",
+                bare_dir.path().display()
+            ),
+        );
+        let paths = onboarding_paths(
+            scratch.path(),
+            children_root.path().to_path_buf(),
+            data_dir.path().to_path_buf(),
+            script,
+        );
+        let lgs = LgsClient::new(paths.lgs_binary.clone());
+
+        adopt_child(&lgs, "allowance-keiko_hart", &paths).unwrap();
+
+        let new_dir = children_root.path().join("keiko_hart");
+        let repo = git2::Repository::open(&new_dir).unwrap();
+        assert!(repo.find_remote("lgs").is_ok(), "origin must be renamed to lgs");
+        assert!(repo.find_remote("origin").is_err(), "origin must not remain once renamed");
+
+        let registry = ChildRegistry::load(data_dir.path()).unwrap();
+        assert_eq!(registry.path_for(&ChildId::from("keiko_hart")), Some(new_dir.as_path()));
+    }
+
+    /// Both machines set up independently: `restore` refuses because
+    /// `allowance-keiko_hart` is already registered here, but nothing is at
+    /// the target directory yet. `adopt_child` must not error — it clones
+    /// directly instead.
+    #[test]
+    fn adopt_child_falls_through_to_a_direct_clone_when_already_registered_and_nothing_local() {
+        let (bare_dir, _branch) = seed_bare_repo();
+        let clone_url = bare_dir.path().to_string_lossy().to_string();
+        let scratch = TempDir::new().unwrap();
+        let children_root = TempDir::new().unwrap();
+        let data_dir = TempDir::new().unwrap();
+
+        let script = fake_lgs_script(
+            scratch.path(),
+            &format!(
+                "case \"$1\" in\n  restore) echo \"project 'allowance-keiko_hart' already exists\" >&2; exit 1 ;;\n  status) cat <<'JSON'\n{}\nJSON\n  ;;\nesac\n",
+                status_json("allowance-keiko_hart", &clone_url)
+            ),
+        );
+        let paths = onboarding_paths(
+            scratch.path(),
+            children_root.path().to_path_buf(),
+            data_dir.path().to_path_buf(),
+            script,
+        );
+        let lgs = LgsClient::new(paths.lgs_binary.clone());
+
+        adopt_child(&lgs, "allowance-keiko_hart", &paths).unwrap();
+
+        let new_dir = children_root.path().join("keiko_hart");
+        assert!(new_dir.join("child.yaml").exists(), "the direct clone must have landed the working tree");
+        let repo = git2::Repository::open(&new_dir).unwrap();
+        assert!(repo.find_remote("lgs").is_ok());
+
+        let registry = ChildRegistry::load(data_dir.path()).unwrap();
+        assert_eq!(registry.path_for(&ChildId::from("keiko_hart")), Some(new_dir.as_path()));
+    }
+
+    /// Same refusal, but this machine already has a working copy at the
+    /// target (a prior partial onboarding attempt, or a hand-made clone) —
+    /// `adopt_child` must fetch rather than clone over it, and must not
+    /// disturb the registry entry if one already exists.
+    #[test]
+    fn adopt_child_falls_through_to_a_fetch_when_already_registered_and_a_local_copy_exists() {
+        let (bare_dir, _branch) = seed_bare_repo();
+        let clone_url = bare_dir.path().to_string_lossy().to_string();
+        let scratch = TempDir::new().unwrap();
+        let children_root = TempDir::new().unwrap();
+        let data_dir = TempDir::new().unwrap();
+
+        let new_dir = children_root.path().join("keiko_hart");
+        clone_repo(&clone_url, &new_dir).unwrap();
+        {
+            let mut registry = ChildRegistry::load(data_dir.path()).unwrap();
+            registry
+                .register(RegistryEntry {
+                    id: ChildId::from("keiko_hart"),
+                    path: new_dir.clone(),
+                    label: "Keiko Hart".to_string(),
+                })
+                .unwrap();
+            registry.save(data_dir.path()).unwrap();
+        }
+
+        let script = fake_lgs_script(
+            scratch.path(),
+            &format!(
+                "case \"$1\" in\n  restore) echo \"project 'allowance-keiko_hart' already exists\" >&2; exit 1 ;;\n  status) cat <<'JSON'\n{}\nJSON\n  ;;\nesac\n",
+                status_json("allowance-keiko_hart", &clone_url)
+            ),
+        );
+        let paths = onboarding_paths(
+            scratch.path(),
+            children_root.path().to_path_buf(),
+            data_dir.path().to_path_buf(),
+            script,
+        );
+        let lgs = LgsClient::new(paths.lgs_binary.clone());
+
+        adopt_child(&lgs, "allowance-keiko_hart", &paths).unwrap();
+
+        let repo = git2::Repository::open(&new_dir).unwrap();
+        assert!(repo.find_remote("lgs").is_ok());
+
+        let registry = ChildRegistry::load(data_dir.path()).unwrap();
+        assert_eq!(
+            registry.path_for(&ChildId::from("keiko_hart")),
+            Some(new_dir.as_path()),
+            "an existing registry entry must not be disturbed"
+        );
+    }
+
+    /// A genuine restore failure (not the already-registered refusal) must
+    /// surface as an error, not be silently swallowed.
+    #[test]
+    fn adopt_child_surfaces_a_genuine_restore_failure() {
+        let scratch = TempDir::new().unwrap();
+        let children_root = TempDir::new().unwrap();
+        let data_dir = TempDir::new().unwrap();
+
+        let script = fake_lgs_script(
+            scratch.path(),
+            "case \"$1\" in\n  restore) echo \"daemon unreachable\" >&2; exit 1 ;;\nesac\n",
+        );
+        let paths = onboarding_paths(
+            scratch.path(),
+            children_root.path().to_path_buf(),
+            data_dir.path().to_path_buf(),
+            script,
+        );
+        let lgs = LgsClient::new(paths.lgs_binary.clone());
+
+        let err = adopt_child(&lgs, "allowance-keiko_hart", &paths).unwrap_err();
+        assert!(err.to_string().contains("daemon unreachable"), "got: {err}");
     }
 }
