@@ -64,6 +64,24 @@ pub struct FastForwardBlockedNotice {
     pub to: String,
 }
 
+/// A sync failure serious enough that the user needs to find out about it,
+/// which must not be silently erased by the next unrelated `SyncStatus`
+/// write. Review round 4, Important-2: a genuine (non-conflict) checkout
+/// failure inside `apply_fast_forward` (an I/O error, a corrupt object, a
+/// permissions problem) was being written to `sync.status` — but
+/// `run_child_sync_cycles` always sends `StatusChanged(Idle)` right after
+/// the message whose handler wrote it, and both are drained in the SAME
+/// `handle_sync_messages` batch on the UI thread before a single frame
+/// renders, so that status write is provably invisible (the exact
+/// reasoning already established for `FastForwardBlockedNotice`, which
+/// this mirrors).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncFailureNotice {
+    pub child_id: String,
+    /// Human-readable description of what failed and why.
+    pub message: String,
+}
+
 /// UI state for sync operations
 pub struct SyncUiState {
     /// Current sync status
@@ -92,6 +110,11 @@ pub struct SyncUiState {
     /// the SAME batch on the UI thread — would erase a status write before
     /// a single frame ever rendered it.
     pub fast_forward_blocked: Vec<FastForwardBlockedNotice>,
+
+    /// Genuine, non-self-resolving sync failures — see
+    /// [`SyncFailureNotice`]'s doc comment for why these cannot be routed
+    /// through `status`.
+    pub sync_failures: Vec<SyncFailureNotice>,
 
     /// When a `SyncCommand::PollNow` was last sent in response to a
     /// stale-head merge refusal, keyed by child id. Missing means either
@@ -131,6 +154,7 @@ impl SyncUiState {
             conflicts: Vec::new(),
             goals_diverged: Vec::new(),
             fast_forward_blocked: Vec::new(),
+            sync_failures: Vec::new(),
             last_stale_head_pollnow_at: HashMap::new(),
             consecutive_stale_head_refusals: HashMap::new(),
             message_rx: None,
@@ -144,6 +168,7 @@ impl SyncUiState {
             conflicts: Vec::new(),
             goals_diverged: Vec::new(),
             fast_forward_blocked: Vec::new(),
+            sync_failures: Vec::new(),
             last_stale_head_pollnow_at: HashMap::new(),
             consecutive_stale_head_refusals: HashMap::new(),
             message_rx: Some(rx),
@@ -170,6 +195,19 @@ impl SyncUiState {
     /// divergence the blocking commit deliberately created.
     pub fn clear_fast_forward_blocked(&mut self, child_id: &str) {
         self.fast_forward_blocked.retain(|n| n.child_id != child_id);
+    }
+
+    /// Record (or refresh) a durable sync-failure notice for a child — same
+    /// replace-not-accumulate behavior as [`Self::record_goals_diverged`].
+    pub fn record_sync_failure(&mut self, notice: SyncFailureNotice) {
+        self.sync_failures.retain(|n| n.child_id != notice.child_id);
+        self.sync_failures.push(notice);
+    }
+
+    /// Clear a child's sync-failure notice — call once a subsequent apply
+    /// (merge or fast-forward) for that child succeeds.
+    pub fn clear_sync_failure(&mut self, child_id: &str) {
+        self.sync_failures.retain(|n| n.child_id != child_id);
     }
 
     /// Record one stale-head merge refusal for `child_id` at `now` and

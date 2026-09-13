@@ -33,7 +33,9 @@ use crate::backend::storage::GitManager;
 use crate::backend::sync::child_sync::{
     current_branch, goals_diverged, push_with_retry, recover_if_dirty, Recovered,
 };
-use crate::ui::state::{FastForwardBlockedNotice, StaleHeadPollAction, STALE_HEAD_REFUSAL_LIMIT};
+use crate::ui::state::{
+    FastForwardBlockedNotice, StaleHeadPollAction, SyncFailureNotice, STALE_HEAD_REFUSAL_LIMIT,
+};
 use shared::sync::EntityType;
 use shared::ChildId;
 
@@ -80,6 +82,28 @@ enum ApplyMergeOutcome {
     /// point of failure.
     Failed,
 }
+
+/// Filenames this app owns inside a child's per-child git repo, and the
+/// ONLY ones [`AllowanceTrackerApp::commit_dirty_tree_to_unblock_fast_forward`]
+/// stages into its unblock commit.
+///
+/// Review round 4, Important-1: that function used to stage with
+/// `add_all(["*"])`, which picks up whatever untracked strays happen to be
+/// sitting in the child's data directory — `.DS_Store`, editor swap files,
+/// anything macOS or an editor drops there — and commits them into this
+/// child's synced history, where they propagate to the other machine
+/// permanently once pushed. This list is deliberately narrower than that:
+/// only files this system itself writes.
+///
+/// `parental_control_attempts.csv` is also owned by this system and lives
+/// in the same per-child directory, but is deliberately NOT included here:
+/// if it happens to be dirty when a fast-forward is blocked, the
+/// SUBSEQUENT merge commit (`GitManager::commit_merge`, a separate,
+/// pre-existing code path with its own staging) still captures it when
+/// that merge lands — this list only needs to cover what THIS unblock
+/// commit itself must not leave behind or omit.
+const FILES_THIS_APP_OWNS: &[&str] =
+    &["transactions.csv", "goals.csv", "child.yaml", "allowance_config.yaml"];
 
 /// Outcome of [`AllowanceTrackerApp::apply_fast_forward`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1158,6 +1182,7 @@ impl AllowanceTrackerApp {
         // actually resolves the divergence that commit deliberately
         // created — the notice can be cleared.
         self.sync.clear_fast_forward_blocked(child_id);
+        self.sync.clear_sync_failure(child_id);
 
         ApplyMergeOutcome::Applied
     }
@@ -1353,10 +1378,22 @@ impl AllowanceTrackerApp {
                 );
                 return self.commit_dirty_tree_to_unblock_fast_forward(child_id, &repo, to);
             }
+            let message = format!("could not check out synced data ({e})");
             log::error!("Fast-forward checkout failed for child {child_id} to {to}: {e}");
-            self.sync.status = SyncStatus::Error(format!(
-                "Sync failed for {child_id}: could not check out synced data ({e})"
-            ));
+            // Review round 4, Important-2: `self.sync.status` here is
+            // WRITE-AND-FORGET — `run_child_sync_cycles` always sends
+            // `StatusChanged(Idle)` right after the `ApplyFastForward`
+            // message being handled right now, and both are drained in the
+            // SAME `handle_sync_messages` batch before a single frame ever
+            // renders, so this status write is provably invisible (see
+            // `SyncFailureNotice`'s doc comment). Recorded there too so a
+            // genuine failure — an I/O error, a corrupt object, a
+            // permissions problem — actually reaches the user.
+            self.sync.status = SyncStatus::Error(format!("Sync failed for {child_id}: {message}"));
+            self.sync.record_sync_failure(SyncFailureNotice {
+                child_id: child_id.to_string(),
+                message,
+            });
             return ApplyFastForwardOutcome::Failed;
         }
 
@@ -1391,6 +1428,7 @@ impl AllowanceTrackerApp {
         // Same as a successful merge apply: any stale-head streak for this
         // child is over.
         self.sync.note_applied(child_id);
+        self.sync.clear_sync_failure(child_id);
 
         ApplyFastForwardOutcome::Applied
     }
@@ -1443,18 +1481,35 @@ impl AllowanceTrackerApp {
             }
         };
 
+        // Review round 4, Important-1: stage ONLY the files this app owns
+        // (see `FILES_THIS_APP_OWNS`'s doc comment) — never `add_all`,
+        // which would sweep up untracked strays (`.DS_Store`, editor swap
+        // files, ...) into a commit that gets pushed to the other machine.
+        // A file that does not currently exist in this child's directory
+        // (e.g. `goals.csv` before any goal was ever created) is skipped,
+        // not an error.
         let gm = GitManager::new();
-        if let Err(e) = gm.add_all(&child_dir) {
-            log::error!("Cannot stage child {child_id}'s dirty tree to unblock a fast-forward: {e}");
-            self.sync.status = SyncStatus::Error(format!(
-                "Sync failed for {child_id}: could not stage its local changes"
-            ));
-            return ApplyFastForwardOutcome::Failed;
+        for name in FILES_THIS_APP_OWNS {
+            if !child_dir.join(name).exists() {
+                continue;
+            }
+            if let Err(e) = gm.add_file(&child_dir, name) {
+                log::error!(
+                    "Cannot stage {name} for child {child_id} to unblock a fast-forward: {e}"
+                );
+                let message = format!("could not stage its local {name}");
+                self.sync.status = SyncStatus::Error(format!("Sync failed for {child_id}: {message}"));
+                self.sync.record_sync_failure(SyncFailureNotice {
+                    child_id: child_id.to_string(),
+                    message,
+                });
+                return ApplyFastForwardOutcome::Failed;
+            }
         }
 
         let message = format!("sync: commit local changes blocking a fast-forward to {to}");
-        match gm.commit(&child_dir, &message) {
-            Ok(oid) => {
+        match gm.commit_if_changed(&child_dir, &message) {
+            Ok(Some(oid)) => {
                 log::warn!(
                     "Child {child_id}'s fast-forward to {to} was blocked by uncommitted local \
                      changes (this app's normal steady state under the AWS transport — see \
@@ -1482,13 +1537,42 @@ impl AllowanceTrackerApp {
                 }
                 ApplyFastForwardOutcome::CommittedLocalChangesToUnblock
             }
+            Ok(None) => {
+                // Review round 4, Minor-3: the checkout conflicted, but
+                // staging only the files this app owns produced no actual
+                // tree change — most likely the conflicting content was in
+                // a file this app does not track (so it was never staged
+                // above), or that content already matched HEAD. Either way
+                // there is nothing safe to commit, and a checkout conflict
+                // that never resolves needs a human, not a silently
+                // recurring empty-commit attempt every tick.
+                log::warn!(
+                    "Fast-forward checkout for child {child_id} to {to} was blocked by local \
+                     changes, but staging only the files this app owns produced no commit-able \
+                     change — the conflicting content is outside what this app tracks. Not \
+                     retrying automatically."
+                );
+                let message =
+                    "a fast-forward was blocked by local changes outside files this app tracks — \
+                     resolve them manually"
+                        .to_string();
+                self.sync.status = SyncStatus::Error(format!("Sync failed for {child_id}: {message}"));
+                self.sync.record_sync_failure(SyncFailureNotice {
+                    child_id: child_id.to_string(),
+                    message,
+                });
+                ApplyFastForwardOutcome::Failed
+            }
             Err(e) => {
                 log::error!(
                     "Cannot commit child {child_id}'s dirty tree to unblock a fast-forward: {e}"
                 );
-                self.sync.status = SyncStatus::Error(format!(
-                    "Sync failed for {child_id}: could not commit its local changes"
-                ));
+                let message = "could not commit its local changes".to_string();
+                self.sync.status = SyncStatus::Error(format!("Sync failed for {child_id}: {message}"));
+                self.sync.record_sync_failure(SyncFailureNotice {
+                    child_id: child_id.to_string(),
+                    message,
+                });
                 ApplyFastForwardOutcome::Failed
             }
         }
@@ -2688,6 +2772,131 @@ mod apply_fast_forward_tests {
             std::fs::read_to_string(child_dir.join("transactions.csv")).unwrap(),
             "uncommitted-aws-row-in-progress",
             "the uncommitted local content must land in the commit byte for byte"
+        );
+    }
+
+    /// Review round 4, Important-1: an untracked stray file (the kind macOS
+    /// or an editor drops into a data directory) sitting alongside a
+    /// legitimate uncommitted AWS write must NOT be swept into the unblock
+    /// commit — only the files this app owns (`FILES_THIS_APP_OWNS`) may be
+    /// staged. `add_all(["*"])` would have picked this up and pushed it to
+    /// the other machine permanently.
+    #[test]
+    fn an_untracked_stray_file_is_not_included_in_the_unblock_commit() {
+        let (mut app, child_id, _temp) = app_with_git_backed_child();
+        let child_dir = app
+            .backend()
+            .csv_connection
+            .child_dir(&shared::ChildId::from(child_id.as_str()))
+            .unwrap();
+        let repo = Repository::open(&child_dir).unwrap();
+        let ours_oid = repo.head().unwrap().peel_to_commit().unwrap().id();
+        let ours_commit = repo.find_commit(ours_oid).unwrap();
+
+        let ahead_oid = commit_with_files(
+            &repo,
+            "peer advanced",
+            &[&ours_commit],
+            &[(
+                "transactions.csv",
+                "id,child_id,date,description,amount,balance,type\nin-peer-a,x,2026-01-02T00:00:00+00:00,Peer,5.00,5.00,allowance\n",
+            )],
+            1_700_000_500,
+        );
+
+        // The legitimate uncommitted AWS write that actually blocks the
+        // fast-forward...
+        std::fs::write(child_dir.join("transactions.csv"), "uncommitted-aws-row").unwrap();
+        // ...alongside a stray file this app never wrote and does not own.
+        std::fs::write(child_dir.join(".DS_Store"), b"not this app's business").unwrap();
+
+        let outcome = app.apply_fast_forward(&child_id, &ahead_oid.to_string());
+        assert_eq!(outcome, ApplyFastForwardOutcome::CommittedLocalChangesToUnblock);
+
+        let repo_final = Repository::open(&child_dir).unwrap();
+        let new_head = repo_final.head().unwrap().peel_to_commit().unwrap();
+        let tree = new_head.tree().unwrap();
+        assert!(
+            tree.get_path(std::path::Path::new(".DS_Store")).is_err(),
+            ".DS_Store must NOT be present in the unblock commit's tree"
+        );
+        // The file itself is untouched on disk — still untracked, not
+        // deleted, not modified — this is purely a staging exclusion.
+        assert_eq!(
+            std::fs::read(child_dir.join(".DS_Store")).unwrap(),
+            b"not this app's business"
+        );
+
+        // The legitimate content still landed correctly.
+        let entry = tree.get_path(std::path::Path::new("transactions.csv")).unwrap();
+        let blob = repo_final.find_blob(entry.id()).unwrap();
+        assert_eq!(blob.content(), b"uncommitted-aws-row");
+    }
+
+    /// Review round 4, Minor-3 + Important-2, combined: a checkout conflict
+    /// caused ENTIRELY by a file this app does not own (`notes.txt`, never
+    /// in `FILES_THIS_APP_OWNS`) leaves nothing for
+    /// `commit_dirty_tree_to_unblock_fast_forward` to legitimately stage —
+    /// every owned file is already byte-identical to HEAD. This must not
+    /// produce a content-free commit (Minor-3's `commit_if_changed` guard),
+    /// and the resulting failure must be surfaced durably (Important-2's
+    /// `SyncFailureNotice`), not just written to `sync.status` where it
+    /// would be silently clobbered by the very next `StatusChanged(Idle)`.
+    #[test]
+    fn a_conflict_outside_owned_files_is_not_committed_empty_and_is_surfaced_durably() {
+        let (mut app, child_id, _temp) = app_with_git_backed_child();
+        let child_dir = app
+            .backend()
+            .csv_connection
+            .child_dir(&shared::ChildId::from(child_id.as_str()))
+            .unwrap();
+        let repo = Repository::open(&child_dir).unwrap();
+        let ours_oid = repo.head().unwrap().peel_to_commit().unwrap().id();
+        let ours_commit = repo.find_commit(ours_oid).unwrap();
+
+        // Preserve transactions.csv's real (randomly-id'd) content so the
+        // "ahead" commit's copy is byte-identical to what is already on
+        // disk and in HEAD — nothing about it is actually changing.
+        let unchanged_transactions =
+            std::fs::read_to_string(child_dir.join("transactions.csv")).unwrap();
+
+        let ahead_oid = commit_with_files(
+            &repo,
+            "peer advanced",
+            &[&ours_commit],
+            &[
+                ("transactions.csv", &unchanged_transactions),
+                ("notes.txt", "peer's notes"),
+            ],
+            1_700_000_500,
+        );
+
+        // Dirty ONLY a file this app does not own — an untracked path that
+        // collides with what the target tree would introduce at
+        // notes.txt. transactions.csv is left completely untouched.
+        std::fs::write(child_dir.join("notes.txt"), "local notes, different from the peer's").unwrap();
+
+        let outcome = app.apply_fast_forward(&child_id, &ahead_oid.to_string());
+        assert_eq!(
+            outcome,
+            ApplyFastForwardOutcome::Failed,
+            "a conflict with nothing legitimately stage-able must fail cleanly, not fabricate an \
+             empty commit"
+        );
+
+        // No commit was created: HEAD must be exactly where it was.
+        let repo_final = Repository::open(&child_dir).unwrap();
+        assert_eq!(
+            repo_final.head().unwrap().peel_to_commit().unwrap().id(),
+            ours_oid,
+            "HEAD must not have moved — nothing was legitimately committable"
+        );
+
+        // Surfaced durably, not just via sync.status (which would be
+        // clobbered by the very next StatusChanged(Idle) in production).
+        assert!(
+            app.sync.sync_failures.iter().any(|n| n.child_id == child_id),
+            "a genuine, unresolved checkout failure must be recorded as a durable notice"
         );
     }
 

@@ -185,6 +185,59 @@ impl GitManager {
         Ok(commit_id.to_string())
     }
 
+    /// Same as [`Self::commit`], but returns `Ok(None)` instead of creating
+    /// a commit when the currently-staged tree is byte-identical to HEAD's
+    /// tree (i.e. staging produced no actual change).
+    ///
+    /// Review round 4, Minor-3: `commit` itself has no such guard, and
+    /// every EXISTING caller already avoids calling it when there is
+    /// nothing to commit (`commit_file_change` checks
+    /// `has_uncommitted_changes` first) — so `commit`'s contract and every
+    /// caller/test that relies on it staying `Result<String>` are left
+    /// untouched here. This exists for callers that stage a specific,
+    /// narrow set of files rather than checking status first (e.g.
+    /// `apply_fast_forward`'s unblock path in `app_coordinator.rs`, which
+    /// stages only the files this app owns — see Important-1 in the same
+    /// review round — and so can legitimately end up with nothing new
+    /// staged, e.g. if the conflicting content was in a file this app does
+    /// not track). Without this guard, that caller would otherwise create
+    /// a content-free commit on every single peer advance it is ever
+    /// invoked for.
+    pub fn commit_if_changed<P: AsRef<Path>>(&self, repo_path: P, message: &str) -> Result<Option<String>> {
+        let repo_path = repo_path.as_ref();
+        let repo = Repository::open(repo_path)?;
+        let signature = self.signature()?;
+
+        let mut index = repo.index()?;
+        let tree_id = index.write_tree()?;
+
+        let parent_commit = match repo.head() {
+            Ok(head) => Some(head.peel_to_commit()?),
+            Err(_) => None,
+        };
+
+        if let Some(parent) = &parent_commit {
+            if parent.tree_id() == tree_id {
+                debug!(
+                    "commit_if_changed: staged tree {} is identical to HEAD's tree in {:?} — \
+                     nothing to commit",
+                    tree_id, repo_path
+                );
+                return Ok(None);
+            }
+        }
+
+        let tree = repo.find_tree(tree_id)?;
+        let commit_id = match &parent_commit {
+            Some(parent) => {
+                repo.commit(Some("HEAD"), &signature, &signature, message, &tree, &[parent])?
+            }
+            None => repo.commit(Some("HEAD"), &signature, &signature, message, &tree, &[])?,
+        };
+
+        Ok(Some(commit_id.to_string()))
+    }
+
     /// Create a merge commit (or an ordinary commit, when given a single
     /// parent) from the current index, using the injected clock for both
     /// author and committer.
@@ -557,6 +610,44 @@ mod tests {
         git_manager.add_file(temp_dir.path(), "test.txt").unwrap();
         let commit_id = git_manager.commit(temp_dir.path(), "Initial commit").unwrap();
         assert!(!commit_id.is_empty());
+    }
+
+    #[test]
+    fn commit_if_changed_creates_a_commit_when_the_tree_actually_differs() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let gm = GitManager::new();
+        gm.init_repo(temp_dir.path()).unwrap();
+        std::fs::write(temp_dir.path().join("test.txt"), "hello").unwrap();
+        gm.add_file(temp_dir.path(), "test.txt").unwrap();
+
+        let result = gm.commit_if_changed(temp_dir.path(), "initial").unwrap();
+        assert!(result.is_some(), "a real content change must produce a commit");
+    }
+
+    /// Review round 4, Minor-3: staging nothing new (or re-staging content
+    /// already matching HEAD) must not produce a content-free commit.
+    #[test]
+    fn commit_if_changed_returns_none_when_nothing_actually_changed() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let gm = GitManager::new();
+        gm.init_repo(temp_dir.path()).unwrap();
+        std::fs::write(temp_dir.path().join("test.txt"), "hello").unwrap();
+        gm.add_file(temp_dir.path(), "test.txt").unwrap();
+        let first = gm.commit_if_changed(temp_dir.path(), "initial").unwrap();
+        assert!(first.is_some(), "precondition: the first commit must have been created");
+
+        // Nothing on disk changed since that commit; re-staging the same
+        // file re-adds byte-identical content to the index.
+        gm.add_file(temp_dir.path(), "test.txt").unwrap();
+        let second = gm.commit_if_changed(temp_dir.path(), "no-op").unwrap();
+        assert!(second.is_none(), "staging identical content must not create an empty commit");
+
+        // HEAD must not have moved.
+        let repo = git2::Repository::open(temp_dir.path()).unwrap();
+        assert_eq!(
+            repo.head().unwrap().peel_to_commit().unwrap().id().to_string(),
+            first.unwrap()
+        );
     }
 
     /// Creates a commit with an empty tree directly via the object database,
