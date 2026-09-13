@@ -739,15 +739,22 @@ mod tests {
         }
     }
 
-    /// Read every file directly inside `env.old_child_dir()`, sorted by
-    /// name, as raw bytes — a content-level pin, not merely an existence
-    /// check. A bug that truncated or rewrote a file in place would pass an
-    /// `.exists()` check but must fail this one.
+    /// Read every plain FILE directly inside `env.old_child_dir()`, sorted
+    /// by name, as raw bytes — a content-level pin, not merely an
+    /// existence check. A bug that truncated or rewrote a file in place
+    /// would pass an `.exists()` check but must fail this one.
+    ///
+    /// Skips directories rather than `fs::read`ing (and panicking on) them.
+    /// This fixture has no subdirectory today, but the REAL folder this
+    /// migration reads from does — it has a `.git` — so a helper that
+    /// blows up the moment one appears is a trap for whoever writes the
+    /// next test against a more realistic fixture.
     fn snapshot_old_dir(env: &TestEnvironment) -> Vec<(String, Vec<u8>)> {
         let dir = env.old_child_dir();
         let mut names: Vec<String> = fs::read_dir(&dir)
             .unwrap()
             .filter_map(|e| e.ok())
+            .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
             .map(|e| e.file_name().to_string_lossy().to_string())
             .collect();
         names.sort();
@@ -1067,7 +1074,7 @@ mod tests {
     /// written and pushed one more transaction after migrating (commit 2:
     /// `tx-a2`). Returns the branch name actually used, so the caller does
     /// not have to guess "main" vs "master".
-    fn seed_bare_with_machine_as_history(bare_path: &Path) {
+    fn seed_bare_with_machine_as_history(bare_path: &Path) -> String {
         let work = TempDir::new().unwrap();
         let repo = git2::Repository::init(work.path()).unwrap();
         let git = GitManager::new();
@@ -1107,6 +1114,36 @@ mod tests {
         remote
             .push(&[format!("refs/heads/{branch}:refs/heads/{branch}")], None)
             .unwrap();
+        branch
+    }
+
+    /// Read `path`'s content out of `repo_dir`'s HEAD commit tree — the
+    /// COMMITTED content, not the working-tree file. Round-2 review,
+    /// Minor-1: asserting only the working-tree file would still pass if a
+    /// bug staged nothing at all (`Push` on an unchanged branch is a
+    /// harmless no-op), which is exactly the failure mode the adopt test
+    /// exists to catch.
+    fn read_committed_file(repo_dir: &Path, path: &str) -> String {
+        let repo = git2::Repository::open(repo_dir).unwrap();
+        let commit = repo.head().unwrap().peel_to_commit().unwrap();
+        let tree = commit.tree().unwrap();
+        let entry = tree.get_path(Path::new(path)).unwrap();
+        let blob = repo.find_blob(entry.id()).unwrap();
+        String::from_utf8(blob.content().to_vec()).unwrap()
+    }
+
+    /// Same, but reads out of a BARE repo's named branch tip — proving the
+    /// content actually reached the remote (was pushed), not merely
+    /// committed in the local working repo. `branch` is the shorthand name
+    /// (e.g. `"main"`).
+    fn read_pushed_file(bare_dir: &Path, branch: &str, path: &str) -> String {
+        let repo = git2::Repository::open_bare(bare_dir).unwrap();
+        let reference = repo.find_reference(&format!("refs/heads/{branch}")).unwrap();
+        let commit = reference.peel_to_commit().unwrap();
+        let tree = commit.tree().unwrap();
+        let entry = tree.get_path(Path::new(path)).unwrap();
+        let blob = repo.find_blob(entry.id()).unwrap();
+        String::from_utf8(blob.content().to_vec()).unwrap()
     }
 
     #[test]
@@ -1127,7 +1164,7 @@ mod tests {
 
         let bare_dir = TempDir::new().unwrap();
         git2::Repository::init_bare(bare_dir.path()).unwrap();
-        seed_bare_with_machine_as_history(bare_dir.path());
+        let branch = seed_bare_with_machine_as_history(bare_dir.path());
 
         let script = fake_lgs_script(
             env.scratch_dir(),
@@ -1146,17 +1183,32 @@ mod tests {
         assert!(!report.failed(), "expected success, got: {:?}", report.error);
 
         // Both the row A wrote after migrating, and the row only B has,
-        // survive — nothing was dropped by the adoption.
-        let migrated = fs::read_to_string(new_dir.join("transactions.csv")).unwrap();
-        assert!(migrated.contains("tx-a1"), "got: {migrated}");
-        assert!(migrated.contains("tx-a2"), "A's post-migration row must survive adoption: {migrated}");
-        assert!(migrated.contains("tx-b1"), "B's own row must survive adoption: {migrated}");
+        // survive — nothing was dropped by the adoption. Asserted against
+        // the COMMITTED tree (`HEAD:transactions.csv`), not the
+        // working-tree file: a bug that staged nothing would leave `Push`
+        // a harmless no-op on an unchanged branch, and a working-tree-only
+        // assertion would not catch that. Also asserted against the BARE
+        // repo's own branch tip, proving the rows actually reached the
+        // remote — "pushed" is the property that makes them durable on
+        // the other machine, which is the entire point of this test.
+        let committed = read_committed_file(&new_dir, "transactions.csv");
+        assert!(committed.contains("tx-a1"), "got: {committed}");
+        assert!(committed.contains("tx-a2"), "A's post-migration row must survive adoption: {committed}");
+        assert!(committed.contains("tx-b1"), "B's own row must survive adoption: {committed}");
+
+        let pushed = read_pushed_file(bare_dir.path(), &branch, "transactions.csv");
+        assert!(pushed.contains("tx-a1"), "got: {pushed}");
+        assert!(pushed.contains("tx-a2"), "A's post-migration row must reach the remote: {pushed}");
+        assert!(pushed.contains("tx-b1"), "B's own row must reach the remote: {pushed}");
 
         // goals.csv differed between the restored history and B's stale
-        // copy; the restored (already-synced) version was kept, and the
+        // copy; the restored (already-synced) version was kept — checked
+        // committed AND pushed, same reasoning as above — and the
         // discrepancy was surfaced rather than silently resolved.
-        let restored_goals = fs::read_to_string(new_dir.join("goals.csv")).unwrap();
-        assert!(!restored_goals.contains("Bike"), "B's stale goals.csv must not silently win: {restored_goals}");
+        let committed_goals = read_committed_file(&new_dir, "goals.csv");
+        assert!(!committed_goals.contains("Bike"), "B's stale goals.csv must not silently win: {committed_goals}");
+        let pushed_goals = read_pushed_file(bare_dir.path(), &branch, "goals.csv");
+        assert!(!pushed_goals.contains("Bike"), "B's stale goals.csv must not reach the remote: {pushed_goals}");
         assert!(report.discrepancies.contains(&"goals.csv".to_string()), "got: {:?}", report.discrepancies);
         assert!(
             report
