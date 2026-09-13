@@ -1013,6 +1013,19 @@ impl AllowanceTrackerApp {
             ),
         }
 
+        // Write the crash-recovery marker BEFORE the first working-tree byte
+        // changes below — its presence is what lets a future `apply_merge`
+        // call (via `recover_if_dirty`, above) tell "we crashed mid-merge"
+        // apart from the AWS transport's ordinary uncommitted writes. Not
+        // fatal if this fails: see `write_merge_marker`'s doc comment for
+        // why losing it only costs the fast recovery path, not correctness.
+        if let Err(e) = crate::backend::sync::child_sync::write_merge_marker(&repo, ours_str, theirs_str) {
+            log::warn!(
+                "Could not write the crash-recovery marker for child {child_id} before applying \
+                 this merge (continuing anyway): {e}"
+            );
+        }
+
         let csv = allowance_core::codec::render_transactions(&rows);
         if let Err(e) = std::fs::write(child_dir.join("transactions.csv"), csv) {
             log::error!("Failed to write merged transactions.csv for child {child_id}: {e}");
@@ -1056,6 +1069,18 @@ impl AllowanceTrackerApp {
                 return ApplyMergeOutcome::Failed;
             }
         };
+
+        // The merge commit exists now — the crash window the marker guards
+        // is over. Clear it so a future `recover_if_dirty` never mistakes
+        // some LATER, unrelated dirty state (e.g. the AWS transport's
+        // ordinary uncommitted writes) for a crash that already happened.
+        if let Err(e) = crate::backend::sync::child_sync::clear_merge_marker(&repo) {
+            log::warn!(
+                "Could not clear the crash-recovery marker for child {child_id} after applying \
+                 this merge (harmless — the next apply's recover_if_dirty will clean it up if \
+                 nothing is actually dirty): {e}"
+            );
+        }
 
         if let Err(e) = push_with_retry(&repo, &branch, 3) {
             // No retry queue is needed here: the merge commit is already on
@@ -1665,8 +1690,21 @@ mod apply_merge_tests {
         );
 
         // Simulate a crash left over from an earlier, unrelated merge apply:
-        // `transactions.csv` was overwritten but the commit that should have
-        // followed never happened. HEAD is untouched (still `ours_oid`).
+        // the crash-recovery marker was written (as the real `apply_merge`
+        // does, immediately before its first working-tree write),
+        // `transactions.csv` was overwritten, but the commit that should
+        // have followed never happened. HEAD is untouched (still
+        // `ours_oid`). Without the marker, `recover_if_dirty` would (post
+        // Task 17 Important-3) correctly leave this dirty tree alone rather
+        // than assume it is a crash — see
+        // `a_dirty_tree_with_no_marker_is_left_untouched` in `child_sync.rs`
+        // for that half of the behavior.
+        crate::backend::sync::child_sync::write_merge_marker(
+            &repo,
+            &ours_oid.to_string(),
+            "some-prior-theirs-oid",
+        )
+        .unwrap();
         std::fs::write(child_dir.join("transactions.csv"), "garbage-from-a-crash").unwrap();
         assert_eq!(
             repo.head().unwrap().peel_to_commit().unwrap().id(),
@@ -1695,6 +1733,64 @@ mod apply_merge_tests {
             on_disk,
             allowance_core::codec::render_transactions(&rows),
             "the crash's garbage must be gone, replaced by this call's own merged content"
+        );
+        assert!(
+            !repo.path().join(crate::backend::sync::child_sync::MERGE_IN_PROGRESS_MARKER).exists(),
+            "the crash-recovery marker must be cleared once this merge's own commit is created"
+        );
+    }
+
+    /// Task 17 Important-3: an ordinary dirty working tree (the AWS
+    /// transport's `upsert_transaction_from_sync` writes `transactions.csv`
+    /// WITHOUT committing — see `apply_remote_entity`'s doc comment) is a
+    /// normal steady state here, NOT a crash. With no crash-recovery marker
+    /// present, `recover_if_dirty` inside `apply_merge` must leave it alone
+    /// rather than hard-reset it away — the bug this finding closed would
+    /// have silently destroyed that legitimate uncommitted content.
+    #[test]
+    fn an_ordinary_dirty_tree_with_no_crash_marker_is_not_reset_before_applying_a_merge() {
+        let (mut app, child_id, _temp) = app_with_git_backed_child();
+        let child_dir = app
+            .backend()
+            .csv_connection
+            .child_dir(&shared::ChildId::from(child_id.as_str()))
+            .unwrap();
+        let repo = Repository::open(&child_dir).unwrap();
+        let ours_oid = repo.head().unwrap().peel_to_commit().unwrap().id();
+        let ours_commit = repo.find_commit(ours_oid).unwrap();
+        let theirs_oid = commit_with_files(
+            &repo,
+            "their edit",
+            &[&ours_commit],
+            &[("transactions.csv", "id,child_id,date,description,amount,balance,type\n")],
+            1_700_000_500,
+        );
+
+        // No marker written — this is NOT a crash, just the AWS transport's
+        // ordinary uncommitted write.
+        assert!(
+            !repo.path().join(crate::backend::sync::child_sync::MERGE_IN_PROGRESS_MARKER).exists(),
+            "precondition: no crash-recovery marker present"
+        );
+        std::fs::write(child_dir.join("transactions.csv"), "uncommitted-aws-row").unwrap();
+
+        // `apply_merge` still proceeds and overwrites transactions.csv with
+        // its own merged content, same as always — the point of this test
+        // is that `recover_if_dirty` did not hard-reset it out from under
+        // this call BEFORE that write (which would have been an invisible
+        // no-op here, but a real data-loss bug the moment some OTHER
+        // in-flight write depended on that content surviving until this
+        // point).
+        let rows = vec![a_row(&child_id, "in-1-a", "Merged Allowance", 1000)];
+        let outcome =
+            app.apply_merge(&child_id, rows.clone(), &(ours_oid.to_string(), theirs_oid.to_string()), &[]);
+        assert_eq!(outcome, ApplyMergeOutcome::Applied);
+
+        let on_disk = std::fs::read_to_string(child_dir.join("transactions.csv")).unwrap();
+        assert_eq!(
+            on_disk,
+            allowance_core::codec::render_transactions(&rows),
+            "apply_merge's own write must be what lands here, not a discard-then-nothing"
         );
     }
 
