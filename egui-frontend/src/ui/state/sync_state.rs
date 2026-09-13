@@ -14,6 +14,7 @@
 
 use crate::backend::domain::sync_manager::{GoalsDivergedNotice, SyncMessage, SyncStatus};
 use shared::sync::SyncConflict;
+use std::collections::HashMap;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
@@ -68,13 +69,30 @@ pub struct SyncUiState {
     pub goals_diverged: Vec<GoalsDivergedNotice>,
 
     /// When a `SyncCommand::PollNow` was last sent in response to a
-    /// stale-head merge refusal. `None` means either none has been sent
-    /// yet, or the counter was just reset by a successful apply.
-    last_stale_head_pollnow_at: Option<Instant>,
+    /// stale-head merge refusal, keyed by child id. Missing means either
+    /// none has been sent yet for that child, or its entry was just reset by
+    /// a successful apply for that same child.
+    ///
+    /// Per-child, not global: once `run_child_sync_cycles`
+    /// (`sync_thread.rs`) loops over every registered child on each tick
+    /// (Task 17), a GLOBAL debounce/cap would let one child's noise (rapid
+    /// local edits racing its own merges) suppress the immediate re-poll a
+    /// completely unrelated child legitimately needed — `PollNow` re-runs
+    /// the cycle for every child, so that suppressed re-poll is not about
+    /// the noisy child at all, it collaterally delays a different child's
+    /// otherwise-uncapped refusal to the next 30s timer tick. Keying by
+    /// child id keeps the guard doing what it was built for (stop ONE
+    /// child's fast-moving HEAD from ping-ponging PollNow) without letting
+    /// that child's streak spend down a budget that belongs to every other
+    /// child too.
+    last_stale_head_pollnow_at: HashMap<String, Instant>,
 
-    /// Consecutive stale-head refusals since the last successful apply.
-    /// Reset to 0 by [`SyncUiState::note_applied`].
-    consecutive_stale_head_refusals: u32,
+    /// Consecutive stale-head refusals since the last successful apply, per
+    /// child. An entry is reset to absent (equivalent to 0) by
+    /// [`SyncUiState::note_applied`] for that same child id only — see the
+    /// doc comment on `last_stale_head_pollnow_at` for why this is keyed
+    /// per-child rather than global.
+    consecutive_stale_head_refusals: HashMap<String, u32>,
 
     /// Receiver for messages from the background sync thread
     pub message_rx: Option<mpsc::Receiver<SyncMessage>>,
@@ -87,8 +105,8 @@ impl SyncUiState {
             status: SyncStatus::Disabled,
             conflicts: Vec::new(),
             goals_diverged: Vec::new(),
-            last_stale_head_pollnow_at: None,
-            consecutive_stale_head_refusals: 0,
+            last_stale_head_pollnow_at: HashMap::new(),
+            consecutive_stale_head_refusals: HashMap::new(),
             message_rx: None,
         }
     }
@@ -99,8 +117,8 @@ impl SyncUiState {
             status: SyncStatus::Idle,
             conflicts: Vec::new(),
             goals_diverged: Vec::new(),
-            last_stale_head_pollnow_at: None,
-            consecutive_stale_head_refusals: 0,
+            last_stale_head_pollnow_at: HashMap::new(),
+            consecutive_stale_head_refusals: HashMap::new(),
             message_rx: Some(rx),
         }
     }
@@ -113,43 +131,51 @@ impl SyncUiState {
         self.goals_diverged.push(notice);
     }
 
-    /// Record one stale-head merge refusal at `now` and decide whether the
-    /// caller should send an immediate `SyncCommand::PollNow`. See
-    /// `STALE_HEAD_POLL_DEBOUNCE` and `STALE_HEAD_REFUSAL_LIMIT` for the
-    /// two guards. The consecutive-refusal count increments on every call
-    /// regardless of the returned action; only [`Self::note_applied`]
+    /// Record one stale-head merge refusal for `child_id` at `now` and
+    /// decide whether the caller should send an immediate
+    /// `SyncCommand::PollNow`. See `STALE_HEAD_POLL_DEBOUNCE` and
+    /// `STALE_HEAD_REFUSAL_LIMIT` for the two guards, and the doc comment on
+    /// `consecutive_stale_head_refusals` for why this is keyed by
+    /// `child_id` rather than tracked once globally. The consecutive-refusal
+    /// count for this child increments on every call regardless of the
+    /// returned action; only [`Self::note_applied`] for the same child
     /// resets it.
-    pub fn note_stale_head_refusal(&mut self, now: Instant) -> StaleHeadPollAction {
-        self.consecutive_stale_head_refusals += 1;
+    pub fn note_stale_head_refusal(&mut self, child_id: &str, now: Instant) -> StaleHeadPollAction {
+        let count = self.consecutive_stale_head_refusals.entry(child_id.to_string()).or_insert(0);
+        *count += 1;
+        let count = *count;
 
         // The cap takes priority over debouncing: once tripped, stay
         // silent even if the debounce window has independently elapsed.
-        if self.consecutive_stale_head_refusals > STALE_HEAD_REFUSAL_LIMIT {
+        if count > STALE_HEAD_REFUSAL_LIMIT {
             return StaleHeadPollAction::Suppressed;
         }
-        if self.consecutive_stale_head_refusals == STALE_HEAD_REFUSAL_LIMIT {
+        if count == STALE_HEAD_REFUSAL_LIMIT {
             return StaleHeadPollAction::LimitReached;
         }
 
-        let should_send = match self.last_stale_head_pollnow_at {
+        let should_send = match self.last_stale_head_pollnow_at.get(child_id) {
             None => true,
-            Some(last) => now.duration_since(last) >= STALE_HEAD_POLL_DEBOUNCE,
+            Some(last) => now.duration_since(*last) >= STALE_HEAD_POLL_DEBOUNCE,
         };
         if should_send {
-            self.last_stale_head_pollnow_at = Some(now);
+            self.last_stale_head_pollnow_at.insert(child_id.to_string(), now);
             StaleHeadPollAction::Send
         } else {
             StaleHeadPollAction::Debounced
         }
     }
 
-    /// A merge was successfully applied — the stale-head streak (if any)
-    /// is over. Resets both the debounce timestamp and the consecutive
-    /// counter, so a fresh bout of stale-head races starts from a clean
-    /// state rather than staying suppressed forever.
-    pub fn note_applied(&mut self) {
-        self.last_stale_head_pollnow_at = None;
-        self.consecutive_stale_head_refusals = 0;
+    /// A merge was successfully applied for `child_id` — that child's
+    /// stale-head streak (if any) is over. Resets both its debounce
+    /// timestamp and its consecutive counter, so a fresh bout of stale-head
+    /// races for THIS child starts from a clean state rather than staying
+    /// suppressed forever. Other children's streaks are untouched — see the
+    /// doc comment on `consecutive_stale_head_refusals` for why this must
+    /// not reset (or be reset by) any other child's state.
+    pub fn note_applied(&mut self, child_id: &str) {
+        self.last_stale_head_pollnow_at.remove(child_id);
+        self.consecutive_stale_head_refusals.remove(child_id);
     }
 
     /// Try to receive the next sync message from the background thread.
@@ -182,10 +208,10 @@ mod stale_head_debounce_tests {
     fn a_second_refusal_within_the_debounce_window_does_not_send() {
         let mut state = SyncUiState::new();
         let t0 = Instant::now();
-        assert_eq!(state.note_stale_head_refusal(t0), StaleHeadPollAction::Send);
+        assert_eq!(state.note_stale_head_refusal("child1", t0), StaleHeadPollAction::Send);
         let t1 = t0 + Duration::from_millis(100);
         assert_eq!(
-            state.note_stale_head_refusal(t1),
+            state.note_stale_head_refusal("child1", t1),
             StaleHeadPollAction::Debounced,
             "a refusal 100ms after the last send must be debounced, not re-sent"
         );
@@ -195,10 +221,10 @@ mod stale_head_debounce_tests {
     fn a_refusal_after_the_debounce_interval_sends_again() {
         let mut state = SyncUiState::new();
         let t0 = Instant::now();
-        assert_eq!(state.note_stale_head_refusal(t0), StaleHeadPollAction::Send);
+        assert_eq!(state.note_stale_head_refusal("child1", t0), StaleHeadPollAction::Send);
         let t1 = t0 + Duration::from_millis(600);
         assert_eq!(
-            state.note_stale_head_refusal(t1),
+            state.note_stale_head_refusal("child1", t1),
             StaleHeadPollAction::Send,
             "600ms is past the 500ms debounce window, so this refusal must send again"
         );
@@ -211,7 +237,7 @@ mod stale_head_debounce_tests {
         // debounce timing once the consecutive count reaches the limit.
         let t = Instant::now();
         let actions: Vec<StaleHeadPollAction> =
-            (0..6).map(|_| state.note_stale_head_refusal(t)).collect();
+            (0..6).map(|_| state.note_stale_head_refusal("child1", t)).collect();
 
         assert_eq!(actions[4], StaleHeadPollAction::LimitReached, "the 5th refusal must trip the limit");
         assert_eq!(
@@ -235,20 +261,67 @@ mod stale_head_debounce_tests {
         let mut state = SyncUiState::new();
         let t = Instant::now();
         for _ in 0..6 {
-            state.note_stale_head_refusal(t);
+            state.note_stale_head_refusal("child1", t);
         }
         assert_eq!(
-            state.note_stale_head_refusal(t),
+            state.note_stale_head_refusal("child1", t),
             StaleHeadPollAction::Suppressed,
             "precondition: the streak must be capped before the reset"
         );
 
-        state.note_applied();
+        state.note_applied("child1");
 
         assert_eq!(
-            state.note_stale_head_refusal(t),
+            state.note_stale_head_refusal("child1", t),
             StaleHeadPollAction::Send,
             "after a successful apply, the very next refusal must send again, not stay suppressed"
+        );
+    }
+
+    /// Task 17, Part C: once `run_child_sync_cycles` loops over every
+    /// registered child on a tick, the debounce/cap MUST be per-child — a
+    /// noisy child tripping the cap must not suppress or delay a
+    /// completely different child's own, independent, uncapped refusal.
+    #[test]
+    fn one_childs_capped_streak_does_not_suppress_a_different_childs_refusal() {
+        let mut state = SyncUiState::new();
+        let t = Instant::now();
+
+        // Child "noisy" races its own merges hard enough to blow through
+        // the cap.
+        for _ in 0..6 {
+            state.note_stale_head_refusal("noisy", t);
+        }
+        assert_eq!(
+            state.note_stale_head_refusal("noisy", t),
+            StaleHeadPollAction::Suppressed,
+            "precondition: the noisy child's own streak must be capped"
+        );
+
+        // Child "quiet" has never refused before — a global counter would
+        // already be past the cap at this point and would wrongly suppress
+        // this too.
+        assert_eq!(
+            state.note_stale_head_refusal("quiet", t),
+            StaleHeadPollAction::Send,
+            "an unrelated child's first refusal must send, unaffected by another child's capped streak"
+        );
+    }
+
+    /// The debounce timestamp is the other half of the same guard: a recent
+    /// `PollNow` sent for one child must not debounce a different child's
+    /// refusal that happens moments later.
+    #[test]
+    fn one_childs_recent_pollnow_does_not_debounce_a_different_childs_refusal() {
+        let mut state = SyncUiState::new();
+        let t0 = Instant::now();
+        assert_eq!(state.note_stale_head_refusal("a", t0), StaleHeadPollAction::Send);
+
+        let t1 = t0 + Duration::from_millis(50);
+        assert_eq!(
+            state.note_stale_head_refusal("b", t1),
+            StaleHeadPollAction::Send,
+            "child b's first-ever refusal must send even though child a just sent 50ms ago"
         );
     }
 }

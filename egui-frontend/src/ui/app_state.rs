@@ -210,6 +210,16 @@ impl AllowanceTrackerApp {
             let wake_ui: crate::backend::domain::WakeUi =
                 std::sync::Arc::new(move || ctx_for_wake.request_repaint());
 
+            // `child_sync: None` — the lgs (desktop-to-desktop) transport is
+            // not wired up here yet. Building the `ChildSyncEngine` this
+            // thread would need requires resolving a live `LgsClient`
+            // (bundled-binary path, daemon adopt-or-install decision — see
+            // `backend/sync/bootstrap.rs`) and deciding per-registration
+            // which children have an lgs project at all; none of that
+            // exists in this startup path yet (it belongs to the plan's
+            // Phase 4 "User-facing" tasks — migration/onboarding). Passing
+            // `None` here keeps this call site's behavior identical to
+            // before Task 17: only the AWS-transport poll below runs.
             let handle = SyncThreadHandle::spawn(
                 remote,
                 rx,
@@ -219,6 +229,7 @@ impl AllowanceTrackerApp {
                 sync_state.clone(),
                 retry_queue.events.clone(),
                 data_dir.clone(),
+                None,
             );
 
             (SyncUiState::with_receiver(message_rx), Some(cmd_tx), Some(handle))

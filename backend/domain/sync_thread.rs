@@ -1,6 +1,7 @@
 use shared::sync::*;
 use crate::backend::storage::remote::RemoteStorage;
 use crate::backend::sync::bootstrap::DaemonOwnership;
+use crate::backend::sync::{ChildSyncEngine, CycleOutcome};
 use super::sync_manager::{SyncEngine, SyncMessage, SyncStatus, SyncCommand, UiMessenger, WakeUi};
 use super::sync_persistence::{self, SyncState, RetryQueue};
 use std::path::PathBuf;
@@ -21,6 +22,14 @@ impl SyncThreadHandle {
     /// - `initial_watermarks`: per-child watermarks loaded from persisted state
     /// - `initial_retry_queue`: events that failed previously and need retrying
     /// - `data_dir`: directory where sync_state.yaml and retry queue are written
+    /// - `child_sync`: the lgs (desktop-to-desktop) transport, when configured.
+    ///   `None` disables it entirely — this thread then behaves exactly as it
+    ///   did before Task 17, running only the AWS-transport poll below. When
+    ///   `Some`, [`run_child_sync_cycles`] runs a cycle per registered child
+    ///   on the same triggers `poll_remote` already runs on (see the call
+    ///   sites in [`sync_loop`]): the first iteration after spawn, the 30s
+    ///   timer, and `PollNow` (window focus).
+    #[allow(clippy::too_many_arguments)]
     pub fn spawn(
         remote: Arc<dyn RemoteStorage>,
         event_rx: mpsc::Receiver<SyncEvent>,
@@ -30,6 +39,7 @@ impl SyncThreadHandle {
         initial_sync_state: SyncState,
         initial_retry_queue: Vec<SyncEvent>,
         data_dir: PathBuf,
+        child_sync: Option<ChildSyncEngine>,
     ) -> Self {
         let shutdown = Arc::new(AtomicBool::new(false));
         let shutdown_flag = shutdown.clone();
@@ -64,6 +74,7 @@ impl SyncThreadHandle {
                     sync_remote_url,
                     daemon_ownership,
                     shutdown_flag,
+                    child_sync,
                 );
             })
             .expect("Failed to spawn sync thread");
@@ -102,6 +113,7 @@ fn sync_loop(
     sync_remote_url: Option<String>,
     daemon_ownership: DaemonOwnership,
     shutdown: Arc<AtomicBool>,
+    child_sync: Option<ChildSyncEngine>,
 ) {
     loop {
         if shutdown.load(Ordering::Relaxed) {
@@ -171,6 +183,7 @@ fn sync_loop(
         if should_poll {
             let _ = messenger.send(SyncMessage::StatusChanged(SyncStatus::Syncing));
             poll_remote(&remote, &mut engine, &messenger);
+            run_child_sync_cycles(&child_sync, &messenger);
             let _ = messenger.send(SyncMessage::StatusChanged(SyncStatus::Idle));
         }
 
@@ -216,6 +229,7 @@ fn sync_loop(
                     log::info!("SYNC: PollNow received in sleep loop — polling remote now");
                     let _ = messenger.send(SyncMessage::StatusChanged(SyncStatus::Syncing));
                     poll_remote(&remote, &mut engine, &messenger);
+                    run_child_sync_cycles(&child_sync, &messenger);
                     let _ = messenger.send(SyncMessage::StatusChanged(SyncStatus::Idle));
                     break 'sleep;
                 }
@@ -274,22 +288,119 @@ fn push_event(
     Ok(())
 }
 
+/// Ask the UI thread for the current list of registered child ids. The UI
+/// thread owns the registry (`sync_manager.rs:36-38`, "UI owns all repo
+/// I/O"), so both transports that need "which children exist right now" —
+/// the AWS-style `poll_remote` below and the lgs-style
+/// `run_child_sync_cycles` — go through this same request rather than each
+/// guessing independently.
+///
+/// `None` means the request timed out (UI thread busy or gone); callers
+/// decide their own fallback, since "no answer" means something different
+/// to each of them.
+fn get_child_ids(messenger: &UiMessenger) -> Option<Vec<String>> {
+    let (response_tx, response_rx) = mpsc::channel();
+    messenger.send(SyncMessage::GetChildIdsRequest { response_tx }).ok()?;
+    response_rx.recv_timeout(std::time::Duration::from_secs(5)).ok()
+}
+
+/// Run one lgs sync cycle ([`ChildSyncEngine::cycle`]) for every registered
+/// child. Called from [`sync_loop`] on the exact same triggers as the
+/// AWS-transport `poll_remote` (see the call sites there): the first
+/// iteration after spawn, the 30s timer, and `PollNow` (sent on window
+/// focus) — Task 17's brief for folding this in.
+///
+/// # Thread ownership
+///
+/// This function runs on the background sync thread and must never touch a
+/// child's working tree. [`ChildSyncEngine::cycle`] already enforces that on
+/// its own side (see its module doc) — it only fetches, reads git objects,
+/// and (for `Cycle::Ahead`) pushes. Every outcome that WOULD require writing
+/// a file is handed to the UI thread as a message instead:
+/// `CycleOutcome::Merged` becomes `SyncMessage::ApplyMerge`, which
+/// `app_coordinator.rs`'s `apply_merge` applies — the one place in this
+/// whole feature that writes `transactions.csv` and creates the merge
+/// commit.
+///
+/// # Failure isolation
+///
+/// Each child has its own repository and its own remote, so one child's
+/// failure (its lgs project not registered yet, a transient fetch error,
+/// the daemon being briefly unreachable) has no bearing on any other
+/// child's. A cycle that returns `Err` is logged and the loop moves on —
+/// never `?`, never `return`, never a panic that would take the rest of the
+/// tick's children down with it.
+fn run_child_sync_cycles(child_sync: &Option<ChildSyncEngine>, messenger: &UiMessenger) {
+    let Some(engine) = child_sync else { return };
+
+    let child_ids = match get_child_ids(messenger) {
+        Some(ids) => ids,
+        None => {
+            log::warn!("SYNC(lgs): GetChildIdsRequest timed out — skipping this child-sync tick");
+            return;
+        }
+    };
+
+    for child_id in &child_ids {
+        let id = shared::ChildId::from(child_id.as_str());
+        match engine.cycle(&id) {
+            Ok(CycleOutcome::UpToDate) | Ok(CycleOutcome::Ahead) => {
+                // `Ahead` already pushed inside `cycle` (fetch/push are both
+                // background-thread operations — see `Cycle::Ahead`'s doc
+                // comment in `child_sync.rs`). Nothing further to do on
+                // either thread.
+            }
+            Ok(CycleOutcome::FastForward { to }) => {
+                // KNOWN GAP: applying a plain fast-forward means checking
+                // out `to`, which is a working-tree write and therefore the
+                // UI thread's job under the same ownership rule as
+                // `ApplyMerge` — but no message or UI-thread handler for a
+                // fast-forward exists yet. Out of scope for Task 17 (whose
+                // brief covers crash recovery and bounded push retry; the
+                // scheduling loop is this task's own addition on top of
+                // that). Logged rather than silently dropped so the gap
+                // stays visible instead of accidentally missing.
+                log::warn!(
+                    "SYNC(lgs): child {child_id} could fast-forward to {to}, but no UI-thread \
+                     handler applies a plain fast-forward yet — skipping this tick (known gap, \
+                     see run_child_sync_cycles)"
+                );
+            }
+            Ok(CycleOutcome::Merged { rows, parents, decisions, .. }) => {
+                if let Err(e) = messenger.send(SyncMessage::ApplyMerge {
+                    child_id: child_id.clone(),
+                    rows,
+                    parents,
+                    decisions,
+                }) {
+                    log::warn!(
+                        "SYNC(lgs): failed to hand a computed merge for child {child_id} to the \
+                         UI thread (channel closed?): {e}"
+                    );
+                }
+            }
+            Err(e) => {
+                // Never abort the tick: the next child's repo and remote are
+                // entirely independent of this one's failure.
+                log::warn!("SYNC(lgs): cycle failed for child {child_id}: {e:#}");
+            }
+        }
+    }
+}
+
 /// Poll remote for new events for all known children and send them to the UI thread.
 fn poll_remote(
     remote: &Arc<dyn RemoteStorage>,
     engine: &mut SyncEngine,
     messenger: &UiMessenger,
 ) {
-    // Ask the UI thread for the current list of local child IDs. Deriving it
-    // from watermarks would be a bootstrap trap: a fresh install (or a blown-
-    // away sync_state) has no watermarks yet, so nothing would ever get
-    // polled. Fall back to watermark-derived IDs only if the UI thread fails
-    // to respond within the timeout.
-    let (response_tx, response_rx) = mpsc::channel();
-    let _ = messenger.send(SyncMessage::GetChildIdsRequest { response_tx });
-    let child_ids: Vec<String> = match response_rx.recv_timeout(std::time::Duration::from_secs(5)) {
-        Ok(ids) => ids,
-        Err(_) => {
+    // Deriving the child list from watermarks would be a bootstrap trap: a
+    // fresh install (or a blown-away sync_state) has no watermarks yet, so
+    // nothing would ever get polled. Fall back to watermark-derived IDs only
+    // if the UI thread fails to respond within the timeout.
+    let child_ids: Vec<String> = match get_child_ids(messenger) {
+        Some(ids) => ids,
+        None => {
             log::warn!("SYNC: GetChildIdsRequest timed out — falling back to watermark keys");
             engine.watermarks_snapshot().keys().cloned().collect()
         }
@@ -376,6 +487,7 @@ mod tests {
             SyncState::default(),
             vec![],
             data_dir.to_path_buf(),
+            None,
         )
     }
 
@@ -415,6 +527,7 @@ mod tests {
             SyncState::default(),
             vec![],
             dir.path().to_path_buf(),
+            None,
         );
 
         // Start a helper thread to simulate the UI: respond to ReadEntityRequest
@@ -496,6 +609,7 @@ mod tests {
             initial_state,
             vec![],
             dir.path().to_path_buf(),
+            None,
         );
 
         command_tx.send(SyncCommand::PollNow).unwrap();

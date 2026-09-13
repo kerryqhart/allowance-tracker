@@ -937,7 +937,7 @@ impl AllowanceTrackerApp {
                  {current_head} since this merge was computed (a local write raced the sync \
                  cycle). Discarding the stale merge — the local commit is untouched."
             );
-            match self.sync.note_stale_head_refusal(std::time::Instant::now()) {
+            match self.sync.note_stale_head_refusal(child_id, std::time::Instant::now()) {
                 StaleHeadPollAction::Send => match &self.sync_command_tx {
                     Some(tx) => {
                         if let Err(e) = tx.send(SyncCommand::PollNow) {
@@ -1072,10 +1072,12 @@ impl AllowanceTrackerApp {
             );
         }
 
-        // The stale-head streak (if any) is over — a fresh bout of races
-        // later starts its debounce and cap from a clean state rather than
-        // staying suppressed forever.
-        self.sync.note_applied();
+        // This child's stale-head streak (if any) is over — a fresh bout of
+        // races later starts its debounce and cap from a clean state rather
+        // than staying suppressed forever. Scoped to `child_id` only (see
+        // `SyncUiState`'s doc comments): another child's independent streak
+        // must not be reset by, or ever confused with, this one.
+        self.sync.note_applied(child_id);
 
         ApplyMergeOutcome::Applied
     }
