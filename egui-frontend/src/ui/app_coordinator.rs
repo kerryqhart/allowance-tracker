@@ -31,7 +31,7 @@ use crate::ui::components::styling::{setup_kid_friendly_style, draw_image_backgr
 use crate::backend::domain::{BalanceService, GoalsDivergedNotice, SyncCommand, SyncMessage, SyncStatus};
 use crate::backend::storage::GitManager;
 use crate::backend::sync::child_sync::{
-    current_branch, goals_diverged, push_with_retry, recover_if_dirty, Recovered,
+    current_branch, goals_diverged, push_with_retry, recover_if_dirty, working_tree_dirty, Recovered,
 };
 use crate::backend::sync::paths::FILES_THIS_APP_OWNS;
 use crate::ui::state::{
@@ -78,6 +78,19 @@ enum ApplyMergeOutcome {
     /// that moved HEAD; nothing was written or committed. The caller must
     /// re-run the sync cycle from the new HEAD to pick this up.
     StaleHead,
+    /// `transactions.csv` was dirty relative to HEAD when this merge was
+    /// about to be applied — the AWS transport's non-committing apply path
+    /// (`upsert_transaction_no_commit`, Task 16) had written an
+    /// MCP-authored row since the tips this merge was computed against.
+    /// This is this design's normal steady state, not a crash (the same
+    /// class of hazard `ApplyFastForwardOutcome::CommittedLocalChangesToUnblock`
+    /// already handles on the fast-forward path). The dirty tree was
+    /// committed as an ordinary local commit so that row is never lost, and
+    /// this merge was discarded outright rather than applied — it was
+    /// computed against tips that go stale the moment that commit lands.
+    /// An immediate re-poll was requested (debounced, like `StaleHead`) so
+    /// the next cycle recomputes the merge from the new HEAD.
+    DirtyTreeCommitted,
     /// Anything else that stopped the merge being applied (I/O, malformed
     /// input, a git failure). Logged and surfaced via `sync.status` at the
     /// point of failure.
@@ -960,8 +973,12 @@ impl AllowanceTrackerApp {
                 log::warn!(
                     "Child {child_id}'s working tree was dirty before applying this merge \
                      (likely a crash between a previous merge's file write and its commit); \
-                     discarded the dirty state — this apply recomputes transactions.csv from \
-                     scratch, so nothing is lost."
+                     discarded the dirty state — recover_if_dirty's own doc comment explains why \
+                     recomputing the SAME merge deterministically from (base, ours, theirs) \
+                     loses nothing that THAT merge attempt produced. This says nothing about \
+                     protecting any MCP-authored row that might independently be sitting in this \
+                     dirty tree: that protection is the dirty-tree guard below (unconditional, \
+                     not marker-gated), not this recovery step."
                 );
             }
             Err(e) => {
@@ -1055,6 +1072,52 @@ impl AllowanceTrackerApp {
                 return ApplyMergeOutcome::Failed;
             }
         };
+
+        // CRITICAL: `transactions.csv` can be dirty relative to HEAD right
+        // now, and that is this design's DESIGNED STEADY STATE, not a
+        // fault — Task 16 made the AWS apply path non-committing
+        // (`upsert_transaction_no_commit`), specifically so a machine that
+        // only ever receives MCP writes does not create a local commit on
+        // every single one. Writing `rows` (computed against `ours_str`,
+        // `theirs_str`) over that dirty file below would silently ERASE any
+        // MCP-authored row written since those tips — and the AWS
+        // watermark has already advanced past it by the time it is read,
+        // so it can never be re-fetched; the row is gone for good. This is
+        // the same class of hazard `ApplyFastForwardOutcome::CommittedLocalChangesToUnblock`
+        // already handles on the fast-forward path — this is the merge
+        // path's equivalent protection, which had none.
+        //
+        // `recover_if_dirty` above does NOT catch this: it only fires when
+        // `MERGE_IN_PROGRESS_MARKER` says a PREVIOUS `apply_merge` crashed
+        // mid-write, and correctly leaves an ordinary dirty tree (this
+        // case) alone.
+        //
+        // Rather than write over it, commit the dirty tree first — as an
+        // ordinary local commit, staging only the files this app owns —
+        // and discard THIS merge outright. `rows` was computed against
+        // `ours_str`/`theirs_str`; the moment that commit lands, HEAD moves
+        // past `ours_str`, so `rows` is stale and must not be applied
+        // regardless. The next cycle recomputes the merge from the new
+        // HEAD (which now includes the row that was just committed) —
+        // requested immediately via the same debounced re-poll `StaleHead`
+        // already uses, since this is exactly as self-healing and exactly
+        // as much "working as designed" as that case.
+        match working_tree_dirty(&repo) {
+            Ok(false) => {}
+            Ok(true) => {
+                return self.commit_dirty_tree_before_merge(child_id, &repo);
+            }
+            Err(e) => {
+                log::error!(
+                    "Cannot check whether child {child_id}'s working tree is dirty before \
+                     applying a merge: {e}"
+                );
+                self.sync.status = SyncStatus::Error(format!(
+                    "Sync failed for {child_id}: could not verify its working tree before merging"
+                ));
+                return ApplyMergeOutcome::Failed;
+            }
+        }
 
         // `goals.csv` is out of scope for `allowance_core::merge` (it models
         // no goal row — a known, recorded gap). A diverged goals.csv must
@@ -1186,6 +1249,128 @@ impl AllowanceTrackerApp {
         self.sync.clear_sync_failure(child_id);
 
         ApplyMergeOutcome::Applied
+    }
+
+    /// Commit an MCP-authored dirty `transactions.csv` before a merge is
+    /// applied over it, and discard that merge outright — see the
+    /// "CRITICAL" doc comment right before this function's call site in
+    /// `apply_merge` for the full hazard this guards against.
+    ///
+    /// Deliberately independent of, not a call into,
+    /// `commit_dirty_tree_to_unblock_fast_forward`: that function returns
+    /// `ApplyFastForwardOutcome` and additionally records
+    /// `FastForwardBlockedNotice` (a notice specific to the fast-forward
+    /// path — this is a merge, not a fast-forward). Both stage the exact
+    /// same list (`FILES_THIS_APP_OWNS`) for the exact same reason (never
+    /// `add_all`, which would sweep untracked strays into a commit that
+    /// gets pushed permanently), so if that staging step ever needs to
+    /// change, change it in both places.
+    fn commit_dirty_tree_before_merge(&mut self, child_id: &str, repo: &git2::Repository) -> ApplyMergeOutcome {
+        let child_dir = match repo.workdir() {
+            Some(d) => d.to_path_buf(),
+            None => {
+                log::error!(
+                    "Cannot commit child {child_id}'s dirty tree before applying a merge: its \
+                     repository has no working directory"
+                );
+                self.sync.status = SyncStatus::Error(format!(
+                    "Sync failed for {child_id}: its repository has no working directory"
+                ));
+                return ApplyMergeOutcome::Failed;
+            }
+        };
+
+        let gm = GitManager::new();
+        for name in FILES_THIS_APP_OWNS {
+            if !child_dir.join(name).exists() {
+                continue;
+            }
+            if let Err(e) = gm.add_file(&child_dir, name) {
+                log::error!("Cannot stage {name} for child {child_id} before applying a merge: {e}");
+                let message = format!("could not stage its local {name}");
+                self.sync.status = SyncStatus::Error(format!("Sync failed for {child_id}: {message}"));
+                self.sync.record_sync_failure(SyncFailureNotice {
+                    child_id: child_id.to_string(),
+                    message,
+                });
+                return ApplyMergeOutcome::Failed;
+            }
+        }
+
+        let message = "sync: commit local changes before applying a peer merge".to_string();
+        match gm.commit_if_changed(&child_dir, &message) {
+            Ok(Some(oid)) => {
+                log::warn!(
+                    "Child {child_id}'s transactions.csv was dirty relative to HEAD when a \
+                     merge was about to be applied (an MCP write landed since the tips this \
+                     merge was computed against — this design's normal steady state under the \
+                     AWS transport, not a crash); committed it as {oid} and discarded the \
+                     already-computed merge, which was based on now-stale tips. The next cycle \
+                     recomputes the merge from the new HEAD."
+                );
+            }
+            Ok(None) => {
+                // The dirtiness check saw *something* uncommitted, but
+                // staging only the files this app owns produced no
+                // commit-able change — the dirty content must be outside
+                // what this app tracks. Nothing to commit; still discard
+                // this stale merge computation and let the next cycle
+                // re-decide from the current HEAD (which has not moved).
+                log::warn!(
+                    "Child {child_id}'s working tree was dirty before applying a merge, but \
+                     staging only the files this app owns produced no commit-able change; \
+                     discarding the merge computation anyway and letting the next cycle \
+                     re-classify."
+                );
+            }
+            Err(e) => {
+                log::error!("Cannot commit child {child_id}'s dirty tree before applying a merge: {e}");
+                let message = "could not commit its local changes before merging".to_string();
+                self.sync.status = SyncStatus::Error(format!("Sync failed for {child_id}: {message}"));
+                self.sync.record_sync_failure(SyncFailureNotice {
+                    child_id: child_id.to_string(),
+                    message,
+                });
+                return ApplyMergeOutcome::Failed;
+            }
+        }
+
+        // Same debounced-re-poll mechanism `StaleHead` already uses — this
+        // is exactly as self-healing and exactly as much "working as
+        // designed," not a fault, so it must never surface as
+        // `SyncStatus::Error` either.
+        match self.sync.note_stale_head_refusal(child_id, std::time::Instant::now()) {
+            StaleHeadPollAction::Send => match &self.sync_command_tx {
+                Some(tx) => {
+                    if let Err(e) = tx.send(SyncCommand::PollNow) {
+                        log::warn!(
+                            "Could not request an immediate re-poll for child {child_id} after \
+                             committing a dirty tree before applying a merge (sync command \
+                             channel closed): {e}"
+                        );
+                    }
+                }
+                None => log::warn!(
+                    "No sync command channel available to request a re-poll for child {child_id} \
+                     after committing a dirty tree before applying a merge"
+                ),
+            },
+            StaleHeadPollAction::Debounced => log::debug!(
+                "Skipping an immediate re-poll for child {child_id} after committing a dirty \
+                 tree before applying a merge (within the debounce window) — the ordinary sync \
+                 timer will pick this up."
+            ),
+            StaleHeadPollAction::LimitReached => log::warn!(
+                "Child {child_id} has had {STALE_HEAD_REFUSAL_LIMIT} consecutive stale-head/dirty \
+                 merge refusals; giving up on immediate re-polling for now and letting the \
+                 ordinary sync timer handle it."
+            ),
+            StaleHeadPollAction::Suppressed => {
+                // Already logged at LimitReached above for this streak.
+            }
+        }
+
+        ApplyMergeOutcome::DirtyTreeCommitted
     }
 
     /// Apply a plain fast-forward computed off-thread by
@@ -2212,15 +2397,28 @@ mod apply_merge_tests {
         );
     }
 
-    /// Task 17 Important-3: an ordinary dirty working tree (the AWS
-    /// transport's `upsert_transaction_from_sync` writes `transactions.csv`
-    /// WITHOUT committing — see `apply_remote_entity`'s doc comment) is a
-    /// normal steady state here, NOT a crash. With no crash-recovery marker
-    /// present, `recover_if_dirty` inside `apply_merge` must leave it alone
-    /// rather than hard-reset it away — the bug this finding closed would
-    /// have silently destroyed that legitimate uncommitted content.
+    /// CRITICAL-1 regression: Task 16 made the AWS apply path
+    /// (`upsert_transaction_no_commit`, reached here via
+    /// `apply_remote_entity`) deliberately non-committing, so an ordinary
+    /// dirty `transactions.csv` with NO crash-recovery marker present is
+    /// this design's STEADY STATE, not a crash. `recover_if_dirty` (marker-
+    /// gated) correctly leaves it alone — but the merge write used to then
+    /// bulldoze it unconditionally anyway, silently erasing any MCP-
+    /// authored row written since the tips this merge was computed
+    /// against. Once the AWS watermark advances past that row it can never
+    /// be re-fetched, so that used to be permanent, silent data loss.
+    ///
+    /// This is the fix: the dirty row must survive (committed as an
+    /// ordinary local commit, never overwritten by the stale merge's
+    /// rows), and the merge itself must be refused and rescheduled rather
+    /// than applied — exactly the shape `ApplyMergeOutcome::StaleHead`
+    /// already uses for the same reason (HEAD moving out from under an
+    /// already-computed merge is not a fault).
     #[test]
-    fn an_ordinary_dirty_tree_with_no_crash_marker_is_not_reset_before_applying_a_merge() {
+    fn an_mcp_authored_dirty_row_survives_a_merge_which_is_discarded_and_rescheduled() {
+        use crate::backend::domain::models::transaction::{Transaction as DomainTransaction, TransactionType};
+        use shared::sync::EntityType;
+
         let (mut app, child_id, _temp) = app_with_git_backed_child();
         let child_dir = app
             .backend()
@@ -2238,31 +2436,95 @@ mod apply_merge_tests {
             1_700_000_500,
         );
 
-        // No marker written — this is NOT a crash, just the AWS transport's
-        // ordinary uncommitted write.
+        // Simulate the AWS transport's non-committing apply path writing an
+        // MCP-authored row AFTER `ours_oid` was computed as this merge's
+        // base. No crash-recovery marker is written — this is NOT a crash,
+        // just the ordinary uncommitted write Task 16 made deliberate.
         assert!(
             !repo.path().join(crate::backend::sync::child_sync::MERGE_IN_PROGRESS_MARKER).exists(),
             "precondition: no crash-recovery marker present"
         );
-        std::fs::write(child_dir.join("transactions.csv"), "uncommitted-aws-row").unwrap();
+        let mcp_row = DomainTransaction {
+            id: DomainTransaction::generate_id(Money::from_cents(700), 1),
+            child_id: child_id.clone(),
+            date: chrono::DateTime::parse_from_rfc3339("2026-02-01T12:00:00Z").unwrap(),
+            description: "MCP gift".to_string(),
+            amount: Money::from_cents(700),
+            balance: Money::from_cents(1700),
+            transaction_type: TransactionType::OneOffIncome,
+        };
+        let json = serde_json::to_string(&mcp_row).unwrap();
+        app.apply_remote_entity(&child_id, &EntityType::Transaction, &mcp_row.id, &json, "evt-mcp-1");
 
-        // `apply_merge` still proceeds and overwrites transactions.csv with
-        // its own merged content, same as always — the point of this test
-        // is that `recover_if_dirty` did not hard-reset it out from under
-        // this call BEFORE that write (which would have been an invisible
-        // no-op here, but a real data-loss bug the moment some OTHER
-        // in-flight write depended on that content surviving until this
-        // point).
-        let rows = vec![a_row(&child_id, "in-1-a", "Merged Allowance", 1000)];
-        let outcome =
-            app.apply_merge(&child_id, rows.clone(), &(ours_oid.to_string(), theirs_oid.to_string()), &[]);
-        assert_eq!(outcome, ApplyMergeOutcome::Applied);
-
-        let on_disk = std::fs::read_to_string(child_dir.join("transactions.csv")).unwrap();
+        let repo = Repository::open(&child_dir).unwrap();
         assert_eq!(
-            on_disk,
-            allowance_core::codec::render_transactions(&rows),
-            "apply_merge's own write must be what lands here, not a discard-then-nothing"
+            repo.head().unwrap().peel_to_commit().unwrap().id(),
+            ours_oid,
+            "precondition: the MCP write must not have moved HEAD (non-committing path)"
+        );
+        let dirty_on_disk = std::fs::read_to_string(child_dir.join("transactions.csv")).unwrap();
+        assert!(dirty_on_disk.contains("MCP gift"), "precondition: the MCP row is on disk uncommitted");
+
+        let (cmd_tx, cmd_rx) = std::sync::mpsc::channel::<SyncCommand>();
+        app.sync_command_tx = Some(cmd_tx);
+        app.sync.status = SyncStatus::Idle;
+
+        // This merge's `rows` were computed against `ours_oid`/`theirs_oid`
+        // — before the MCP row landed. Applying them unconditionally would
+        // overwrite the dirty file above and erase the MCP row for good.
+        let stale_rows = vec![a_row(&child_id, "in-1-a", "Merged Allowance", 1000)];
+        let outcome = app.apply_merge(
+            &child_id,
+            stale_rows,
+            &(ours_oid.to_string(), theirs_oid.to_string()),
+            &[],
+        );
+        assert_eq!(
+            outcome,
+            ApplyMergeOutcome::DirtyTreeCommitted,
+            "a dirty transactions.csv must refuse this stale merge, not apply it"
+        );
+
+        // Never surfaced as an error — this is the safety guard working as
+        // designed, same as a stale-head refusal.
+        assert_eq!(
+            app.sync.status,
+            SyncStatus::Idle,
+            "a dirty-tree refusal must never be reported as SyncStatus::Error"
+        );
+
+        // Rescheduled: the caller must re-run the cycle from the new HEAD.
+        assert!(
+            matches!(cmd_rx.try_recv(), Ok(SyncCommand::PollNow)),
+            "discarding a merge for a dirty tree must trigger an immediate re-poll"
+        );
+
+        // The MCP row must still be on disk in the working tree...
+        let repo = Repository::open(&child_dir).unwrap();
+        let on_disk = std::fs::read_to_string(child_dir.join("transactions.csv")).unwrap();
+        assert!(
+            on_disk.contains("MCP gift"),
+            "the MCP-authored row must survive, not be erased by the stale merge's write: {on_disk}"
+        );
+        assert!(
+            !on_disk.contains("Merged Allowance"),
+            "the stale merge's own rows must never have been written at all"
+        );
+
+        // ...AND committed: HEAD must have moved to a new, single-parent
+        // commit whose tree holds it — the dirty tree was durably
+        // committed, not merely left dirty for the next crash to find.
+        let new_head = repo.head().unwrap().peel_to_commit().unwrap();
+        assert_ne!(new_head.id(), ours_oid, "the dirty tree must have been committed, advancing HEAD");
+        assert_eq!(new_head.parent_count(), 1, "an ordinary local commit, not a merge commit");
+        assert_eq!(new_head.parent_id(0).unwrap(), ours_oid);
+        let tree = new_head.tree().unwrap();
+        let entry = tree.get_path(std::path::Path::new("transactions.csv")).unwrap();
+        let blob = repo.find_blob(entry.id()).unwrap();
+        let content = std::str::from_utf8(blob.content()).unwrap();
+        assert!(
+            content.contains("MCP gift"),
+            "the new commit's tree must hold the MCP row, not just the working tree: {content}"
         );
     }
 

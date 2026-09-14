@@ -17,9 +17,13 @@ use std::path::{Path, PathBuf};
 /// duplicate definitions of lists like this drifting apart; keep it to one.
 ///
 /// `parental_control_attempts.csv` is also owned by this system and lives in
-/// the same per-child directory, but is deliberately NOT included here: see
-/// the call sites for why each excludes it (a later merge commit still
-/// captures it, or migration handles it separately/not at all yet).
+/// the same per-child directory, but is deliberately NOT included here: it
+/// is durably committed on its own, directly, by
+/// `ParentalControlRepository`'s own call to `GitManager::commit_file_change`
+/// — it does not need (and, now that `commit_merge` and
+/// `commit_file_change`'s staging fallback both also stage only this list,
+/// no longer gets) a later merge commit sweeping it in as a side effect.
+/// Migration handles it separately/not at all yet, for its own reasons.
 pub(crate) const FILES_THIS_APP_OWNS: &[&str] =
     &["transactions.csv", "goals.csv", "child.yaml", "allowance_config.yaml"];
 

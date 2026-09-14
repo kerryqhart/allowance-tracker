@@ -18,9 +18,15 @@
 //!   history. Its path is named in full, because the path is the only way to
 //!   find it again.
 //!
-//! Deliberately not a notification system: no queue, no timers, no severity
-//! routing beyond two colours. Notices are produced once, during
-//! `Backend::with_data_dir`, and the user dismisses them.
+//! Deliberately not a notification system: no timers, no severity routing
+//! beyond two colours. Most notices are produced once, during
+//! `Backend::with_data_dir`, and the user dismisses them — but the lgs
+//! first-run migration (`plan_lgs_migration`/`run_lgs_migration`, wired from
+//! `lgs_sync_modal.rs`) can only run once the user has picked a cloud folder
+//! in Settings, well after startup, so [`StartupBanner::extend`] exists for
+//! that one additional producer. It appends to the same list `dismiss`
+//! already indexes into — still no queue, no timer, no routing beyond the
+//! two colours above.
 
 use eframe::egui;
 
@@ -43,6 +49,13 @@ impl StartupBanner {
 
     pub fn notices(&self) -> &[StartupNotice] {
         &self.notices
+    }
+
+    /// Append notices raised after startup — see the module doc comment for
+    /// why this exists (the lgs first-run migration is the one producer
+    /// that cannot run early enough to go through [`Self::new`]).
+    pub fn extend(&mut self, notices: impl IntoIterator<Item = StartupNotice>) {
+        self.notices.extend(notices);
     }
 
     /// Dismiss one notice. Dismissal is for this run only — the condition is

@@ -1000,6 +1000,29 @@ pub(crate) fn goals_diverged(repo: &Repository, ours: Oid, theirs: Oid) -> Resul
     Ok(ours_goals != theirs_goals)
 }
 
+/// `true` when the working tree has any uncommitted change to a file
+/// already tracked in HEAD's tree. `StatusOptions::include_untracked(false)`
+/// deliberately excludes untracked files (`.DS_Store`, editor swap files,
+/// anything this app does not track) from counting as "dirty" — matching
+/// [`recover_if_dirty`]'s own status check — because those are never what
+/// this guard exists to catch.
+///
+/// This is what `apply_merge` (`app_coordinator.rs`) uses to detect the AWS
+/// transport's non-committing apply path (`upsert_transaction_no_commit`,
+/// Task 16) having written an MCP-authored row to `transactions.csv` since
+/// the tips a merge was computed against — that dirty tree is this design's
+/// normal steady state, not a crash, and must be committed rather than
+/// silently overwritten by the merged CSV. See `apply_merge`'s doc comment
+/// for the full hazard this guards against.
+pub(crate) fn working_tree_dirty(repo: &Repository) -> Result<bool> {
+    let mut opts = git2::StatusOptions::new();
+    opts.include_untracked(false);
+    Ok(!repo
+        .statuses(Some(&mut opts))
+        .context("checking working tree dirtiness before applying a merge")?
+        .is_empty())
+}
+
 /// Read a file's raw bytes out of a commit's tree. `Ok(None)` when the path
 /// is not present at that commit (never an error — an older commit
 /// predating the file, or a project with no goals.csv yet, is normal).
@@ -1497,6 +1520,77 @@ ex-3-a,keiko,2026-01-03T00:00:00+00:00,Book,-3.00,7.00,expense\n";
         });
         assert!(result.is_ok());
         assert_eq!(attempts.get(), 2, "must not keep retrying once it has succeeded");
+    }
+
+    /// MINOR-6: the design's Testing table claims "No retry queue is
+    /// needed" (kill the remote, do five writes, restore, assert all five
+    /// land in order) but nothing ever exercised it — this is that test.
+    ///
+    /// Each of the five local commits is durable on disk (in the repo's
+    /// object database) the moment it is made, independent of whether any
+    /// push succeeds — see `push_with_retry_inner`'s doc comment. So there
+    /// is nothing to queue: once the remote comes back, a single ordinary
+    /// push carries every commit made while it was down, in the exact
+    /// order they were made, because that is just what pushing a branch
+    /// ref does — it sends the whole ahead range, not one commit at a
+    /// time.
+    #[test]
+    fn no_retry_queue_is_needed_five_writes_while_the_remote_is_down_all_land_in_order() {
+        let (repo, dir) = repo_with_commit();
+        let branch = current_branch(&repo).unwrap();
+
+        // The remote starts "killed": the URL resolves to a real directory
+        // that is NOT a git repository, so every push against it fails —
+        // no daemon, no bare repo, nothing there yet.
+        let remote_dir = tempfile::tempdir().unwrap();
+        repo.remote("lgs", remote_dir.path().to_str().unwrap()).unwrap();
+
+        let mut expected_messages = Vec::new();
+        for i in 1..=5 {
+            let content = format!("id,child_id,date,description,amount,balance,type\nrow-{i}\n");
+            std::fs::write(dir.path().join(TRANSACTIONS_FILE), &content).unwrap();
+            let message = format!("write {i}");
+            let gm = GitManager::new();
+            gm.add_all(dir.path()).unwrap();
+            gm.commit(dir.path(), &message).unwrap();
+            expected_messages.push(message);
+
+            let result = push_with_retry(&repo, &branch, 3);
+            assert!(result.is_err(), "push {i} must fail while the remote is down");
+        }
+
+        let local_head = repo.head().unwrap().peel_to_commit().unwrap().id();
+
+        // "Restore the remote": now it really is a bare repo, exactly as if
+        // the daemon had come back.
+        git2::Repository::init_bare(remote_dir.path()).unwrap();
+
+        // No queue, no replay mechanism — just the ordinary retry path,
+        // called once, exactly as the next scheduled sync cycle would.
+        push_with_retry(&repo, &branch, 3).expect("push must succeed once the remote is back");
+
+        let bare = git2::Repository::open_bare(remote_dir.path()).unwrap();
+        let remote_head = bare
+            .find_reference(&format!("refs/heads/{branch}"))
+            .unwrap()
+            .target()
+            .unwrap();
+        assert_eq!(remote_head, local_head, "the remote's branch must land at exactly this machine's HEAD");
+
+        // Walk the remote's history from its tip back to the very first
+        // commit and check every one of the five writes is there, in
+        // order — not merely that the tip matches.
+        let mut walk = bare.revwalk().unwrap();
+        walk.push(remote_head).unwrap();
+        walk.set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::REVERSE).unwrap();
+        let messages: Vec<String> = walk
+            .map(|oid| bare.find_commit(oid.unwrap()).unwrap().message().unwrap().to_string())
+            .collect();
+        let tail = &messages[messages.len() - expected_messages.len()..];
+        assert_eq!(
+            tail, expected_messages,
+            "all five writes made while the remote was down must land, in order: {messages:?}"
+        );
     }
 
     // --- Task 20: check_sync -----------------------------------------------

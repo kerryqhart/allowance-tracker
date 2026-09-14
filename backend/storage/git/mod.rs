@@ -37,6 +37,28 @@ use log::{info, warn, debug};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use crate::backend::sync::paths::FILES_THIS_APP_OWNS;
+
+/// Stage only the files this app owns (see [`FILES_THIS_APP_OWNS`]'s doc
+/// comment) into `repo`'s index, skipping any that do not currently exist —
+/// never `add_all(["*"])`, which would sweep untracked strays (`.DS_Store`,
+/// editor swap files, ...) into a commit that gets pushed permanently into a
+/// child's synced history. Shared by [`GitManager::commit_merge`] and the
+/// `commit_file_change` staging-failure fallback so both stay in sync with
+/// the single source of truth instead of drifting the way duplicate lists
+/// already have once in this project.
+fn stage_owned_files(repo: &Repository, repo_path: &Path) -> Result<()> {
+    let mut index = repo.index()?;
+    for name in FILES_THIS_APP_OWNS {
+        if !repo_path.join(name).exists() {
+            continue;
+        }
+        index.add_path(Path::new(name))?;
+    }
+    index.write()?;
+    Ok(())
+}
+
 /// Injectable so tests can construct committer-timestamp ties. Real usage
 /// (`GitManager::new`) points this at wall-clock time; only `with_clock`
 /// injects a fake, and only tests call `with_clock`.
@@ -285,10 +307,13 @@ impl GitManager {
 
         // Stage the current working state so the merge commit's tree
         // reflects it, not whatever was left in the index from an earlier
-        // operation.
+        // operation. Only the files this app owns — never `add_all(["*"])`
+        // (see `stage_owned_files`'s doc comment): this merge commit is the
+        // most-travelled pushed commit in the whole sync design, and
+        // `add_all` here would sweep `.DS_Store` and editor temp files into
+        // a child's synced history permanently.
+        stage_owned_files(&repo, repo_path)?;
         let mut index = repo.index()?;
-        index.add_all(["*"].iter(), IndexAddOption::DEFAULT, None)?;
-        index.write()?;
         let tree_id = index.write_tree()?;
         let tree = repo.find_tree(tree_id)?;
 
@@ -338,10 +363,17 @@ impl GitManager {
         // Ensure repo exists
         self.ensure_repo_exists(repo_path)?;
 
-        // Stage the file
+        // Stage the file. On failure, fall back to staging only the files
+        // this app owns (never `add_all(["*"])` — see `stage_owned_files`'s
+        // doc comment for why a blanket stage must never reach a commit
+        // that gets pushed into a child's synced history).
         if let Err(e) = self.add_file(repo_path, filename) {
-            warn!("Failed to stage file {}: {}. Trying add_all instead.", filename, e);
-            self.add_all(repo_path)?;
+            warn!(
+                "Failed to stage file {}: {}. Falling back to staging only the files this app owns.",
+                filename, e
+            );
+            let repo = Repository::open(repo_path)?;
+            stage_owned_files(&repo, repo_path)?;
         }
 
         // Create commit message
@@ -1159,7 +1191,11 @@ mod tests {
 
         // The file the merge is expected to actually commit, proving the
         // resulting tree reflects working state rather than being empty.
-        std::fs::write(dir.path().join("merged.txt"), "merged content").unwrap();
+        // Must be one of `FILES_THIS_APP_OWNS` — `commit_merge` stages only
+        // that list (never `add_all(["*"])`; see `stage_owned_files`'s doc
+        // comment), so an arbitrary filename would silently not be picked
+        // up at all.
+        std::fs::write(dir.path().join("transactions.csv"), "merged content").unwrap();
 
         let merge_oid = gm
             .commit_merge(dir.path(), "merge commit", &[&parent1, &parent2])
@@ -1182,10 +1218,52 @@ mod tests {
 
         let tree = commit.tree().unwrap();
         let entry = tree
-            .get_name("merged.txt")
+            .get_name("transactions.csv")
             .expect("merge commit's tree must contain the file written before the call");
         let blob = repo.find_blob(entry.id()).unwrap();
         assert_eq!(blob.content(), b"merged content");
+    }
+
+    /// CRITICAL-2 regression: `commit_merge` used to stage with
+    /// `add_all(["*"])`, which would sweep any untracked stray sitting in
+    /// the repo — most notably `.DS_Store` — into the merge commit's tree.
+    /// This is the most-travelled pushed commit in the whole sync design,
+    /// so that stray would be permanently replicated into a child's synced
+    /// history. It must never appear in the resulting tree.
+    #[test]
+    fn commit_merge_never_picks_up_an_untracked_ds_store() {
+        let dir = tempfile::tempdir().unwrap();
+        let gm = GitManager::with_clock(|| 1_700_000_700);
+        gm.init_repo(dir.path()).unwrap();
+
+        std::fs::write(dir.path().join("transactions.csv"), "id,child_id\n").unwrap();
+        gm.add_all(dir.path()).unwrap();
+        let parent1 = gm.commit(dir.path(), "first parent").unwrap();
+
+        let repo = git2::Repository::open(dir.path()).unwrap();
+        let parent2_oid = commit_empty_tree(&repo, "second parent", &[]);
+        let parent2 = parent2_oid.to_string();
+
+        // The merge write plus an untracked stray macOS drops in the same
+        // directory.
+        std::fs::write(dir.path().join("transactions.csv"), "id,child_id\nrow-1,c1\n").unwrap();
+        std::fs::write(dir.path().join(".DS_Store"), "not a real DS_Store, just a stray").unwrap();
+
+        let merge_oid = gm
+            .commit_merge(dir.path(), "merge commit", &[&parent1, &parent2])
+            .unwrap();
+
+        let repo = git2::Repository::open(dir.path()).unwrap();
+        let commit = repo.find_commit(git2::Oid::from_str(&merge_oid).unwrap()).unwrap();
+        let tree = commit.tree().unwrap();
+        assert!(
+            tree.get_name(".DS_Store").is_none(),
+            "an untracked .DS_Store must never end up in a merge commit's tree"
+        );
+        assert!(
+            tree.get_name("transactions.csv").is_some(),
+            "the file this app actually owns must still be committed"
+        );
     }
 
     #[test]

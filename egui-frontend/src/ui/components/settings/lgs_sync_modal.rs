@@ -28,8 +28,8 @@ use eframe::egui;
 
 use crate::backend::domain::sync_persistence::{sync_state_path, SyncState};
 use crate::backend::sync::{
-    adopt_child, adoptable_children, ensure_daemon, ensure_lgs_binary, run_first_run, AdoptableChild,
-    ChildSyncEngine, DaemonOutcome, LgsClient, StageResult, SyncPaths,
+    adopt_child, adoptable_children, ensure_daemon, ensure_lgs_binary, plan_lgs_migration, run_first_run,
+    run_lgs_migration, AdoptableChild, ChildSyncEngine, DaemonOutcome, LgsClient, StageResult, SyncPaths,
 };
 use crate::backend::Backend;
 use crate::ui::app_state::AllowanceTrackerApp;
@@ -161,6 +161,7 @@ impl AllowanceTrackerApp {
                                     );
                                 }
                                 render_check_sync_results(ui, &self.settings.lgs_sync_form.check_sync_results);
+                                render_sync_notices(ui, &self.sync);
 
                                 ui.add_space(8.0);
                                 ui.horizontal(|ui| {
@@ -377,10 +378,92 @@ impl AllowanceTrackerApp {
             return;
         }
 
+        // The cloud root is now persisted and the daemon has just been
+        // confirmed reachable (or its problem already reported above) —
+        // exactly the point Critical-3 names for running the migration:
+        // any registered child still living in its pre-lgs folder must be
+        // relocated now, or every sync tick for it will fail forever
+        // (`project_from_status` looking for a project this machine never
+        // created). Skipped when the daemon itself is not ready — retrying
+        // a migration against a daemon that is not there yet would just
+        // fail the same way `ensure_daemon`'s own error already explains.
+        if self.settings.lgs_sync_form.error_message.is_none() {
+            self.migrate_registered_children_into_lgs(&paths);
+        }
+
         if self.settings.lgs_sync_form.error_message.is_none() {
             self.settings.lgs_sync_form.set_success(
                 "Sync with another Mac is set up. Restart the app to finish enabling it.".to_string(),
             );
+        }
+    }
+
+    /// Migrate any registered child whose folder is not already under
+    /// `paths.children_root` into an lgs-backed repo. Without this call,
+    /// `plan_lgs_migration`/`run_lgs_migration` (Task 18) have no production
+    /// caller at all: the existing iCloud child on this machine would never
+    /// be relocated, no `allowance-<id>` project would ever be created for
+    /// it, and every sync tick would fail looking for a project this
+    /// machine never registered. This function only adds the call — the
+    /// migration's own logic (copy-then-repoint, registry-written-last, old
+    /// folder never deleted; see the module doc comment on
+    /// `backend::sync::migration_lgs`) is untouched.
+    ///
+    /// Best-effort across children: one child's migration failing does not
+    /// stop another's, and every step up to `RepointRegistry` is safe to
+    /// retry (see that same module doc comment) — re-running first run is
+    /// exactly how a user retries whichever child failed.
+    fn migrate_registered_children_into_lgs(&mut self, paths: &SyncPaths) {
+        let registry = self.core.backend.csv_connection.registry();
+        let to_migrate: Vec<_> = registry
+            .entries()
+            .iter()
+            .filter(|entry| !entry.path.starts_with(&paths.children_root))
+            .cloned()
+            .collect();
+        if to_migrate.is_empty() {
+            return;
+        }
+
+        let lgs = LgsClient::new(paths.lgs_binary.clone());
+        let status = match lgs.status() {
+            Ok(s) => s,
+            Err(e) => {
+                self.settings.lgs_sync_form.set_error(format!(
+                    "Sync with another Mac is set up, but this machine's existing child data \
+                     could not be migrated (could not reach the lgs daemon to check its status: \
+                     {e}). Open this dialog again to retry."
+                ));
+                return;
+            }
+        };
+
+        let mut failures = Vec::new();
+        for entry in &to_migrate {
+            let plan = plan_lgs_migration(entry, paths, &status);
+            let report = run_lgs_migration(plan);
+            if report.failed() {
+                failures.push(format!(
+                    "{}: {}",
+                    entry.id,
+                    report.error.unwrap_or_else(|| "unknown error".to_string())
+                ));
+            } else {
+                // Carries the legacy-precision rounding count and the old
+                // folder's location (both already built into these notices
+                // by `run_lgs_migration` itself) through the existing
+                // StartupNotice mechanism — see `StartupBanner::extend`.
+                self.startup_banner.extend(report.notices);
+            }
+        }
+
+        if !failures.is_empty() {
+            self.settings.lgs_sync_form.set_error(format!(
+                "Sync with another Mac is set up, but migrating existing child data failed for: \
+                 {}. Open this dialog again to retry — nothing was lost; the old folder is \
+                 untouched.",
+                failures.join("; ")
+            ));
         }
     }
 
@@ -520,6 +603,61 @@ fn render_check_sync_results(ui: &mut egui::Ui, results: &[StageResult]) {
         });
 }
 
+/// MUST-FIX 4: `sync_failures`, `goals_diverged`, and `fast_forward_blocked`
+/// (`ui::state::sync_state::SyncUiState`) are written by their `record_*`
+/// helpers on every failed goals merge, blocked fast-forward, staging
+/// failure, and non-conflict checkout error — but until this function
+/// existed, nothing ever read them back except tests. Every "make failures
+/// loud" mechanism this branch built terminated in a struct field nobody
+/// rendered. This reads exactly what is already recorded — no new state, no
+/// new panel — and shows nothing when all three are empty.
+fn render_sync_notices(ui: &mut egui::Ui, sync: &crate::ui::state::SyncUiState) {
+    if sync.sync_failures.is_empty() && sync.goals_diverged.is_empty() && sync.fast_forward_blocked.is_empty() {
+        return;
+    }
+
+    ui.add_space(6.0);
+    ui.separator();
+    ui.add_space(6.0);
+    egui::ScrollArea::vertical()
+        .max_height(120.0)
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            for notice in &sync.sync_failures {
+                render_sync_notice_line(ui, &notice.child_id, &notice.message);
+            }
+            for notice in &sync.goals_diverged {
+                render_sync_notice_line(
+                    ui,
+                    &notice.child_id,
+                    &format!(
+                        "goals.csv diverged between {} and {} and was not merged — reconcile by hand.",
+                        notice.ours_oid, notice.theirs_oid
+                    ),
+                );
+            }
+            for notice in &sync.fast_forward_blocked {
+                render_sync_notice_line(
+                    ui,
+                    &notice.child_id,
+                    &format!(
+                        "a fast-forward to {} was blocked by uncommitted local changes; they were \
+                         committed locally so syncing can continue.",
+                        notice.to
+                    ),
+                );
+            }
+        });
+}
+
+fn render_sync_notice_line(ui: &mut egui::Ui, child_id: &str, detail: &str) {
+    ui.horizontal_wrapped(|ui| {
+        ui.label(egui::RichText::new(child_id).strong().color(egui::Color32::from_rgb(190, 60, 60)));
+        ui.label(egui::RichText::new(detail).color(egui::Color32::from_rgb(120, 120, 120)));
+    });
+    ui.add_space(4.0);
+}
+
 fn render_first_run_pitch(ui: &mut egui::Ui) {
     ui.add(
         egui::Label::new(
@@ -533,4 +671,177 @@ fn render_first_run_pitch(ui: &mut egui::Ui) {
         )
         .wrap(),
     );
+}
+
+/// CRITICAL-3 regression: `plan_lgs_migration`/`run_lgs_migration` (Task 18)
+/// used to have no production caller at all — a registered child was never
+/// relocated into an lgs-backed folder on the machine that has the data, so
+/// every sync tick for it would fail forever. These drive
+/// `AllowanceTrackerApp::migrate_registered_children_into_lgs` directly
+/// (the same real-git-repo-in-a-tempdir style `apply_merge_tests` and
+/// `apply_fast_forward_tests` use elsewhere in this crate — no `lgs` binary,
+/// no daemon, no network; only a fake `lgs` script and a local bare repo as
+/// the push target).
+#[cfg(test)]
+mod migrate_into_lgs_tests {
+    use super::AllowanceTrackerApp;
+    use crate::backend::domain::commands::child::{CreateChildCommand, SetActiveChildCommand};
+    use crate::backend::domain::commands::transactions::CreateTransactionCommand;
+    use crate::backend::storage::csv::ChildRegistry;
+    use crate::backend::sync::SyncPaths;
+    use crate::backend::Backend;
+    use shared::ChildId;
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use tempfile::TempDir;
+
+    /// Mirrors `backend::sync::migration_lgs`'s own test helper of the same
+    /// name (private to that module, so duplicated here rather than
+    /// exposed just for this test) — a fake `lgs` binary that never talks
+    /// to a real daemon.
+    fn fake_lgs_script(dir: &Path, body: &str) -> PathBuf {
+        let path = dir.join("lgs");
+        fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&path).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&path, perms).unwrap();
+        path
+    }
+
+    /// A fake `lgs status --json` response naming one project, freshly
+    /// `add`ed, whose `clone_url` points at a real local bare repo so
+    /// `run_lgs_migration`'s final `Push` step has somewhere real to land.
+    fn status_json(clone_url: &str, child_id: &str) -> String {
+        format!(
+            "{{\"daemon_running\":true,\"cloud_root\":null,\"cloud_root_exists\":false,\
+             \"projects\":[{{\"name\":\"allowance-{child_id}\",\
+             \"working_repo_path\":\"/tmp/x\",\"clone_url\":\"{clone_url}\",\
+             \"archived\":false}}],\"adoptable\":[]}}"
+        )
+    }
+
+    /// One child with a real committed folder (an ordinary local write
+    /// initializes the git repo via `commit_file_change`, same as
+    /// production), registered at whatever `Backend::with_data_dir` put it
+    /// — deliberately NOT under the `children_root` these tests construct
+    /// separately, mirroring the pre-migration, iCloud-backed layout.
+    fn app_with_unmigrated_child() -> (AllowanceTrackerApp, String, PathBuf, TempDir) {
+        let data_dir = TempDir::new().unwrap();
+        let backend = Backend::with_data_dir(data_dir.path().to_path_buf(), None).unwrap();
+        let child = backend
+            .child_service
+            .create_child(CreateChildCommand {
+                name: "Keiko Hart".to_string(),
+                birthdate: "2015-01-01".to_string(),
+            })
+            .unwrap()
+            .child;
+        backend
+            .child_service
+            .set_active_child(SetActiveChildCommand { child_id: child.id.clone() })
+            .unwrap();
+        backend
+            .transaction_service
+            .create_transaction(CreateTransactionCommand {
+                description: "Allowance".to_string(),
+                amount: 10.0,
+                date: None,
+            })
+            .unwrap();
+        let old_dir = backend.csv_connection.child_dir(&ChildId::from(child.id.as_str())).unwrap();
+        let app = AllowanceTrackerApp::new_for_test(backend);
+        (app, child.id, old_dir, data_dir)
+    }
+
+    #[test]
+    fn first_run_migrates_a_registered_child_not_yet_under_children_root() {
+        let (mut app, child_id, old_dir, data_dir) = app_with_unmigrated_child();
+        assert!(
+            app.startup_banner.is_empty(),
+            "precondition: nothing raised on the banner yet"
+        );
+
+        let children_root = TempDir::new().unwrap();
+        let scratch = TempDir::new().unwrap();
+        let bare_dir = TempDir::new().unwrap();
+        git2::Repository::init_bare(bare_dir.path()).unwrap();
+
+        let json = status_json(&bare_dir.path().to_string_lossy(), &child_id);
+        let script = fake_lgs_script(
+            scratch.path(),
+            &format!(
+                "case \"$1\" in\n  add) exit 0 ;;\n  status) cat <<'JSON'\n{json}\nJSON\n  ;;\nesac\n"
+            ),
+        );
+
+        let paths = SyncPaths {
+            data_dir: data_dir.path().to_path_buf(),
+            children_root: children_root.path().to_path_buf(),
+            lgs_binary: script,
+            cloud_root: None,
+            home: scratch.path().join("not_a_real_home"),
+        };
+
+        app.migrate_registered_children_into_lgs(&paths);
+
+        assert!(
+            app.settings.lgs_sync_form.error_message.is_none(),
+            "migration must succeed: {:?}",
+            app.settings.lgs_sync_form.error_message
+        );
+
+        let new_dir = children_root.path().join(&child_id);
+        let registry = ChildRegistry::load(data_dir.path()).unwrap();
+        assert_eq!(
+            registry.path_for(&ChildId::from(child_id.as_str())),
+            Some(new_dir.as_path()),
+            "the registry must be repointed at the new lgs-backed folder"
+        );
+        assert!(new_dir.join("transactions.csv").exists(), "the migrated folder must hold the data");
+        assert!(old_dir.exists(), "the old folder must be kept, never deleted");
+
+        assert!(
+            !app.startup_banner.is_empty(),
+            "the migration's report must reach the user through the StartupNotice mechanism"
+        );
+        assert!(
+            app.startup_banner
+                .notices()
+                .iter()
+                .any(|n| n.details.iter().any(|d| d.contains(&old_dir.display().to_string()))),
+            "a notice must name the old folder's location: {:?}",
+            app.startup_banner.notices()
+        );
+    }
+
+    /// A child whose folder is ALREADY under `children_root` (a prior
+    /// successful migration, or a fresh install set up after this branch
+    /// shipped) must not be migrated again — calling `lgs add` a second
+    /// time for an already-registered project fails permanently.
+    #[test]
+    fn a_child_already_under_children_root_is_left_alone() {
+        let (mut app, _child_id, old_dir, data_dir) = app_with_unmigrated_child();
+        let children_root = old_dir.parent().unwrap().to_path_buf();
+
+        let paths = SyncPaths {
+            data_dir: data_dir.path().to_path_buf(),
+            children_root,
+            lgs_binary: PathBuf::from("/fake/bin/lgs-not-used"),
+            cloud_root: None,
+            home: PathBuf::from("/fake/home"),
+        };
+
+        app.migrate_registered_children_into_lgs(&paths);
+
+        assert!(
+            app.settings.lgs_sync_form.error_message.is_none(),
+            "must be a no-op, not a failed lgs call: {:?}",
+            app.settings.lgs_sync_form.error_message
+        );
+        assert!(
+            app.startup_banner.is_empty(),
+            "nothing to report when there is nothing left to migrate"
+        );
+    }
 }

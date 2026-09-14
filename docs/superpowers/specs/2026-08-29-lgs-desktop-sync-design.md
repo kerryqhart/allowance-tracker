@@ -69,6 +69,17 @@ with repeated merges. Widening the goal requires proving confluence first.
 - Syncing machine-local state (registry, watermarks, retry queue, parental-control attempts).
 - Extracting all of `backend/` into its own crate. Only the merge and the pure
   balance arithmetic move; see [Testing](#testing).
+- **Merging `goals.csv`.** `allowance_core::merge` models `TxRow`
+  (`transactions.csv`) only, not a goal row. What shipped instead:
+  `goals.csv` is byte-compared between the two diverged tips, and a
+  divergence is *reported* — never merged — via `GoalsDivergedNotice`,
+  surfaced in the "Sync with another Mac" settings modal, so the user knows
+  to reconcile it by hand rather than the merge silently picking a side.
+  This is a known, deliberate scope boundary, not an oversight:
+  `DomainGoal::target_amount` deliberately stays `f64`, so goals keep
+  exactly the byte-instability the [Money](#money) section's `Money(i64)`
+  change was introduced to remove for transactions. A real goal merge, and
+  moving `target_amount` to `Money`, is future work, not this spec's.
 
 ## Blocking spike before planning
 
@@ -372,8 +383,20 @@ the wire does not. A round-trip test against a captured production payload
 enforces this.
 
 `validate_all_balances` currently returns `Ok(Vec<String>)`, so it returns `Ok`
-when balances are wrong and a `?` at the call site swallows it. It becomes
-`Result<(), Vec<BalanceMismatch>>`.
+when balances are wrong and a `?` at the call site swallows it.
+
+**Amended post-shipping.** This spec originally called for
+`Result<(), Vec<BalanceMismatch>>`. Task 4 shipped
+`anyhow::Result<BalanceCheck>` instead, where `BalanceCheck` is
+`#[must_use] enum { Ok, Mismatches(Vec<BalanceMismatch>) }`
+(`backend/domain/balance_service.rs`). The reasoning `Result<(), Vec<...>>`
+does not capture: that shape conflates "could not read the data at all" (an
+`Err`, e.g. a corrupt or unreadable CSV) with "read the data and it disagrees"
+(`Mismatches`) into a single error channel that a careless `.is_err()` check
+cannot tell apart, while "read the data and it's clean" collapses to the same
+`Ok(())` an `Err`-swallowing `?` would too easily be mistaken for. A three-way
+outcome — read failure vs. clean vs. mismatched — needs a three-way type, not
+a `Result` doing double duty as its own mismatch list.
 
 ## Canonical form
 
@@ -737,9 +760,23 @@ proves termination.
 | "No retry queue": kill remote, 5 writes, restore, assert all land in order | the claim is tested, not asserted |
 | AWS/git serialization | testable now that all mutation is behind `ApplyMerge` |
 | Crash mid-merge | dirty tree on a diverged branch recovers |
-| Schema skew | a version marker refuses a merge from a newer schema — `parse_transaction_type` otherwise falls through to *derivation* (`transaction_repository.rs:97`), so an older app would silently downgrade a row type and push it |
+| Strict transaction-type parsing (amended — see below) | an unknown `type` value is a hard parse error, not a silent derivation, so an older app can never downgrade a newer row type and push it |
 | Migration failure at each step | registry unchanged, old data intact, app still works |
 | `parse_status` against lgs's blessed fixture | parsing, and that `outdated` surfaces rather than being swallowed |
+
+**Amended post-shipping.** This spec originally called for a schema-version
+marker: an explicit version field that a merge would check, refusing to
+proceed against a newer schema than the reading app understands. What
+shipped instead is strict parsing — an unknown transaction `type` value in
+`transactions.csv` is a hard parse error (`allowance_core::codec`, "unknown
+transaction type {value:?} — refusing rather than guessing"), full stop, with
+no derivation fallback to fall through to. This is a better answer to the
+same hazard: a version marker only helps if every future schema change
+remembers to bump it and every reader remembers to check it, whereas strict
+parsing fails safe automatically the moment any future row shape it does not
+recognize appears on disk — no marker to forget, no derivation path left for
+an older app to silently guess through and downgrade a newer row type before
+pushing it back out.
 
 ### `TwoMachineHarness`
 
