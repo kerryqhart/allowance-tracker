@@ -27,7 +27,6 @@
 use eframe::egui;
 
 use crate::backend::domain::sync_persistence::{sync_state_path, SyncState};
-use crate::backend::storage::git::GitManager;
 use crate::backend::sync::{
     adopt_child, adoptable_children, ensure_daemon, ensure_lgs_binary, run_first_run, AdoptableChild,
     ChildSyncEngine, DaemonOutcome, LgsClient, StageResult, SyncPaths,
@@ -389,7 +388,9 @@ impl AllowanceTrackerApp {
     /// demand, and show each stage's pass/fail by name — Task 20's "Check
     /// sync": health *reporting* (`refresh_lgs_status`) proves nothing about
     /// whether a child's own commits can actually get out and back, and the
-    /// no-terminal goal means the user needs a button, not a command.
+    /// no-terminal goal means the user needs a button, not a command. Never
+    /// touches the child's branch — see `check_sync`'s module doc — so no
+    /// `GitManager` is needed here either.
     fn check_lgs_sync(&mut self) {
         self.settings.lgs_sync_form.clear_messages();
 
@@ -399,10 +400,9 @@ impl AllowanceTrackerApp {
         };
         let Some((lgs, _paths)) = self.lgs_client_for_settings() else { return };
 
-        let git = GitManager::new();
         let engine = ChildSyncEngine::new(lgs, self.core.backend.csv_connection.clone());
         let child_id = shared::ChildId::from(child.id.clone());
-        let results = engine.check_sync(&git, &child_id);
+        let results = engine.check_sync(&child_id);
 
         let all_ok = !results.is_empty() && results.iter().all(|r| r.ok);
         self.settings.lgs_sync_form.check_sync_results = results;

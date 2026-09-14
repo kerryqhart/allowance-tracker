@@ -34,7 +34,6 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
 use git2::{Oid, Repository};
@@ -44,7 +43,9 @@ use allowance_core::row::{Provenance, Sided, TxRow};
 use shared::ChildId;
 
 use crate::backend::storage::csv::CsvConnection;
-use crate::backend::storage::git::{ensure_lgs_remote, fetch_lgs, push_lgs, GitManager};
+use crate::backend::storage::git::{
+    ensure_lgs_remote, fetch_lgs, fetch_lgs_refspec, push_lgs, push_lgs_refspec,
+};
 use crate::backend::sync::lgs_client::{LgsClient, ProjectReport, StatusReport};
 
 /// The ref the merge input is read from. See the module doc and
@@ -173,10 +174,32 @@ pub enum CycleOutcome {
 // Health *reporting* (`fetch_status`/`cycle`) proves nothing about whether
 // the loop actually works end to end — a daemon that answers `status --json`
 // says nothing about whether THIS child's commits can actually get out and
-// back. `check_sync` exercises the real path a user's edit takes: write,
-// commit, push, fetch, read back what came out the other side, then clean
-// up after itself. Every stage is named so a failure reads as "Push failed:
-// <reason>", never "something went wrong."
+// back. `check_sync` exercises the real path: build a scratch commit, push
+// it, fetch it back, read back what came out the other side, then delete it
+// — entirely on a disposable ref, never the child's actual branch. Every
+// stage is named so a failure reads as "Push failed: <reason>", never
+// "something went wrong."
+//
+// # Why a disposable ref, not a commit on the branch
+//
+// An earlier version of this built its sentinel on the child's real branch:
+// write a file, commit, push, and (on success or recovery) commit the
+// removal too. Review caught the flaw: the "add" commit is permanent in the
+// remote DAG the instant it is pushed — the "remove" commit cleans the
+// working tree but does not erase it, so every click of a diagnostic button
+// leaves two permanent commits in the family's real financial history, and
+// troubleshooting means clicking it repeatedly. [`PROBE_REF`] fixes this at
+// the root: the probe commit is built with `Repository::commit`'s
+// `update_ref` set to `None` (so nothing moves `HEAD`, the working tree, or
+// the index) and recorded only under `refs/sync-check/probe` — a ref lgs's
+// own reconcile never looks at (it mirrors `refs/heads/*` into
+// `refs/lgs-auth/heads/*` and nothing else; see
+// `storage::git::LGS_AUTH_REFSPEC`'s doc comment). No stage of this
+// function, however it ends, can ever add a commit to the branch's history.
+// `Cleanup` deletes the probe ref both locally and on the remote; if that
+// delete itself fails, the worst case is an orphaned throwaway ref sitting
+// on the remote — never the user's branch, and self-healing on the very
+// next run (`Push` force-pushes over it; see [`PROBE_REF`]'s doc comment).
 
 /// One stage of [`ChildSyncEngine::check_sync`], in the order they run.
 /// `Ord` follows this declaration order deliberately — [`check_sync_stages`]
@@ -190,23 +213,28 @@ pub enum Stage {
     /// This child has a registered lgs project, and its clone URL (and this
     /// child's local repo) were both resolved.
     RemoteResolved,
-    /// The sentinel scratch file was written into the working tree.
+    /// The sentinel blob and tree were built in the object database. Never
+    /// the working tree or the index — see the module doc's "disposable
+    /// ref" section.
     WriteSentinel,
-    /// The sentinel was staged and committed.
+    /// The sentinel was committed as a standalone, parentless commit and
+    /// recorded under [`PROBE_REF`] — never `HEAD`, never a branch.
     Commit,
-    /// The commit was pushed to the `lgs` remote.
+    /// [`PROBE_REF`] was pushed to the `lgs` remote (force-pushed, so a
+    /// previous run's un-cleaned-up leftover never blocks this one).
     Push,
-    /// The authoritative peer ref (`refs/remotes/lgs-auth/*`) was observed
-    /// to advance to the pushed commit — bounded-polled, never assumed on
-    /// the first fetch, because `lgs sync` only acknowledges the nudge (see
-    /// [`LgsClient::sync`]).
+    /// [`PROBE_REF`] was fetched back from the remote into a distinct local
+    /// tracking ref, proving the round trip actually went through the
+    /// daemon rather than trusting the push's own say-so. A single
+    /// attempt — see [`check_sync_against`]'s doc comment for why this
+    /// needs no poll now that it never touches the branch.
     Fetch,
-    /// The sentinel's content was read back from that authoritative ref's
-    /// tree and matched exactly what was written.
+    /// The sentinel's content was read back from that fetched ref's tree
+    /// and matched exactly what was written.
     ReadBack,
-    /// The sentinel was removed and that removal committed (and, once it
-    /// was ever pushed, pushed too) — leaving the repo exactly as it was
-    /// before this check ran.
+    /// [`PROBE_REF`] was deleted, locally and on the remote — leaving
+    /// nothing behind, because nothing this check does ever touches the
+    /// child's real branch to begin with.
     Cleanup,
 }
 
@@ -237,26 +265,27 @@ impl StageResult {
     }
 }
 
-/// The scratch file `check_sync` round-trips through the whole loop.
-///
-/// Deliberately NOT one of `paths::FILES_THIS_APP_OWNS` — seeded into an
-/// unrelated commit via that list's callers would both corrupt this app's
-/// real owned files' history and make the sentinel invisible to the staging
-/// that check_sync itself does (which stages this name explicitly, never
-/// `add_all`). The leading dot also keeps it out of anything that globs
-/// only "real" data files.
+/// The path the probe commit's tree records its scratch content under.
+/// Never one of `paths::FILES_THIS_APP_OWNS`, and never written into any
+/// working tree — see the module doc's "disposable ref" section.
 pub const SYNC_CHECK_SENTINEL: &str = ".sync-check";
 
-/// Total time [`check_sync_against`]'s `Fetch`/`ReadBack` stages will wait,
-/// combined, for the authoritative peer ref to catch up to the commit this
-/// same run just pushed. `lgs sync` is ACK-ONLY (see [`LgsClient::sync`]) —
-/// this is what stands between "the daemon said ok" and "the daemon actually
-/// finished," so it must be bounded generously rather than assumed instant,
-/// but bounded all the same so a wedged daemon fails this stage rather than
-/// hanging the button that triggered it.
-const CHECK_SYNC_POLL_TIMEOUT: Duration = Duration::from_secs(30);
-/// How long to sleep between poll attempts within that bound.
-const CHECK_SYNC_POLL_INTERVAL: Duration = Duration::from_millis(500);
+/// The local ref [`check_sync_against`] builds its probe commit under.
+/// Deliberately NOT `refs/heads/*` and NOT `refs/lgs-auth/*`: lgs's own
+/// reconcile only ever mirrors `refs/heads/*` into `refs/lgs-auth/heads/*`
+/// (see `storage::git::LGS_AUTH_REFSPEC`'s doc comment) — a ref under
+/// `refs/sync-check/*` is invisible to that machinery entirely, which is
+/// exactly why pushing, fetching, and deleting it can never touch (or even
+/// be seen by) the child's actual synced branch. `Push` always force-pushes
+/// this ref (see its call site), so an orphaned leftover from a previous
+/// run whose `Cleanup` failed never blocks — it is simply overwritten.
+const PROBE_REF: &str = "refs/sync-check/probe";
+/// Where [`Stage::Fetch`] lands the probe ref locally — deliberately a
+/// DIFFERENT name than [`PROBE_REF`], so `ReadBack` reads whatever the
+/// remote actually returned rather than trusting the object this run
+/// already had sitting in its own local object database from creating the
+/// commit in the first place.
+const PROBE_VERIFY_REF: &str = "refs/remotes/sync-check-probe/probe";
 
 /// One sync cycle for one child. See the module doc for thread ownership.
 pub struct ChildSyncEngine {
@@ -340,21 +369,14 @@ impl ChildSyncEngine {
 
     /// Exercise the whole lgs loop for `child_id`, on demand, and report
     /// each stage by name — see this module's "Task 20" section for why a
-    /// health report alone (`fetch_status`/`cycle`) is not enough. `git` is
-    /// taken as a parameter rather than held on `self`, matching every other
-    /// repo-mutating call in this app (constructed at the call site — see
-    /// `app_coordinator.rs`) rather than stored as engine state.
-    pub fn check_sync(&self, git: &GitManager, child_id: &ChildId) -> Vec<StageResult> {
+    /// health report alone (`fetch_status`/`cycle`) is not enough, and for
+    /// why this never touches `child_id`'s actual branch. No `GitManager`
+    /// is needed: every git operation here builds objects and a disposable
+    /// ref directly through `git2`, never the working tree or the index.
+    pub fn check_sync(&self, child_id: &ChildId) -> Vec<StageResult> {
         let project_name = format!("allowance-{child_id}");
         match self.work_dir(child_id) {
-            Ok(work_dir) => check_sync_against(
-                &self.lgs,
-                git,
-                &work_dir,
-                &project_name,
-                CHECK_SYNC_POLL_TIMEOUT,
-                CHECK_SYNC_POLL_INTERVAL,
-            ),
+            Ok(work_dir) => check_sync_against(&self.lgs, &work_dir, &project_name),
             Err(e) => {
                 // The daemon check is independent of this child's local
                 // folder, so it is still worth running and reporting even
@@ -471,25 +493,34 @@ impl ChildSyncEngine {
 /// script instead of the real daemon — same shape as [`cycle_against`]/
 /// [`ChildSyncEngine::cycle`].
 ///
-/// `poll_timeout`/`poll_interval` govern the `Fetch` stage's bounded wait
-/// for the authoritative ref to catch up (see [`CHECK_SYNC_POLL_TIMEOUT`]'s
-/// doc comment); exposed here so a test can drive the timeout path in
-/// milliseconds rather than waiting out the real 30s bound.
+/// # No poll
+///
+/// An earlier version of this bounded-polled `Fetch`, re-nudging `lgs sync`
+/// each iteration, because `lgs sync` only acknowledges the request rather
+/// than waiting for the daemon's reconcile to finish. That reasoning applied
+/// to fetching `refs/lgs-auth/*`, which the daemon only updates on its own
+/// async reconcile tick — but [`PROBE_REF`] is not `refs/heads/*` or
+/// `refs/lgs-auth/*` at all, so nothing about it ever depends on reconcile
+/// or a peer. Pushing and fetching it is a direct, synchronous round trip to
+/// the local daemon's own git-http-backend over the `lgs` remote — the same
+/// kind of call `ensure_lgs_remote`/`fetch_lgs` already make without any
+/// poll. There is nothing here to wait out, so `Fetch` and `Push` each make
+/// exactly one attempt, bounded only by `storage::git`'s existing
+/// `NETWORK_TIMEOUT` (30s) on the underlying git operation itself.
+///
+/// # No branch, ever
+///
+/// Every git operation below builds objects or moves [`PROBE_REF`] — never
+/// `HEAD`, the working tree, the index, or any `refs/heads/*` branch. See
+/// the module doc's "Why a disposable ref" section for why.
 ///
 /// Stops at the first failing stage — no stage after it is ever appended to
-/// the returned `Vec`. On a failure, a best-effort attempt is made to undo
-/// whatever this run had already done (see [`recover_after_failure`]); if
-/// that cleanup attempt itself fails, that failure is folded into the
-/// ALREADY-failing stage's own `detail` — never reported as a separate,
-/// later `Stage` entry.
-fn check_sync_against(
-    lgs: &LgsClient,
-    git: &GitManager,
-    work_dir: &Path,
-    project_name: &str,
-    poll_timeout: Duration,
-    poll_interval: Duration,
-) -> Vec<StageResult> {
+/// the returned `Vec`. On a failure, a best-effort attempt is made to
+/// delete whatever this run had already created (see
+/// [`recover_after_failure`]); if that cleanup attempt itself fails, that
+/// failure is folded into the ALREADY-failing stage's own `detail` — never
+/// reported as a separate, later `Stage` entry.
+fn check_sync_against(lgs: &LgsClient, work_dir: &Path, project_name: &str) -> Vec<StageResult> {
     let mut results = Vec::new();
 
     // --- Stage 1: DaemonReachable -------------------------------------
@@ -536,190 +567,177 @@ fn check_sync_against(
         ));
         return results;
     }
-    let branch = match current_branch(&repo) {
-        Ok(b) => b,
-        Err(e) => {
-            results.push(StageResult::fail(
-                Stage::RemoteResolved,
-                format!("determining the checked-out branch: {e}"),
-            ));
-            return results;
-        }
-    };
     results.push(StageResult::pass(
         Stage::RemoteResolved,
         format!("resolved lgs project '{project_name}' -> {clone_url}"),
     ));
 
-    // --- Stage 3: WriteSentinel -----------------------------------------
-    let sentinel_path = work_dir.join(SYNC_CHECK_SENTINEL);
+    // --- Stage 3: WriteSentinel — build the blob and tree only. No
+    // working-tree write, no index write, no ref moved yet. ----------------
     let token = format!("check-sync {}\n", chrono::Utc::now().to_rfc3339());
-    if let Err(e) = std::fs::write(&sentinel_path, &token) {
-        let mut fail = StageResult::fail(
-            Stage::WriteSentinel,
-            format!("writing {SYNC_CHECK_SENTINEL} into the working tree: {e}"),
-        );
-        recover_after_failure(&repo, work_dir, git, &branch, false, &mut fail);
-        results.push(fail);
-        return results;
-    }
-    results.push(StageResult::pass(Stage::WriteSentinel, format!("wrote {SYNC_CHECK_SENTINEL}")));
-
-    // --- Stage 4: Commit --------------------------------------------------
-    if let Err(e) = git.add_file(work_dir, SYNC_CHECK_SENTINEL) {
-        let mut fail = StageResult::fail(Stage::Commit, format!("staging {SYNC_CHECK_SENTINEL}: {e}"));
-        recover_after_failure(&repo, work_dir, git, &branch, false, &mut fail);
-        results.push(fail);
-        return results;
-    }
-    let sentinel_oid_str = match git.commit(work_dir, "chore(sync-check): add sentinel") {
+    let blob_oid = match repo.blob(token.as_bytes()) {
         Ok(oid) => oid,
         Err(e) => {
-            let mut fail =
-                StageResult::fail(Stage::Commit, format!("committing {SYNC_CHECK_SENTINEL}: {e}"));
-            recover_after_failure(&repo, work_dir, git, &branch, false, &mut fail);
+            let mut fail = StageResult::fail(
+                Stage::WriteSentinel,
+                format!("writing the sentinel blob into the object database: {e}"),
+            );
+            recover_after_failure(&repo, false, &mut fail);
             results.push(fail);
             return results;
         }
     };
-    let sentinel_oid = match Oid::from_str(&sentinel_oid_str) {
+    let tree_oid = (|| -> Result<Oid> {
+        let mut builder = repo.treebuilder(None)?;
+        builder.insert(SYNC_CHECK_SENTINEL, blob_oid, 0o100644)?;
+        Ok(builder.write()?)
+    })();
+    let tree_oid = match tree_oid {
+        Ok(oid) => oid,
+        Err(e) => {
+            let mut fail =
+                StageResult::fail(Stage::WriteSentinel, format!("building the sentinel tree: {e}"));
+            recover_after_failure(&repo, false, &mut fail);
+            results.push(fail);
+            return results;
+        }
+    };
+    results.push(StageResult::pass(
+        Stage::WriteSentinel,
+        "built the sentinel blob and tree (no working tree or index touched)",
+    ));
+
+    // --- Stage 4: Commit — a standalone, parentless commit recorded only
+    // under PROBE_REF. Never touches HEAD or any branch. --------------------
+    let probe_oid = (|| -> Result<Oid> {
+        let sig = git2::Signature::now("Allowance Tracker", "allowance@tracker.local")?;
+        let tree = repo.find_tree(tree_oid)?;
+        let oid = repo.commit(None, &sig, &sig, "chore(sync-check): probe", &tree, &[])?;
+        repo.reference(PROBE_REF, oid, true, "sync-check probe")?;
+        Ok(oid)
+    })();
+    let probe_oid = match probe_oid {
         Ok(oid) => oid,
         Err(e) => {
             let mut fail = StageResult::fail(
                 Stage::Commit,
-                format!("parsing the sentinel commit id '{sentinel_oid_str}': {e}"),
+                format!("creating the probe commit under {PROBE_REF}: {e}"),
             );
-            recover_after_failure(&repo, work_dir, git, &branch, false, &mut fail);
+            recover_after_failure(&repo, false, &mut fail);
             results.push(fail);
             return results;
         }
     };
     results.push(StageResult::pass(
         Stage::Commit,
-        format!("committed {SYNC_CHECK_SENTINEL} as {sentinel_oid_str}"),
+        format!("committed the sentinel as a standalone commit ({probe_oid}), detached from any branch"),
     ));
 
-    // --- Stage 5: Push -----------------------------------------------------
-    if let Err(e) = push_with_retry(&repo, &branch, PUSH_RETRY_MAX) {
-        let mut fail = StageResult::fail(
-            Stage::Push,
-            format!("pushing branch '{branch}' (retried up to {PUSH_RETRY_MAX} times): {e}"),
-        );
-        recover_after_failure(&repo, work_dir, git, &branch, false, &mut fail);
+    // --- Stage 5: Push — force-pushed (see PROBE_REF's doc comment for
+    // why), never a branch, so lgs's reconcile and refs/lgs-auth/* both
+    // ignore it. A single attempt: see this function's "No poll" doc. ------
+    if let Err(e) = push_lgs_refspec(&repo, &format!("+{PROBE_REF}:{PROBE_REF}")) {
+        let mut fail = StageResult::fail(Stage::Push, format!("pushing {PROBE_REF} to lgs: {e}"));
+        recover_after_failure(&repo, false, &mut fail);
         results.push(fail);
         return results;
     }
-    results.push(StageResult::pass(Stage::Push, format!("pushed branch '{branch}' with the sentinel commit")));
+    results.push(StageResult::pass(
+        Stage::Push,
+        format!("pushed the probe commit to {PROBE_REF} on the lgs remote"),
+    ));
 
-    // --- Stage 6: Fetch (bounded poll — lgs sync is ack-only) -------------
-    let deadline = Instant::now() + poll_timeout;
-    // The initial `None` is never read if the very first iteration's fetch
-    // succeeds — that is the intended, common case, not a bug.
-    #[allow(unused_assignments)]
-    let mut last_fetch_err: Option<String> = None;
-    let mut landed = false;
-    loop {
-        // Ack-only nudge — ignored on error: even if this particular call
-        // fails, the daemon's own ambient tick might still land the
-        // reconcile before the deadline, so it is still worth fetching.
-        let _ = lgs.sync(project_name);
-        match fetch_lgs(&repo) {
-            Ok(()) => {
-                last_fetch_err = None;
-                if let Ok(reference) = repo.find_reference(LGS_AUTH_MAIN) {
-                    if let Ok(commit) = reference.peel_to_commit() {
-                        if commit.id() == sentinel_oid {
-                            landed = true;
-                        }
-                    }
-                }
-            }
-            Err(e) => last_fetch_err = Some(e.to_string()),
-        }
-        if landed || Instant::now() >= deadline {
-            break;
-        }
-        std::thread::sleep(poll_interval);
+    // --- Stage 6: Fetch — one attempt, into a DISTINCT local tracking ref,
+    // proving the round trip through the remote rather than trusting the
+    // push's own say-so. --------------------------------------------------
+    if let Err(e) = fetch_lgs_refspec(&repo, &format!("+{PROBE_REF}:{PROBE_VERIFY_REF}")) {
+        let mut fail = StageResult::fail(Stage::Fetch, format!("fetching {PROBE_REF} back from lgs: {e}"));
+        recover_after_failure(&repo, true, &mut fail);
+        results.push(fail);
+        return results;
     }
-    if !landed {
-        let detail = match last_fetch_err {
-            Some(e) => format!(
-                "fetching from lgs kept failing (last error: {e}) after waiting up to {poll_timeout:?} \
-                 for the sentinel commit to become authoritative"
+    let fetched_oid = repo
+        .find_reference(PROBE_VERIFY_REF)
+        .and_then(|r| r.peel_to_commit())
+        .map(|c| c.id());
+    let fetched_oid = match fetched_oid {
+        Ok(oid) => oid,
+        Err(e) => {
+            let mut fail =
+                StageResult::fail(Stage::Fetch, format!("resolving the fetched probe ref: {e}"));
+            recover_after_failure(&repo, true, &mut fail);
+            results.push(fail);
+            return results;
+        }
+    };
+    if fetched_oid != probe_oid {
+        let mut fail = StageResult::fail(
+            Stage::Fetch,
+            format!(
+                "the remote's probe ref points at {fetched_oid}, not the {probe_oid} this run just \
+                 pushed"
             ),
-            None => format!(
-                "waited {poll_timeout:?} but the authoritative peer ref never advanced to the pushed \
-                 sentinel commit — lgs's reconcile may not have run yet"
-            ),
-        };
-        let mut fail = StageResult::fail(Stage::Fetch, detail);
-        recover_after_failure(&repo, work_dir, git, &branch, true, &mut fail);
+        );
+        recover_after_failure(&repo, true, &mut fail);
         results.push(fail);
         return results;
     }
     results.push(StageResult::pass(
         Stage::Fetch,
-        format!("the authoritative peer ref advanced to the pushed sentinel commit within {poll_timeout:?}"),
+        "fetched the probe commit back from the lgs remote and it matches what was pushed",
     ));
 
     // --- Stage 7: ReadBack -------------------------------------------------
-    let auth_commit_id = repo
-        .find_reference(LGS_AUTH_MAIN)
-        .and_then(|r| r.peel_to_commit())
-        .map(|c| c.id());
-    let read_back = auth_commit_id
-        .map_err(|e| format!("resolving the authoritative ref's commit: {e}"))
-        .and_then(|oid| {
-            read_blob_at(&repo, oid, SYNC_CHECK_SENTINEL)
-                .map_err(|e| format!("reading {SYNC_CHECK_SENTINEL} back from commit {oid}: {e}"))
-        });
+    let read_back = read_blob_at(&repo, fetched_oid, SYNC_CHECK_SENTINEL)
+        .map_err(|e| format!("reading {SYNC_CHECK_SENTINEL} back from the fetched probe commit: {e}"));
     match read_back {
         Ok(Some(bytes)) if bytes == token.as_bytes() => {
             results.push(StageResult::pass(
                 Stage::ReadBack,
-                "read the sentinel back from the authoritative ref and its content matched exactly",
+                "read the sentinel back from the fetched probe commit and its content matched exactly",
             ));
         }
         Ok(Some(_)) => {
             let mut fail = StageResult::fail(
                 Stage::ReadBack,
-                "the sentinel read back from the authoritative ref does not match what was written",
+                "the sentinel read back from the fetched probe commit does not match what was written",
             );
-            recover_after_failure(&repo, work_dir, git, &branch, true, &mut fail);
+            recover_after_failure(&repo, true, &mut fail);
             results.push(fail);
             return results;
         }
         Ok(None) => {
             let mut fail = StageResult::fail(
                 Stage::ReadBack,
-                format!("{SYNC_CHECK_SENTINEL} is missing from the authoritative ref's tree"),
+                format!("{SYNC_CHECK_SENTINEL} is missing from the fetched probe commit's tree"),
             );
-            recover_after_failure(&repo, work_dir, git, &branch, true, &mut fail);
+            recover_after_failure(&repo, true, &mut fail);
             results.push(fail);
             return results;
         }
         Err(e) => {
             let mut fail = StageResult::fail(Stage::ReadBack, e);
-            recover_after_failure(&repo, work_dir, git, &branch, true, &mut fail);
+            recover_after_failure(&repo, true, &mut fail);
             results.push(fail);
             return results;
         }
     }
 
     // --- Stage 8: Cleanup ---------------------------------------------------
-    match do_cleanup(&repo, work_dir, git, &branch, true) {
+    match do_cleanup(&repo, true) {
         Ok(()) => {
             results.push(StageResult::pass(
                 Stage::Cleanup,
-                format!("removed {SYNC_CHECK_SENTINEL} and pushed its removal"),
+                format!("deleted the probe ref ({PROBE_REF}) locally and on the lgs remote"),
             ));
         }
         Err(e) => {
             results.push(StageResult::fail(
                 Stage::Cleanup,
                 format!(
-                    "{e} — the repo may be left with a leftover {SYNC_CHECK_SENTINEL} commit and \
-                     needs manual attention"
+                    "{e} — the remote may be left with an orphaned {PROBE_REF} ref; it is disposable \
+                     (never part of the family's data or history), and the next Check sync run's \
+                     forced push will overwrite it, but it was not cleaned up just now"
                 ),
             ));
         }
@@ -728,55 +746,49 @@ fn check_sync_against(
     results
 }
 
-/// Best-effort: undo whatever local (and, once `push_succeeded`, remote)
-/// state an earlier stage's failure left behind, folding the outcome into
-/// the ALREADY-failing `failing` stage's own `detail` rather than ever
+/// Best-effort: delete whatever probe ref this run had already created —
+/// locally always, and on the remote too once `push_succeeded` (before
+/// that, nothing ever reached the remote to undo). Folds a cleanup failure
+/// into the ALREADY-failing `failing` stage's own `detail` rather than ever
 /// appending a separate, later `Stage` entry — a stage after the one that
 /// failed must never be reported at all (see this module's tests).
-/// `push_succeeded` says whether the sentinel commit reached the remote
-/// before the failure: if it did, undoing it locally is not enough — the
-/// removal must be pushed too, or the remote stays permanently polluted.
-fn recover_after_failure(
-    repo: &Repository,
-    work_dir: &Path,
-    git: &GitManager,
-    branch: &str,
-    push_succeeded: bool,
-    failing: &mut StageResult,
-) {
-    if let Err(e) = do_cleanup(repo, work_dir, git, branch, push_succeeded) {
+fn recover_after_failure(repo: &Repository, push_succeeded: bool, failing: &mut StageResult) {
+    if let Err(e) = do_cleanup(repo, push_succeeded) {
         failing.detail = format!(
-            "{}; additionally, cleaning up the sentinel afterward failed too: {e} — the repo may be \
-             left with a leftover {SYNC_CHECK_SENTINEL} commit and needs manual attention",
+            "{}; additionally, cleaning up the probe ref afterward failed too: {e} — it is disposable \
+             (never part of the family's data or history), and the next Check sync run's forced push \
+             will overwrite it, but it was not cleaned up just now",
             failing.detail
         );
     }
 }
 
-/// Remove the sentinel file if present, unstage it if tracked, commit the
-/// removal if that actually changed anything relative to `HEAD`, and (only
-/// when `push`) push that removal commit. Shared by the terminal `Cleanup`
-/// stage and by [`recover_after_failure`] — both need exactly this, differing
-/// only in whether a push has ever actually happened yet to need undoing.
-fn do_cleanup(repo: &Repository, work_dir: &Path, git: &GitManager, branch: &str, push: bool) -> Result<()> {
-    let sentinel_path = work_dir.join(SYNC_CHECK_SENTINEL);
-    if sentinel_path.exists() {
-        std::fs::remove_file(&sentinel_path)
-            .with_context(|| format!("removing {SYNC_CHECK_SENTINEL} from the working tree"))?;
+/// Delete [`PROBE_REF`] locally, and (only when `push`, i.e. it was ever
+/// actually pushed) on the remote too. Shared by the terminal `Cleanup`
+/// stage and by [`recover_after_failure`] — both need exactly this,
+/// differing only in whether a push has ever actually happened yet to need
+/// undoing. Never touches the working tree or the index — there is nothing
+/// there to clean up in this design (see the module doc). The local
+/// deletes are attempted regardless of whether the remote delete succeeds,
+/// so a remote failure never leaves a needlessly stale local ref behind
+/// too; only the remote failure (the one that can genuinely leave something
+/// behind) is returned as `Err`.
+fn do_cleanup(repo: &Repository, push: bool) -> Result<()> {
+    let remote_result = if push {
+        push_lgs_refspec(repo, &format!(":{PROBE_REF}"))
+            .with_context(|| format!("deleting {PROBE_REF} on the lgs remote"))
+    } else {
+        Ok(())
+    };
+    if let Ok(mut reference) = repo.find_reference(PROBE_REF) {
+        let _ = reference.delete();
     }
-    git.remove_file(work_dir, SYNC_CHECK_SENTINEL)
-        .with_context(|| format!("unstaging {SYNC_CHECK_SENTINEL}"))?;
-    match git
-        .commit_if_changed(work_dir, "chore(sync-check): remove sentinel")
-        .with_context(|| format!("committing the removal of {SYNC_CHECK_SENTINEL}"))?
-    {
-        Some(_) if push => {
-            push_with_retry(repo, branch, PUSH_RETRY_MAX)
-                .with_context(|| format!("pushing the removal of {SYNC_CHECK_SENTINEL}"))?;
-            Ok(())
-        }
-        Some(_) | None => Ok(()),
+    if let Ok(mut reference) = repo.find_reference(PROBE_VERIFY_REF) {
+        // Our own local fetch-tracking ref — never seen by the remote or
+        // any other machine, so a failure here is not worth surfacing.
+        let _ = reference.delete();
     }
+    remote_result
 }
 
 /// The branch currently checked out, by shorthand name (e.g. `"main"`).
@@ -1538,7 +1550,10 @@ ex-3-a,keiko,2026-01-03T00:00:00+00:00,Book,-3.00,7.00,expense\n";
     /// A bare "cloud" repo with a base commit, plus a local clone (the
     /// child's `work_dir`) — no `lgs` remote wired yet; `check_sync_against`
     /// wires it itself from the fake script's `status --json` clone_url,
-    /// exactly like production.
+    /// exactly like production. A real child repo always has at least one
+    /// commit already; `check_sync_against` no longer actually depends on
+    /// that (the probe commit it builds is parentless — see the module
+    /// doc), but this keeps the fixture realistic.
     fn setup_check_sync_repo() -> (tempfile::TempDir, PathBuf, tempfile::TempDir, PathBuf) {
         let bare_dir = tempfile::tempdir().unwrap();
         let bare = Repository::init_bare(bare_dir.path()).unwrap();
@@ -1557,37 +1572,18 @@ ex-3-a,keiko,2026-01-03T00:00:00+00:00,Book,-3.00,7.00,expense\n";
 
     /// Writes a fake `lgs` executable (a shell script, reached only by an
     /// explicit tempdir path — never on `PATH`) that answers `status --json`
-    /// with one project pointing at `bare_path`, and answers `sync <name>`
-    /// one of two ways:
-    ///
-    /// - `reconcile_on_sync = true`: mirrors `refs/lgs-auth/heads/main` to
-    ///   whatever `refs/heads/main` currently is on the bare — a faithful
-    ///   stand-in for "the daemon's reconcile landed," used by the
-    ///   happy-path test.
-    /// - `reconcile_on_sync = false`: advances the bare's `refs/heads/main`
-    ///   to an unrelated new commit EVERY time it's called, and never
-    ///   touches `refs/lgs-auth/heads/main` at all — simulates a peer
-    ///   advancing the branch while this run's reconcile never lands,
-    ///   which both makes `Fetch` time out AND makes a later cleanup push
-    ///   a genuine non-fast-forward. Used by the "cleanup itself fails"
-    ///   test.
-    fn write_fake_lgs(script_dir: &Path, project_name: &str, bare_path: &Path, reconcile_on_sync: bool) -> PathBuf {
+    /// with one project pointing at `bare_path`. `check_sync_against` never
+    /// calls `lgs sync` any more (see its "No poll" doc comment — the probe
+    /// ref never depends on the daemon's async reconcile), so this fake
+    /// binary needs to handle nothing but `status`.
+    fn write_fake_lgs(script_dir: &Path, project_name: &str, bare_path: &Path) -> PathBuf {
         let script_path = script_dir.join("lgs");
         let bare = bare_path.display();
         let status_json = format!(
             "{{\"daemon\":{{\"state\":\"ok\"}},\"cloud_root\":\"/tmp\",\"cloud_root_exists\":true,\"projects\":[{{\"name\":\"{project_name}\",\"clone_url\":\"{bare}\",\"working_repo_path\":\"/tmp\",\"archived\":false}}]}}"
         );
-        let sync_body = if reconcile_on_sync {
-            format!(
-                "    HEAD=$(git --git-dir=\"{bare}\" rev-parse refs/heads/main 2>/dev/null) || exit 0\n    git --git-dir=\"{bare}\" update-ref refs/lgs-auth/heads/main \"$HEAD\"\n"
-            )
-        } else {
-            format!(
-                "    export GIT_AUTHOR_NAME=Test GIT_AUTHOR_EMAIL=test@example.com GIT_COMMITTER_NAME=Test GIT_COMMITTER_EMAIL=test@example.com\n    TREE=$(git --git-dir=\"{bare}\" rev-parse 'refs/heads/main^{{tree}}') || exit 0\n    PARENT=$(git --git-dir=\"{bare}\" rev-parse refs/heads/main) || exit 0\n    NEW=$(printf 'advance after %s' \"$PARENT\" | git --git-dir=\"{bare}\" commit-tree \"$TREE\" -p \"$PARENT\") || exit 0\n    git --git-dir=\"{bare}\" update-ref refs/heads/main \"$NEW\"\n"
-            )
-        };
         let script = format!(
-            "#!/bin/sh\ncase \"$1\" in\n  status)\n    cat <<'JSON'\n{status_json}\nJSON\n    ;;\n  sync)\n{sync_body}    ;;\n  *)\n    exit 1\n    ;;\nesac\n"
+            "#!/bin/sh\ncase \"$1\" in\n  status)\n    cat <<'JSON'\n{status_json}\nJSON\n    ;;\n  *)\n    exit 1\n    ;;\nesac\n"
         );
         std::fs::write(&script_path, script).unwrap();
         {
@@ -1599,23 +1595,21 @@ ex-3-a,keiko,2026-01-03T00:00:00+00:00,Book,-3.00,7.00,expense\n";
         script_path
     }
 
+    /// The full happy path. Asserts every stage passes AND — the whole
+    /// point of the redesign — that the child's branch tip never moves by
+    /// even one commit, and that the disposable probe ref is gone on both
+    /// sides afterward.
     #[test]
-    fn check_sync_end_to_end_succeeds_and_leaves_the_repo_clean() {
+    fn check_sync_end_to_end_succeeds_and_never_touches_the_branch() {
         let (_bare_dir, bare_path, _work_dir, work_path) = setup_check_sync_repo();
         let script_dir = tempfile::tempdir().unwrap();
-        let script_path = write_fake_lgs(script_dir.path(), "allowance-keiko", &bare_path, true);
-
+        let script_path = write_fake_lgs(script_dir.path(), "allowance-keiko", &bare_path);
         let lgs = LgsClient::new(script_path);
-        let git = GitManager::new();
 
-        let results = check_sync_against(
-            &lgs,
-            &git,
-            &work_path,
-            "allowance-keiko",
-            Duration::from_secs(5),
-            Duration::from_millis(50),
-        );
+        let repo_before = Repository::open(&work_path).unwrap();
+        let head_before = repo_before.head().unwrap().peel_to_commit().unwrap().id();
+
+        let results = check_sync_against(&lgs, &work_path, "allowance-keiko");
 
         assert_eq!(
             results.len(),
@@ -1626,20 +1620,20 @@ ex-3-a,keiko,2026-01-03T00:00:00+00:00,Book,-3.00,7.00,expense\n";
             assert!(r.ok, "stage {:?} unexpectedly failed: {}", r.stage, r.detail);
         }
 
-        // Locally: no sentinel on disk, and HEAD's tree has no sentinel entry.
-        assert!(!work_path.join(SYNC_CHECK_SENTINEL).exists());
+        // The branch must not have moved — not even one commit. This is
+        // the regression this redesign exists to fix: an earlier version
+        // committed "add sentinel" and "remove sentinel" directly onto the
+        // branch, permanently, on every single run.
         let repo = Repository::open(&work_path).unwrap();
-        let head_tree = repo.head().unwrap().peel_to_commit().unwrap().tree().unwrap();
-        assert!(head_tree.get_name(SYNC_CHECK_SENTINEL).is_none(), "HEAD must have no sentinel");
+        let head_after = repo.head().unwrap().peel_to_commit().unwrap().id();
+        assert_eq!(head_before, head_after, "check_sync must never move the child's branch");
 
-        // And the remote: cleanup's removal was actually pushed, not just
-        // committed locally.
+        // The disposable probe ref must be gone, locally and on the remote.
+        assert!(repo.find_reference(PROBE_REF).is_err(), "the local probe ref must be deleted");
         let bare = Repository::open_bare(&bare_path).unwrap();
-        let bare_tip_oid = bare.find_reference("refs/heads/main").unwrap().target().unwrap();
-        let bare_tip = bare.find_commit(bare_tip_oid).unwrap();
         assert!(
-            bare_tip.tree().unwrap().get_name(SYNC_CHECK_SENTINEL).is_none(),
-            "the remote must be clean too — cleanup's removal must have been pushed"
+            bare.find_reference(PROBE_REF).is_err(),
+            "the remote's probe ref must be deleted too"
         );
     }
 
@@ -1658,19 +1652,10 @@ ex-3-a,keiko,2026-01-03T00:00:00+00:00,Book,-3.00,7.00,expense\n";
         // A clone_url that isn't a git repo at all — push fails outright, no
         // real remote plumbing needed for this test.
         let bogus_remote = script_dir.path().join("does-not-exist.git");
-        let script_path = write_fake_lgs(script_dir.path(), "allowance-keiko", &bogus_remote, true);
-
+        let script_path = write_fake_lgs(script_dir.path(), "allowance-keiko", &bogus_remote);
         let lgs = LgsClient::new(script_path);
-        let git = GitManager::new();
 
-        let results = check_sync_against(
-            &lgs,
-            &git,
-            &work_path,
-            "allowance-keiko",
-            Duration::from_secs(2),
-            Duration::from_millis(50),
-        );
+        let results = check_sync_against(&lgs, &work_path, "allowance-keiko");
 
         assert!(
             results.iter().all(|r| r.stage <= Stage::Push),
@@ -1680,62 +1665,63 @@ ex-3-a,keiko,2026-01-03T00:00:00+00:00,Book,-3.00,7.00,expense\n";
         assert_eq!(last.stage, Stage::Push);
         assert!(!last.ok, "push against a nonexistent remote must fail");
         assert!(
-            !last.detail.contains("cleaning up the sentinel afterward failed"),
+            !last.detail.contains("cleaning up the probe ref afterward failed"),
             "local-only cleanup must succeed here: {}",
             last.detail
         );
 
-        assert!(!work_path.join(SYNC_CHECK_SENTINEL).exists(), "sentinel must be removed from disk");
+        // The local probe ref (created by Commit, before Push ever ran)
+        // must be gone.
         let repo = Repository::open(&work_path).unwrap();
-        let head_tree = repo.head().unwrap().peel_to_commit().unwrap().tree().unwrap();
-        assert!(head_tree.get_name(SYNC_CHECK_SENTINEL).is_none(), "HEAD must have no sentinel");
+        assert!(repo.find_reference(PROBE_REF).is_err(), "the local probe ref must be deleted");
     }
 
-    /// Review-anticipating regression: a failure that happens AFTER the
-    /// sentinel was already pushed (here, `Fetch` timing out) must still
-    /// attempt to clean up — including pushing the removal, since the
-    /// remote is already polluted at that point — and if THAT cleanup
-    /// attempt also fails, it must say so rather than reporting the
-    /// failing stage as if cleanup were silent. The fake script here
-    /// advances the bare's `refs/heads/main` independently on every `sync`
-    /// call (never landing `refs/lgs-auth/*`), which both starves `Fetch`
-    /// and makes the eventual cleanup push a genuine non-fast-forward.
+    /// The disposable-ref redesign removes the branch-pollution failure
+    /// mode entirely, but a later network call can still fail after an
+    /// earlier one succeeded (e.g. the daemon becomes unreachable between
+    /// a successful push and the cleanup that follows) — and that must
+    /// still be reported, not silently swallowed. Exercises
+    /// `do_cleanup`/`recover_after_failure` directly (the same private
+    /// helpers both the terminal `Cleanup` stage and every earlier
+    /// failure's recovery share) against a real push that then loses its
+    /// remote, rather than trying to race a fault into the middle of a
+    /// single `check_sync_against` call.
     #[test]
-    fn check_sync_reports_when_cleanup_itself_fails_after_a_later_failure() {
-        let (_bare_dir, bare_path, _work_dir, work_path) = setup_check_sync_repo();
-        let script_dir = tempfile::tempdir().unwrap();
-        let script_path = write_fake_lgs(script_dir.path(), "allowance-keiko", &bare_path, false);
-
-        let lgs = LgsClient::new(script_path);
-        let git = GitManager::new();
-
-        let results = check_sync_against(
-            &lgs,
-            &git,
-            &work_path,
-            "allowance-keiko",
-            Duration::from_millis(400),
-            Duration::from_millis(50),
-        );
-
-        assert!(
-            results.iter().all(|r| r.stage <= Stage::Fetch),
-            "must not report any stage after Fetch: {results:?}"
-        );
-        let last = results.last().expect("at least one stage must have run");
-        assert_eq!(last.stage, Stage::Fetch);
-        assert!(!last.ok, "the authoritative ref never advances in this scenario, so Fetch must fail");
-        assert!(
-            last.detail.contains("cleaning up the sentinel afterward failed too"),
-            "the recovery push must fail too (non-fast-forward) and be reported: {}",
-            last.detail
-        );
-
-        // The local half of cleanup must still have succeeded even though
-        // the push of the removal failed.
-        assert!(!work_path.join(SYNC_CHECK_SENTINEL).exists());
+    fn recovery_reports_when_the_remote_delete_itself_fails() {
+        let (bare_dir, bare_path, _work_dir, work_path) = setup_check_sync_repo();
         let repo = Repository::open(&work_path).unwrap();
-        let head_tree = repo.head().unwrap().peel_to_commit().unwrap().tree().unwrap();
-        assert!(head_tree.get_name(SYNC_CHECK_SENTINEL).is_none());
+        ensure_lgs_remote(&repo, bare_path.to_str().unwrap()).unwrap();
+
+        // Build and push a probe commit exactly the way Commit/Push would.
+        let blob_oid = repo.blob(b"probe content").unwrap();
+        let mut builder = repo.treebuilder(None).unwrap();
+        builder.insert(SYNC_CHECK_SENTINEL, blob_oid, 0o100644).unwrap();
+        let tree_oid = builder.write().unwrap();
+        let tree = repo.find_tree(tree_oid).unwrap();
+        let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+        let probe_oid = repo.commit(None, &sig, &sig, "probe", &tree, &[]).unwrap();
+        repo.reference(PROBE_REF, probe_oid, true, "probe").unwrap();
+        push_lgs_refspec(&repo, &format!("+{PROBE_REF}:{PROBE_REF}")).unwrap();
+        assert!(
+            Repository::open_bare(&bare_path).unwrap().find_reference(PROBE_REF).is_ok(),
+            "precondition: the probe ref must have actually reached the remote"
+        );
+
+        // The remote becomes unreachable before cleanup gets a chance to
+        // run — e.g. the daemon stopped, or the cloud path went away.
+        drop(bare_dir);
+
+        let mut failing = StageResult::fail(Stage::ReadBack, "unrelated failure for this test");
+        recover_after_failure(&repo, true, &mut failing);
+
+        assert!(
+            failing.detail.contains("cleaning up the probe ref afterward failed too"),
+            "a failed remote delete must be folded into the already-failing stage's detail: {}",
+            failing.detail
+        );
+        assert!(
+            repo.find_reference(PROBE_REF).is_err(),
+            "the LOCAL probe ref must still be deleted even though the remote delete failed"
+        );
     }
 }

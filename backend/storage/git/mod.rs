@@ -594,6 +594,74 @@ fn push_lgs_with_deadline(repo: &git2::Repository, branch: &str, deadline: Insta
     Ok(())
 }
 
+/// Fetch exactly one caller-supplied refspec from the `lgs` remote, bounded
+/// the same way as [`fetch_lgs`]. Exists for callers that need a ref OTHER
+/// than `refs/heads/*`/`refs/lgs-auth/*` — e.g. `check_sync`'s disposable
+/// `refs/sync-check/probe`, which must never touch the branch refspecs
+/// `fetch_lgs` fetches. Never used for the branch sync loop itself; that
+/// stays on `fetch_lgs` unchanged.
+pub fn fetch_lgs_refspec(repo: &git2::Repository, refspec: &str) -> Result<()> {
+    fetch_lgs_refspec_with_deadline(repo, refspec, Instant::now() + NETWORK_TIMEOUT)
+}
+
+/// The actual implementation behind [`fetch_lgs_refspec`], with the deadline
+/// exposed for the same reason as [`fetch_lgs_with_deadline`].
+fn fetch_lgs_refspec_with_deadline(repo: &git2::Repository, refspec: &str, deadline: Instant) -> Result<()> {
+    let mut remote = repo.find_remote("lgs")?;
+
+    let mut callbacks = git2::RemoteCallbacks::new();
+    callbacks.transfer_progress(move |_progress| Instant::now() < deadline);
+    callbacks.sideband_progress(move |_msg| Instant::now() < deadline);
+
+    let mut fetch_options = git2::FetchOptions::new();
+    fetch_options.remote_callbacks(callbacks);
+
+    remote
+        .fetch(&[refspec], Some(&mut fetch_options), None)
+        .with_context(|| format!("fetching {refspec} from lgs (bounded to {NETWORK_TIMEOUT:?})"))?;
+    Ok(())
+}
+
+/// Push exactly one caller-supplied refspec to the `lgs` remote, bounded the
+/// same way as [`push_lgs`]. Exists for callers that need to push (or, with
+/// an empty source side, delete) a ref other than a branch — see
+/// [`fetch_lgs_refspec`]'s doc comment for why. Same rejection handling as
+/// [`push_lgs`]: a per-ref rejection is turned into an `Err`, never silently
+/// swallowed.
+pub fn push_lgs_refspec(repo: &git2::Repository, refspec: &str) -> Result<()> {
+    push_lgs_refspec_with_deadline(repo, refspec, Instant::now() + NETWORK_TIMEOUT)
+}
+
+/// The actual implementation behind [`push_lgs_refspec`], with the deadline
+/// exposed for the same reason as [`push_lgs_with_deadline`].
+fn push_lgs_refspec_with_deadline(repo: &git2::Repository, refspec: &str, deadline: Instant) -> Result<()> {
+    let mut remote = repo.find_remote("lgs")?;
+
+    let mut callbacks = git2::RemoteCallbacks::new();
+    callbacks.push_update_reference(|refname, status| match status {
+        None => Ok(()),
+        Some(msg) => Err(git2::Error::from_str(&format!("lgs rejected push of {refname}: {msg}"))),
+    });
+    callbacks.sideband_progress(move |_msg| Instant::now() < deadline);
+    callbacks.push_negotiation(move |_updates| {
+        if Instant::now() < deadline {
+            Ok(())
+        } else {
+            Err(git2::Error::from_str(
+                "push aborted: network timeout exceeded before negotiation completed",
+            ))
+        }
+    });
+
+    let mut push_options = git2::PushOptions::new();
+    push_options.remote_callbacks(callbacks);
+
+    remote
+        .push(&[refspec], Some(&mut push_options))
+        .with_context(|| format!("pushing {refspec} to lgs (bounded to {NETWORK_TIMEOUT:?})"))?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -966,6 +1034,95 @@ mod tests {
 
         let bare = git2::Repository::open_bare(bare_dir.path()).unwrap();
         assert_eq!(bare.find_reference("refs/heads/main").unwrap().target().unwrap(), base_oid);
+    }
+
+    /// Task 20's `check_sync` needs a ref OTHER than a branch — pins that
+    /// `push_lgs_refspec`/`fetch_lgs_refspec` round-trip an arbitrary
+    /// namespace (`refs/sync-check/probe`) rather than being hardcoded to
+    /// `refs/heads/*` the way `push_lgs`/`fetch_lgs` are.
+    #[test]
+    fn push_and_fetch_refspec_round_trip_a_non_branch_ref() {
+        let bare_dir = tempfile::tempdir().unwrap();
+        git2::Repository::init_bare(bare_dir.path()).unwrap();
+
+        let work_dir = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(work_dir.path()).unwrap();
+        repo.remote("lgs", bare_dir.path().to_str().unwrap()).unwrap();
+
+        let oid = commit_empty_tree(&repo, "probe", &[]);
+        repo.reference("refs/sync-check/probe", oid, true, "probe").unwrap();
+
+        push_lgs_refspec(&repo, "refs/sync-check/probe:refs/sync-check/probe").unwrap();
+
+        let bare = git2::Repository::open_bare(bare_dir.path()).unwrap();
+        assert_eq!(
+            bare.find_reference("refs/sync-check/probe").unwrap().target().unwrap(),
+            oid,
+            "the probe ref must land on the remote under its own name"
+        );
+
+        // Fetch it back into a distinct local tracking ref, proving the
+        // round trip through the remote rather than just trusting the push.
+        fetch_lgs_refspec(
+            &repo,
+            "+refs/sync-check/probe:refs/remotes/sync-check-probe/probe",
+        )
+        .unwrap();
+        assert_eq!(
+            repo.find_reference("refs/remotes/sync-check-probe/probe").unwrap().target().unwrap(),
+            oid
+        );
+    }
+
+    /// A force-prefixed push refspec (`+`) must overwrite an unrelated,
+    /// non-fast-forward ref on the remote rather than being rejected —
+    /// this is exactly what lets `check_sync` self-heal from a previous
+    /// run's leftover, un-cleaned-up probe ref instead of failing forever.
+    #[test]
+    fn push_refspec_with_force_prefix_overwrites_a_non_fast_forward_ref() {
+        let bare_dir = tempfile::tempdir().unwrap();
+        let bare = git2::Repository::init_bare(bare_dir.path()).unwrap();
+        let stale_oid = commit_empty_tree(&bare, "stale leftover probe", &[]);
+        bare.reference("refs/sync-check/probe", stale_oid, true, "leftover").unwrap();
+
+        let work_dir = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(work_dir.path()).unwrap();
+        repo.remote("lgs", bare_dir.path().to_str().unwrap()).unwrap();
+        let fresh_oid = commit_empty_tree(&repo, "fresh probe", &[]);
+        repo.reference("refs/sync-check/probe", fresh_oid, true, "fresh").unwrap();
+
+        // Without the `+` prefix this would be a non-fast-forward (the two
+        // commits share no history) and would be rejected.
+        push_lgs_refspec(&repo, "+refs/sync-check/probe:refs/sync-check/probe").unwrap();
+
+        assert_eq!(
+            bare.find_reference("refs/sync-check/probe").unwrap().target().unwrap(),
+            fresh_oid,
+            "a forced push must overwrite the stale leftover ref"
+        );
+    }
+
+    /// An empty source side (`:refs/...`) is a delete refspec — pins that
+    /// `push_lgs_refspec` supports deleting the remote's ref, which is how
+    /// `check_sync`'s `Cleanup` stage removes the probe ref it pushed.
+    #[test]
+    fn push_refspec_with_empty_source_deletes_the_remote_ref() {
+        let bare_dir = tempfile::tempdir().unwrap();
+        let bare = git2::Repository::init_bare(bare_dir.path()).unwrap();
+        let oid = commit_empty_tree(&bare, "probe", &[]);
+        bare.reference("refs/sync-check/probe", oid, true, "probe").unwrap();
+
+        let work_dir = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(work_dir.path()).unwrap();
+        repo.remote("lgs", bare_dir.path().to_str().unwrap()).unwrap();
+
+        push_lgs_refspec(&repo, ":refs/sync-check/probe").unwrap();
+
+        let bare = git2::Repository::open_bare(bare_dir.path()).unwrap();
+        assert!(
+            bare.find_reference("refs/sync-check/probe").is_err(),
+            "a delete refspec must remove the ref from the remote"
+        );
     }
 
     #[test]
