@@ -338,6 +338,17 @@ impl LgsClient {
     pub fn init(&self, cloud_root: &str) -> Result<()> {
         self.run(&["init", "--cloud-root", cloud_root]).map(|_| ())
     }
+    /// Nudge the daemon to sync `project` now. ACK-ONLY: per lgs's own CLI
+    /// (`local-git-sync/src/cli.rs`'s `sync()` sends `Request::SyncNow` and
+    /// returns as soon as the daemon acknowledges the request), a successful
+    /// return here means the nudge was received, NOT that the reconcile it
+    /// triggers has finished. A caller that needs the result to have
+    /// actually landed (e.g. `check_sync`'s `Fetch`/`ReadBack` stages) must
+    /// poll for that separately rather than trusting this call's return
+    /// alone.
+    pub fn sync(&self, project: &str) -> Result<String> {
+        self.run(&["sync", project])
+    }
 }
 
 #[cfg(test)]
@@ -400,6 +411,27 @@ mod tests {
         let client = LgsClient::new(script_path);
         let out = client.run(&["status", "--json"]).unwrap();
         assert_eq!(out.trim(), r#"{"projects":[]}"#);
+    }
+
+    /// `sync` is a thin wrapper over `run` with a fixed `["sync", project]`
+    /// argv — pins that the project name actually reaches the subprocess
+    /// (not, say, dropped or reordered) and that a well-behaved process's
+    /// output is captured the same way `status` and the others already are.
+    #[test]
+    fn sync_passes_the_project_name_through_to_the_subprocess() {
+        let dir = tempfile::tempdir().unwrap();
+        let script_path = dir.path().join("lgs");
+        std::fs::write(&script_path, "#!/bin/sh\necho \"synced:$2\"\n").unwrap();
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&script_path).unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&script_path, perms).unwrap();
+        }
+
+        let client = LgsClient::new(script_path);
+        let out = client.sync("allowance-keiko").unwrap();
+        assert_eq!(out.trim(), "synced:allowance-keiko");
     }
 
     #[test]

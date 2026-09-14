@@ -127,6 +127,23 @@ impl GitManager {
         Ok(())
     }
 
+    /// Unstage a specific file from the index — the removal counterpart to
+    /// [`Self::add_file`]. A no-op (not an error) when the path is not
+    /// currently in the index, so a best-effort cleanup caller (Task 20's
+    /// `check_sync`) can call this without first having to know whether the
+    /// file was ever actually staged.
+    pub fn remove_file<P: AsRef<Path>>(&self, repo_path: P, file_path: &str) -> Result<()> {
+        let repo_path = repo_path.as_ref();
+        debug!("Unstaging file '{}' in repository: {:?}", file_path, repo_path);
+        let repo = Repository::open(repo_path)?;
+        let mut index = repo.index()?;
+        if index.get_path(Path::new(file_path), 0).is_some() {
+            index.remove_path(Path::new(file_path))?;
+            index.write()?;
+        }
+        Ok(())
+    }
+
     /// Stage all changes in the repository
     pub fn add_all<P: AsRef<Path>>(&self, repo_path: P) -> Result<()> {
         let repo_path = repo_path.as_ref();
@@ -610,6 +627,41 @@ mod tests {
         git_manager.add_file(temp_dir.path(), "test.txt").unwrap();
         let commit_id = git_manager.commit(temp_dir.path(), "Initial commit").unwrap();
         assert!(!commit_id.is_empty());
+    }
+
+    #[test]
+    fn remove_file_unstages_a_tracked_file() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let gm = GitManager::new();
+        gm.init_repo(temp_dir.path()).unwrap();
+        std::fs::write(temp_dir.path().join("test.txt"), "hello").unwrap();
+        gm.add_file(temp_dir.path(), "test.txt").unwrap();
+        gm.commit(temp_dir.path(), "initial").unwrap();
+
+        std::fs::remove_file(temp_dir.path().join("test.txt")).unwrap();
+        gm.remove_file(temp_dir.path(), "test.txt").unwrap();
+
+        let commit_id = gm.commit(temp_dir.path(), "remove test.txt").unwrap();
+        let repo = git2::Repository::open(temp_dir.path()).unwrap();
+        let commit = repo.find_commit(git2::Oid::from_str(&commit_id).unwrap()).unwrap();
+        let tree = commit.tree().unwrap();
+        assert!(tree.get_name("test.txt").is_none(), "test.txt must be gone from the new tree");
+    }
+
+    /// A best-effort cleanup caller may not know whether a file was ever
+    /// actually staged (e.g. an earlier stage failed before staging it).
+    /// This must be a quiet no-op, not an error.
+    #[test]
+    fn remove_file_is_a_no_op_when_the_path_was_never_staged() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let gm = GitManager::new();
+        gm.init_repo(temp_dir.path()).unwrap();
+        std::fs::write(temp_dir.path().join("other.txt"), "x").unwrap();
+        gm.add_file(temp_dir.path(), "other.txt").unwrap();
+        gm.commit(temp_dir.path(), "initial").unwrap();
+
+        // "never-staged.txt" was never added — removing it must not error.
+        gm.remove_file(temp_dir.path(), "never-staged.txt").unwrap();
     }
 
     #[test]

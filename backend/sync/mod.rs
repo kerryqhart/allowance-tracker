@@ -17,7 +17,10 @@ pub use bootstrap::{
     copy_binary, ensure_daemon, ensure_lgs_binary, git_is_available, run_first_run, DaemonAction,
     DaemonOutcome, DaemonOwnership, GIT_MISSING_MESSAGE,
 };
-pub use child_sync::{classify, ChildSyncEngine, Cycle, CycleOutcome};
+pub use child_sync::{
+    check_sync_stages, classify, ChildSyncEngine, Cycle, CycleOutcome, Stage, StageResult,
+    SYNC_CHECK_SENTINEL,
+};
 pub use lgs_client::{
     AdoptableEntry, DaemonInfo, DaemonState, DurabilityState, LgsClient, ProjectReport, StatusReport,
 };

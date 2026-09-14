@@ -27,9 +27,10 @@
 use eframe::egui;
 
 use crate::backend::domain::sync_persistence::{sync_state_path, SyncState};
+use crate::backend::storage::git::GitManager;
 use crate::backend::sync::{
     adopt_child, adoptable_children, ensure_daemon, ensure_lgs_binary, run_first_run, AdoptableChild,
-    DaemonOutcome, LgsClient, SyncPaths,
+    ChildSyncEngine, DaemonOutcome, LgsClient, StageResult, SyncPaths,
 };
 use crate::backend::Backend;
 use crate::ui::app_state::AllowanceTrackerApp;
@@ -48,6 +49,11 @@ pub struct LgsSyncFormState {
     /// opened it isn't also read as a backdrop click that closes it, and so
     /// the adoptable list is fetched exactly once per open.
     pub just_opened: bool,
+    /// The most recent "Check sync" run's per-stage results, in order.
+    /// Empty until the button is clicked; cleared whenever the modal is
+    /// re-opened or another action's message is set, so a stale result
+    /// from a previous child/run is never shown alongside a new message.
+    pub check_sync_results: Vec<StageResult>,
 }
 
 impl LgsSyncFormState {
@@ -62,6 +68,7 @@ impl LgsSyncFormState {
     pub fn clear_messages(&mut self) {
         self.success_message = None;
         self.error_message = None;
+        self.check_sync_results.clear();
     }
 
     pub fn set_success(&mut self, message: String) {
@@ -154,6 +161,7 @@ impl AllowanceTrackerApp {
                                         .wrap(),
                                     );
                                 }
+                                render_check_sync_results(ui, &self.settings.lgs_sync_form.check_sync_results);
 
                                 ui.add_space(8.0);
                                 ui.horizontal(|ui| {
@@ -162,6 +170,16 @@ impl AllowanceTrackerApp {
                                     }
                                     if cloud_root_configured && ui.button("Refresh").clicked() {
                                         self.refresh_lgs_status();
+                                    }
+                                    if cloud_root_configured {
+                                        let can_check = self.core.current_child.is_some();
+                                        if ui
+                                            .add_enabled(can_check, egui::Button::new("Check sync"))
+                                            .on_disabled_hover_text("Select a child first.")
+                                            .clicked()
+                                        {
+                                            self.check_lgs_sync();
+                                        }
                                     }
                                     if ui.button("Close").clicked() {
                                         close_requested = true;
@@ -367,6 +385,36 @@ impl AllowanceTrackerApp {
         }
     }
 
+    /// Exercise the whole lgs loop for the currently selected child, on
+    /// demand, and show each stage's pass/fail by name — Task 20's "Check
+    /// sync": health *reporting* (`refresh_lgs_status`) proves nothing about
+    /// whether a child's own commits can actually get out and back, and the
+    /// no-terminal goal means the user needs a button, not a command.
+    fn check_lgs_sync(&mut self) {
+        self.settings.lgs_sync_form.clear_messages();
+
+        let Some(child) = self.core.current_child.clone() else {
+            self.settings.lgs_sync_form.set_error("Select a child first.".to_string());
+            return;
+        };
+        let Some((lgs, _paths)) = self.lgs_client_for_settings() else { return };
+
+        let git = GitManager::new();
+        let engine = ChildSyncEngine::new(lgs, self.core.backend.csv_connection.clone());
+        let child_id = shared::ChildId::from(child.id.clone());
+        let results = engine.check_sync(&git, &child_id);
+
+        let all_ok = !results.is_empty() && results.iter().all(|r| r.ok);
+        self.settings.lgs_sync_form.check_sync_results = results;
+        if all_ok {
+            self.settings.lgs_sync_form.set_success(format!("Sync check passed for {}.", child.name));
+        } else {
+            self.settings
+                .lgs_sync_form
+                .set_error(format!("Sync check failed for {} — see details below.", child.name));
+        }
+    }
+
     fn refresh_lgs_status(&mut self) {
         self.settings.lgs_sync_form.clear_messages();
         let Some((lgs, _paths)) = self.lgs_client_for_settings() else { return };
@@ -432,6 +480,44 @@ impl AllowanceTrackerApp {
         let lgs = LgsClient::new(paths.lgs_binary.clone());
         Some((lgs, paths))
     }
+}
+
+/// Render "Check sync"'s per-stage results, each named and marked pass/fail
+/// — the whole point of Task 20 is that a failure says which stage broke,
+/// in plain language, rather than "something went wrong." A no-op when
+/// `results` is empty (nothing has been checked yet this session).
+fn render_check_sync_results(ui: &mut egui::Ui, results: &[StageResult]) {
+    if results.is_empty() {
+        return;
+    }
+    ui.add_space(6.0);
+    ui.separator();
+    ui.add_space(6.0);
+    egui::ScrollArea::vertical()
+        .max_height(140.0)
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            for stage in results {
+                let (icon, color) = if stage.ok {
+                    ("✅", egui::Color32::from_rgb(0, 140, 0))
+                } else {
+                    ("❌", egui::Color32::from_rgb(190, 60, 60))
+                };
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(icon).color(color));
+                    ui.label(egui::RichText::new(format!("{:?}", stage.stage)).strong());
+                });
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(&stage.detail)
+                            .font(egui::FontId::new(12.0, egui::FontFamily::Proportional))
+                            .color(egui::Color32::from_rgb(120, 120, 120)),
+                    )
+                    .wrap(),
+                );
+                ui.add_space(4.0);
+            }
+        });
 }
 
 fn render_first_run_pitch(ui: &mut egui::Ui) {
