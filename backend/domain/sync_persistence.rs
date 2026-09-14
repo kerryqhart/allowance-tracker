@@ -40,9 +40,26 @@ impl SyncState {
         Ok(state)
     }
 
+    /// Persist atomically: write a temp file, then rename over the target.
+    ///
+    /// Review (round 2): a bare `fs::write` leaves a torn-read/lost-update
+    /// window — a crash (or another process's write landing) mid-write left
+    /// a truncated `sync_state.yaml`, which the sync thread re-reads every
+    /// 30 seconds via `persist_watermarks`. Mirrors `ChildRegistry::save`
+    /// (`backend/storage/csv/child_registry.rs`), the pattern this same
+    /// codebase already uses for exactly this reason: the rename is a single
+    /// filesystem operation, so a reader never observes a partially-written
+    /// file.
     pub fn save(&self, path: &Path) -> Result<()> {
         let contents = serde_yaml::to_string(self)?;
-        std::fs::write(path, contents)?;
+        if let Some(parent) = path.parent() {
+            if !parent.as_os_str().is_empty() && !parent.exists() {
+                std::fs::create_dir_all(parent)?;
+            }
+        }
+        let temp = path.with_extension("yaml.tmp");
+        std::fs::write(&temp, contents)?;
+        std::fs::rename(&temp, path)?;
         Ok(())
     }
 }
@@ -65,9 +82,19 @@ impl RetryQueue {
         Ok(queue)
     }
 
+    /// Persist atomically — same temp-file-plus-rename pattern as
+    /// [`SyncState::save`], and for the same reason: this file is also
+    /// re-read and rewritten every ~30 seconds by the sync thread.
     pub fn save(&self, path: &Path) -> Result<()> {
         let contents = serde_yaml::to_string(self)?;
-        std::fs::write(path, contents)?;
+        if let Some(parent) = path.parent() {
+            if !parent.as_os_str().is_empty() && !parent.exists() {
+                std::fs::create_dir_all(parent)?;
+            }
+        }
+        let temp = path.with_extension("yaml.tmp");
+        std::fs::write(&temp, contents)?;
+        std::fs::rename(&temp, path)?;
         Ok(())
     }
 }
@@ -174,6 +201,69 @@ mod tests {
         assert!(
             !loaded.daemon_ownership.installed_by_app,
             "a pre-existing file with no daemon_ownership key must default to installed_by_app: false"
+        );
+    }
+
+    // --- Review round 2: atomic saves (temp file + rename), mirroring
+    // `ChildRegistry::save`. A bare `fs::write` leaves a torn-read/lost-write
+    // window that matters here specifically because the sync thread
+    // re-reads and rewrites this file every ~30 seconds.
+
+    #[test]
+    fn sync_state_save_leaves_no_temp_artifact_behind() {
+        let dir = TempDir::new().unwrap();
+        let path = sync_state_path(dir.path());
+
+        let mut state = SyncState::default();
+        state.enabled = true;
+        state.save(&path).unwrap();
+
+        let entries: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(
+            entries,
+            vec![std::ffi::OsString::from("sync_state.yaml")],
+            "no .yaml.tmp staging file should remain: {entries:?}"
+        );
+    }
+
+    /// A stale, truncated, or otherwise garbage existing file must be fully
+    /// replaced, not appended to or partially overwritten — the rename
+    /// swaps the whole file atomically.
+    #[test]
+    fn sync_state_save_replaces_a_corrupt_existing_file_wholesale() {
+        let dir = TempDir::new().unwrap();
+        let path = sync_state_path(dir.path());
+        std::fs::write(&path, "not: valid: yaml: at: all: {{{").unwrap();
+
+        let mut state = SyncState::default();
+        state.enabled = true;
+        state.remote_url = Some("https://example.com".to_string());
+        state.save(&path).unwrap();
+
+        let loaded = SyncState::load(&path).unwrap();
+        assert!(loaded.enabled);
+        assert_eq!(loaded.remote_url.as_deref(), Some("https://example.com"));
+    }
+
+    #[test]
+    fn retry_queue_save_leaves_no_temp_artifact_behind() {
+        let dir = TempDir::new().unwrap();
+        let path = retry_queue_path(dir.path());
+
+        let queue = RetryQueue::default();
+        queue.save(&path).unwrap();
+
+        let entries: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(
+            entries,
+            vec![std::ffi::OsString::from("sync_retry_queue.yaml")],
+            "no .yaml.tmp staging file should remain: {entries:?}"
         );
     }
 }

@@ -287,7 +287,21 @@ impl AllowanceTrackerApp {
                 return;
             }
         };
-        let mut sync_state = SyncState::load(&sync_state_path(&data_dir)).unwrap_or_default();
+        let state_path = sync_state_path(&data_dir);
+
+        // Review round 2: read ONLY to decide `ensure_daemon`'s action from
+        // the current ownership below — never saved back verbatim. The
+        // calls between here and the save site at the end of this function
+        // (`ensure_lgs_binary`, `run_first_run`, `ensure_daemon`) can block
+        // for up to ~50s combined. The background sync thread's own
+        // periodic save (`persist_watermarks` in `sync_thread.rs`) can
+        // advance `watermarks` on disk during that whole window. Saving a
+        // `SyncState` read from BEFORE that window — the bug this comment
+        // replaces — would silently erase whatever the loop wrote: the
+        // exact stale-snapshot clobber `persist_watermarks` exists to
+        // prevent, pointing in the opposite direction. The fix is the same
+        // shape: re-read immediately before writing, at the save site below.
+        let starting_ownership = SyncState::load(&state_path).unwrap_or_default().daemon_ownership;
 
         let paths = match SyncPaths::for_production(data_dir.clone(), Some(picked)) {
             Ok(p) => p,
@@ -315,9 +329,10 @@ impl AllowanceTrackerApp {
             return;
         }
 
-        match ensure_daemon(&lgs, &sync_state.daemon_ownership) {
+        let mut updated_ownership = starting_ownership.clone();
+        match ensure_daemon(&lgs, &starting_ownership) {
             Ok(DaemonOutcome::InstalledAndOwned) => {
-                sync_state.daemon_ownership.installed_by_app = true;
+                updated_ownership.installed_by_app = true;
             }
             Ok(DaemonOutcome::Skewed(message)) => {
                 self.settings
@@ -332,8 +347,15 @@ impl AllowanceTrackerApp {
             }
         }
 
+        // Re-read immediately before writing — see the comment at the
+        // first `load` above. Only `cloud_root` and `daemon_ownership` are
+        // ours to set here; everything else (in particular `watermarks`)
+        // comes from whatever the background thread most recently wrote,
+        // not from a snapshot taken before the blocking calls above.
+        let mut sync_state = SyncState::load(&state_path).unwrap_or_default();
         sync_state.cloud_root = Some(cloud_root);
-        if let Err(e) = sync_state.save(&sync_state_path(&data_dir)) {
+        sync_state.daemon_ownership = updated_ownership;
+        if let Err(e) = sync_state.save(&state_path) {
             self.settings.lgs_sync_form.set_error(format!("Could not save sync settings: {e}"));
             return;
         }
