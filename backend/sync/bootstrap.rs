@@ -1,8 +1,10 @@
 use crate::backend::sync::lgs_client::{DaemonState, LgsClient};
 use crate::backend::sync::paths::SyncPaths;
 use anyhow::{Context, Result};
+use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 /// lgs shells out to `git` for every repository operation, and spawns
 /// `git http-backend` to serve the remote. Bundling lgs does NOT remove this
@@ -228,24 +230,89 @@ pub fn run_first_run(lgs: &LgsClient, cloud_root: &Path, git_available: bool) ->
     lgs.init(cloud_root_str).context("running `lgs init --cloud-root`")
 }
 
+/// How long a single `id`/`launchctl` call is given before it's treated as
+/// hung and killed.
+///
+/// Review Important-4: these used to run via bare `Command::output()`, which
+/// has no bound at all — and `install_and_start` is reachable from
+/// `AllowanceTrackerApp::new`, on the main thread, before the first frame
+/// ever renders. A wedged `launchctl` (stuck talking to a launchd that is
+/// itself unhealthy, which is not a hypothetical on a machine whose own
+/// daemon is exactly what this call is trying to fix) would hang the app on
+/// launch with a blank window and no way for the user to even see what's
+/// wrong. 10s matches [`crate::backend::sync::lgs_client::LgsClient::run`]'s
+/// own bound for the same class of call — a local process talking to a
+/// local daemon/launchd, never a network round-trip.
+const SYSTEM_COMMAND_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Run `cmd`, killing it and returning an error if it does not complete
+/// within `timeout`. The same spawn+poll+kill technique
+/// `LgsClient::run_with_timeout` already uses for the same reason:
+/// `Command::output()` blocks with no built-in bound, and reading
+/// stdout/stderr only after the child exits risks the classic pipe deadlock,
+/// so both pipes are drained on their own threads concurrently with the wait
+/// loop.
+fn run_command_with_timeout(cmd: &mut Command, timeout: Duration) -> Result<std::process::Output> {
+    let mut child = cmd
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .with_context(|| format!("spawning {cmd:?}"))?;
+
+    let mut stdout_pipe = child.stdout.take().expect("stdout was piped");
+    let mut stderr_pipe = child.stderr.take().expect("stderr was piped");
+    let stdout_thread = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        let _ = stdout_pipe.read_to_end(&mut buf);
+        buf
+    });
+    let stderr_thread = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        let _ = stderr_pipe.read_to_end(&mut buf);
+        buf
+    });
+
+    let deadline = Instant::now() + timeout;
+    let status = loop {
+        match child.try_wait().with_context(|| format!("waiting for {cmd:?}"))? {
+            Some(status) => break status,
+            None if Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                anyhow::bail!(
+                    "{cmd:?} did not complete within {timeout:?} and was killed — it may be hung"
+                );
+            }
+            None => std::thread::sleep(Duration::from_millis(20)),
+        }
+    };
+
+    let stdout = stdout_thread.join().unwrap_or_default();
+    let stderr = stderr_thread.join().unwrap_or_default();
+    Ok(std::process::Output { status, stdout, stderr })
+}
+
 /// `lgs install-service` writes the plist and then PRINTS the launchctl
 /// commands for a human to run — nothing loads and nothing starts until the
 /// next login. We run them ourselves, or first run hands a non-technical user
 /// a plist, no daemon, no clone URL, and a terminal command as the remedy.
 pub fn install_and_start(lgs: &LgsClient) -> Result<()> {
     lgs.run(&["install-service"])?;
-    let uid = Command::new("id").arg("-u").output().context("running id -u")?;
+    let uid = run_command_with_timeout(Command::new("id").arg("-u"), SYSTEM_COMMAND_TIMEOUT)
+        .context("running id -u")?;
     let uid = String::from_utf8_lossy(&uid.stdout).trim().to_string();
     let plist = dirs::home_dir()
         .unwrap_or_default()
         .join("Library/LaunchAgents/com.local-git-sync.daemon.plist");
-    let _ = Command::new("launchctl")
-        .args(["bootstrap", &format!("gui/{uid}"), &plist.to_string_lossy()])
-        .output();
-    let st = Command::new("launchctl")
-        .args(["kickstart", &format!("gui/{uid}/com.local-git-sync.daemon")])
-        .output()
-        .context("running launchctl kickstart")?;
+    let _ = run_command_with_timeout(
+        Command::new("launchctl").args(["bootstrap", &format!("gui/{uid}"), &plist.to_string_lossy()]),
+        SYSTEM_COMMAND_TIMEOUT,
+    );
+    let st = run_command_with_timeout(
+        Command::new("launchctl").args(["kickstart", &format!("gui/{uid}/com.local-git-sync.daemon")]),
+        SYSTEM_COMMAND_TIMEOUT,
+    )
+    .context("running launchctl kickstart")?;
     anyhow::ensure!(
         st.status.success(),
         "launchctl kickstart failed: {}",
@@ -364,6 +431,39 @@ mod tests {
     fn git_is_available_does_not_panic() {
         let available: bool = git_is_available();
         assert!(available, "git is expected to be present on this dev machine");
+    }
+
+    // --- Review Important-4: `run_command_with_timeout` — the same bound
+    // `LgsClient::run` already has, now covering the `id`/`launchctl` calls
+    // `install_and_start` makes on the main thread before the first frame.
+
+    #[test]
+    fn run_command_with_timeout_kills_a_hung_process_instead_of_blocking_forever() {
+        let mut cmd = Command::new("sh");
+        cmd.args(["-c", "sleep 5; echo too-late"]);
+        let start = Instant::now();
+        let result = run_command_with_timeout(&mut cmd, Duration::from_millis(200));
+        let elapsed = start.elapsed();
+
+        let err = result.expect_err("a hung process must be reported as an error, not hang the caller");
+        assert!(
+            format!("{err}").contains("did not complete"),
+            "error must say the process was killed for timing out: {err}"
+        );
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "must return close to the 200ms bound, not wait out the process's full 5s sleep: \
+             took {elapsed:?}"
+        );
+    }
+
+    #[test]
+    fn run_command_with_timeout_captures_output_for_a_well_behaved_process() {
+        let mut cmd = Command::new("sh");
+        cmd.args(["-c", "echo hello"]);
+        let output = run_command_with_timeout(&mut cmd, Duration::from_secs(5)).unwrap();
+        assert!(output.status.success());
+        assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "hello");
     }
 
     /// A failed rename must not leave the `.tmp` staging file behind. Force

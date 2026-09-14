@@ -44,7 +44,7 @@ use shared::ChildId;
 
 use crate::backend::storage::csv::CsvConnection;
 use crate::backend::storage::git::{ensure_lgs_remote, fetch_lgs, push_lgs};
-use crate::backend::sync::lgs_client::{LgsClient, StatusReport};
+use crate::backend::sync::lgs_client::{LgsClient, ProjectReport, StatusReport};
 
 /// The ref the merge input is read from. See the module doc and
 /// `storage::git::LGS_AUTH_REFSPEC` for why this, and never
@@ -155,6 +155,16 @@ pub enum CycleOutcome {
         /// silent, everything-synced success when it is `true`.
         goals_diverged: bool,
     },
+    /// We were ahead of the peer's last published tip, but the project is
+    /// archived (`ProjectReport::archived`) — lgs refuses every push
+    /// against an archived project with a 403, and that refusal is
+    /// permanent until a human runs `lgs unarchive`. Nothing was pushed:
+    /// review finding Important-1 is that without this check, every single
+    /// tick retried the push, got the 403, and tried again next tick —
+    /// forever, for as long as any local edit existed, with no durable
+    /// notice ever reaching the user. The caller surfaces one notice
+    /// (`SyncMessage::ArchivedProjectSkipped`) instead of retrying.
+    ArchivedSkipped,
 }
 
 /// One sync cycle for one child. See the module doc for thread ownership.
@@ -174,31 +184,27 @@ impl ChildSyncEngine {
         self.connection.child_dir(child_id)
     }
 
-    /// Resolve this child's lgs clone URL from a freshly-fetched
-    /// `lgs status --json`, never frozen — see the design spec's "remote
-    /// URL is re-resolved, never frozen" and
-    /// `storage::git::ensure_lgs_remote`'s doc comment. Project naming
-    /// convention: `allowance-<child_id>`.
-    fn clone_url(&self, child_id: &ChildId) -> Result<String> {
-        let status = self.fetch_status()?;
-        Self::clone_url_from_status(&status, child_id)
-    }
-
-    /// Resolve this child's lgs clone URL from an ALREADY-fetched
-    /// `StatusReport` rather than shelling out again. See
-    /// [`Self::fetch_status`] and [`Self::cycle_with_status`]'s doc
-    /// comments — a caller syncing several children in one tick fetches
+    /// Resolve this child's `ProjectReport` — clone URL AND `archived` —
+    /// from an ALREADY-fetched `StatusReport` rather than shelling out
+    /// again. See [`Self::fetch_status`] and [`Self::cycle_with_status`]'s
+    /// doc comments — a caller syncing several children in one tick fetches
     /// status once and reuses it, rather than running `lgs status --json`
-    /// once per child per tick.
-    fn clone_url_from_status(status: &StatusReport, child_id: &ChildId) -> Result<String> {
+    /// once per child per tick. Project naming convention:
+    /// `allowance-<child_id>`.
+    ///
+    /// `archived` travels with the clone URL, not as a separate lookup,
+    /// because [`cycle_against`] needs both from the exact same
+    /// `ProjectReport` — resolving them independently would risk reading
+    /// `archived` from a stale/different fetch than the URL it's paired
+    /// with.
+    fn project_from_status<'a>(status: &'a StatusReport, child_id: &ChildId) -> Result<&'a ProjectReport> {
         let project_name = format!("allowance-{child_id}");
-        let project = status.project(&project_name).ok_or_else(|| {
+        status.project(&project_name).ok_or_else(|| {
             anyhow::anyhow!(
                 "lgs has no project named '{project_name}' — has child '{child_id}' been \
                  registered with lgs yet?"
             )
-        })?;
-        Ok(project.clone_url.clone())
+        })
     }
 
     /// Run `lgs status --json` once. Exposed so a caller syncing several
@@ -227,20 +233,21 @@ impl ChildSyncEngine {
     /// tick instead of calling this once per child.
     pub fn cycle(&self, child_id: &ChildId) -> Result<CycleOutcome> {
         let work_dir = self.work_dir(child_id)?;
-        let clone_url = self.clone_url(child_id)?;
-        Self::cycle_against(&work_dir, &clone_url)
+        let status = self.fetch_status()?;
+        let project = Self::project_from_status(&status, child_id)?;
+        Self::cycle_against(&work_dir, &project.clone_url, project.archived)
     }
 
-    /// Same as [`Self::cycle`], but resolves the clone URL from an
+    /// Same as [`Self::cycle`], but resolves the project from an
     /// already-fetched `StatusReport` (see [`Self::fetch_status`]) instead
     /// of shelling out to `lgs status --json` again.
     pub fn cycle_with_status(&self, child_id: &ChildId, status: &StatusReport) -> Result<CycleOutcome> {
         let work_dir = self.work_dir(child_id)?;
-        let clone_url = Self::clone_url_from_status(status, child_id)?;
-        Self::cycle_against(&work_dir, &clone_url)
+        let project = Self::project_from_status(status, child_id)?;
+        Self::cycle_against(&work_dir, &project.clone_url, project.archived)
     }
 
-    fn cycle_against(work_dir: &Path, clone_url: &str) -> Result<CycleOutcome> {
+    fn cycle_against(work_dir: &Path, clone_url: &str, archived: bool) -> Result<CycleOutcome> {
         let repo = Repository::open(work_dir)
             .with_context(|| format!("opening child repo at {}", work_dir.display()))?;
         ensure_lgs_remote(&repo, clone_url)?;
@@ -267,6 +274,14 @@ impl ChildSyncEngine {
             Cycle::FastForward => {
                 let auth_oid = auth_oid.expect("Cycle::FastForward implies classify saw Some(auth)");
                 Ok(CycleOutcome::FastForward { to: auth_oid.to_string() })
+            }
+            Cycle::Ahead if archived => {
+                // Review Important-1: an archived project refuses every
+                // push with a 403, permanently — there is nothing to
+                // retry into existence. Skip the push entirely rather than
+                // attempting (and re-attempting, forever, every tick) a
+                // push that cannot ever succeed.
+                Ok(CycleOutcome::ArchivedSkipped)
             }
             Cycle::Ahead => {
                 // Nothing to merge — push our tip and stop. Push is a
@@ -694,6 +709,7 @@ ex-3-a,keiko,2026-01-03T00:00:00+00:00,Book,-3.00,7.00,expense\n";
         let outcome = ChildSyncEngine::cycle_against(
             &work_dir.path().join("work"),
             bare_dir.path().to_str().unwrap(),
+            false,
         )
         .unwrap();
         assert!(matches!(outcome, CycleOutcome::UpToDate));
@@ -716,6 +732,7 @@ ex-3-a,keiko,2026-01-03T00:00:00+00:00,Book,-3.00,7.00,expense\n";
         let outcome = ChildSyncEngine::cycle_against(
             &work_dir.path().join("work"),
             bare_dir.path().to_str().unwrap(),
+            false,
         )
         .unwrap();
         match outcome {
@@ -746,7 +763,7 @@ ex-3-a,keiko,2026-01-03T00:00:00+00:00,Book,-3.00,7.00,expense\n";
         bare.reference("refs/lgs-auth/heads/main", base_oid, true, "auth mirrors our old tip")
             .unwrap();
 
-        let outcome = ChildSyncEngine::cycle_against(&work_path, bare_dir.path().to_str().unwrap())
+        let outcome = ChildSyncEngine::cycle_against(&work_path, bare_dir.path().to_str().unwrap(), false)
             .unwrap();
         assert!(matches!(outcome, CycleOutcome::Ahead), "expected Ahead, got {outcome:?}");
 
@@ -764,6 +781,43 @@ ex-3-a,keiko,2026-01-03T00:00:00+00:00,Book,-3.00,7.00,expense\n";
         let head_commit = work_repo.head().unwrap().peel_to_commit().unwrap();
         assert_eq!(head_commit.id().to_string(), ours_oid_str);
         assert_eq!(head_commit.parent_count(), 1);
+    }
+
+    /// Review Important-1: an archived project must never have its push
+    /// attempted — not once, and not retried. Same "ahead" setup as
+    /// `pushes_and_reports_ahead_when_we_are_strictly_ahead_of_the_published_tip`,
+    /// but `archived: true` this time. Asserts BOTH that the outcome is
+    /// `ArchivedSkipped` AND that the bare's real branch ref never moved —
+    /// proving this is skip-before-attempting, not attempt-then-swallow-the-403.
+    #[test]
+    fn an_archived_project_that_is_ahead_skips_the_push_instead_of_retrying_forever() {
+        let (bare_dir, base_oid, work_dir) = setup_base();
+        let work_path = work_dir.path().join("work");
+
+        std::fs::write(work_path.join(TRANSACTIONS_FILE), TX_OURS).unwrap();
+        let gm = GitManager::with_clock(|| 1_700_000_050);
+        gm.add_all(&work_path).unwrap();
+        gm.commit(&work_path, "ours edit").unwrap();
+
+        let bare = Repository::open_bare(bare_dir.path()).unwrap();
+        bare.reference("refs/lgs-auth/heads/main", base_oid, true, "auth mirrors our old tip")
+            .unwrap();
+
+        let outcome = ChildSyncEngine::cycle_against(&work_path, bare_dir.path().to_str().unwrap(), true)
+            .unwrap();
+        assert!(
+            matches!(outcome, CycleOutcome::ArchivedSkipped),
+            "expected ArchivedSkipped, got {outcome:?}"
+        );
+
+        // The real branch ref must still be exactly where it started —
+        // nothing was pushed, not even an attempt that a fake 403 happened
+        // to swallow.
+        assert_eq!(
+            bare.find_reference("refs/heads/main").unwrap().target().unwrap(),
+            base_oid,
+            "an archived project's push must never be attempted, so the remote ref must not move"
+        );
     }
 
     #[test]
@@ -792,7 +846,7 @@ ex-3-a,keiko,2026-01-03T00:00:00+00:00,Book,-3.00,7.00,expense\n";
         bare.reference("refs/lgs-auth/heads/main", theirs_oid, true, "auth tip").unwrap();
 
         let outcome =
-            ChildSyncEngine::cycle_against(&work_path, bare_dir.path().to_str().unwrap()).unwrap();
+            ChildSyncEngine::cycle_against(&work_path, bare_dir.path().to_str().unwrap(), false).unwrap();
 
         match outcome {
             CycleOutcome::Merged { rows, parents, goals_diverged, .. } => {
@@ -830,7 +884,7 @@ ex-3-a,keiko,2026-01-03T00:00:00+00:00,Book,-3.00,7.00,expense\n";
         bare.reference("refs/lgs-auth/heads/main", theirs_oid, true, "auth tip").unwrap();
 
         let outcome =
-            ChildSyncEngine::cycle_against(&work_path, bare_dir.path().to_str().unwrap()).unwrap();
+            ChildSyncEngine::cycle_against(&work_path, bare_dir.path().to_str().unwrap(), false).unwrap();
 
         match outcome {
             CycleOutcome::Merged { goals_diverged, .. } => {

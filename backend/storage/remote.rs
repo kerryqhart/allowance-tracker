@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use shared::sync::*;
 
 pub trait RemoteStorage: Send + Sync {
@@ -22,14 +22,23 @@ pub trait RemoteStorage: Send + Sync {
 /// that case, rather than leaving the whole thread unspawned, is what makes
 /// `child_sync` reachable on an installation that only ever configures lgs.
 ///
-/// Every method is a safe no-op: reads report "nothing new" and writes
-/// succeed trivially. This is not a hidden data sink — `push_event`/
-/// `poll_remote` only reach it when a `SyncNotifier` feeds local write
-/// events into the thread's `event_rx`, and the caller that chooses
-/// `NullRemoteStorage` also passes `None` for that notifier (see
-/// `AllowanceTrackerApp::new`), so the write paths here are never actually
-/// exercised in that configuration — this exists to satisfy the type the
-/// thread requires, not to pretend to transport anything.
+/// Reads report "nothing new" — safe, since there is nothing this transport
+/// could have missed. Writes (`upsert_entity`/`delete_entity`) are NOT a
+/// safe no-op and must never silently report success:
+///
+/// Review Important-5: `sync_loop`'s step 1 unconditionally drains
+/// `retry_queue.yaml` through `push_event` on every iteration, regardless of
+/// which `remote` it was spawned with — that queue can hold events left
+/// over from a PRIOR run where AWS genuinely was configured (a user who
+/// disables AWS but keeps lgs configured does not get `retry_queue.yaml`
+/// wiped). If these write paths returned `Ok(())`, that drain would read as
+/// "pushed successfully" and delete each event from the queue — discarding
+/// real, previously-queued AWS events with no trace, into a transport that
+/// was never actually asked to do anything. Returning `Err` here instead
+/// makes `push_event` fail, which is `sync_loop`'s existing, already-tested
+/// path for "keep this event queued and tell the user" (see
+/// `SyncMessage::PushFailed`) — the safe, honest outcome for a write this
+/// installation has no way to actually deliver.
 pub struct NullRemoteStorage;
 
 impl RemoteStorage for NullRemoteStorage {
@@ -44,7 +53,10 @@ impl RemoteStorage for NullRemoteStorage {
         _entity_id: &str,
         _entity_json: &str,
     ) -> Result<()> {
-        Ok(())
+        Err(anyhow!(
+            "no AWS transport is configured on this installation — this event stays queued for \
+             retry rather than being silently discarded"
+        ))
     }
 
     fn get_entity(&self, _child_id: &str, _entity_type: EntityType, _entity_id: &str) -> Result<Option<String>> {
@@ -52,7 +64,10 @@ impl RemoteStorage for NullRemoteStorage {
     }
 
     fn delete_entity(&self, _child_id: &str, _entity_type: EntityType, _entity_id: &str) -> Result<()> {
-        Ok(())
+        Err(anyhow!(
+            "no AWS transport is configured on this installation — this event stays queued for \
+             retry rather than being silently discarded"
+        ))
     }
 
     fn get_checkpoint(&self, child_id: &str) -> Result<SyncCheckpoint> {
@@ -60,6 +75,10 @@ impl RemoteStorage for NullRemoteStorage {
     }
 
     fn update_watermark(&self, _child_id: &str, _which: &str, _value: u64) -> Result<()> {
+        // Bookkeeping only (advances a "don't re-fetch what we've already
+        // seen" marker), never a delivery guarantee — unlike
+        // `upsert_entity`/`delete_entity`, a no-op here loses nothing:
+        // there is nothing to re-fetch from a transport that does not exist.
         Ok(())
     }
 
@@ -77,15 +96,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn null_remote_storage_reports_nothing_new_and_never_errors() {
+    fn null_remote_storage_reads_report_nothing_new_and_never_error() {
         let remote = NullRemoteStorage;
         assert_eq!(remote.get_events_since("child1", 0).unwrap().len(), 0);
         assert_eq!(remote.get_entity("child1", EntityType::Goal, "g1").unwrap(), None);
-        assert!(remote.upsert_entity("child1", EntityType::Goal, "g1", "{}").is_ok());
-        assert!(remote.delete_entity("child1", EntityType::Goal, "g1").is_ok());
         assert!(remote.update_watermark("child1", "local", 5).is_ok());
         assert!(remote.initialize_child("child1").is_ok());
         assert!(remote.health_check().unwrap());
         assert_eq!(remote.get_checkpoint("child1").unwrap().child_id, "child1");
+    }
+
+    /// Review Important-5: writes must error, not silently succeed — an
+    /// `Ok(())` here is exactly what would make `sync_loop`'s retry-queue
+    /// drain read a leftover, undelivered AWS event as "pushed" and delete
+    /// it from the queue forever.
+    #[test]
+    fn null_remote_storage_writes_error_instead_of_silently_succeeding() {
+        let remote = NullRemoteStorage;
+        assert!(remote.upsert_entity("child1", EntityType::Goal, "g1", "{}").is_err());
+        assert!(remote.delete_entity("child1", EntityType::Goal, "g1").is_err());
     }
 }

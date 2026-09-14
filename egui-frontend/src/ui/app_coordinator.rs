@@ -615,6 +615,22 @@ impl AllowanceTrackerApp {
                     // event).
                     self.sync.record_goals_diverged(GoalsDivergedNotice { child_id, ours_oid, theirs_oid });
                 }
+                SyncMessage::ArchivedProjectSkipped { child_id } => {
+                    // Review Important-1: durable, not a status — reusing
+                    // `SyncFailureNotice`'s existing replace-not-accumulate
+                    // storage rather than adding a fourth parallel notice
+                    // list. Names the fix, not just the symptom: unlike an
+                    // ordinary sync failure, this one never resolves itself
+                    // by retrying.
+                    self.sync.record_sync_failure(SyncFailureNotice {
+                        child_id,
+                        message: "This child's project is archived in lgs, so lgs refuses to \
+                                  accept new changes from this machine. Local edits are saved \
+                                  here, but will not sync until you run `lgs unarchive` for this \
+                                  project."
+                            .to_string(),
+                    });
+                }
             }
         }
         // Rebuild once after draining, not once per entity during a bulk sync.

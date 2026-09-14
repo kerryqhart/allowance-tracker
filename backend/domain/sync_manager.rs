@@ -96,6 +96,15 @@ pub enum SyncMessage {
     /// [`GoalsDivergedNotice`] — this is a NOTICE (something that happened,
     /// held until dismissed), never routed through `SyncStatus`.
     GoalsDiverged { child_id: String, ours_oid: String, theirs_oid: String },
+
+    /// A push for this child was skipped because the lgs project is
+    /// archived (`ProjectReport::archived` — see
+    /// `ChildSyncEngine::cycle_against`'s `Cycle::Ahead if archived` arm).
+    /// lgs refuses every push against an archived project with a 403,
+    /// permanently, so this is reported ONCE as a durable notice rather
+    /// than retried — same reasoning as [`GoalsDivergedNotice`], never
+    /// routed through `SyncStatus`.
+    ArchivedProjectSkipped { child_id: String },
 }
 
 impl std::fmt::Debug for SyncMessage {
@@ -156,6 +165,10 @@ impl std::fmt::Debug for SyncMessage {
                 .field("child_id", child_id)
                 .field("ours_oid", ours_oid)
                 .field("theirs_oid", theirs_oid)
+                .finish(),
+            SyncMessage::ArchivedProjectSkipped { child_id } => f
+                .debug_struct("ArchivedProjectSkipped")
+                .field("child_id", child_id)
                 .finish(),
         }
     }

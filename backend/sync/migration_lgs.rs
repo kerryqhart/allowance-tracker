@@ -569,6 +569,27 @@ pub struct AdoptableChild {
     pub project_name: String,
     pub archived: bool,
     pub note: Option<String>,
+    /// `Some(reason)` when THIS machine could not read the project's
+    /// archive record at all (lgs's own `archive_unreadable` reason
+    /// string) — `archived` above is then a default (`false`), not an
+    /// observation. Review Important-2: must never be dropped and must
+    /// never be treated as "confirmed not archived" — the record this
+    /// binary could not read might well be an archived one. Same principle
+    /// as `ProjectReport::is_confirmed_backed_up` treating `Unknown` as
+    /// unsafe rather than defaulting it to safe. See
+    /// [`Self::should_be_labelled_archived`].
+    pub archive_status_unknown: Option<String>,
+}
+
+impl AdoptableChild {
+    /// True whenever this row must NOT be presented as an ordinary,
+    /// definitely-not-archived project: either lgs affirmatively says it is
+    /// archived, or this machine could not read the archive record at all
+    /// and so has no basis for saying it isn't. Prefer this over reading
+    /// `archived` alone when deciding how to label a row.
+    pub fn should_be_labelled_archived(&self) -> bool {
+        self.archived || self.archive_status_unknown.is_some()
+    }
 }
 
 /// lgs project names for this app are always `allowance-<child_id>` — see
@@ -591,6 +612,7 @@ pub fn adoptable_children(status: &StatusReport) -> Vec<AdoptableChild> {
                 project_name: entry.name.clone(),
                 archived: entry.archived,
                 note: entry.note.clone(),
+                archive_status_unknown: entry.archive_unreadable.clone(),
             })
         })
         .collect()
@@ -759,6 +781,7 @@ mod tests {
                     name: s.to_string(),
                     archived: false,
                     note: None,
+                    archive_unreadable: None,
                 })
                 .collect(),
         }
@@ -1436,7 +1459,12 @@ mod onboarding_tests {
         status_with_adoptable_entries(
             names
                 .iter()
-                .map(|n| AdoptableEntry { name: n.to_string(), archived: false, note: None })
+                .map(|n| AdoptableEntry {
+                    name: n.to_string(),
+                    archived: false,
+                    note: None,
+                    archive_unreadable: None,
+                })
                 .collect(),
         )
     }
@@ -1446,6 +1474,16 @@ mod onboarding_tests {
             name: name.to_string(),
             archived: true,
             note: Some(note.to_string()),
+            archive_unreadable: None,
+        }])
+    }
+
+    fn status_with_unreadable_archive_adoptable(name: &str, reason: &str) -> StatusReport {
+        status_with_adoptable_entries(vec![AdoptableEntry {
+            name: name.to_string(),
+            archived: false,
+            note: None,
+            archive_unreadable: Some(reason.to_string()),
         }])
     }
 
@@ -1465,6 +1503,31 @@ mod onboarding_tests {
         let found = adoptable_children(&status);
         assert!(found[0].archived);
         assert_eq!(found[0].note.as_deref(), Some("finished with this child"));
+        assert!(found[0].should_be_labelled_archived());
+    }
+
+    /// Review Important-2: an entry lgs could not read the archive record
+    /// for must carry that fact through — `archived` alone defaults to
+    /// `false` here (mirroring lgs's own default-when-unreadable), which
+    /// would otherwise render as "confirmed not archived." It must not:
+    /// `should_be_labelled_archived` is the safe read, and it must be
+    /// `true` here exactly as it is for a genuinely archived row.
+    #[test]
+    fn an_unreadable_archive_record_is_carried_through_and_labelled_as_unknown_not_safe() {
+        let status = status_with_unreadable_archive_adoptable(
+            "allowance-keiko_hart",
+            "permission denied reading archive/state.yaml",
+        );
+        let found = adoptable_children(&status);
+        assert!(!found[0].archived, "archived itself is only ever a default here, never an observation");
+        assert_eq!(
+            found[0].archive_status_unknown.as_deref(),
+            Some("permission denied reading archive/state.yaml")
+        );
+        assert!(
+            found[0].should_be_labelled_archived(),
+            "an unreadable archive record must never present as a safe, ordinary project"
+        );
     }
 
     #[test]

@@ -4,7 +4,8 @@ use crate::backend::sync::bootstrap::DaemonOwnership;
 use crate::backend::sync::{ChildSyncEngine, CycleOutcome};
 use super::sync_manager::{SyncEngine, SyncMessage, SyncStatus, SyncCommand, UiMessenger, WakeUi};
 use super::sync_persistence::{self, SyncState, RetryQueue};
-use std::path::PathBuf;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, mpsc, atomic::{AtomicBool, Ordering}};
 
 /// Handle to the background sync thread. Drop to shut down.
@@ -50,9 +51,16 @@ impl SyncThreadHandle {
         }
         let retry_queue = RetryQueue { events: initial_retry_queue };
 
-        // Preserve the non-watermark fields of SyncState (enabled, remote_url,
-        // daemon_ownership) so that the persistence writes below don't clobber
-        // user configuration or forget which daemon this app installed.
+        // Fallback for the non-watermark fields of SyncState (enabled,
+        // remote_url, daemon_ownership, cloud_root) — used ONLY when
+        // `sync_state.yaml` cannot be read at persist time (see
+        // `persist_watermarks`), never used to overwrite a file that DOES
+        // read successfully. This thread's own spawn-time snapshot is a
+        // better fallback than blanket defaults, but it is not the source
+        // of truth for these fields once the thread is running — the file
+        // on disk is, because the UI thread (Settings toggles, the lgs
+        // first-run flow persisting `cloud_root`) can change them while
+        // this thread runs.
         let sync_enabled = initial_sync_state.enabled;
         let sync_remote_url = initial_sync_state.remote_url.clone();
         let daemon_ownership = initial_sync_state.daemon_ownership.clone();
@@ -118,6 +126,18 @@ fn sync_loop(
     shutdown: Arc<AtomicBool>,
     child_sync: Option<ChildSyncEngine>,
 ) {
+    // Fallback for `persist_watermarks` — see its doc comment. Built once,
+    // not per iteration, since these fields never change over this thread's
+    // lifetime; only what's on disk does.
+    let persist_fallback = SyncState {
+        watermarks: HashMap::new(),
+        enabled: sync_enabled,
+        remote_url: sync_remote_url,
+        daemon_ownership,
+        cloud_root: sync_cloud_root,
+    };
+    let sync_state_path = sync_persistence::sync_state_path(&data_dir);
+
     loop {
         if shutdown.load(Ordering::Relaxed) {
             break;
@@ -190,16 +210,12 @@ fn sync_loop(
             let _ = messenger.send(SyncMessage::StatusChanged(SyncStatus::Idle));
         }
 
-        // 4. Persist state every loop iteration. Preserve enabled/remote_url from
-        // the config we were spawned with so that a save doesn't clobber user config.
-        let sync_state = SyncState {
-            watermarks: engine.watermarks_snapshot(),
-            enabled: sync_enabled,
-            remote_url: sync_remote_url.clone(),
-            daemon_ownership: daemon_ownership.clone(),
-            cloud_root: sync_cloud_root.clone(),
-        };
-        let _ = sync_state.save(&sync_persistence::sync_state_path(&data_dir));
+        // 4. Persist state every loop iteration. `persist_watermarks` re-reads
+        // the file and changes ONLY `watermarks` — see its doc comment for
+        // why reconstructing the whole struct from this thread's spawn-time
+        // snapshot (the previous approach) silently erased any non-watermark
+        // field the UI thread wrote after spawn.
+        let _ = persist_watermarks(&sync_state_path, engine.watermarks_snapshot(), &persist_fallback);
         let _ = retry_queue.save(&sync_persistence::retry_queue_path(&data_dir));
 
         // 5. Sleep responsively — check every 500ms for new events, commands,
@@ -245,6 +261,49 @@ fn sync_loop(
             }
         }
     }
+}
+
+/// Persist `watermarks` into `sync_state.yaml`, changing ONLY that field.
+///
+/// Re-reads the file immediately before writing rather than reconstructing
+/// the whole `SyncState` from this thread's spawn-time snapshot — the
+/// previous approach. That approach meant any field the UI thread wrote
+/// after this thread spawned (`daemon_ownership`, fixed in Task 12;
+/// `cloud_root`, the very next field to hit the same bug, in Task 19's
+/// first-run flow) was silently erased the next time this function ran,
+/// often within the same 30 seconds — before a user could even act on
+/// whatever the write was supposed to enable. Task 12's review named this
+/// "self-alerting but not self-protecting."
+///
+/// This is the structural fix: this function is the ONLY place `watermarks`
+/// is ever written, and it is the only thing it ever changes. A field added
+/// to `SyncState` after this one is automatically safe from this mechanism
+/// — nobody has to remember to thread it through a save call, because
+/// there is nothing left here to reconstruct.
+///
+/// `fallback` supplies the non-watermark fields only when the file cannot
+/// be read at all (missing, or a transient parse failure mid-write) — using
+/// this thread's own last-known state is a better degradation than
+/// resetting the user's configuration to defaults, but it is never used
+/// to override a file that reads successfully.
+fn persist_watermarks(
+    path: &Path,
+    watermarks: HashMap<String, u64>,
+    fallback: &SyncState,
+) -> anyhow::Result<()> {
+    let mut sync_state = if path.exists() {
+        SyncState::load(path).unwrap_or_else(|e| {
+            log::warn!(
+                "sync_state.yaml could not be read while persisting watermarks ({e}); \
+                 falling back to this thread's last-known configuration rather than defaults"
+            );
+            fallback.clone()
+        })
+    } else {
+        fallback.clone()
+    };
+    sync_state.watermarks = watermarks;
+    sync_state.save(path)
 }
 
 /// Push a single local event to the remote. For non-delete events, first
@@ -453,6 +512,22 @@ fn run_child_sync_cycles_with_budget(
                 // (fetch/push are both background-thread operations — see
                 // `Cycle::Ahead`'s doc comment in `child_sync.rs`). Nothing
                 // further to do on either thread.
+            }
+            Ok(CycleOutcome::ArchivedSkipped) => {
+                // Review Important-1: never retried — see
+                // `CycleOutcome::ArchivedSkipped`'s doc comment. One durable
+                // notice per occurrence; the UI thread de-duplicates by
+                // child id (`SyncUiState::record_sync_failure`), so this
+                // firing again next tick (the project stays archived until
+                // a human runs `lgs unarchive`) does not accumulate.
+                if let Err(e) = messenger.send(SyncMessage::ArchivedProjectSkipped {
+                    child_id: child_id.clone(),
+                }) {
+                    log::warn!(
+                        "SYNC(lgs): failed to notify the UI thread that child {child_id}'s project \
+                         is archived (channel closed?): {e}"
+                    );
+                }
             }
             Ok(CycleOutcome::FastForward { to }) => {
                 if let Err(e) = messenger.send(SyncMessage::ApplyFastForward {
@@ -1367,6 +1442,125 @@ mod tests {
             count, 1,
             "lgs status --json must be fetched exactly once per tick regardless of child count, \
              got {count} invocation(s): {invocations:?}"
+        );
+    }
+
+    // --- Review: the recurring "reconstruct the whole SyncState from a
+    // spawn-time snapshot" defect (Task 12 for daemon_ownership, Task 19 for
+    // cloud_root). `persist_watermarks` is the structural fix: it is the
+    // only place `watermarks` is written, and the only field it ever
+    // changes — so a write to any OTHER field, from anywhere, at any time,
+    // must survive it.
+
+    /// The exact scenario the review named: the lgs first-run flow runs on
+    /// the UI thread and persists `cloud_root` (and flips
+    /// `daemon_ownership.installed_by_app`) into `sync_state.yaml` while the
+    /// AWS-transport sync thread is already running with a stale,
+    /// spawn-time snapshot that has neither. The thread's own periodic save
+    /// must not erase what the UI thread just wrote.
+    #[test]
+    fn a_ui_thread_write_to_a_non_watermark_field_survives_a_subsequent_watermark_save() {
+        let dir = TempDir::new().unwrap();
+        let path = sync_persistence::sync_state_path(dir.path());
+
+        // The thread's own spawn-time snapshot: sync was enabled with a
+        // remote_url, but lgs had not been set up yet.
+        let fallback = SyncState {
+            watermarks: HashMap::new(),
+            enabled: true,
+            remote_url: Some("https://example.com/sync".to_string()),
+            daemon_ownership: DaemonOwnership::default(),
+            cloud_root: None,
+        };
+        fallback.save(&path).unwrap();
+
+        // The UI thread completes lgs first run *after* this thread's
+        // snapshot was taken, and persists the result directly to the same
+        // file — exactly what `AllowanceTrackerApp::start_lgs_first_run`
+        // does.
+        let mut after_first_run = SyncState::load(&path).unwrap();
+        after_first_run.cloud_root = Some(PathBuf::from("/fake/cloud/root"));
+        after_first_run.daemon_ownership.installed_by_app = true;
+        after_first_run.save(&path).unwrap();
+
+        // The sync thread's next periodic save runs, carrying only its own
+        // watermark update.
+        let mut watermarks = HashMap::new();
+        watermarks.insert("child1".to_string(), 7u64);
+        persist_watermarks(&path, watermarks.clone(), &fallback).unwrap();
+
+        let after_persist = SyncState::load(&path).unwrap();
+        assert_eq!(
+            after_persist.cloud_root,
+            Some(PathBuf::from("/fake/cloud/root")),
+            "the UI thread's cloud_root write must survive the loop's own save"
+        );
+        assert!(
+            after_persist.daemon_ownership.installed_by_app,
+            "the UI thread's daemon_ownership write must survive the loop's own save"
+        );
+        assert_eq!(after_persist.watermarks, watermarks, "the loop's own watermark update must still land");
+    }
+
+    /// The other half: when `sync_state.yaml` cannot be read at all (never
+    /// written yet, or deleted out from under this thread), the fallback
+    /// supplies the non-watermark fields — this thread's own last-known
+    /// state, never blanket defaults that would silently disable sync.
+    #[test]
+    fn persist_watermarks_falls_back_to_the_threads_own_snapshot_when_the_file_is_missing() {
+        let dir = TempDir::new().unwrap();
+        let path = sync_persistence::sync_state_path(dir.path());
+        assert!(!path.exists(), "precondition: nothing written yet");
+
+        let fallback = SyncState {
+            watermarks: HashMap::new(),
+            enabled: true,
+            remote_url: Some("https://example.com/sync".to_string()),
+            daemon_ownership: DaemonOwnership { installed_by_app: true },
+            cloud_root: Some(PathBuf::from("/fake/root")),
+        };
+
+        let mut watermarks = HashMap::new();
+        watermarks.insert("child1".to_string(), 3u64);
+        persist_watermarks(&path, watermarks.clone(), &fallback).unwrap();
+
+        let saved = SyncState::load(&path).unwrap();
+        assert!(saved.enabled);
+        assert_eq!(saved.remote_url, Some("https://example.com/sync".to_string()));
+        assert!(saved.daemon_ownership.installed_by_app);
+        assert_eq!(saved.cloud_root, Some(PathBuf::from("/fake/root")));
+        assert_eq!(saved.watermarks, watermarks);
+    }
+
+    // --- Review Important-5: a leftover retry-queue event must survive a
+    // drain against `NullRemoteStorage`, not be silently discarded.
+
+    /// Directly exercises `push_event` — the function BOTH the retry-queue
+    /// drain (`sync_loop` step 1) and the new-event drain (step 2 and the
+    /// sleep loop) call — against `NullRemoteStorage`. If this returned
+    /// `Ok(())`, the retry-queue drain would read a leftover, undelivered
+    /// AWS event as "pushed" and remove it from the queue forever; a leaf
+    /// `Err` is what keeps it in `remaining_retries` (see `sync_loop`'s
+    /// step 1) instead.
+    #[test]
+    fn a_delete_event_against_the_null_remote_is_reported_as_failed_not_silently_dropped() {
+        let remote: Arc<dyn RemoteStorage> = Arc::new(crate::backend::storage::NullRemoteStorage);
+        let (message_tx, _message_rx) = mpsc::channel();
+        let messenger = UiMessenger::new(message_tx, noop_wake());
+
+        let event = SyncEvent::new(
+            EntityType::Transaction,
+            "tx1".to_string(),
+            "child1".to_string(),
+            SyncAction::Deleted,
+            SyncSource::Local,
+        );
+
+        let result = push_event(&remote, &event, &messenger);
+        assert!(
+            result.is_err(),
+            "a write against the null remote must fail, not silently succeed — a leftover \
+             retry-queue event depends on this to stay queued rather than being discarded"
         );
     }
 }

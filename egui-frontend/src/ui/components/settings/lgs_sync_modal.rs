@@ -215,9 +215,21 @@ impl AllowanceTrackerApp {
                 for row in &rows {
                     ui.horizontal(|ui| {
                         ui.label(egui::RichText::new(&row.child_id).strong());
+                        // Review Important-2: an unreadable archive record
+                        // must be labelled the same cautious way as a
+                        // confirmed-archived one — `archived` alone
+                        // defaults to `false` when lgs couldn't read the
+                        // record, which must never present as "safe,
+                        // ordinary project." See
+                        // `AdoptableChild::should_be_labelled_archived`.
                         if row.archived {
                             ui.label(
                                 egui::RichText::new("archived — read-only")
+                                    .color(egui::Color32::from_rgb(190, 130, 30)),
+                            );
+                        } else if row.archive_status_unknown.is_some() {
+                            ui.label(
+                                egui::RichText::new("archived status unknown")
                                     .color(egui::Color32::from_rgb(190, 130, 30)),
                             );
                         }
@@ -231,6 +243,16 @@ impl AllowanceTrackerApp {
                                 egui::RichText::new(note)
                                     .font(egui::FontId::new(12.0, egui::FontFamily::Proportional))
                                     .color(egui::Color32::from_rgb(120, 120, 120)),
+                            )
+                            .wrap(),
+                        );
+                    }
+                    if let Some(reason) = &row.archive_status_unknown {
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(format!("Could not confirm archive status: {reason}"))
+                                    .font(egui::FontId::new(12.0, egui::FontFamily::Proportional))
+                                    .color(egui::Color32::from_rgb(190, 130, 30)),
                             )
                             .wrap(),
                         );

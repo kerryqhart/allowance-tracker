@@ -106,10 +106,19 @@ impl ProjectReport {
 /// machine has not registered, discovered by scanning the cloud root
 /// directly (`local-git-sync`'s `discover_adoptable`).
 ///
-/// `archived` and `note` mirror lgs's own `AdoptableEntry` shape
-/// (`local-git-sync/src/ipc.rs`) — an archived project is still offered here
-/// (never hidden), and `note` carries the human-written reason, when there is
-/// one, so onboarding can label rather than silently skip it.
+/// `archived`, `note`, and `archive_unreadable` mirror lgs's own
+/// `AdoptableEntry` shape (`local-git-sync/src/ipc.rs`) — an archived
+/// project is still offered here (never hidden), `note` carries the
+/// human-written reason, when there is one, and `archive_unreadable`
+/// carries lgs's own reason string for why THIS binary could not read the
+/// archive record at all, in which case `archived` is a default (`false`),
+/// not an observation.
+///
+/// Review Important-2: `archive_unreadable` must be carried through and
+/// never dropped. lgs's own doc comment on this field says as much — an
+/// unreadable archive record must not silently render as "not archived",
+/// the exact same principle as [`ProjectReport::is_confirmed_backed_up`]
+/// treating `Unknown` as unsafe rather than defaulting it to safe.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct AdoptableEntry {
     pub name: String,
@@ -117,6 +126,8 @@ pub struct AdoptableEntry {
     pub archived: bool,
     #[serde(default)]
     pub note: Option<String>,
+    #[serde(default)]
+    pub archive_unreadable: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -174,6 +185,8 @@ pub fn parse_status(json: &str) -> Result<StatusReport> {
         archived: bool,
         #[serde(default)]
         note: Option<String>,
+        #[serde(default)]
+        archive_unreadable: Option<String>,
     }
     #[derive(Deserialize)]
     struct Raw {
@@ -213,7 +226,12 @@ pub fn parse_status(json: &str) -> Result<StatusReport> {
         adoptable: raw
             .adoptable
             .into_iter()
-            .map(|a| AdoptableEntry { name: a.name, archived: a.archived, note: a.note })
+            .map(|a| AdoptableEntry {
+                name: a.name,
+                archived: a.archived,
+                note: a.note,
+                archive_unreadable: a.archive_unreadable,
+            })
             .collect(),
     })
 }

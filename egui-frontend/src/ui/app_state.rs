@@ -234,6 +234,32 @@ impl AllowanceTrackerApp {
         let _current_month = now.month();
         let _current_year = now.year();
 
+        // Review Important-3: this diagnostic is decided by a pure function
+        // (`diagnose_aws_transport`, tested below) on `will_spawn_aws`
+        // alone, independent of `will_spawn_sync`'s branch further down.
+        // It used to live in that branch's `else`, which is only reached
+        // when NEITHER transport is configured — so once lgs being
+        // configured could make `will_spawn_sync` true on its own, an
+        // invalid/missing AWS `remote_url` fell into the `if` branch
+        // instead (silently substituting `NullRemoteStorage`) and this
+        // warning became unreachable. AWS misconfiguration must be
+        // diagnosable whether or not lgs happens to be picking up the slack.
+        match diagnose_aws_transport(sync_state.enabled, &sync_state.remote_url, will_spawn_aws, lgs_configured) {
+            AwsTransportDiagnostic::InvalidUrl { remote_url: Some(url), lgs_configured } => warn!(
+                "Sync enabled but remote_url {:?} is not a valid http(s) URL — AWS sync disabled{}",
+                url,
+                if lgs_configured { " (lgs sync continues)" } else { "" }
+            ),
+            AwsTransportDiagnostic::InvalidUrl { remote_url: None, lgs_configured } => warn!(
+                "Sync enabled but remote_url is missing — AWS sync disabled{}",
+                if lgs_configured { " (lgs sync continues)" } else { "" }
+            ),
+            AwsTransportDiagnostic::NothingConfigured => {
+                info!("Sync disabled — no AWS remote_url configured and lgs has not completed first run");
+            }
+            AwsTransportDiagnostic::Silent => {}
+        }
+
         // Spawn the sync thread if (and only if) EITHER transport is
         // configured: AWS (enabled with a valid URL) or lgs (a cloud root
         // persisted from a completed first run). Before Task 19 this was
@@ -278,16 +304,11 @@ impl AllowanceTrackerApp {
 
             (SyncUiState::with_receiver(message_rx), Some(cmd_tx), Some(handle))
         } else {
-            if sync_state.enabled && sync_state.remote_url.is_some() {
-                warn!(
-                    "Sync enabled but remote_url {:?} is not a valid http(s) URL — sync disabled",
-                    sync_state.remote_url
-                );
-            } else if sync_state.enabled {
-                warn!("Sync enabled but remote_url is missing — sync disabled");
-            } else {
-                info!("Sync disabled — no AWS remote_url configured and lgs has not completed first run");
-            }
+            // Neither transport is configured. The diagnostic for WHY
+            // (invalid/missing remote_url, or nothing configured at all)
+            // was already logged above, independent of this branch — see
+            // the Important-3 comment there for why that independence
+            // matters.
             (SyncUiState::new(), None, None)
         };
         // ─────────────────────────────────────────────────────────────────────
@@ -1216,6 +1237,103 @@ fn is_valid_http_url(url: &str) -> bool {
     let trimmed = url.trim();
     (trimmed.starts_with("http://") || trimmed.starts_with("https://"))
         && trimmed.len() > "https://".len()
+}
+
+/// What `AllowanceTrackerApp::new` should log about the AWS transport's
+/// configuration.
+///
+/// Review Important-3: deliberately decided from `will_spawn_aws` alone,
+/// NOT from whether the sync thread ends up spawning at all (`will_spawn_aws
+/// || lgs_configured`). Gating this on the combined flag is exactly the bug
+/// that made an invalid/missing `remote_url` silently unreportable once lgs
+/// alone was enough to spawn the thread — the diagnostic must fire whenever
+/// AWS specifically is misconfigured, whether or not lgs is separately
+/// picking up the slack.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum AwsTransportDiagnostic {
+    /// `enabled` but `remote_url` fails validation (or is absent).
+    /// `lgs_configured` is carried through so the message can say whether
+    /// lgs sync continues regardless.
+    InvalidUrl { remote_url: Option<String>, lgs_configured: bool },
+    /// Neither transport is configured — nothing to warn about, but worth
+    /// one `info!` so a blank first run doesn't read as silence.
+    NothingConfigured,
+    /// AWS is healthy, or lgs is configured and AWS was never asked for.
+    /// Nothing to say either way.
+    Silent,
+}
+
+fn diagnose_aws_transport(
+    enabled: bool,
+    remote_url: &Option<String>,
+    will_spawn_aws: bool,
+    lgs_configured: bool,
+) -> AwsTransportDiagnostic {
+    if enabled && !will_spawn_aws {
+        AwsTransportDiagnostic::InvalidUrl { remote_url: remote_url.clone(), lgs_configured }
+    } else if !enabled && !lgs_configured {
+        AwsTransportDiagnostic::NothingConfigured
+    } else {
+        AwsTransportDiagnostic::Silent
+    }
+}
+
+#[cfg(test)]
+mod aws_transport_diagnostic_tests {
+    use super::*;
+
+    /// The exact regression: lgs being configured must not swallow the
+    /// warning that AWS's own `remote_url` is garbage.
+    #[test]
+    fn an_invalid_url_is_reported_even_when_lgs_is_configured() {
+        let diagnostic = diagnose_aws_transport(true, &Some("not-a-url".to_string()), false, true);
+        assert_eq!(
+            diagnostic,
+            AwsTransportDiagnostic::InvalidUrl {
+                remote_url: Some("not-a-url".to_string()),
+                lgs_configured: true
+            }
+        );
+    }
+
+    #[test]
+    fn an_invalid_url_is_reported_when_lgs_is_not_configured_either() {
+        let diagnostic = diagnose_aws_transport(true, &Some("not-a-url".to_string()), false, false);
+        assert_eq!(
+            diagnostic,
+            AwsTransportDiagnostic::InvalidUrl {
+                remote_url: Some("not-a-url".to_string()),
+                lgs_configured: false
+            }
+        );
+    }
+
+    #[test]
+    fn a_missing_url_is_reported_even_when_lgs_is_configured() {
+        let diagnostic = diagnose_aws_transport(true, &None, false, true);
+        assert_eq!(
+            diagnostic,
+            AwsTransportDiagnostic::InvalidUrl { remote_url: None, lgs_configured: true }
+        );
+    }
+
+    #[test]
+    fn silent_when_aws_is_healthy() {
+        let diagnostic = diagnose_aws_transport(true, &Some("https://example.com".to_string()), true, false);
+        assert_eq!(diagnostic, AwsTransportDiagnostic::Silent);
+    }
+
+    #[test]
+    fn silent_when_only_lgs_is_configured_and_aws_was_never_enabled() {
+        let diagnostic = diagnose_aws_transport(false, &None, false, true);
+        assert_eq!(diagnostic, AwsTransportDiagnostic::Silent);
+    }
+
+    #[test]
+    fn nothing_configured_is_reported_once_on_a_blank_install() {
+        let diagnostic = diagnose_aws_transport(false, &None, false, false);
+        assert_eq!(diagnostic, AwsTransportDiagnostic::NothingConfigured);
+    }
 }
 
 /// Build the real `ChildSyncEngine` for a machine that has already completed
