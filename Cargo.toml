@@ -4,6 +4,7 @@ members = [
     "shared",
     "egui-frontend",
     "sync-service",
+    "allowance-core",
 ]
 
 [profile.dev]

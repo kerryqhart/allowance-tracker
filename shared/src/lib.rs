@@ -4,7 +4,6 @@ pub mod child_id;
 pub use child_id::ChildId;
 
 use serde::{Deserialize, Serialize};
-use std::fmt;
 use chrono::{Datelike, DateTime, FixedOffset, NaiveDate, Utc};
 
 /// A financial transaction representing money in or out.
@@ -488,7 +487,7 @@ pub struct Goal {
 impl Goal {
     /// Generate a unique goal ID
     pub fn generate_id(child_id: &str, timestamp_millis: u64) -> String {
-        format!("goal::{}::{}", child_id, timestamp_millis)
+        format!("goal::{}::{}::{:04x}", child_id, timestamp_millis, rand::random::<u16>())
     }
 }
 
@@ -574,56 +573,6 @@ pub struct CancelGoalResponse {
     pub success_message: String,
 }
 
-impl Transaction {
-    /// Generate transaction ID from amount and timestamp
-    pub fn generate_id(amount: f64, epoch_millis: u64) -> String {
-        let transaction_type = if amount < 0.0 { "expense" } else { "income" };
-        format!("transaction::{}::{}", transaction_type, epoch_millis)
-    }
-
-    /// Parse transaction ID to extract components
-    pub fn parse_id(id: &str) -> Result<(String, u64), TransactionIdError> {
-        let parts: Vec<&str> = id.split("::").collect();
-        if parts.len() != 3 || parts[0] != "transaction" {
-            return Err(TransactionIdError::InvalidFormat);
-        }
-
-        let transaction_type = parts[1];
-        if transaction_type != "income" && transaction_type != "expense" {
-            return Err(TransactionIdError::InvalidType);
-        }
-
-        let epoch_millis = parts[2]
-            .parse::<u64>()
-            .map_err(|_| TransactionIdError::InvalidTimestamp)?;
-
-        Ok((transaction_type.to_string(), epoch_millis))
-    }
-
-    /// Extract epoch timestamp from transaction ID for sorting
-    pub fn extract_timestamp(&self) -> Result<u64, TransactionIdError> {
-        Self::parse_id(&self.id).map(|(_, timestamp)| timestamp)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum TransactionIdError {
-    InvalidFormat,
-    InvalidType,
-    InvalidTimestamp,
-}
-
-impl fmt::Display for TransactionIdError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            TransactionIdError::InvalidFormat => write!(f, "Invalid transaction ID format"),
-            TransactionIdError::InvalidType => write!(f, "Invalid transaction type"),
-            TransactionIdError::InvalidTimestamp => write!(f, "Invalid timestamp in transaction ID"),
-        }
-    }
-}
-
-impl std::error::Error for TransactionIdError {}
 
 /// Request to export transaction data as CSV
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -695,138 +644,13 @@ impl AllowanceConfig {
     }
 }
 
-impl Child {
-    /// Generate a child ID based on timestamp
-    pub fn generate_id(epoch_millis: u64) -> String {
-        format!("child::{}", epoch_millis)
-    }
-
-    /// Parse a child ID to extract the timestamp
-    pub fn parse_id(id: &str) -> Result<u64, ChildIdError> {
-        let parts: Vec<&str> = id.split("::").collect();
-        if parts.len() != 2 || parts[0] != "child" {
-            return Err(ChildIdError::InvalidFormat);
-        }
-
-        parts[1].parse::<u64>().map_err(|_| ChildIdError::InvalidTimestamp)
-    }
-
-    /// Extract timestamp from child ID
-    pub fn extract_timestamp(&self) -> Result<u64, ChildIdError> {
-        Self::parse_id(&self.id)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum ChildIdError {
-    InvalidFormat,
-    InvalidTimestamp,
-}
-
-impl fmt::Display for ChildIdError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ChildIdError::InvalidFormat => write!(f, "Invalid child ID format"),
-            ChildIdError::InvalidTimestamp => write!(f, "Invalid timestamp in child ID"),
-        }
-    }
-}
-
-impl std::error::Error for ChildIdError {}
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_generate_transaction_id() {
-        // Test income transaction
-        let income_id = Transaction::generate_id(10.0, 1702516122000);
-        assert_eq!(income_id, "transaction::income::1702516122000");
 
-        // Test expense transaction
-        let expense_id = Transaction::generate_id(-5.0, 1702516125000);
-        assert_eq!(expense_id, "transaction::expense::1702516125000");
-
-        // Test zero amount (should be income)
-        let zero_id = Transaction::generate_id(0.0, 1702516130000);
-        assert_eq!(zero_id, "transaction::income::1702516130000");
-    }
-
-    #[test]
-    fn test_parse_transaction_id() {
-        // Test valid income ID
-        let (tx_type, timestamp) = Transaction::parse_id("transaction::income::1702516122000").unwrap();
-        assert_eq!(tx_type, "income");
-        assert_eq!(timestamp, 1702516122000);
-
-        // Test valid expense ID
-        let (tx_type, timestamp) = Transaction::parse_id("transaction::expense::1702516125000").unwrap();
-        assert_eq!(tx_type, "expense");
-        assert_eq!(timestamp, 1702516125000);
-
-        // Test invalid format
-        assert!(Transaction::parse_id("invalid::format").is_err());
-        assert!(Transaction::parse_id("transaction::income").is_err());
-        assert!(Transaction::parse_id("not_transaction::income::123").is_err());
-
-        // Test invalid type
-        assert!(Transaction::parse_id("transaction::invalid::123").is_err());
-
-        // Test invalid timestamp
-        assert!(Transaction::parse_id("transaction::income::not_a_number").is_err());
-    }
-
-    #[test]
-    fn test_extract_timestamp() {
-        let transaction = Transaction {
-            id: "transaction::income::1702516122000".to_string(),
-            child_id: "test_child_id".to_string(),
-            date: Utc::now().with_timezone(&FixedOffset::east_opt(0).unwrap()), // FIXED: Use east_opt instead
-            description: "Test transaction".to_string(),
-            amount: 10.0,
-            balance: 100.0,
-            transaction_type: TransactionType::OneOffIncome,
-        };
-
-        assert_eq!(transaction.extract_timestamp().unwrap(), 1702516122000);
-    }
-
-    #[test]
-    fn test_generate_child_id() {
-        let child_id = Child::generate_id(1702516122000);
-        assert_eq!(child_id, "child::1702516122000");
-    }
-
-    #[test]
-    fn test_parse_child_id() {
-        // Test valid child ID
-        let timestamp = Child::parse_id("child::1702516122000").unwrap();
-        assert_eq!(timestamp, 1702516122000);
-
-        // Test invalid format
-        assert!(Child::parse_id("invalid::format").is_err());
-        assert!(Child::parse_id("child").is_err());
-        assert!(Child::parse_id("not_child::123").is_err());
-
-        // Test invalid timestamp
-        assert!(Child::parse_id("child::not_a_number").is_err());
-    }
-
-    #[test]
-    fn test_child_extract_timestamp() {
-        let child = Child {
-            id: "child::1702516122000".to_string(),
-            name: "Test Child".to_string(),
-            birthdate: NaiveDate::from_ymd_opt(2015, 6, 15).unwrap(),  // FIXED: Use proper NaiveDate
-            created_at: DateTime::parse_from_rfc3339("2023-12-14T01:02:02.000Z").unwrap().with_timezone(&Utc),  // FIXED: Use proper DateTime
-            updated_at: DateTime::parse_from_rfc3339("2023-12-14T01:02:02.000Z").unwrap().with_timezone(&Utc),  // FIXED: Use proper DateTime
-        };
-
-        assert_eq!(child.extract_timestamp().unwrap(), 1702516122000);
-    }
-
-    #[test]
+#[test]
     fn test_allowance_config_day_names() {
         let days = [
             (0, "Sunday"),
@@ -860,5 +684,30 @@ mod tests {
         assert!(AllowanceConfig::is_valid_day_of_week(6));
         assert!(!AllowanceConfig::is_valid_day_of_week(7));
         assert!(!AllowanceConfig::is_valid_day_of_week(255));
+    }
+
+    #[test]
+    fn goal_suffix_is_random_not_clock_derived() {
+        // The old implementation used timestamp-only, which produced identical ids.
+        // The new implementation uses a random suffix. This test discriminates by checking
+        // ordering: clock-derived suffixes give ~0-2 descending steps (only at wraps),
+        // random gives ~50%. Counting distinctness alone cannot tell them apart.
+        let ids: Vec<String> = (0..200)
+            .map(|_| Goal::generate_id("child123", 1_702_516_125_000))
+            .collect();
+
+        let suffixes: Vec<u16> = ids.iter()
+            .map(|id| {
+                let parts: Vec<&str> = id.split("::").collect();
+                u16::from_str_radix(parts[3], 16).unwrap()
+            })
+            .collect();
+
+        let descending_steps = suffixes.windows(2)
+            .filter(|w| w[1] < w[0])
+            .count();
+
+        // Clock-derived: ~0-2. Random: ~100. Assert > 30 to be well above clock but below random.
+        assert!(descending_steps > 30, "only {} descending steps in 200 draws (expected ~100 for random)", descending_steps);
     }
 }

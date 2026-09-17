@@ -1,171 +1,193 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 // Removed async_trait - no longer needed for synchronous operations
-use csv::{Reader, Writer};
 use log::{info, warn};
-use std::fs::{File, OpenOptions};
-use std::io::{BufReader, BufWriter};
-use std::sync::Arc;
 use crate::backend::domain::models::transaction::{
     Transaction as DomainTransaction, TransactionType as DomainTransactionType,
 };
+use allowance_core::money::Money;
+use allowance_core::row::{TxRow, TxType};
 use super::connection::CsvConnection;
-use super::child_repository::ChildRepository;
-use crate::backend::storage::ChildStorage;
 use crate::backend::storage::GitManager;
 use shared::ChildId;
+
+/// `TxRow` (the pure `allowance-core` type, produced and consumed by the
+/// single canonical codec) onto the domain `Transaction`. This boundary
+/// conversion lives here — the same way `BalanceService` converts at its own
+/// boundary — because `allowance-core` must not know about the domain model.
+fn row_to_domain(row: TxRow) -> DomainTransaction {
+    DomainTransaction {
+        id: row.id,
+        child_id: row.child_id,
+        date: row.date,
+        description: row.description,
+        amount: row.amount,
+        balance: row.balance,
+        transaction_type: match row.tx_type {
+            TxType::Allowance => DomainTransactionType::Allowance,
+            TxType::OneOffIncome => DomainTransactionType::OneOffIncome,
+            TxType::Expense => DomainTransactionType::Expense,
+            TxType::FutureAllowance => DomainTransactionType::FutureAllowance,
+        },
+    }
+}
+
+fn domain_to_row(t: &DomainTransaction) -> TxRow {
+    TxRow {
+        id: t.id.clone(),
+        child_id: t.child_id.clone(),
+        date: t.date,
+        description: t.description.clone(),
+        amount: t.amount,
+        balance: t.balance,
+        tx_type: match t.transaction_type {
+            DomainTransactionType::Allowance => TxType::Allowance,
+            DomainTransactionType::OneOffIncome => TxType::OneOffIncome,
+            DomainTransactionType::Expense => TxType::Expense,
+            DomainTransactionType::FutureAllowance => TxType::FutureAllowance,
+        },
+    }
+}
+
+/// One thing about a registered child's `transactions.csv` worth surfacing at
+/// startup — see `TransactionRepository::validate_all_transaction_files` and
+/// `Backend::with_data_dir`, which turns each of these into a `StartupNotice`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum TransactionFileNotice {
+    /// The file did not parse under the codec at all (a hard error: an
+    /// unparseable date, a date-only value, or an unrecognised type).
+    ParseFailed { child_id: String, reason: String },
+    /// The file parsed, but some rows carried legacy f64-precision noise
+    /// (e.g. `"14.620000000000001"`) that was rounded to the nearest cent.
+    /// The rewrite is correct — but not silently absorbed.
+    LegacyPrecisionRounded { child_id: String, rows_rounded: usize },
+}
 
 /// CSV-based transaction repository
 #[derive(Clone)]
 pub struct TransactionRepository {
     connection: CsvConnection,
-    child_repository: ChildRepository,
     git_manager: GitManager,
 }
 
 impl TransactionRepository {
     /// Create a new CSV transaction repository
     pub fn new(connection: CsvConnection) -> Self {
-        let child_repository = ChildRepository::new(Arc::new(connection.clone()));
         Self {
             connection,
-            child_repository,
             git_manager: GitManager::new(),
         }
     }
     
+    /// Read and parse a child's `transactions.csv`, without converting to the
+    /// domain type. Shared by `read_transactions` and
+    /// `validate_all_transaction_files` so there is one place that resolves
+    /// the path and calls the codec; the two callers use the result
+    /// differently — see the note on `rows_rounded` below.
+    fn parse_transactions_file(
+        &self,
+        child_id: &ChildId,
+    ) -> Result<allowance_core::codec::ParsedTransactions> {
+        self.connection.ensure_transactions_file_exists(child_id)?;
+
+        let file_path = self.connection.transactions_path(child_id)?;
+
+        let text = std::fs::read_to_string(&file_path)
+            .with_context(|| format!("reading {}", file_path.display()))?;
+
+        // The one canonical codec: no current-time fallback on an unparseable
+        // date, no chrono::Local resolution of a date-only value, and no
+        // deriving an unrecognised type from the description/amount. Any of
+        // those would make read-modify-write non-idempotent — one bad row
+        // would make the file change on every read/write cycle, and two
+        // machines syncing it would never converge. A malformed row is now a
+        // hard error surfaced to the caller (and, at startup, collected into
+        // a `StartupNotice` — see `validate_all_transaction_files` and
+        // `Backend::with_data_dir`) instead of being silently rewritten.
+        //
+        // Money is parsed with rounding (not the strict `FromStr`): legacy
+        // data written before `Money` existed carries f64-precision noise
+        // like `"14.620000000000001"`, which means 1462 cents and nothing
+        // else. Refusing it here would refuse the user's own history over a
+        // rendering artifact. The file self-cleans — the next write emits
+        // exactly two decimals via `render_transactions`.
+        //
+        // `rows_rounded` on the result is NOT structurally forced on every
+        // caller — `ParsedTransactions` is a plain struct, and nothing stops
+        // a caller from dropping the count. The actual guarantee is a
+        // convention held at exactly one call site:
+        // `validate_all_transaction_files` reads it and turns it into a
+        // `StartupNotice`, once per child at startup. `read_transactions`
+        // below deliberately discards it on every ordinary read — surfacing
+        // it there too would repeat the same notice on every CRUD call,
+        // which is noise, not information. Reporting it once at launch is
+        // the right dose; the type system does not enforce that dose, this
+        // comment and the call site below are what hold it.
+        allowance_core::codec::parse_transactions(&text)
+            .with_context(|| format!("parsing {}", file_path.display()))
+    }
+
     /// Read all transactions for a child from their CSV file.
     ///
     /// Resolution is by immutable id through the registry. It used to derive
     /// the folder from the child's *display name*, so a rename silently
     /// resolved elsewhere and the history read back as empty.
     fn read_transactions(&self, child_id: &ChildId) -> Result<Vec<DomainTransaction>> {
-        self.connection.ensure_transactions_file_exists(child_id)?;
-
-        let file_path = self.connection.transactions_path(child_id)?;
-
-        let file = File::open(&file_path)?;
-        let reader = BufReader::new(file);
-        let mut csv_reader = Reader::from_reader(reader);
-        
-        let mut transactions = Vec::new();
-        
-        for result in csv_reader.records() {
-            let record = result?;
-            
-            // FIXED: Parse date string into DateTime object (CSV layer responsibility)
-            let date_str = record.get(2).unwrap_or("");
-            let parsed_date = self.parse_date_string(date_str)?;
-            
-            // Parse CSV record into Transaction
-            let amount = record.get(4).unwrap_or("0").parse::<f64>().unwrap_or(0.0);
-            let description = record.get(3).unwrap_or("");
-            let transaction = DomainTransaction {
-                id: record.get(0).unwrap_or("").to_string(),
-                child_id: record.get(1).unwrap_or("").to_string(),
-                date: parsed_date,  // Now uses parsed DateTime object
-                description: description.to_string(),
-                amount,
-                balance: record.get(5).unwrap_or("0").parse::<f64>().unwrap_or(0.0),
-                transaction_type: Self::parse_transaction_type(
-                    record.get(6),  // type column (may be None for old data)
-                    description,    // description for fallback
-                    amount,         // amount for fallback
-                ),
-            };
-            
-            transactions.push(transaction);
-        }
-        
-        Ok(transactions)
-    }
-    
-    /// Parse transaction type from CSV, with backward compatibility for old data
-    fn parse_transaction_type(
-        type_field: Option<&str>,
-        description: &str,
-        amount: f64,
-    ) -> DomainTransactionType {
-        // If type column exists, use it
-        if let Some(type_str) = type_field {
-            match type_str.to_lowercase().as_str() {
-                "allowance" => return DomainTransactionType::Allowance,
-                "income" | "oneoffincome" => return DomainTransactionType::OneOffIncome,
-                "expense" => return DomainTransactionType::Expense,
-                "future_allowance" | "futureallowance" => return DomainTransactionType::FutureAllowance,
-                _ => {} // Fall through to derivation
-            }
-        }
-
-        // Backward compatibility: derive from description/amount
-        let desc_lower = description.to_lowercase();
-        if desc_lower.contains("allowance") || desc_lower.contains("weekly") {
-            DomainTransactionType::Allowance
-        } else if amount >= 0.0 {
-            DomainTransactionType::OneOffIncome
-        } else {
-            DomainTransactionType::Expense
-        }
+        let allowance_core::codec::ParsedTransactions { rows, rows_rounded: _ } =
+            self.parse_transactions_file(child_id)?;
+        // Rounding is reported once per child at startup; see
+        // `validate_all_transaction_files`. An ordinary read discards the
+        // count on purpose — see the comment on `parse_transactions_file`.
+        Ok(rows.into_iter().map(row_to_domain).collect())
     }
 
-    /// NEW: Parse date string into DateTime object - this is where the CSV layer handles date parsing
-    fn parse_date_string(&self, date_str: &str) -> Result<chrono::DateTime<chrono::FixedOffset>> {
-        use chrono::{DateTime, FixedOffset, NaiveDate};
-        
-        // Try parsing as RFC3339 first (most common format)
-        if let Ok(dt) = DateTime::parse_from_rfc3339(date_str) {
-            return Ok(dt);
-        }
-        
-        // Try parsing as date-only format (YYYY-MM-DD)
-        if let Ok(naive_date) = NaiveDate::parse_from_str(date_str, "%Y-%m-%d") {
-            // Convert to beginning of day in local timezone (handles DST automatically)
-            let naive_datetime = naive_date.and_hms_opt(0, 0, 0).unwrap();
-            if let Some(local_dt) = naive_datetime.and_local_timezone(chrono::Local).single() {
-                return Ok(local_dt.fixed_offset());
-            }
-        }
-        
-        // If all parsing fails, return current time as fallback
-        log::warn!("Failed to parse date '{}', using current time as fallback", date_str);
-        Ok(chrono::Utc::now().with_timezone(&FixedOffset::east_opt(0).unwrap()))
+    /// Check every registered child's `transactions.csv` up front.
+    ///
+    /// The codec no longer tolerates a malformed row: an unparseable date, a
+    /// date-only value, or an unrecognised transaction type is now a hard
+    /// `Err` instead of a silently rewritten fallback. Without this check,
+    /// the first sign of that would be an error the moment someone opens the
+    /// affected child's page. Called once at startup instead, so it becomes a
+    /// `StartupNotice` in the banner up front — visible, but not fatal to the
+    /// rest of the app.
+    ///
+    /// A file that parses but needed legacy-precision rounding (see
+    /// `Money::parse_rounding`) is reported too, as a lower-severity notice —
+    /// the rewrite is correct, but the user should still be told their data
+    /// was touched.
+    pub fn validate_all_transaction_files(&self) -> Vec<TransactionFileNotice> {
+        self.connection
+            .registry()
+            .entries()
+            .iter()
+            .filter_map(|entry| match self.parse_transactions_file(&entry.id) {
+                Ok(parsed) if parsed.rows_rounded > 0 => {
+                    Some(TransactionFileNotice::LegacyPrecisionRounded {
+                        child_id: entry.id.to_string(),
+                        rows_rounded: parsed.rows_rounded,
+                    })
+                }
+                Ok(_) => None,
+                Err(e) => Some(TransactionFileNotice::ParseFailed {
+                    child_id: entry.id.to_string(),
+                    reason: format!("{e:#}"),
+                }),
+            })
+            .collect()
     }
-    
+
     /// Write all transactions for a child to their CSV file (internal, no git commit)
     fn write_transactions_internal(&self, child_id: &ChildId, transactions: &[DomainTransaction]) -> Result<()> {
         let file_path = self.connection.transactions_path(child_id)?;
 
-        let file = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(&file_path)?;
+        // Always the canonical (date, id) order and canonical rendering,
+        // applied on every write — not only after a merge — so two machines
+        // writing the same rows produce identical bytes.
+        let rows: Vec<TxRow> = transactions.iter().map(domain_to_row).collect();
+        let text = allowance_core::codec::render_transactions(&rows);
 
-        let writer = BufWriter::new(file);
-        let mut csv_writer = Writer::from_writer(writer);
+        std::fs::write(&file_path, text)
+            .with_context(|| format!("writing {}", file_path.display()))?;
 
-        // Write header - includes "type" column for transaction type
-        csv_writer.write_record(&["id", "child_id", "date", "description", "amount", "balance", "type"])?;
-
-        // Write transactions
-        for transaction in transactions {
-            let type_str = match transaction.transaction_type {
-                DomainTransactionType::Allowance => "allowance",
-                DomainTransactionType::OneOffIncome => "income",
-                DomainTransactionType::Expense => "expense",
-                DomainTransactionType::FutureAllowance => "future_allowance",
-            };
-            csv_writer.write_record(&[
-                &transaction.id,
-                &transaction.child_id,
-                &transaction.date.to_rfc3339(),  // Convert DateTime back to string for CSV storage
-                &transaction.description,
-                &transaction.amount.to_string(),
-                &transaction.balance.to_string(),
-                type_str,
-            ])?;
-        }
-
-        csv_writer.flush()?;
         Ok(())
     }
 
@@ -184,6 +206,55 @@ impl TransactionRepository {
 
         Ok(())
     }
+
+    /// Store or update a single transaction WITHOUT creating a git commit.
+    ///
+    /// Used exclusively by the AWS-apply path (`ApplyRemoteEntity`, applied
+    /// on the UI thread in `egui-frontend/src/ui/app_coordinator.rs`). Two
+    /// transports now write this same file — the old AWS event-sourcing
+    /// path and the new lgs (local git sync) path — and if the AWS path
+    /// also committed here, ONE MCP-server write would produce a SEPARATE
+    /// git commit on EACH machine for the same logical change. Divergence
+    /// would stop being an exception and become the steady state whenever
+    /// the MCP server is active, which defeats the point of the lgs merge:
+    /// it would be merging constantly for no reason.
+    ///
+    /// The commit for this change is produced later — by whatever ordinary
+    /// local edit or lgs merge next touches `transactions.csv` on this
+    /// machine — not by this call.
+    pub(crate) fn upsert_transaction_no_commit(&self, transaction: &DomainTransaction) -> Result<()> {
+        reject_pending_balance(transaction)?;
+        let child_id = ChildId::from(transaction.child_id.as_str());
+        let mut transactions = self.read_transactions(&child_id)?;
+        if let Some(pos) = transactions.iter().position(|t| t.id == transaction.id) {
+            transactions[pos] = transaction.clone();
+        } else {
+            transactions.push(transaction.clone());
+        }
+        self.write_transactions_internal(&child_id, &transactions)
+    }
+
+    /// Delete a single transaction WITHOUT creating a git commit.
+    ///
+    /// Used exclusively by the AWS-apply path (`DeleteLocalEntity`, the
+    /// sibling of `ApplyRemoteEntity` — see
+    /// `upsert_transaction_no_commit`'s doc comment for the shared
+    /// rationale). Returns `true` if a row was found and removed, `false`
+    /// if it was already absent (idempotent, same as the committing
+    /// `delete_transaction`).
+    pub(crate) fn delete_transaction_no_commit(&self, child_id: &str, transaction_id: &str) -> Result<bool> {
+        let child_id = ChildId::from(child_id);
+        let mut transactions = self.read_transactions(&child_id)?;
+        let original_len = transactions.len();
+        transactions.retain(|t| t.id != transaction_id);
+
+        if transactions.len() < original_len {
+            self.write_transactions_internal(&child_id, &transactions)?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
 }
 
 impl TransactionRepository {
@@ -200,33 +271,31 @@ impl TransactionRepository {
         }
     }
     
-    /// Helper method to get all child IDs
-    fn get_all_child_ids(&self) -> Result<Vec<ChildId>> {
-        // Get all children from the child repository
-        let children = self.child_repository.list_children()?;
-        Ok(children
-            .into_iter()
-            .map(|child| ChildId::from(child.id))
-            .collect())
+}
+
+/// Guard shared by every single-transaction write path: refuses to persist a
+/// transaction whose balance is still `Transaction::BALANCE_PENDING`
+/// (`Money::from_cents(i64::MIN)`, the in-domain stand-in for the old
+/// `f64::NAN` "not yet calculated" sentinel).
+///
+/// `Money::render()` on `i64::MIN` produces `"-92233720368547758.08"`, and
+/// parsing that back overflows `i64` and returns `Err` (see allowance-core's
+/// own test for this). A later task turns an unparseable CSV row into a
+/// hard, unrecoverable read error with no fallback — so persisting
+/// BALANCE_PENDING today would write a file this app can never read again.
+fn reject_pending_balance(transaction: &DomainTransaction) -> Result<()> {
+    if transaction.balance == DomainTransaction::BALANCE_PENDING {
+        anyhow::bail!(
+            "refusing to persist transaction {}: balance is still BALANCE_PENDING (not yet calculated by BalanceService)",
+            transaction.id
+        );
     }
-
-    /// Find which child a transaction belongs to by searching through all child directories
-    fn find_child_id_for_transaction(&self, transaction_id: &str) -> Result<Option<ChildId>> {
-        let child_ids = self.get_all_child_ids()?;
-
-        for child_id in child_ids {
-            let transactions = self.read_transactions(&child_id)?;
-            if transactions.iter().any(|t| t.id == transaction_id) {
-                return Ok(Some(child_id));
-            }
-        }
-
-        Ok(None)
-    }
+    Ok(())
 }
 
 impl crate::backend::storage::TransactionStorage for TransactionRepository {
     fn store_transaction(&self, transaction: &DomainTransaction) -> Result<()> {
+        reject_pending_balance(transaction)?;
         let child_id = ChildId::from(transaction.child_id.as_str());
         let mut transactions = self.read_transactions(&child_id)?;
         if let Some(pos) = transactions.iter().position(|t| t.id == transaction.id) {
@@ -294,6 +363,7 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
     }
 
     fn update_transaction(&self, transaction: &DomainTransaction) -> Result<()> {
+        reject_pending_balance(transaction)?;
         info!("Updating transaction in CSV: {}", transaction.id);
 
         let child_id = ChildId::from(transaction.child_id.as_str());
@@ -360,7 +430,7 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
     fn update_transaction_balance(
         &self,
         _transaction_id: &str,
-        _new_balance: f64,
+        _new_balance: Money,
     ) -> Result<()> {
         // This is a complex operation in a file-based system, as it requires
         // finding the right child, reading all transactions, updating one, and writing back.
@@ -369,44 +439,27 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
         Ok(())
     }
 
-    fn update_transaction_balances(&self, updates: &[(String, f64)]) -> Result<()> {
-        info!("Updating multiple transaction balances in CSV");
-
+    fn update_transaction_balances(&self, child_id: &str, updates: &[(String, Money)]) -> Result<()> {
         if updates.is_empty() {
             return Ok(());
         }
 
-        info!("Updating {} transaction balances", updates.len());
+        info!("Updating {} transaction balances for child {}", updates.len(), child_id);
 
-        // Group updates by child_id by looking up each transaction's child
-        let mut child_updates: std::collections::HashMap<ChildId, Vec<(String, f64)>> = std::collections::HashMap::new();
+        let child_id = ChildId::from(child_id);
+        let mut transactions = self.read_transactions(&child_id)?;
+        let mut needs_write = false;
 
-        for (transaction_id, new_balance) in updates {
-            // Find which child this transaction belongs to
-            let child_id = self.find_child_id_for_transaction(transaction_id)?;
-            if let Some(child_id) = child_id {
-                child_updates.entry(child_id).or_insert_with(Vec::new).push((transaction_id.clone(), *new_balance));
-            } else {
-                warn!("Could not find child for transaction {}, skipping update", transaction_id);
+        for transaction in &mut transactions {
+            if let Some(update) = updates.iter().find(|(id, _)| id == &transaction.id) {
+                transaction.balance = update.1;
+                needs_write = true;
             }
         }
 
-        // Update transactions for each child
-        for (child_id, child_transaction_updates) in child_updates {
-            let mut transactions = self.read_transactions(&child_id)?;
-            let mut needs_write = false;
-
-            for transaction in &mut transactions {
-                if let Some(update) = child_transaction_updates.iter().find(|(id, _)| id == &transaction.id) {
-                    transaction.balance = update.1;
-                    needs_write = true;
-                }
-            }
-
-            if needs_write {
-                // Use internal method to avoid git commits during balance recalculation
-                self.write_transactions_internal(&child_id, &transactions)?;
-            }
+        if needs_write {
+            // Use internal method to avoid git commits during balance recalculation
+            self.write_transactions_internal(&child_id, &transactions)?;
         }
 
         Ok(())
@@ -443,11 +496,19 @@ impl crate::backend::storage::TransactionStorage for TransactionRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::storage::TransactionStorage;
+    use super::super::child_repository::ChildRepository;
+    use crate::backend::storage::{ChildStorage, TransactionStorage};
     use crate::backend::domain::models::child::Child as DomainChild;
     use chrono::Utc;
     use std::sync::Arc;
     use tempfile::TempDir;
+
+    /// Convert a dollar-amount literal (as tests already write them) into
+    /// exact `Money` cents, mirroring `Money`'s own `Deserialize` boundary
+    /// conversion. Not money arithmetic — a one-shot literal conversion.
+    fn dollars(amount: f64) -> Money {
+        Money::from_cents((amount * 100.0).round() as i64)
+    }
 
     /// Build a repository over a temp dir with one registered child, id
     /// `test_child`.
@@ -483,27 +544,35 @@ mod tests {
     #[test]
     fn test_compare_dates_timezone_fix() -> Result<()> {
         let (repo, _env) = setup_test_repo()?;
-        
-        // Test the exact scenario from the bug report
+
+        // Test the exact scenario from the bug report. `compare_dates` is used
+        // only for query-parameter filtering now (date1 already comes in as a
+        // parsed `DateTime` off a `TxRow`; the codec is the only place that
+        // turns a raw string into one, and it never falls back), so both
+        // dates here are constructed directly rather than through the
+        // now-deleted `parse_date_string`.
         let cdt_transaction_date = "2025-06-15T00:00:00-05:00"; // CDT transaction
         let utc_query_end_date = "2025-06-30T23:59:59Z";       // UTC query
-        
+
         // The CDT transaction should be BEFORE the UTC end date (comparison should be < 0)
-        let result = repo.compare_dates(&repo.parse_date_string(cdt_transaction_date)?, utc_query_end_date);
+        let date1 = chrono::DateTime::parse_from_rfc3339(cdt_transaction_date)?;
+        let result = repo.compare_dates(&date1, utc_query_end_date);
         println!("Test: compare_dates('{}', '{}') = {}", cdt_transaction_date, utc_query_end_date, result);
         assert!(result < 0, "CDT transaction should be before UTC end date");
-        
+
         // Test another CDT transaction that should be included
         let cdt_transaction_june27 = "2025-06-27T07:00:00-05:00";
-        let result2 = repo.compare_dates(&repo.parse_date_string(cdt_transaction_june27)?, utc_query_end_date);
+        let date2 = chrono::DateTime::parse_from_rfc3339(cdt_transaction_june27)?;
+        let result2 = repo.compare_dates(&date2, utc_query_end_date);
         println!("Test: compare_dates('{}', '{}') = {}", cdt_transaction_june27, utc_query_end_date, result2);
         assert!(result2 < 0, "CDT June 27 transaction should be before UTC end date");
-        
-        // Test string comparison fallback with invalid dates
-        let invalid_date = "invalid-date";
-        let result3 = repo.compare_dates(&repo.parse_date_string(invalid_date)?, utc_query_end_date);
-        println!("Test: compare_dates('{}', '{}') = {} (fallback)", invalid_date, utc_query_end_date, result3);
-        
+
+        // `compare_dates` itself still falls back to string comparison when
+        // its *second* argument (a query parameter, not a stored row) fails
+        // to parse. That fallback is unrelated to the codec and stays.
+        let result3 = repo.compare_dates(&date1, "invalid-date");
+        println!("Test: compare_dates('{}', 'invalid-date') = {} (fallback)", cdt_transaction_date, result3);
+
         Ok(())
     }
     
@@ -516,22 +585,22 @@ mod tests {
             child_id: "test_child".to_string(),
             date: chrono::DateTime::parse_from_rfc3339("2024-01-15T10:30:00Z").unwrap(),
             description: "Test transaction".to_string(),
-            amount: 25.50,
-            balance: 25.50,
+            amount: dollars(25.50),
+            balance: dollars(25.50),
             transaction_type: DomainTransactionType::OneOffIncome,
         };
-        
+
         // Store transaction
         repo.store_transaction(&transaction)?;
-        
+
         // Retrieve transaction
         let retrieved = repo.get_transaction("test_child", "test_tx_001")?;
         assert!(retrieved.is_some());
-        
+
         let retrieved = retrieved.unwrap();
         assert_eq!(retrieved.id, "test_tx_001");
         assert_eq!(retrieved.description, "Test transaction");
-        assert_eq!(retrieved.amount, 25.50);
+        assert_eq!(retrieved.amount, dollars(25.50));
         
         Ok(())
     }
@@ -547,8 +616,8 @@ mod tests {
                 child_id: "test_child".to_string(),
                 date: chrono::DateTime::parse_from_rfc3339(&format!("2024-01-{:02}T10:30:00Z", i + 10)).unwrap(),
                 description: format!("Transaction {}", i),
-                amount: i as f64 * 10.0,
-                balance: (i * (i + 1) / 2) as f64 * 10.0, // Cumulative sum
+                amount: dollars(i as f64 * 10.0),
+                balance: dollars((i * (i + 1) / 2) as f64 * 10.0), // Cumulative sum
                 transaction_type: DomainTransactionType::OneOffIncome,
             };
             
@@ -563,10 +632,80 @@ mod tests {
         assert_eq!(transactions[0].id, "tx_005");
         assert_eq!(transactions[1].id, "tx_004");
         assert_eq!(transactions[2].id, "tx_003");
-        
+
         Ok(())
     }
-    
+
+    /// Regression test: `Transaction::BALANCE_PENDING`
+    /// (`Money::from_cents(i64::MIN)`) must never be persisted. Its
+    /// `render()` overflows `i64` on the way back in, and a later task turns
+    /// an unparseable CSV row into a hard, unrecoverable read error — so a
+    /// persisted BALANCE_PENDING row would permanently brick that child's
+    /// transaction file.
+    #[test]
+    fn store_transaction_refuses_a_balance_pending_transaction() -> Result<()> {
+        let (repo, _env) = setup_test_repo()?;
+
+        let transaction = DomainTransaction {
+            id: "test_tx_pending".to_string(),
+            child_id: "test_child".to_string(),
+            date: chrono::DateTime::parse_from_rfc3339("2024-01-15T10:30:00Z").unwrap(),
+            description: "Future allowance".to_string(),
+            amount: dollars(10.0),
+            balance: DomainTransaction::BALANCE_PENDING,
+            transaction_type: DomainTransactionType::FutureAllowance,
+        };
+
+        let result = repo.store_transaction(&transaction);
+        assert!(
+            result.is_err(),
+            "storing a transaction with balance == BALANCE_PENDING must fail, not silently persist it"
+        );
+
+        assert!(
+            repo.get_transaction("test_child", "test_tx_pending")?.is_none(),
+            "a refused BALANCE_PENDING transaction must not end up in storage"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn update_transaction_refuses_a_balance_pending_transaction() -> Result<()> {
+        let (repo, _env) = setup_test_repo()?;
+
+        // Store a normal transaction first...
+        let transaction = DomainTransaction {
+            id: "test_tx_to_update".to_string(),
+            child_id: "test_child".to_string(),
+            date: chrono::DateTime::parse_from_rfc3339("2024-01-15T10:30:00Z").unwrap(),
+            description: "Allowance".to_string(),
+            amount: dollars(10.0),
+            balance: dollars(10.0),
+            transaction_type: DomainTransactionType::Allowance,
+        };
+        repo.store_transaction(&transaction)?;
+
+        // ...then attempt to update it to carry BALANCE_PENDING.
+        use crate::backend::storage::traits::TransactionStorage;
+        let mut pending_update = transaction.clone();
+        pending_update.balance = DomainTransaction::BALANCE_PENDING;
+        let result = TransactionStorage::update_transaction(&repo, &pending_update);
+        assert!(
+            result.is_err(),
+            "updating a transaction to carry BALANCE_PENDING must fail, not silently persist it"
+        );
+
+        let stored = repo.get_transaction("test_child", "test_tx_to_update")?.unwrap();
+        assert_eq!(
+            stored.balance,
+            dollars(10.0),
+            "the original balance must be untouched after a refused update"
+        );
+
+        Ok(())
+    }
+
     #[test]
     fn test_delete_transaction() -> Result<()> {
         let (repo, _temp_dir) = setup_test_repo()?;
@@ -578,8 +717,8 @@ mod tests {
             child_id: child.id.clone(),
             date: chrono::DateTime::parse_from_rfc3339("2025-01-01T12:00:00Z").unwrap(),
             description: "Test transaction".to_string(),
-            amount: 10.0,
-            balance: 10.0,
+            amount: dollars(10.0),
+            balance: dollars(10.0),
             transaction_type: DomainTransactionType::OneOffIncome,
         };
 
@@ -599,29 +738,42 @@ mod tests {
     // ARCHITECTURAL INVARIANT TESTS
     // ========================================
     
+    /// The codec accepts RFC3339 only (a colon-delimited offset, or `Z`) and
+    /// refuses everything else — no `chrono::Local` resolution of a bare
+    /// date, and no silent fallback. `2024-06-15T10:30:00-0500` (no colon in
+    /// the offset) used to slide through the old `parse_date_string`'s
+    /// current-time fallback undetected; now it is a hard `CodecError::Date`.
     #[test]
-    fn test_invariant_csv_layer_parses_date_strings() -> Result<()> {
-        let (repo, _env) = setup_test_repo()?;
-        
-        // Test that CSV layer can parse various date string formats
-        let date_formats = vec![
-            "2024-06-15T10:30:00Z",           // UTC
-            "2024-06-15T10:30:00-0500",       // CDT
-            "2024-06-15T10:30:00+0000",       // UTC with offset
-            "2024-06-15T10:30:00.123Z",       // With milliseconds
-            "2024-06-15T10:30:00-05:00",      // With colon in timezone
+    fn round_trip_accepts_only_strict_rfc3339() {
+        let strict = [
+            "2024-06-15T10:30:00Z",
+            "2024-06-15T10:30:00+00:00",
+            "2024-06-15T10:30:00.123Z",
+            "2024-06-15T10:30:00-05:00",
         ];
-        
-        for (i, date_str) in date_formats.iter().enumerate() {
-            let result = repo.compare_dates(&repo.parse_date_string(date_str)?, "2024-06-15T23:59:59Z");
-            println!("CSV layer successfully parsed date format #{}: '{}'", i + 1, date_str);
-            assert!(result != 0 || result == 0, "Date parsing should not fail");
+        for date_str in strict {
+            let csv = format!(
+                "id,child_id,date,description,amount,balance,type\nx,c,{date_str},d,1.00,1.00,expense\n"
+            );
+            assert!(
+                allowance_core::codec::parse_transactions(&csv).is_ok(),
+                "expected {date_str} to parse"
+            );
         }
-        
-        Ok(())
+
+        let loose = ["2024-06-15T10:30:00-0500", "2024-06-15T10:30:00+0000", "2024-06-15"];
+        for date_str in loose {
+            let csv = format!(
+                "id,child_id,date,description,amount,balance,type\nx,c,{date_str},d,1.00,1.00,expense\n"
+            );
+            assert!(
+                allowance_core::codec::parse_transactions(&csv).is_err(),
+                "expected {date_str} to be refused, not silently normalized"
+            );
+        }
     }
-    
-    #[test] 
+
+    #[test]
     fn test_invariant_domain_models_use_datetime_objects() -> Result<()> {
         // This test will fail until we fix the domain models
         // It should verify that domain models use DateTime objects, not strings
@@ -635,11 +787,11 @@ mod tests {
             child_id: "child".to_string(),
             date: chrono::DateTime::parse_from_rfc3339("2024-01-01T12:00:00Z").unwrap(), // Fixed domain model to use DateTime
             description: "Test".to_string(),
-            amount: 10.0,
-            balance: 10.0,
+            amount: dollars(10.0),
+            balance: dollars(10.0),
             transaction_type: DomainTransactionType::OneOffIncome,
         };
-        
+
         // This test checks that the date field is NOT a string
         // Currently this will fail because date is still a String
         let date_field_type = TypeId::of::<String>();
@@ -668,8 +820,8 @@ mod tests {
             child_id: "test_child".to_string(),
             date: chrono::DateTime::parse_from_str("2024-06-15T10:30:00-0500", "%Y-%m-%dT%H:%M:%S%z").unwrap(), // Parse with timezone
             description: "Test isolation".to_string(),
-            amount: 50.0,
-            balance: 50.0,
+            amount: dollars(50.0),
+            balance: dollars(50.0),
             transaction_type: DomainTransactionType::OneOffIncome,
         };
         
@@ -713,8 +865,8 @@ mod tests {
                 child_id: "test_child".to_string(),
                 date: chrono::DateTime::parse_from_rfc3339(date_str).unwrap(),
                 description: format!("Test {}", description),
-                amount: 10.0,
-                balance: 10.0,
+                amount: dollars(10.0),
+                balance: dollars(10.0),
                 transaction_type: DomainTransactionType::OneOffIncome,
             };
             
@@ -754,8 +906,8 @@ mod tests {
                 child_id: "test_child".to_string(),
                 date: chrono::DateTime::parse_from_str(invalid_date, "%Y-%m-%dT%H:%M:%S%z").unwrap_or_else(|_| chrono::DateTime::parse_from_rfc3339("2024-01-01T00:00:00Z").unwrap()),
                 description: format!("Test invalid date: {}", invalid_date),
-                amount: 10.0,
-                balance: 10.0,
+                amount: dollars(10.0),
+                balance: dollars(10.0),
                 transaction_type: DomainTransactionType::OneOffIncome,
             };
             
@@ -794,8 +946,8 @@ mod tests {
             child_id: "test_child".to_string(),
             date: chrono::DateTime::parse_from_rfc3339("2025-07-21T09:00:00Z").unwrap(),
             description: "Morning transaction".to_string(),
-            amount: 1.00,
-            balance: 17.62,
+            amount: dollars(1.00),
+            balance: dollars(17.62),
             transaction_type: DomainTransactionType::OneOffIncome,
         };
         
@@ -804,8 +956,8 @@ mod tests {
             child_id: "test_child".to_string(),
             date: chrono::DateTime::parse_from_rfc3339("2025-07-21T15:00:00Z").unwrap(),
             description: "Afternoon transaction".to_string(),
-            amount: 2.00,
-            balance: 19.62,
+            amount: dollars(2.00),
+            balance: dollars(19.62),
             transaction_type: DomainTransactionType::OneOffIncome,
         };
         
@@ -835,7 +987,19 @@ mod tests {
         println!("Storage layer preserves timestamp precision:");
         println!("   TX1: {} (hour: {})", retrieved_tx1.date.to_rfc3339(), retrieved_tx1.date.hour());
         println!("   TX2: {} (hour: {})", retrieved_tx2.date.to_rfc3339(), retrieved_tx2.date.hour());
-        
+
         Ok(())
     }
-} 
+
+    #[test]
+    fn round_trips_a_legacy_shaped_csv_byte_for_byte() {
+        // Guards against a codec change that quietly rewrites every row and makes
+        // the first sync look like a thousand-row conflict.
+        let text = std::fs::read_to_string("tests/fixtures/transactions_legacy_shapes.csv").unwrap();
+        let once = allowance_core::codec::render_transactions(
+            &allowance_core::codec::parse_transactions(&text).unwrap().rows);
+        let twice = allowance_core::codec::render_transactions(
+            &allowance_core::codec::parse_transactions(&once).unwrap().rows);
+        assert_eq!(once, twice);
+    }
+}

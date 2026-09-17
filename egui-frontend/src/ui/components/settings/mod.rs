@@ -30,6 +30,7 @@ pub mod export_modal; // Added in Phase 2 - Export data functionality
 pub mod children_modal; // Settings → Children: the machine-local child registry
 pub mod allowance_config_modal; // Allowance configuration functionality
 pub mod backfill_modal; // Initial sync backfill modal
+pub mod lgs_sync_modal; // Settings → Sync with another Mac (lgs onboarding + first run)
 pub mod shared;
 
 pub use state::*;

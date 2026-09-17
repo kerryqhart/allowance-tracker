@@ -188,7 +188,11 @@ impl CsvConnection {
         let file_path = child_dir.join("transactions.csv");
 
         if !file_path.exists() {
-            fs::write(&file_path, "id,child_id,date,description,amount,balance\n")?;
+            // The same canonical header `allowance_core::codec` reads and
+            // writes — one definition, so a freshly created file can never
+            // drift from what the codec actually expects.
+            let header = allowance_core::codec::HEADER.join(",");
+            fs::write(&file_path, format!("{header}\n"))?;
         }
 
         Ok(())

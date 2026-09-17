@@ -50,7 +50,7 @@ pub use csv::CsvConnection;
 pub use traits::{Connection, TransactionStorage, ChildStorage, AllowanceStorage, ParentalControlStorage};
 pub use csv::{GlobalConfig, GlobalConfigStorage};
 pub use git::GitManager;
-pub use remote::RemoteStorage;
+pub use remote::{NullRemoteStorage, RemoteStorage};
 pub use http_remote::HttpRemoteClient;
 
 // SQLite components are available via the sqlite sub-module

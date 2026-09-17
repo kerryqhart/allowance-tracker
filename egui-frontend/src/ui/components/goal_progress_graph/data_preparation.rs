@@ -6,6 +6,7 @@
 use chrono::NaiveDate;
 use shared::Transaction;
 use crate::backend::domain::models::goal::DomainGoal;
+use allowance_core::money::Money;
 
 /// Data point for the goal progress graph (similar to ChartDataPoint but goal-specific)
 #[derive(Debug, Clone)]
@@ -374,25 +375,45 @@ pub fn convert_domain_transactions_to_data_points(
         
         // Use the FINAL transaction's balance for this day (last transaction after sorting)
         if let Some(final_transaction) = sorted_day_transactions.last() {
+            // A transaction whose balance BalanceService has not calculated
+            // yet carries the BALANCE_PENDING sentinel (Money has no NaN).
+            // Skip it rather than plotting `i64::MIN` cents as a data point —
+            // this preserves the pre-Money behavior where an `f64::NAN`
+            // balance was simply not a valid plot point (a gap), not a
+            // ~-92 quadrillion dollar spike.
+            if final_transaction.balance == crate::backend::domain::models::transaction::Transaction::BALANCE_PENDING {
+                log::warn!(
+                    "  Day {}: skipping data point — transaction {} still carries BALANCE_PENDING",
+                    date, final_transaction.id
+                );
+                continue;
+            }
+
             let is_future = date > today;
-            let is_goal_target = final_transaction.balance >= goal.target_amount;
-            
+            // Boundary conversion: DomainGoal.target_amount is still f64
+            // dollars (DomainGoal is out of scope for this task).
+            let target_amount_money = Money::from_cents((goal.target_amount * 100.0).round() as i64);
+            let is_goal_target = final_transaction.balance >= target_amount_money;
+            // Graph-plotting boundary: GoalGraphDataPoint stores plain f64
+            // for rendering.
+            let balance_dollars = final_transaction.balance.cents() as f64 / 100.0;
+
             if is_future {
                 // Future allowance - use balance calculated by domain layer (BalanceService)
-                let mut data_point = GoalGraphDataPoint::new_projection(date, final_transaction.balance);
+                let mut data_point = GoalGraphDataPoint::new_projection(date, balance_dollars);
                 if is_goal_target {
                     data_point.is_goal_target = true;
                 }
                 data_points.push(data_point);
-                
-                log::info!("  Day {}: final balance ${:.2} (future: {}, goal_target: {}) from {} transactions", 
-                           date, final_transaction.balance, is_future, is_goal_target, sorted_day_transactions.len());
+
+                log::info!("  Day {}: final balance ${:.2} (future: {}, goal_target: {}) from {} transactions",
+                           date, balance_dollars, is_future, is_goal_target, sorted_day_transactions.len());
             } else {
                 // Historical transaction - use final balance from domain layer
-                data_points.push(GoalGraphDataPoint::new(date, final_transaction.balance, false));
-                
-                log::info!("  Day {}: final balance ${:.2} (historical, goal_target: {}) from {} transactions", 
-                           date, final_transaction.balance, is_goal_target, sorted_day_transactions.len());
+                data_points.push(GoalGraphDataPoint::new(date, balance_dollars, false));
+
+                log::info!("  Day {}: final balance ${:.2} (historical, goal_target: {}) from {} transactions",
+                           date, balance_dollars, is_goal_target, sorted_day_transactions.len());
             }
         }
     }
@@ -419,9 +440,74 @@ pub fn convert_domain_transactions_to_data_points(
     // Debug final data points
     log::info!("DATA CONVERSION DEBUG: Final data points:");
     for (i, point) in data_points.iter().enumerate() {
-        log::info!("  Final point {}: {} - ${:.2} (goal_start: {}, goal_target: {}, projection: {})", 
+        log::info!("  Final point {}: {} - ${:.2} (goal_start: {}, goal_target: {}, projection: {})",
                    i, point.date, point.balance, point.is_goal_start, point.is_goal_target, point.is_projection);
     }
-    
+
     data_points
-} 
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backend::domain::models::goal::DomainGoalState;
+    use crate::backend::domain::models::transaction::{
+        Transaction as DomainTransaction, TransactionType,
+    };
+
+    fn test_goal(target_amount: f64) -> DomainGoal {
+        DomainGoal {
+            id: "goal-1".to_string(),
+            child_id: "child-1".to_string(),
+            description: "Test goal".to_string(),
+            target_amount,
+            state: DomainGoalState::Active,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        }
+    }
+
+    /// Regression test: before the Money migration, a not-yet-calculated
+    /// future-allowance balance was `f64::NAN`, which plotting simply
+    /// treated as a gap. After the migration it is
+    /// `Transaction::BALANCE_PENDING` (`Money::from_cents(i64::MIN)`), and
+    /// converting that straight to `cents() as f64 / 100.0` would plot a
+    /// ~-92 quadrillion dollar point instead of leaving a gap. This pins
+    /// that a BALANCE_PENDING transaction is skipped, not plotted.
+    #[test]
+    fn a_balance_pending_transaction_produces_no_data_point() {
+        let goal = test_goal(50.0);
+
+        let pending_tx = DomainTransaction {
+            id: "future-1".to_string(),
+            child_id: "child-1".to_string(),
+            date: chrono::DateTime::parse_from_rfc3339("2026-01-15T12:00:00Z").unwrap(),
+            description: "Upcoming allowance".to_string(),
+            amount: Money::from_cents(1000),
+            balance: DomainTransaction::BALANCE_PENDING,
+            transaction_type: TransactionType::FutureAllowance,
+        };
+
+        let data_points =
+            convert_domain_transactions_to_data_points(&[pending_tx], &goal, 10.0);
+
+        // Only the goal-creation starting point should be present — the
+        // BALANCE_PENDING transaction must not contribute a plotted point.
+        assert_eq!(
+            data_points.len(),
+            1,
+            "a BALANCE_PENDING transaction must not produce a plotted data point"
+        );
+        assert!(data_points[0].is_goal_start);
+
+        // Belt-and-suspenders: no surviving point may reflect anywhere near
+        // the sentinel's magnitude.
+        for point in &data_points {
+            assert!(
+                point.balance.abs() < 1_000_000.0,
+                "no data point should reflect the BALANCE_PENDING sentinel, got {}",
+                point.balance
+            );
+        }
+    }
+}

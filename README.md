@@ -104,6 +104,17 @@ The application will create data files in your user directory automatically on f
   the Mac, or an iCloud-synced copy, can't read or launch it. Installs to
   `/Applications` by default. Requires `cargo install cargo-bundle`.
 
+  Release builds also bundle `lgs` (used for cross-machine sync) inside the
+  `.app`. Set `LGS_BINARY` to the path of an `lgs` binary built from the
+  pinned commit before running `cargo build --release` or `cargo bundle` —
+  `egui-frontend/build.rs` copies it into `target/release/lgs`, which
+  `[package.metadata.bundle] resources` then picks up:
+  ```bash
+  LGS_BINARY=/path/to/pinned/lgs scripts/install.sh
+  ```
+  Without `LGS_BINARY` set, the build proceeds but the bundle ships without
+  `lgs`, and sync setup will fail to find a bundled binary at runtime.
+
 ### Project Structure
 
 #### Frontend (`egui-frontend/`)

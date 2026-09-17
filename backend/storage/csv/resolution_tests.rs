@@ -65,8 +65,8 @@ fn transactions_land_in_the_folder_the_id_names() {
         child_id: child.id.clone(),
         date: chrono::Utc::now().fixed_offset(),
         description: "Allowance".to_string(),
-        amount: 5.0,
-        balance: 5.0,
+        amount: allowance_core::money::Money::from_cents(500),
+        balance: allowance_core::money::Money::from_cents(500),
         transaction_type: crate::backend::domain::models::transaction::TransactionType::OneOffIncome,
     };
     helper.transaction_repo.store_transaction(&tx).unwrap();
@@ -101,8 +101,8 @@ fn renaming_a_child_does_not_move_or_lose_their_transactions() {
         child_id: child.id.clone(),
         date: chrono::Utc::now().fixed_offset(),
         description: "Allowance".to_string(),
-        amount: 5.0,
-        balance: 5.0,
+        amount: allowance_core::money::Money::from_cents(500),
+        balance: allowance_core::money::Money::from_cents(500),
         transaction_type: crate::backend::domain::models::transaction::TransactionType::OneOffIncome,
     };
     helper.transaction_repo.store_transaction(&tx).unwrap();

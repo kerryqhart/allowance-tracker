@@ -17,6 +17,23 @@ pub enum SyncCommand {
     Shutdown,
 }
 
+/// A `goals.csv` divergence a merge could not resolve (`allowance_core`
+/// models no goal row — a known, recorded gap; see
+/// `backend/sync/child_sync.rs`'s "Scope" doc). Deliberately a distinct
+/// type from `SyncStatus`, not a string folded into it: `SyncStatus` is
+/// last-writer-wins state (the next `StatusChanged` or `Error` overwrites
+/// whatever was there), so routing a notice through it means the notice is
+/// erased by the very next unrelated sync event — useless for something the
+/// user needs to still see after their goals failed to merge. This type is
+/// meant to be held (e.g. in `SyncUiState::goals_diverged`) until a future
+/// UI dismisses it, not glanced at once and discarded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GoalsDivergedNotice {
+    pub child_id: String,
+    pub ours_oid: String,
+    pub theirs_oid: String,
+}
+
 /// Messages from the sync background thread to the UI.
 pub enum SyncMessage {
     StatusChanged(SyncStatus),
@@ -56,6 +73,38 @@ pub enum SyncMessage {
         entity_id: String,
         event_id: String,
     },
+
+    /// A merge computed off-thread. The UI thread owns every byte in the
+    /// working tree (sync_manager.rs:36-38), so the background thread does
+    /// fetch/push only and hands the result over here.
+    ApplyMerge {
+        child_id: String,
+        rows: Vec<allowance_core::row::TxRow>,
+        parents: (String, String),
+        decisions: Vec<allowance_core::merge::Decision>,
+    },
+
+    /// The peer is strictly ahead with no local commits to reconcile
+    /// (`Cycle::FastForward` in `child_sync.rs`) — `to` is the commit the
+    /// background thread already fetched into `refs/remotes/lgs-auth/*`.
+    /// Checking it out is a working-tree write, so — same rule as
+    /// `ApplyMerge` — the background thread only detects this and hands it
+    /// here; `app_coordinator.rs`'s `apply_fast_forward` does the checkout.
+    ApplyFastForward { child_id: String, to: String },
+
+    /// `goals.csv` diverged during a merge and was left unmerged. See
+    /// [`GoalsDivergedNotice`] — this is a NOTICE (something that happened,
+    /// held until dismissed), never routed through `SyncStatus`.
+    GoalsDiverged { child_id: String, ours_oid: String, theirs_oid: String },
+
+    /// A push for this child was skipped because the lgs project is
+    /// archived (`ProjectReport::archived` — see
+    /// `ChildSyncEngine::cycle_against`'s `Cycle::Ahead if archived` arm).
+    /// lgs refuses every push against an archived project with a 403,
+    /// permanently, so this is reported ONCE as a durable notice rather
+    /// than retried — same reasoning as [`GoalsDivergedNotice`], never
+    /// routed through `SyncStatus`.
+    ArchivedProjectSkipped { child_id: String },
 }
 
 impl std::fmt::Debug for SyncMessage {
@@ -98,6 +147,28 @@ impl std::fmt::Debug for SyncMessage {
                 .field("entity_type", entity_type)
                 .field("entity_id", entity_id)
                 .field("event_id", event_id)
+                .finish(),
+            SyncMessage::ApplyMerge { child_id, rows, parents, decisions } => f
+                .debug_struct("ApplyMerge")
+                .field("child_id", child_id)
+                .field("rows", &format_args!("<{} rows>", rows.len()))
+                .field("parents", parents)
+                .field("decisions", decisions)
+                .finish(),
+            SyncMessage::ApplyFastForward { child_id, to } => f
+                .debug_struct("ApplyFastForward")
+                .field("child_id", child_id)
+                .field("to", to)
+                .finish(),
+            SyncMessage::GoalsDiverged { child_id, ours_oid, theirs_oid } => f
+                .debug_struct("GoalsDiverged")
+                .field("child_id", child_id)
+                .field("ours_oid", ours_oid)
+                .field("theirs_oid", theirs_oid)
+                .finish(),
+            SyncMessage::ArchivedProjectSkipped { child_id } => f
+                .debug_struct("ArchivedProjectSkipped")
+                .field("child_id", child_id)
                 .finish(),
         }
     }
@@ -415,8 +486,8 @@ mod tests {
             child_id: "child1".to_string(),
             date: chrono::Utc::now().fixed_offset(),
             description: "Allowance".to_string(),
-            amount: 10.0,
-            balance: 10.0,
+            amount: allowance_core::money::Money::from_cents(1000),
+            balance: allowance_core::money::Money::from_cents(1000),
             transaction_type: super::super::models::transaction::TransactionType::Allowance,
         };
 

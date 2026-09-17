@@ -32,5 +32,6 @@ impl AllowanceTrackerApp {
         self.render_children_modal(ctx); // Settings → Children (the child registry)
         self.render_allowance_config_modal(ctx); // Allowance config modal from settings
         self.render_backfill_modal(ctx); // Initial sync backfill modal
+        self.render_lgs_sync_modal(ctx); // Settings → Sync with another Mac
     }
 } 

@@ -244,12 +244,16 @@ impl ChildService {
     ///
     /// **Critical:** does NOT call `notify_sync` — writing a remote-sourced entity
     /// back through the notifier would create a sync loop.
+    ///
+    /// **Also critical:** does NOT go through `store_child`/`update_child`
+    /// (both commit to git). See `TransactionRepository::upsert_transaction_no_commit`
+    /// for the rationale — the lgs merge produces commits for `child.yaml`
+    /// now, not this path. Only the commit is suppressed: `child.yaml` on
+    /// disk is still written correctly (atomic write-then-rename), and a
+    /// child unregistered on this machine is still registered, exactly as
+    /// `store_child` would.
     pub fn upsert_child_from_sync(&self, child: &DomainChild) -> Result<()> {
-        // Check if child already exists; update or create accordingly.
-        match self.child_repository.get_child(&child.id)? {
-            Some(_) => self.child_repository.update_child(child),
-            None => self.child_repository.store_child(child),
-        }
+        self.child_repository.upsert_child_no_commit(child)
     }
 
     /// Delete a child by ID without firing the sync notifier.

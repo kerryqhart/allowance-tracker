@@ -39,4 +39,7 @@ pub use interaction_state::*;
 pub use table_state::*;
 pub use chart_state::*;
 pub use goal_state::GoalUiState;
-pub use sync_state::SyncUiState; 
+pub use sync_state::{
+    FastForwardBlockedNotice, StaleHeadPollAction, SyncFailureNotice, SyncUiState,
+    STALE_HEAD_REFUSAL_LIMIT,
+};

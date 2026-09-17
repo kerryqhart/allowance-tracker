@@ -16,6 +16,7 @@ use crate::backend::domain::commands::allowance::{
     GetAllowanceConfigResult, UpdateAllowanceConfigResult
 };
 use crate::backend::domain::commands::child::GetChildCommand;
+use allowance_core::money::Money;
 
 
 /// Service for managing allowance configurations
@@ -299,13 +300,16 @@ impl AllowanceService {
                         .single()
                         .unwrap();
 
+                    // Boundary conversion: AllowanceConfig.amount is still f64
+                    // dollars (out of scope for this task); the transaction
+                    // it produces is Money.
                     let allowance_transaction = DomainTransaction {
                         id: format!("future-allowance::{}::{}", child_id, current.format("%Y-%m-%d")),
                         child_id: child_id.to_string(),
                         date: transaction_datetime,
                         description: "Upcoming allowance".to_string(),
-                        amount,
-                        balance: f64::NAN, // Balance calculation delegated to BalanceService
+                        amount: Money::from_cents((amount * 100.0).round() as i64),
+                        balance: DomainTransaction::BALANCE_PENDING, // Balance calculation delegated to BalanceService
                         transaction_type: DomainTransactionType::FutureAllowance,
                     };
 
@@ -336,7 +340,7 @@ impl AllowanceService {
         } else {
             debug!("🔮 ALLOWANCE DEBUG: Generated future allowances:");
             for allowance in &future_allowances {
-                info!("  - {} on {}: ${:.2}", allowance.id, allowance.date.format("%Y-%m-%d"), allowance.amount);
+                info!("  - {} on {}: ${}", allowance.id, allowance.date.format("%Y-%m-%d"), allowance.amount.render());
             }
         }
 
@@ -895,8 +899,8 @@ mod tests {
             child_id: child.id.clone(),
             date: chrono::DateTime::parse_from_str(&format!("{}T12:00:00-05:00", test_date.format("%Y-%m-%d")), "%Y-%m-%dT%H:%M:%S%z").expect("Failed to parse date"),
             description: "Weekly allowance".to_string(),
-            amount: 5.0,
-            balance: 5.0,
+            amount: Money::from_cents(500),
+            balance: Money::from_cents(500),
             transaction_type: DomainTransactionType::Allowance,
         };
 
@@ -904,12 +908,12 @@ mod tests {
         service
             .transaction_repository
             .store_transaction(&transaction)
-            
+
             .expect("Failed to store test transaction");
 
         let has_allowance = service
             .has_allowance_for_date(&child.id, test_date)
-            
+
             .expect("Failed to check allowance for date");
 
         assert!(has_allowance, "Should detect existing allowance transaction");
@@ -928,8 +932,8 @@ mod tests {
             child_id: child.id.clone(),
             date: chrono::DateTime::parse_from_str(&format!("{}T12:00:00-05:00", test_date.format("%Y-%m-%d")), "%Y-%m-%dT%H:%M:%S%z").expect("Failed to parse date"),
             description: "Bought candy".to_string(),
-            amount: -2.0, // Negative amount (expense)
-            balance: 3.0,
+            amount: Money::from_cents(-200), // Negative amount (expense)
+            balance: Money::from_cents(300),
             transaction_type: DomainTransactionType::Expense,
         };
 
@@ -977,12 +981,12 @@ mod tests {
         // Should have at least one future allowance (likely 2 Fridays in a 2-week period)
         assert!(!future_allowances.is_empty(), "Should generate at least one future allowance");
 
-        // All future allowances should have NaN balance (balance calculation delegated to BalanceService)
+        // All future allowances should have the pending-balance sentinel (balance calculation delegated to BalanceService)
         for allowance in &future_allowances {
-            assert!(allowance.balance.is_nan(), 
-                "Future allowance balance should be NaN, not {:.2}. AllowanceService should not calculate balances - that's BalanceService's responsibility",
-                allowance.balance);
-            assert_eq!(allowance.amount, 10.0, "Future allowance amount should match config");
+            assert_eq!(allowance.balance, DomainTransaction::BALANCE_PENDING,
+                "Future allowance balance should be BALANCE_PENDING, not {}. AllowanceService should not calculate balances - that's BalanceService's responsibility",
+                allowance.balance.render());
+            assert_eq!(allowance.amount, Money::from_cents(1000), "Future allowance amount should match config");
             assert_eq!(allowance.description, "Upcoming allowance", "Future allowance description should be correct");
             assert_eq!(allowance.transaction_type, DomainTransactionType::FutureAllowance, "Future allowance type should be FutureAllowance");
         }
@@ -1024,8 +1028,8 @@ mod tests {
             child_id: child.id.clone(),
             date: chrono::DateTime::parse_from_str(&format!("{}T12:00:00-05:00", today.format("%Y-%m-%d")), "%Y-%m-%dT%H:%M:%S%z").expect("Failed to parse date"),
             description: "Weekly allowance".to_string(),
-            amount: 10.0,
-            balance: 10.0,
+            amount: Money::from_cents(1000),
+            balance: Money::from_cents(1000),
             transaction_type: DomainTransactionType::Allowance,
         };
 
@@ -1062,8 +1066,8 @@ mod tests {
             child_id: child.id.clone(),
             date: chrono::DateTime::parse_from_str(&format!("{}T12:00:00-05:00", test_date.format("%Y-%m-%d")), "%Y-%m-%dT%H:%M:%S%z").expect("Failed to parse date"),
             description: "Weekly allowance".to_string(),
-            amount: 10.0,
-            balance: 10.0,
+            amount: Money::from_cents(1000),
+            balance: Money::from_cents(1000),
             transaction_type: DomainTransactionType::Allowance,
         };
 
@@ -1078,8 +1082,8 @@ mod tests {
             child_id: child.id.clone(),
             date: chrono::DateTime::parse_from_str(&format!("{}T14:00:00-05:00", test_date.format("%Y-%m-%d")), "%Y-%m-%dT%H:%M:%S%z").expect("Failed to parse date"),
             description: "Weekly allowance".to_string(),
-            amount: 10.0,
-            balance: 20.0,
+            amount: Money::from_cents(1000),
+            balance: Money::from_cents(2000),
             transaction_type: DomainTransactionType::Allowance,
         };
 
@@ -1148,8 +1152,8 @@ mod tests {
             child_id: child.id.clone(),
             date: chrono::DateTime::parse_from_str(&format!("{}T12:00:00-05:00", test_date.format("%Y-%m-%d")), "%Y-%m-%dT%H:%M:%S%z").expect("Failed to parse date"),
             description: "Weekly allowance".to_string(),
-            amount: 10.0,
-            balance: 10.0,
+            amount: Money::from_cents(1000),
+            balance: Money::from_cents(1000),
             transaction_type: DomainTransactionType::Allowance,
         };
 
@@ -1186,8 +1190,8 @@ mod tests {
             child_id: child.id.clone(),
             date: chrono::DateTime::parse_from_str(&format!("{}T12:00:00-05:00", test_date.format("%Y-%m-%d")), "%Y-%m-%dT%H:%M:%S%z").expect("Failed to parse date"),
             description: "Weekly allowance".to_string(),
-            amount: 10.0,
-            balance: 10.0,
+            amount: Money::from_cents(1000),
+            balance: Money::from_cents(1000),
             transaction_type: DomainTransactionType::Allowance,
         };
 
@@ -1208,8 +1212,8 @@ mod tests {
             child_id: child.id.clone(),
             date: chrono::DateTime::parse_from_str(&format!("{}T14:00:00-05:00", test_date.format("%Y-%m-%d")), "%Y-%m-%dT%H:%M:%S%z").expect("Failed to parse date"),
             description: "Monthly allowance".to_string(),
-            amount: 20.0,
-            balance: 30.0,
+            amount: Money::from_cents(2000),
+            balance: Money::from_cents(3000),
             transaction_type: DomainTransactionType::Allowance,
         };
 
@@ -1230,8 +1234,8 @@ mod tests {
             child_id: child.id.clone(),
             date: chrono::DateTime::parse_from_str(&format!("{}T16:00:00-05:00", test_date.format("%Y-%m-%d")), "%Y-%m-%dT%H:%M:%S%z").expect("Failed to parse date"),
             description: "Birthday gift from grandma".to_string(),
-            amount: 50.0,
-            balance: 80.0,
+            amount: Money::from_cents(5000),
+            balance: Money::from_cents(8000),
             transaction_type: DomainTransactionType::OneOffIncome,
         };
 
@@ -1305,12 +1309,12 @@ mod tests {
         for allowance in &future_allowances {
             let allowance_date = allowance.date.date_naive();
             if allowance_date < future_birthday {
-                assert_eq!(allowance.amount, 5.0,
-                    "Before birthday ({}) should be age 5, got {}", allowance_date, allowance.amount);
+                assert_eq!(allowance.amount, Money::from_cents(500),
+                    "Before birthday ({}) should be age 5, got {}", allowance_date, allowance.amount.render());
                 found_age_5 = true;
             } else {
-                assert_eq!(allowance.amount, 6.0,
-                    "On/after birthday ({}) should be age 6, got {}", allowance_date, allowance.amount);
+                assert_eq!(allowance.amount, Money::from_cents(600),
+                    "On/after birthday ({}) should be age 6, got {}", allowance_date, allowance.amount.render());
                 found_age_6 = true;
             }
         }

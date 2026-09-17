@@ -33,7 +33,7 @@
 |---|---|
 | `allowance-core/src/money.rs` | `Money(i64)` cents, wire-compatible serde, canonical 2-decimal rendering |
 | `allowance-core/src/row.rs` | `TxRow`, `Sided<T>`, `Provenance` — the merge's data model |
-| `allowance-core/src/codec.rs` | `parse_transactions` / `render_transactions`, canonical ordering |
+| `allowance-core/src/codec.rs` | `parse_transactions` / `render_transactions`, canonical ordering. **Note:** `parse_transactions` returns `ParsedTransactions { rows, rows_rounded }`, not a bare `Vec<TxRow>` — Task 5 changed this so the legacy-precision rounding count cannot be silently dropped. Later tasks use `.rows`. |
 | `allowance-core/src/merge.rs` | `merge(base, ours, theirs)` — the resolution table |
 | `allowance-core/src/balance.rs` | pure `recompute_running_balances` / `validate` |
 
@@ -327,15 +327,19 @@ impl Sum for Money {
     fn sum<I: Iterator<Item = Money>>(iter: I) -> Money { Money(iter.map(|m| m.0).sum()) }
 }
 
-/// Serializes as a JSON **number** with two decimals, and deserializes from any
-/// JSON number. This is load-bearing: the domain `Transaction` is serialized
-/// straight onto the AWS wire and read by the MCP Lambda in another stack, so
-/// the shape cannot change.
+/// Serializes as a plain number and deserializes from one. This is
+/// load-bearing: the domain `Transaction` is serialized straight onto the AWS
+/// wire and read by the MCP Lambda in another stack, so the shape cannot
+/// change.
+///
+/// Deliberately `serialize_f64` rather than routing through
+/// `serde_json::Number` — the latter is JSON-specific, and money also has to
+/// survive the YAML serializers this codebase uses for `child.yaml` and
+/// `allowance_config.yaml`. A format-specific impl would work in tests and
+/// fail the first time a `Money` field reached YAML.
 impl Serialize for Money {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        serde_json::Number::from_f64(self.0 as f64 / 100.0)
-            .ok_or_else(|| serde::ser::Error::custom("money out of range"))?
-            .serialize(s)
+        s.serialize_f64(self.0 as f64 / 100.0)
     }
 }
 
@@ -538,10 +542,10 @@ git commit -m "refactor(domain): Transaction money becomes Money(i64), wire form
 - Modify: `backend/domain/balance_service.rs`
 
 **Interfaces:**
-- Consumes: `Money`, `TxRow` (Task 5 defines `TxRow`; for this task operate on a slice of the domain `Transaction` via a small trait-free helper — see Step 3).
-- Produces: `recompute_running_balances(&mut [T])` and `validate(&[T]) -> Vec<BalanceMismatch>` where `T` is `allowance_core::row::TxRow`.
+- Consumes: `Money` (Task 2).
+- Produces: **`allowance-core/src/row.rs`** — `TxRow`, `TxType`, `Provenance`, `Sided` — plus `recompute_running_balances(&mut [TxRow])` and `validate(&[TxRow]) -> Vec<BalanceMismatch>`.
 
-> Ordering note: this task defines `TxRow` because `balance` and `codec` both need it. Task 5 uses it rather than redefining it.
+> **This task owns `row.rs`.** `balance`, `codec` (Task 5), `merge` (Task 7) and `ChildSyncEngine` (Task 15) all consume those types and none of them redefine any part of it.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -835,7 +839,7 @@ x,keiko,2026-01-01,d,1.00,1.00,expense\n";
     }
 
     #[test]
-    fn an_unknown_type_is_preserved_not_derived() {
+    fn an_unknown_type_is_refused_not_derived() {
         let future = "id,child_id,date,description,amount,balance,type\n\
 x,keiko,2026-01-01T00:00:00+00:00,d,1.00,1.00,rebate\n";
         // Derivation would silently downgrade a row an older app does not know,
@@ -957,15 +961,10 @@ An unparseable row now surfaces as an error instead of being silently rewritten.
 ```rust
 // backend/storage/csv/transaction_repository.rs (in the existing #[cfg(test)] mod)
 #[test]
-fn round_trips_the_real_production_csv_byte_for_byte() {
+fn round_trips_a_legacy_shaped_csv_byte_for_byte() {
     // Guards against a codec change that quietly rewrites every row and makes
     // the first sync look like a thousand-row conflict.
-    let path = std::path::Path::new("tests/fixtures/transactions_production.csv");
-    if !path.exists() {
-        eprintln!("fixture absent; skipping");
-        return;
-    }
-    let text = std::fs::read_to_string(path).unwrap();
+    let text = std::fs::read_to_string("tests/fixtures/transactions_legacy_shapes.csv").unwrap();
     let once = allowance_core::codec::render_transactions(
         &allowance_core::codec::parse_transactions(&text).unwrap());
     let twice = allowance_core::codec::render_transactions(
@@ -974,11 +973,35 @@ fn round_trips_the_real_production_csv_byte_for_byte() {
 }
 ```
 
-Copy the real file into place, scrubbing nothing — it is the user's own data and stays local:
+**The fixture is synthesized, not copied from real data.** This repo has a
+GitHub remote, so committing a child's real `transactions.csv` would put their
+financial history — dates, descriptions, amounts — into git history permanently
+and push it to GitHub. The round-trip property holds over any input, so the
+fixture only needs to reproduce the *shapes* real data contains, not the data.
+
+Build `egui-frontend/tests/fixtures/transactions_legacy_shapes.csv` by hand to
+cover every quirk the live file actually contains — these are what a naive codec
+change silently rewrites:
+
+- money that `f64::to_string()` rendered without decimals (`5`), with one (`5.5`),
+  and with two (`27.25`), plus a negative of each
+- a zero amount and a zero balance
+- RFC3339 dates with a non-UTC offset (`-04:00`, `-05:00` — the file spans a DST
+  boundary) and at least one with `+00:00`
+- every legacy `type` value the parser accepts: `allowance`, `income`,
+  `expense`, `future_allowance`
+- a description containing a comma, so CSV quoting is exercised
+- rows deliberately out of `(date, id)` order, so the canonical re-sort is proven
+
+Additionally, as a **local, uncommitted** check, run the same round-trip against
+the real file once and report the result:
 
 ```bash
-cp "$HOME/Library/Mobile Documents/com~apple~CloudDocs/HartRoot/Parent Portal/Allowance Tracker/keiko_hart/transactions.csv" egui-frontend/tests/fixtures/transactions_production.csv
+cargo test -p allowance_tracker_egui --test codec_real_data -- --ignored
 ```
+
+Write that as an `#[ignore]`d test reading a path from the `REAL_CSV` env var, so
+the real data is exercised on the developer's machine and never enters the repo.
 
 - [ ] **Step 7: Run the suite**
 
@@ -1287,15 +1310,21 @@ pub fn merge(base: Option<&[TxRow]>, ours: &Sided, theirs: &Sided) -> MergeOutco
                     // add/add: two DIFFERENT rows that collided on a key.
                     // Keeping one destroys a real transaction, so keep both and
                     // re-key deterministically.
-                    let (keep, rekey, keep_prov, rekey_prov) =
-                        if wins(&ours.provenance, &theirs.provenance) {
-                            (o, t, ours.provenance, theirs.provenance)
-                        } else {
-                            (t, o, theirs.provenance, ours.provenance)
-                        };
-                    let _ = keep_prov;
+                    //
+                    // The suffix is derived from the ROW'S OWN CONTENT, never
+                    // from provenance. A provenance-derived suffix is not a
+                    // fixed point: re-merging the result against the same side
+                    // sees the same collision on the original id and re-keys
+                    // again with a fresh suffix, forever. Content-derived plus
+                    // the dedupe below means the second merge produces exactly
+                    // the first merge's rows.
+                    let (keep, rekey) = if wins(&ours.provenance, &theirs.provenance) {
+                        (o, t)
+                    } else {
+                        (t, o)
+                    };
                     let mut moved = rekey.clone();
-                    moved.id = format!("{}-{}", rekey.id, rekey_prov.short_hex());
+                    moved.id = format!("{}-{}", rekey.id, content_suffix(rekey));
                     decisions.push(Decision::KeptBothReKeyed {
                         original: rekey.id.clone(),
                         re_keyed: moved.id.clone(),
@@ -1317,8 +1346,39 @@ pub fn merge(base: Option<&[TxRow]>, ours: &Sided, theirs: &Sided) -> MergeOutco
         }
     }
 
+    // A re-keyed row can equal a row the other side already carries (exactly
+    // what makes the second merge a fixed point). Collapse those.
+    rows.sort_by(|a, b| a.id.cmp(&b.id));
+    rows.dedup_by(|a, b| a.id == b.id);
+
     recompute_running_balances(&mut rows);
     MergeOutcome { rows, decisions }
+}
+
+/// A stable fingerprint of a row's intrinsic fields.
+///
+/// FNV-1a, written out explicitly. `DefaultHasher` would be wrong here: Rust
+/// does not guarantee its output is stable across compiler versions, and this
+/// value becomes part of a transaction id that both machines must agree on
+/// while building from separate toolchains.
+fn content_suffix(row: &TxRow) -> String {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut eat = |bytes: &[u8]| {
+        for b in bytes {
+            hash ^= *b as u64;
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    };
+    eat(row.child_id.as_bytes());
+    eat(b"\x1f");
+    eat(row.date.to_rfc3339().as_bytes());
+    eat(b"\x1f");
+    eat(row.description.as_bytes());
+    eat(b"\x1f");
+    eat(row.amount.cents().to_string().as_bytes());
+    eat(b"\x1f");
+    eat(row.tx_type.as_csv().as_bytes());
+    format!("{:08x}", hash as u32)
 }
 
 /// Later committer timestamp wins; ties break on commit oid.
@@ -1394,6 +1454,12 @@ fn row_strategy() -> impl Strategy<Value = TxRow> {
 fn sided_strategy() -> impl Strategy<Value = Sided> {
     (prop::collection::vec(row_strategy(), 0..8), 0i64..1000, 0u8..255).prop_map(
         |(mut rows, epoch, oid)| {
+            // Sort BEFORE dedup: `dedup_by` only removes *consecutive*
+            // duplicates, so an unsorted vec keeps duplicate ids. The merge
+            // indexes rows by id, so a duplicate would be silently dropped and
+            // symmetry would appear to fail for a reason that is purely an
+            // artifact of the generator.
+            rows.sort_by(|a, b| a.id.cmp(&b.id));
             rows.dedup_by(|a, b| a.id == b.id);
             Sided { rows, provenance: Provenance { committer_epoch: epoch, commit_oid: [oid; 20] } }
         },
@@ -1437,7 +1503,7 @@ proptest! {
     #[test]
     fn round_trip_is_byte_stable(rows in prop::collection::vec(row_strategy(), 0..10)) {
         let once = render_transactions(&rows);
-        let twice = render_transactions(&parse_transactions(&once).unwrap());
+        let twice = render_transactions(&parse_transactions(&once).unwrap().rows);
         prop_assert_eq!(once, twice);
     }
 
@@ -1468,9 +1534,9 @@ fn merge_output_does_not_depend_on_the_machine_timezone() {
     let csv = "id,child_id,date,description,amount,balance,type\n\
 a,c,2026-01-01T00:00:00+00:00,x,1.00,1.00,expense\n";
     std::env::set_var("TZ", "UTC");
-    let utc = render_transactions(&parse_transactions(csv).unwrap());
+    let utc = render_transactions(&parse_transactions(csv).unwrap().rows);
     std::env::set_var("TZ", "America/Los_Angeles");
-    let la = render_transactions(&parse_transactions(csv).unwrap());
+    let la = render_transactions(&parse_transactions(csv).unwrap().rows);
     assert_eq!(utc, la);
 }
 ```
@@ -1501,7 +1567,7 @@ The single most important safety rule in the spec. As a pure predicate over inje
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: `SyncPaths { data_dir, children_root, lgs_binary, cloud_root: Option<PathBuf> }` and `is_cloud_synced(candidate: &Path, env: &SyncPaths, documents_is_symlink: bool) -> Option<Reason>`.
+- Produces: `SyncPaths { data_dir, children_root, lgs_binary, cloud_root: Option<PathBuf>, home: PathBuf }` and `is_cloud_synced(candidate: &Path, env: &SyncPaths, documents_is_symlink: bool) -> Option<Reason>`. The `home` field is required — the guard compares against `home/Library/Mobile Documents` and `home/Documents`, and reading `dirs::home_dir()` internally is what would make it untestable.
 
 - [ ] **Step 1: Write the failing table test**
 
@@ -1673,7 +1739,7 @@ mod tests {
         let report = parse_status(json).unwrap();
         assert_eq!(report.daemon.state, DaemonState::Outdated);
         assert!(report.daemon.message.contains("restart the service"));
-        assert!(!report.can_claim_durability(),
+        assert!(!report.durability_data_is_fresh(),
             "a skewed daemon reads durability from disk; we must not claim backed-up");
     }
 }
@@ -1747,7 +1813,14 @@ pub struct StatusReport {
 
 impl StatusReport {
     /// Durability is only trustworthy from a daemon we can actually talk to.
-    pub fn can_claim_durability(&self) -> bool {
+    /// Whether the durability numbers in this report are FRESH — i.e. the
+    /// daemon answered rather than the values being read stale from disk.
+    /// This is report-wide and is NOT a per-project safety answer: use
+    /// `ProjectReport::is_confirmed_backed_up()` for that. Task 10's review
+    /// found this returning true for a report containing a genuinely
+    /// stranded project, which is exactly the misreading the old name
+    /// (`can_claim_durability`) invited.
+    pub fn durability_data_is_fresh(&self) -> bool {
         matches!(self.daemon.state, DaemonState::Ok)
     }
     pub fn project(&self, name: &str) -> Option<&ProjectReport> {
@@ -2382,7 +2455,7 @@ git commit -m "test(sync): two-machine harness over one temp cloud root"
 
 **Interfaces:**
 - Consumes: `GitManager` remote ops, `allowance_core::merge`.
-- Produces: `SyncMessage::ApplyMerge { child_id, rows: Vec<TxRow>, parents: (String, String), decisions: Vec<Decision> }` and `ChildSyncEngine::cycle(&ChildId) -> Result<CycleOutcome>`.
+- Produces: `SyncMessage::ApplyMerge { child_id, rows: Vec<TxRow>, parents: (String, String), decisions: Vec<Decision> }`; `ChildSyncEngine::cycle(&ChildId) -> Result<CycleOutcome>`; and the pure helper the test in Step 2 targets — `classify(ours: Option<&str>, auth: Option<&str>, base: Option<&str>) -> Cycle` with `enum Cycle { UpToDate, FastForward, Diverged }`. `cycle()` calls `classify` after the fetch; keeping the decision separable is what makes it testable without a repository.
 
 - [ ] **Step 1: Add the message**
 

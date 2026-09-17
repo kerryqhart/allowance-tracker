@@ -1,8 +1,11 @@
 use shared::sync::*;
 use crate::backend::storage::remote::RemoteStorage;
+use crate::backend::sync::bootstrap::DaemonOwnership;
+use crate::backend::sync::{ChildSyncEngine, CycleOutcome};
 use super::sync_manager::{SyncEngine, SyncMessage, SyncStatus, SyncCommand, UiMessenger, WakeUi};
 use super::sync_persistence::{self, SyncState, RetryQueue};
-use std::path::PathBuf;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, mpsc, atomic::{AtomicBool, Ordering}};
 
 /// Handle to the background sync thread. Drop to shut down.
@@ -20,6 +23,14 @@ impl SyncThreadHandle {
     /// - `initial_watermarks`: per-child watermarks loaded from persisted state
     /// - `initial_retry_queue`: events that failed previously and need retrying
     /// - `data_dir`: directory where sync_state.yaml and retry queue are written
+    /// - `child_sync`: the lgs (desktop-to-desktop) transport, when configured.
+    ///   `None` disables it entirely — this thread then behaves exactly as it
+    ///   did before Task 17, running only the AWS-transport poll below. When
+    ///   `Some`, [`run_child_sync_cycles`] runs a cycle per registered child
+    ///   on the same triggers `poll_remote` already runs on (see the call
+    ///   sites in [`sync_loop`]): the first iteration after spawn, the 30s
+    ///   timer, and `PollNow` (window focus).
+    #[allow(clippy::too_many_arguments)]
     pub fn spawn(
         remote: Arc<dyn RemoteStorage>,
         event_rx: mpsc::Receiver<SyncEvent>,
@@ -29,6 +40,7 @@ impl SyncThreadHandle {
         initial_sync_state: SyncState,
         initial_retry_queue: Vec<SyncEvent>,
         data_dir: PathBuf,
+        child_sync: Option<ChildSyncEngine>,
     ) -> Self {
         let shutdown = Arc::new(AtomicBool::new(false));
         let shutdown_flag = shutdown.clone();
@@ -39,10 +51,20 @@ impl SyncThreadHandle {
         }
         let retry_queue = RetryQueue { events: initial_retry_queue };
 
-        // Preserve the non-watermark fields of SyncState (enabled, remote_url) so
-        // that the persistence writes below don't clobber user configuration.
+        // Fallback for the non-watermark fields of SyncState (enabled,
+        // remote_url, daemon_ownership, cloud_root) — used ONLY when
+        // `sync_state.yaml` cannot be read at persist time (see
+        // `persist_watermarks`), never used to overwrite a file that DOES
+        // read successfully. This thread's own spawn-time snapshot is a
+        // better fallback than blanket defaults, but it is not the source
+        // of truth for these fields once the thread is running — the file
+        // on disk is, because the UI thread (Settings toggles, the lgs
+        // first-run flow persisting `cloud_root`) can change them while
+        // this thread runs.
         let sync_enabled = initial_sync_state.enabled;
         let sync_remote_url = initial_sync_state.remote_url.clone();
+        let daemon_ownership = initial_sync_state.daemon_ownership.clone();
+        let sync_cloud_root = initial_sync_state.cloud_root.clone();
 
         let messenger = UiMessenger::new(message_tx, wake_ui);
 
@@ -59,7 +81,10 @@ impl SyncThreadHandle {
                     data_dir,
                     sync_enabled,
                     sync_remote_url,
+                    daemon_ownership,
+                    sync_cloud_root,
                     shutdown_flag,
+                    child_sync,
                 );
             })
             .expect("Failed to spawn sync thread");
@@ -96,8 +121,23 @@ fn sync_loop(
     data_dir: PathBuf,
     sync_enabled: bool,
     sync_remote_url: Option<String>,
+    daemon_ownership: DaemonOwnership,
+    sync_cloud_root: Option<PathBuf>,
     shutdown: Arc<AtomicBool>,
+    child_sync: Option<ChildSyncEngine>,
 ) {
+    // Fallback for `persist_watermarks` — see its doc comment. Built once,
+    // not per iteration, since these fields never change over this thread's
+    // lifetime; only what's on disk does.
+    let persist_fallback = SyncState {
+        watermarks: HashMap::new(),
+        enabled: sync_enabled,
+        remote_url: sync_remote_url,
+        daemon_ownership,
+        cloud_root: sync_cloud_root,
+    };
+    let sync_state_path = sync_persistence::sync_state_path(&data_dir);
+
     loop {
         if shutdown.load(Ordering::Relaxed) {
             break;
@@ -166,17 +206,16 @@ fn sync_loop(
         if should_poll {
             let _ = messenger.send(SyncMessage::StatusChanged(SyncStatus::Syncing));
             poll_remote(&remote, &mut engine, &messenger);
+            run_child_sync_cycles(&child_sync, &messenger, &shutdown);
             let _ = messenger.send(SyncMessage::StatusChanged(SyncStatus::Idle));
         }
 
-        // 4. Persist state every loop iteration. Preserve enabled/remote_url from
-        // the config we were spawned with so that a save doesn't clobber user config.
-        let sync_state = SyncState {
-            watermarks: engine.watermarks_snapshot(),
-            enabled: sync_enabled,
-            remote_url: sync_remote_url.clone(),
-        };
-        let _ = sync_state.save(&sync_persistence::sync_state_path(&data_dir));
+        // 4. Persist state every loop iteration. `persist_watermarks` re-reads
+        // the file and changes ONLY `watermarks` — see its doc comment for
+        // why reconstructing the whole struct from this thread's spawn-time
+        // snapshot (the previous approach) silently erased any non-watermark
+        // field the UI thread wrote after spawn.
+        let _ = persist_watermarks(&sync_state_path, engine.watermarks_snapshot(), &persist_fallback);
         let _ = retry_queue.save(&sync_persistence::retry_queue_path(&data_dir));
 
         // 5. Sleep responsively — check every 500ms for new events, commands,
@@ -210,6 +249,7 @@ fn sync_loop(
                     log::info!("SYNC: PollNow received in sleep loop — polling remote now");
                     let _ = messenger.send(SyncMessage::StatusChanged(SyncStatus::Syncing));
                     poll_remote(&remote, &mut engine, &messenger);
+                    run_child_sync_cycles(&child_sync, &messenger, &shutdown);
                     let _ = messenger.send(SyncMessage::StatusChanged(SyncStatus::Idle));
                     break 'sleep;
                 }
@@ -221,6 +261,49 @@ fn sync_loop(
             }
         }
     }
+}
+
+/// Persist `watermarks` into `sync_state.yaml`, changing ONLY that field.
+///
+/// Re-reads the file immediately before writing rather than reconstructing
+/// the whole `SyncState` from this thread's spawn-time snapshot — the
+/// previous approach. That approach meant any field the UI thread wrote
+/// after this thread spawned (`daemon_ownership`, fixed in Task 12;
+/// `cloud_root`, the very next field to hit the same bug, in Task 19's
+/// first-run flow) was silently erased the next time this function ran,
+/// often within the same 30 seconds — before a user could even act on
+/// whatever the write was supposed to enable. Task 12's review named this
+/// "self-alerting but not self-protecting."
+///
+/// This is the structural fix: this function is the ONLY place `watermarks`
+/// is ever written, and it is the only thing it ever changes. A field added
+/// to `SyncState` after this one is automatically safe from this mechanism
+/// — nobody has to remember to thread it through a save call, because
+/// there is nothing left here to reconstruct.
+///
+/// `fallback` supplies the non-watermark fields only when the file cannot
+/// be read at all (missing, or a transient parse failure mid-write) — using
+/// this thread's own last-known state is a better degradation than
+/// resetting the user's configuration to defaults, but it is never used
+/// to override a file that reads successfully.
+fn persist_watermarks(
+    path: &Path,
+    watermarks: HashMap<String, u64>,
+    fallback: &SyncState,
+) -> anyhow::Result<()> {
+    let mut sync_state = if path.exists() {
+        SyncState::load(path).unwrap_or_else(|e| {
+            log::warn!(
+                "sync_state.yaml could not be read while persisting watermarks ({e}); \
+                 falling back to this thread's last-known configuration rather than defaults"
+            );
+            fallback.clone()
+        })
+    } else {
+        fallback.clone()
+    };
+    sync_state.watermarks = watermarks;
+    sync_state.save(path)
 }
 
 /// Push a single local event to the remote. For non-delete events, first
@@ -268,22 +351,230 @@ fn push_event(
     Ok(())
 }
 
+/// Ask the UI thread for the current list of registered child ids. The UI
+/// thread owns the registry (`sync_manager.rs:36-38`, "UI owns all repo
+/// I/O"), so both transports that need "which children exist right now" —
+/// the AWS-style `poll_remote` below and the lgs-style
+/// `run_child_sync_cycles` — go through this same request rather than each
+/// guessing independently.
+///
+/// `None` means the request timed out (UI thread busy or gone); callers
+/// decide their own fallback, since "no answer" means something different
+/// to each of them.
+fn get_child_ids(messenger: &UiMessenger) -> Option<Vec<String>> {
+    let (response_tx, response_rx) = mpsc::channel();
+    messenger.send(SyncMessage::GetChildIdsRequest { response_tx }).ok()?;
+    response_rx.recv_timeout(std::time::Duration::from_secs(5)).ok()
+}
+
+/// Per-tick time budget for [`run_child_sync_cycles`]. Review Critical-2:
+/// without a bound, iterating every registered child with no time budget and
+/// no shutdown check let one hung child (a stalled daemon, a fetch that
+/// never returns) cost the WHOLE tick — and everything downstream of it in
+/// `sync_loop` (the AWS poll's own next call, the 30s timer, shutdown)
+/// blocks right along with it, since this all runs synchronously on the one
+/// background sync thread. `LgsClient::run` now bounds any single `lgs`
+/// process spawn to 10s (see `LGS_RUN_TIMEOUT`), but `fetch_lgs`/`push_lgs`
+/// are raw libgit2 network calls with no such bound of their own — this
+/// budget is what keeps a slow child to costing at most one tick rather than
+/// the thread, by refusing to START another child's cycle once it is spent
+/// (a child already in flight when the budget expires still finishes; nb
+/// this does not preempt it).
+const CHILD_SYNC_TICK_BUDGET: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// Run one lgs sync cycle ([`ChildSyncEngine::cycle_with_status`]) for every
+/// registered child. Called from [`sync_loop`] on the exact same triggers as
+/// the AWS-transport `poll_remote` (see the call sites there): the first
+/// iteration after spawn, the 30s timer, and `PollNow` (sent on window
+/// focus) — Task 17's brief for folding this in.
+///
+/// # Thread ownership
+///
+/// This function runs on the background sync thread and must never touch a
+/// child's working tree. [`ChildSyncEngine::cycle_with_status`] already
+/// enforces that on its own side (see its module doc) — it only fetches,
+/// reads git objects, and (for `Cycle::Ahead`) pushes. Every outcome that
+/// WOULD require writing a file is handed to the UI thread as a message
+/// instead: `CycleOutcome::Merged` becomes `SyncMessage::ApplyMerge` and
+/// `CycleOutcome::FastForward` becomes `SyncMessage::ApplyFastForward`,
+/// both applied on `app_coordinator.rs` — the only place in this whole
+/// feature that writes to a child's working tree.
+///
+/// # Failure isolation
+///
+/// Each child has its own repository and its own remote, so one child's
+/// failure (its lgs project not registered yet, a transient fetch error,
+/// the daemon being briefly unreachable) has no bearing on any other
+/// child's. A cycle that returns `Err` is logged and the loop moves on —
+/// never `?`, never `return`, never a panic that would take the rest of the
+/// tick's children down with it.
+///
+/// # One `lgs status --json` per tick, not per child
+///
+/// `lgs status --json` answers "what are my projects," which does not
+/// depend on which child is asking — fetched once here via
+/// [`ChildSyncEngine::fetch_status`] and passed to every child's
+/// `cycle_with_status`, rather than this engine spawning `lgs` once per
+/// child per tick (each spawn being its own process and its own
+/// [`LGS_RUN_TIMEOUT`]-bounded wait).
+///
+/// # Per-tick budget and shutdown
+///
+/// `shutdown` is checked before each child, and the tick stops taking on
+/// NEW children once [`CHILD_SYNC_TICK_BUDGET`] has elapsed — see that
+/// constant's doc comment. It is ALSO checked before either of this
+/// function's own two blocking calls (`get_child_ids`, up to 5s; and
+/// `ChildSyncEngine::fetch_status`, up to `LGS_RUN_TIMEOUT` — 10s) — Review
+/// Important-2 — so a shutdown request already pending is never delayed by
+/// work this tick has not started yet. `fetch_lgs`/`push_lgs` inside each
+/// child's cycle are themselves bounded (`storage::git::NETWORK_TIMEOUT`,
+/// 30s, via libgit2 transfer/negotiation callbacks) rather than left to
+/// block this thread indefinitely on a stalled remote.
+fn run_child_sync_cycles(
+    child_sync: &Option<ChildSyncEngine>,
+    messenger: &UiMessenger,
+    shutdown: &Arc<AtomicBool>,
+) {
+    run_child_sync_cycles_with_budget(child_sync, messenger, shutdown, CHILD_SYNC_TICK_BUDGET)
+}
+
+/// The actual implementation behind [`run_child_sync_cycles`], with the
+/// per-tick budget exposed so tests can drive the "budget already spent"
+/// path deterministically (a zero/near-zero budget) instead of waiting out
+/// the real 20s bound.
+fn run_child_sync_cycles_with_budget(
+    child_sync: &Option<ChildSyncEngine>,
+    messenger: &UiMessenger,
+    shutdown: &Arc<AtomicBool>,
+    budget: std::time::Duration,
+) {
+    let Some(engine) = child_sync else { return };
+
+    // Review Important-2: this is "the first shutdown check" — checked
+    // before EITHER of the two blocking calls below (`get_child_ids` can
+    // wait up to 5s for the UI thread; `fetch_status` up to
+    // `LGS_RUN_TIMEOUT`, 10s), so a shutdown request is never delayed by
+    // work this tick has not even started yet.
+    if shutdown.load(Ordering::Relaxed) {
+        return;
+    }
+
+    let child_ids = match get_child_ids(messenger) {
+        Some(ids) => ids,
+        None => {
+            log::warn!("SYNC(lgs): GetChildIdsRequest timed out — skipping this child-sync tick");
+            return;
+        }
+    };
+
+    // Checked again before `fetch_status` specifically (up to 10s) for the
+    // same reason — a shutdown requested while `get_child_ids` was waiting
+    // must not then be delayed by a second, unrelated blocking call.
+    if shutdown.load(Ordering::Relaxed) {
+        log::info!("SYNC(lgs): shutdown requested before fetching lgs status — skipping this tick");
+        return;
+    }
+
+    let status = match engine.fetch_status() {
+        Ok(s) => s,
+        Err(e) => {
+            log::warn!(
+                "SYNC(lgs): could not fetch `lgs status --json` for this tick — skipping all \
+                 {} registered child(ren): {e:#}",
+                child_ids.len()
+            );
+            return;
+        }
+    };
+
+    let tick_deadline = std::time::Instant::now() + budget;
+    for (i, child_id) in child_ids.iter().enumerate() {
+        if shutdown.load(Ordering::Relaxed) {
+            log::info!(
+                "SYNC(lgs): shutdown requested mid-tick — stopping after {i} of {} children",
+                child_ids.len()
+            );
+            break;
+        }
+        if std::time::Instant::now() >= tick_deadline {
+            log::warn!(
+                "SYNC(lgs): per-tick time budget ({budget:?}) exceeded after {i} of {} children \
+                 — deferring the rest to the next tick",
+                child_ids.len()
+            );
+            break;
+        }
+
+        let id = shared::ChildId::from(child_id.as_str());
+        match engine.cycle_with_status(&id, &status) {
+            Ok(CycleOutcome::UpToDate) | Ok(CycleOutcome::Ahead) => {
+                // `Ahead` already pushed inside `cycle_with_status`
+                // (fetch/push are both background-thread operations — see
+                // `Cycle::Ahead`'s doc comment in `child_sync.rs`). Nothing
+                // further to do on either thread.
+            }
+            Ok(CycleOutcome::ArchivedSkipped) => {
+                // Review Important-1: never retried — see
+                // `CycleOutcome::ArchivedSkipped`'s doc comment. One durable
+                // notice per occurrence; the UI thread de-duplicates by
+                // child id (`SyncUiState::record_sync_failure`), so this
+                // firing again next tick (the project stays archived until
+                // a human runs `lgs unarchive`) does not accumulate.
+                if let Err(e) = messenger.send(SyncMessage::ArchivedProjectSkipped {
+                    child_id: child_id.clone(),
+                }) {
+                    log::warn!(
+                        "SYNC(lgs): failed to notify the UI thread that child {child_id}'s project \
+                         is archived (channel closed?): {e}"
+                    );
+                }
+            }
+            Ok(CycleOutcome::FastForward { to }) => {
+                if let Err(e) = messenger.send(SyncMessage::ApplyFastForward {
+                    child_id: child_id.clone(),
+                    to,
+                }) {
+                    log::warn!(
+                        "SYNC(lgs): failed to hand a fast-forward for child {child_id} to the UI \
+                         thread (channel closed?): {e}"
+                    );
+                }
+            }
+            Ok(CycleOutcome::Merged { rows, parents, decisions, .. }) => {
+                if let Err(e) = messenger.send(SyncMessage::ApplyMerge {
+                    child_id: child_id.clone(),
+                    rows,
+                    parents,
+                    decisions,
+                }) {
+                    log::warn!(
+                        "SYNC(lgs): failed to hand a computed merge for child {child_id} to the \
+                         UI thread (channel closed?): {e}"
+                    );
+                }
+            }
+            Err(e) => {
+                // Never abort the tick: the next child's repo and remote are
+                // entirely independent of this one's failure.
+                log::warn!("SYNC(lgs): cycle failed for child {child_id}: {e:#}");
+            }
+        }
+    }
+}
+
 /// Poll remote for new events for all known children and send them to the UI thread.
 fn poll_remote(
     remote: &Arc<dyn RemoteStorage>,
     engine: &mut SyncEngine,
     messenger: &UiMessenger,
 ) {
-    // Ask the UI thread for the current list of local child IDs. Deriving it
-    // from watermarks would be a bootstrap trap: a fresh install (or a blown-
-    // away sync_state) has no watermarks yet, so nothing would ever get
-    // polled. Fall back to watermark-derived IDs only if the UI thread fails
-    // to respond within the timeout.
-    let (response_tx, response_rx) = mpsc::channel();
-    let _ = messenger.send(SyncMessage::GetChildIdsRequest { response_tx });
-    let child_ids: Vec<String> = match response_rx.recv_timeout(std::time::Duration::from_secs(5)) {
-        Ok(ids) => ids,
-        Err(_) => {
+    // Deriving the child list from watermarks would be a bootstrap trap: a
+    // fresh install (or a blown-away sync_state) has no watermarks yet, so
+    // nothing would ever get polled. Fall back to watermark-derived IDs only
+    // if the UI thread fails to respond within the timeout.
+    let child_ids: Vec<String> = match get_child_ids(messenger) {
+        Some(ids) => ids,
+        None => {
             log::warn!("SYNC: GetChildIdsRequest timed out — falling back to watermark keys");
             engine.watermarks_snapshot().keys().cloned().collect()
         }
@@ -345,7 +636,11 @@ fn poll_remote(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backend::domain::commands::child::{CreateChildCommand, SetActiveChildCommand};
+    use crate::backend::domain::commands::transactions::CreateTransactionCommand;
     use crate::backend::storage::mock_remote::MockRemoteClient;
+    use crate::backend::sync::lgs_client::LgsClient;
+    use crate::backend::Backend;
     use std::collections::HashMap;
     use std::time::Duration;
     use tempfile::TempDir;
@@ -370,6 +665,7 @@ mod tests {
             SyncState::default(),
             vec![],
             data_dir.to_path_buf(),
+            None,
         )
     }
 
@@ -409,6 +705,7 @@ mod tests {
             SyncState::default(),
             vec![],
             dir.path().to_path_buf(),
+            None,
         );
 
         // Start a helper thread to simulate the UI: respond to ReadEntityRequest
@@ -478,6 +775,8 @@ mod tests {
             watermarks: initial_watermarks,
             enabled: true,
             remote_url: None,
+            daemon_ownership: DaemonOwnership::default(),
+            cloud_root: None,
         };
 
         let mut handle = SyncThreadHandle::spawn(
@@ -489,6 +788,7 @@ mod tests {
             initial_state,
             vec![],
             dir.path().to_path_buf(),
+            None,
         );
 
         command_tx.send(SyncCommand::PollNow).unwrap();
@@ -511,5 +811,756 @@ mod tests {
         assert!(found, "Expected ApplyRemoteEntity for tx_remote");
 
         handle.shutdown();
+    }
+
+    // --- Task 17, Part B: the lgs scheduling loop --------------------------
+    //
+    // No `lgs` binary and no daemon anywhere below — `LgsClient` just shells
+    // out to whatever binary path it is given, so a tiny shell script that
+    // prints canned `lgs status --json` output is a fake, not the real CLI.
+    // The "remote" is a local bare repo in a tempdir, exactly like
+    // `child_sync.rs`'s own tests. This matches the safety constraint: no
+    // launchctl, no real lgs command, no live daemon required.
+
+    /// A real, git-backed child (created the same way `Backend`'s ordinary
+    /// write path does it) whose lgs "auth" tip has diverged from an
+    /// unrelated peer bare repo. `ChildSyncEngine::cycle` for this child
+    /// must therefore return `CycleOutcome::Merged` — `classify`'s
+    /// catch-all arm treats "no common ancestor at all" the same as any
+    /// other divergence (see `child_sync::classify`'s doc comment), so the
+    /// peer repo does not need to share any history with the child's repo.
+    struct DivergedChildFixture {
+        engine: ChildSyncEngine,
+        child_id: String,
+        ours_oid: git2::Oid,
+        theirs_oid: git2::Oid,
+        // Held only for their Drop (tempdir cleanup) — never read directly.
+        _data_dir: TempDir,
+        _bare_dir: TempDir,
+        _script_dir: TempDir,
+    }
+
+    fn diverged_child_fixture() -> DivergedChildFixture {
+        let data_dir = TempDir::new().unwrap();
+        let backend = Backend::with_data_dir(data_dir.path().to_path_buf(), None).unwrap();
+        let child = backend
+            .child_service
+            .create_child(CreateChildCommand {
+                name: "Test Kid".to_string(),
+                birthdate: "2015-01-01".to_string(),
+            })
+            .unwrap()
+            .child;
+        backend
+            .child_service
+            .set_active_child(SetActiveChildCommand { child_id: child.id.clone() })
+            .unwrap();
+        backend
+            .transaction_service
+            .create_transaction(CreateTransactionCommand {
+                description: "Allowance".to_string(),
+                amount: 10.0,
+                date: None,
+            })
+            .unwrap();
+
+        let child_dir = backend.csv_connection.child_dir(&shared::ChildId::from(child.id.as_str())).unwrap();
+        let repo = git2::Repository::open(&child_dir).unwrap();
+        let ours_oid = repo.head().unwrap().peel_to_commit().unwrap().id();
+
+        // An unrelated "peer" bare repo standing in for lgs's cloud copy,
+        // with one commit made directly against its object database (no
+        // working tree needed) advertised as the authoritative tip.
+        let bare_dir = TempDir::new().unwrap();
+        let bare = git2::Repository::init_bare(bare_dir.path()).unwrap();
+        let sig =
+            git2::Signature::new("Peer", "peer@example.com", &git2::Time::new(1_700_000_500, 0)).unwrap();
+        let mut builder = bare.treebuilder(None).unwrap();
+        let blob = bare
+            .blob(
+                b"id,child_id,date,description,amount,balance,type\n\
+                  in-peer-a,x,2026-01-02T00:00:00+00:00,Peer Allowance,5.00,5.00,allowance\n",
+            )
+            .unwrap();
+        builder.insert("transactions.csv", blob, 0o100644).unwrap();
+        let tree_id = builder.write().unwrap();
+        let tree = bare.find_tree(tree_id).unwrap();
+        let theirs_oid = bare.commit(None, &sig, &sig, "peer edit", &tree, &[]).unwrap();
+        bare.reference("refs/lgs-auth/heads/main", theirs_oid, true, "auth tip").unwrap();
+
+        // A fake `lgs status --json`: a shell script (never the real `lgs`
+        // binary) that always prints one project pointing at the bare repo
+        // above.
+        let script_dir = TempDir::new().unwrap();
+        let script_path = script_dir.path().join("lgs");
+        let json = format!(
+            r#"{{"projects":[{{"name":"allowance-{}","clone_url":"{}","working_repo_path":"{}"}}]}}"#,
+            child.id,
+            bare_dir.path().to_str().unwrap(),
+            child_dir.to_str().unwrap(),
+        );
+        std::fs::write(&script_path, format!("#!/bin/sh\ncat <<'JSON'\n{json}\nJSON\n")).unwrap();
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&script_path).unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&script_path, perms).unwrap();
+        }
+
+        let lgs = LgsClient::new(script_path);
+        let engine = ChildSyncEngine::new(lgs, backend.csv_connection.clone());
+
+        DivergedChildFixture {
+            engine,
+            child_id: child.id,
+            ours_oid,
+            theirs_oid,
+            _data_dir: data_dir,
+            _bare_dir: bare_dir,
+            _script_dir: script_dir,
+        }
+    }
+
+    /// Drain `message_rx` until either the expected `ApplyMerge` for
+    /// `expect_child_id` arrives (answering every `GetChildIdsRequest` along
+    /// the way with `respond_ids`) or the deadline passes.
+    fn wait_for_apply_merge(
+        message_rx: &mpsc::Receiver<SyncMessage>,
+        respond_ids: Vec<String>,
+        expect_child_id: &str,
+        timeout: Duration,
+    ) -> Option<(Vec<allowance_core::row::TxRow>, (String, String))> {
+        let deadline = std::time::Instant::now() + timeout;
+        while std::time::Instant::now() < deadline {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            match message_rx.recv_timeout(remaining) {
+                Ok(SyncMessage::GetChildIdsRequest { response_tx }) => {
+                    let _ = response_tx.send(respond_ids.clone());
+                }
+                Ok(SyncMessage::ApplyMerge { child_id, rows, parents, .. }) if child_id == expect_child_id => {
+                    return Some((rows, parents));
+                }
+                Ok(_) => continue,
+                Err(_) => break,
+            }
+        }
+        None
+    }
+
+    /// Task 17, Part B: nothing called `ChildSyncEngine::cycle()` or sent
+    /// `ApplyMerge` at runtime before this task. This proves the scheduling
+    /// loop actually runs a cycle for a registered child on a tick (here,
+    /// the unconditional first-iteration poll right after spawn — "startup"
+    /// in the brief's list of triggers) and that a genuine divergence
+    /// produces a real `SyncMessage::ApplyMerge` carrying the merged rows.
+    #[test]
+    fn child_sync_cycle_runs_on_startup_and_sends_apply_merge() {
+        let fixture = diverged_child_fixture();
+        let child_id = fixture.child_id.clone();
+        let ours_oid = fixture.ours_oid;
+        let theirs_oid = fixture.theirs_oid;
+
+        let (_event_tx, event_rx) = mpsc::channel::<SyncEvent>();
+        let (_command_tx, command_rx) = mpsc::channel::<SyncCommand>();
+        let (message_tx, message_rx) = mpsc::channel::<SyncMessage>();
+        let dir = TempDir::new().unwrap();
+
+        let mut handle = SyncThreadHandle::spawn(
+            Arc::new(MockRemoteClient::new()),
+            event_rx,
+            command_rx,
+            message_tx,
+            noop_wake(),
+            SyncState::default(),
+            vec![],
+            dir.path().to_path_buf(),
+            Some(fixture.engine),
+        );
+
+        let result = wait_for_apply_merge(
+            &message_rx,
+            vec![child_id.clone()],
+            &child_id,
+            Duration::from_secs(10),
+        );
+        handle.shutdown();
+
+        let (rows, parents) = result.expect("expected ApplyMerge for the registered child on startup");
+        assert_eq!(parents, (ours_oid.to_string(), theirs_oid.to_string()));
+        let ids: Vec<&str> = rows.iter().map(|r| r.id.as_str()).collect();
+        assert!(ids.contains(&"in-peer-a"), "the merge must include the peer's row: {ids:?}");
+    }
+
+    /// Task 17, Part B's explicit requirement: "a failure syncing ONE child
+    /// must not abort the others." A bogus, unregistered child id ahead of
+    /// the real one in the roster response makes `ChildSyncEngine::cycle`
+    /// fail immediately (its `work_dir` lookup errors — no such child is
+    /// registered in `CsvConnection`). That failure must be logged and
+    /// skipped, not stop the loop: the real, diverged child after it must
+    /// still get its cycle and its `ApplyMerge`.
+    #[test]
+    fn one_childs_failed_cycle_does_not_block_another_childs_cycle() {
+        let fixture = diverged_child_fixture();
+        let child_id = fixture.child_id.clone();
+
+        let (_event_tx, event_rx) = mpsc::channel::<SyncEvent>();
+        let (_command_tx, command_rx) = mpsc::channel::<SyncCommand>();
+        let (message_tx, message_rx) = mpsc::channel::<SyncMessage>();
+        let dir = TempDir::new().unwrap();
+
+        let mut handle = SyncThreadHandle::spawn(
+            Arc::new(MockRemoteClient::new()),
+            event_rx,
+            command_rx,
+            message_tx,
+            noop_wake(),
+            SyncState::default(),
+            vec![],
+            dir.path().to_path_buf(),
+            Some(fixture.engine),
+        );
+
+        // The bogus id is listed FIRST, so its failure happens before the
+        // real child's cycle is even attempted — proving a failure earlier
+        // in the loop does not short-circuit the rest of it.
+        let result = wait_for_apply_merge(
+            &message_rx,
+            vec!["nonexistent-child".to_string(), child_id.clone()],
+            &child_id,
+            Duration::from_secs(10),
+        );
+        handle.shutdown();
+
+        assert!(
+            result.is_some(),
+            "the registered child's cycle must still run and produce an ApplyMerge despite the \
+             other (nonexistent) child's cycle failing"
+        );
+    }
+
+    /// A real, git-backed child that is ORDINARILY behind — its own tip is a
+    /// genuine ancestor of the peer's advertised tip, with no local commits
+    /// of its own since then. Review Critical-1: `classify` returns
+    /// `Cycle::FastForward` in exactly this situation, and it is the
+    /// COMMON case (any machine that is not the one currently editing), not
+    /// an edge case — so this fixture exists specifically to exercise it
+    /// end to end through the scheduling loop.
+    struct AheadChildFixture {
+        engine: ChildSyncEngine,
+        child_id: String,
+        ahead_oid: git2::Oid,
+        _data_dir: TempDir,
+        _bare_dir: TempDir,
+        _script_dir: TempDir,
+    }
+
+    fn ahead_child_fixture() -> AheadChildFixture {
+        use crate::backend::storage::git::{ensure_lgs_remote, push_lgs};
+        use crate::backend::sync::child_sync::current_branch;
+
+        let data_dir = TempDir::new().unwrap();
+        let backend = Backend::with_data_dir(data_dir.path().to_path_buf(), None).unwrap();
+        let child = backend
+            .child_service
+            .create_child(CreateChildCommand {
+                name: "Test Kid".to_string(),
+                birthdate: "2015-01-01".to_string(),
+            })
+            .unwrap()
+            .child;
+        backend
+            .child_service
+            .set_active_child(SetActiveChildCommand { child_id: child.id.clone() })
+            .unwrap();
+        backend
+            .transaction_service
+            .create_transaction(CreateTransactionCommand {
+                description: "Allowance".to_string(),
+                amount: 10.0,
+                date: None,
+            })
+            .unwrap();
+
+        let child_dir = backend.csv_connection.child_dir(&shared::ChildId::from(child.id.as_str())).unwrap();
+        let child_repo = git2::Repository::open(&child_dir).unwrap();
+        let base_oid = child_repo.head().unwrap().peel_to_commit().unwrap().id();
+
+        // Push the child's OWN current tip into a bare repo first, then add
+        // one more commit on top directly against the bare's object
+        // database — this makes `base_oid` a genuine ancestor of the new
+        // tip (a real shared history), which is what distinguishes a
+        // fast-forward from `diverged_child_fixture`'s deliberately
+        // unrelated history.
+        let bare_dir = TempDir::new().unwrap();
+        git2::Repository::init_bare(bare_dir.path()).unwrap();
+        ensure_lgs_remote(&child_repo, bare_dir.path().to_str().unwrap()).unwrap();
+        // Push the child's OWN actual branch name — its default branch may
+        // be "main" or "master" depending on the local git install's
+        // `init.defaultBranch`, and `push_lgs`'s refspec needs the real one
+        // to exist. The "auth" ref below stays hardcoded to
+        // `refs/lgs-auth/heads/main` regardless — that literal path is what
+        // `child_sync::LGS_AUTH_MAIN` always looks for.
+        let child_branch = current_branch(&child_repo).unwrap();
+        push_lgs(&child_repo, &child_branch).unwrap();
+
+        let bare = git2::Repository::open_bare(bare_dir.path()).unwrap();
+        let base_commit = bare.find_commit(base_oid).unwrap();
+        let sig =
+            git2::Signature::new("Peer", "peer@example.com", &git2::Time::new(1_700_000_500, 0)).unwrap();
+        let mut builder = bare.treebuilder(Some(&base_commit.tree().unwrap())).unwrap();
+        let blob = bare
+            .blob(
+                b"id,child_id,date,description,amount,balance,type\n\
+                  in-1-a,x,2026-01-01T00:00:00+00:00,Allowance,10.00,10.00,allowance\n\
+                  in-peer-a,x,2026-01-02T00:00:00+00:00,Peer Allowance,5.00,15.00,allowance\n",
+            )
+            .unwrap();
+        builder.insert("transactions.csv", blob, 0o100644).unwrap();
+        let tree_id = builder.write().unwrap();
+        let tree = bare.find_tree(tree_id).unwrap();
+        let ahead_oid = bare.commit(None, &sig, &sig, "peer advanced", &tree, &[&base_commit]).unwrap();
+        bare.reference("refs/lgs-auth/heads/main", ahead_oid, true, "auth tip").unwrap();
+
+        let script_dir = TempDir::new().unwrap();
+        let script_path = script_dir.path().join("lgs");
+        let json = format!(
+            r#"{{"projects":[{{"name":"allowance-{}","clone_url":"{}","working_repo_path":"{}"}}]}}"#,
+            child.id,
+            bare_dir.path().to_str().unwrap(),
+            child_dir.to_str().unwrap(),
+        );
+        std::fs::write(&script_path, format!("#!/bin/sh\ncat <<'JSON'\n{json}\nJSON\n")).unwrap();
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&script_path).unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&script_path, perms).unwrap();
+        }
+
+        let lgs = LgsClient::new(script_path);
+        let engine = ChildSyncEngine::new(lgs, backend.csv_connection.clone());
+
+        AheadChildFixture {
+            engine,
+            child_id: child.id,
+            ahead_oid,
+            _data_dir: data_dir,
+            _bare_dir: bare_dir,
+            _script_dir: script_dir,
+        }
+    }
+
+    /// Drain `message_rx` until either the expected `ApplyFastForward` for
+    /// `expect_child_id` arrives (answering every `GetChildIdsRequest`
+    /// along the way with `respond_ids`) or the deadline passes.
+    fn wait_for_apply_fast_forward(
+        message_rx: &mpsc::Receiver<SyncMessage>,
+        respond_ids: Vec<String>,
+        expect_child_id: &str,
+        timeout: Duration,
+    ) -> Option<String> {
+        let deadline = std::time::Instant::now() + timeout;
+        while std::time::Instant::now() < deadline {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            match message_rx.recv_timeout(remaining) {
+                Ok(SyncMessage::GetChildIdsRequest { response_tx }) => {
+                    let _ = response_tx.send(respond_ids.clone());
+                }
+                Ok(SyncMessage::ApplyFastForward { child_id, to }) if child_id == expect_child_id => {
+                    return Some(to);
+                }
+                Ok(_) => continue,
+                Err(_) => break,
+            }
+        }
+        None
+    }
+
+    /// Review Critical-1: `CycleOutcome::FastForward` used to have no
+    /// consumer at all — this proves the scheduling loop now sends
+    /// `SyncMessage::ApplyFastForward` for the ORDINARY case (a child that
+    /// is simply behind, no divergence), end to end through
+    /// `SyncThreadHandle::spawn`. (`apply_fast_forward_tests` in
+    /// `app_coordinator.rs` separately proves the UI-thread handler for
+    /// this message actually updates the working tree on disk.)
+    #[test]
+    fn child_sync_cycle_sends_apply_fast_forward_for_an_ordinary_behind_child() {
+        let fixture = ahead_child_fixture();
+        let child_id = fixture.child_id.clone();
+        let ahead_oid = fixture.ahead_oid;
+
+        let (_event_tx, event_rx) = mpsc::channel::<SyncEvent>();
+        let (_command_tx, command_rx) = mpsc::channel::<SyncCommand>();
+        let (message_tx, message_rx) = mpsc::channel::<SyncMessage>();
+        let dir = TempDir::new().unwrap();
+
+        let mut handle = SyncThreadHandle::spawn(
+            Arc::new(MockRemoteClient::new()),
+            event_rx,
+            command_rx,
+            message_tx,
+            noop_wake(),
+            SyncState::default(),
+            vec![],
+            dir.path().to_path_buf(),
+            Some(fixture.engine),
+        );
+
+        let result = wait_for_apply_fast_forward(
+            &message_rx,
+            vec![child_id.clone()],
+            &child_id,
+            Duration::from_secs(10),
+        );
+        handle.shutdown();
+
+        let to = result.expect("expected ApplyFastForward for the registered, ordinarily-behind child");
+        assert_eq!(to, ahead_oid.to_string());
+    }
+
+    // --- Review Critical-2: bounded, budgeted, single-status-fetch tick ---
+
+    /// If `shutdown` is already set before a tick starts, `run_child_sync_cycles`
+    /// must stop before running ANY child's cycle rather than pushing
+    /// through the whole registered list first — in fact, per Review
+    /// Important-2's "first shutdown check" fix, it must not even send a
+    /// `GetChildIdsRequest` (a call the UI thread could otherwise take up
+    /// to 5s to answer). Calls the function directly (not through a live
+    /// `SyncThreadHandle`) with a hand-rolled responder thread, so the
+    /// shutdown flag can be controlled precisely.
+    #[test]
+    fn shutdown_already_set_prevents_any_child_cycle_from_running() {
+        let fixture = diverged_child_fixture();
+        let child_id = fixture.child_id.clone();
+
+        let (message_tx, message_rx) = mpsc::channel::<SyncMessage>();
+        let messenger = UiMessenger::new(message_tx, noop_wake());
+        let shutdown = Arc::new(AtomicBool::new(true));
+
+        let responder = std::thread::spawn(move || {
+            let mut saw_apply = false;
+            loop {
+                // Short timeout: with shutdown already set, nothing should
+                // ever be sent at all (not even a GetChildIdsRequest), so
+                // this only needs to wait long enough to be confident
+                // nothing is coming, not to accommodate real work.
+                match message_rx.recv_timeout(Duration::from_millis(300)) {
+                    Ok(SyncMessage::GetChildIdsRequest { response_tx }) => {
+                        let _ = response_tx.send(vec![child_id.clone()]);
+                    }
+                    Ok(SyncMessage::ApplyMerge { .. }) | Ok(SyncMessage::ApplyFastForward { .. }) => {
+                        saw_apply = true;
+                    }
+                    Ok(_) => {}
+                    Err(_) => break,
+                }
+            }
+            saw_apply
+        });
+
+        run_child_sync_cycles(&Some(fixture.engine), &messenger, &shutdown);
+        drop(messenger); // closes the channel so the responder's recv times out and returns
+
+        let saw_apply = responder.join().unwrap();
+        assert!(
+            !saw_apply,
+            "no child cycle should have run at all once shutdown was already set"
+        );
+    }
+
+    /// An effectively-zero per-tick budget must stop the loop before it
+    /// takes on any child's cycle — proving the budget check is a real gate
+    /// (not a no-op), without waiting out the real 20s production bound.
+    /// Contrast with `child_sync_cycle_runs_on_startup_and_sends_apply_merge`,
+    /// which proves the SAME fixture's child DOES get a cycle under the
+    /// ordinary (non-tiny) budget.
+    #[test]
+    fn a_near_zero_budget_prevents_any_child_cycle_from_running() {
+        let fixture = diverged_child_fixture();
+        let child_id = fixture.child_id.clone();
+
+        let (message_tx, message_rx) = mpsc::channel::<SyncMessage>();
+        let messenger = UiMessenger::new(message_tx, noop_wake());
+        let shutdown = Arc::new(AtomicBool::new(false));
+
+        let responder = std::thread::spawn(move || {
+            let mut saw_apply = false;
+            loop {
+                match message_rx.recv_timeout(Duration::from_secs(2)) {
+                    Ok(SyncMessage::GetChildIdsRequest { response_tx }) => {
+                        let _ = response_tx.send(vec![child_id.clone()]);
+                    }
+                    Ok(SyncMessage::ApplyMerge { .. }) | Ok(SyncMessage::ApplyFastForward { .. }) => {
+                        saw_apply = true;
+                    }
+                    Ok(_) => {}
+                    Err(_) => break,
+                }
+            }
+            saw_apply
+        });
+
+        run_child_sync_cycles_with_budget(&Some(fixture.engine), &messenger, &shutdown, Duration::ZERO);
+        drop(messenger);
+
+        let saw_apply = responder.join().unwrap();
+        assert!(
+            !saw_apply,
+            "a zero-duration tick budget should have expired before any child's cycle ran"
+        );
+    }
+
+    /// Review Critical-2(c): `lgs status --json` must be fetched ONCE per
+    /// tick and reused across every child, not once per child. Two real,
+    /// diverged children share ONE fake `lgs` script that appends a line to
+    /// a counter file every time it is invoked; after a tick that
+    /// successfully syncs both, the counter must show exactly one
+    /// invocation.
+    #[test]
+    fn lgs_status_is_fetched_once_per_tick_not_once_per_child() {
+        let data_dir = TempDir::new().unwrap();
+        let backend = Backend::with_data_dir(data_dir.path().to_path_buf(), None).unwrap();
+
+        let mut child_ids = Vec::new();
+        let mut bare_dirs = Vec::new();
+        let mut projects_json = Vec::new();
+        for n in 0..2 {
+            let child = backend
+                .child_service
+                .create_child(CreateChildCommand {
+                    name: format!("Test Kid {n}"),
+                    birthdate: "2015-01-01".to_string(),
+                })
+                .unwrap()
+                .child;
+            backend
+                .child_service
+                .set_active_child(SetActiveChildCommand { child_id: child.id.clone() })
+                .unwrap();
+            backend
+                .transaction_service
+                .create_transaction(CreateTransactionCommand {
+                    description: "Allowance".to_string(),
+                    amount: 10.0,
+                    date: None,
+                })
+                .unwrap();
+
+            let child_dir = backend.csv_connection.child_dir(&shared::ChildId::from(child.id.as_str())).unwrap();
+            let repo = git2::Repository::open(&child_dir).unwrap();
+            let ours_oid = repo.head().unwrap().peel_to_commit().unwrap().id();
+
+            let bare_dir = TempDir::new().unwrap();
+            let bare = git2::Repository::init_bare(bare_dir.path()).unwrap();
+            let sig = git2::Signature::new("Peer", "peer@example.com", &git2::Time::new(1_700_000_500, 0))
+                .unwrap();
+            let mut builder = bare.treebuilder(None).unwrap();
+            let blob = bare
+                .blob(
+                    format!(
+                        "id,child_id,date,description,amount,balance,type\n\
+                         in-peer-{n},x,2026-01-02T00:00:00+00:00,Peer Allowance,5.00,5.00,allowance\n"
+                    )
+                    .as_bytes(),
+                )
+                .unwrap();
+            builder.insert("transactions.csv", blob, 0o100644).unwrap();
+            let tree_id = builder.write().unwrap();
+            let tree = bare.find_tree(tree_id).unwrap();
+            let theirs_oid = bare.commit(None, &sig, &sig, "peer edit", &tree, &[]).unwrap();
+            bare.reference("refs/lgs-auth/heads/main", theirs_oid, true, "auth tip").unwrap();
+
+            projects_json.push(format!(
+                r#"{{"name":"allowance-{}","clone_url":"{}","working_repo_path":"{}"}}"#,
+                child.id,
+                bare_dir.path().to_str().unwrap(),
+                child_dir.to_str().unwrap(),
+            ));
+            child_ids.push(child.id.clone());
+            let _ = ours_oid; // only needed to prove the repo has a HEAD; not asserted on directly
+            bare_dirs.push(bare_dir);
+        }
+
+        let script_dir = TempDir::new().unwrap();
+        let script_path = script_dir.path().join("lgs");
+        let counter_path = script_dir.path().join("invocations");
+        let json = format!(r#"{{"projects":[{}]}}"#, projects_json.join(","));
+        // Appends one line to the counter file on every invocation, then
+        // prints the canned status JSON — a shell-script fake, never the
+        // real `lgs` binary.
+        std::fs::write(
+            &script_path,
+            format!(
+                "#!/bin/sh\necho invoked >> {}\ncat <<'JSON'\n{json}\nJSON\n",
+                counter_path.to_str().unwrap()
+            ),
+        )
+        .unwrap();
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&script_path).unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&script_path, perms).unwrap();
+        }
+
+        let lgs = LgsClient::new(script_path);
+        let engine = ChildSyncEngine::new(lgs, backend.csv_connection.clone());
+
+        let (message_tx, message_rx) = mpsc::channel::<SyncMessage>();
+        let messenger = UiMessenger::new(message_tx, noop_wake());
+        let shutdown = Arc::new(AtomicBool::new(false));
+
+        let responder_child_ids = child_ids.clone();
+        let responder = std::thread::spawn(move || {
+            let mut applied: Vec<String> = Vec::new();
+            loop {
+                match message_rx.recv_timeout(Duration::from_secs(5)) {
+                    Ok(SyncMessage::GetChildIdsRequest { response_tx }) => {
+                        let _ = response_tx.send(responder_child_ids.clone());
+                    }
+                    Ok(SyncMessage::ApplyMerge { child_id, .. }) => applied.push(child_id),
+                    Ok(_) => {}
+                    Err(_) => break,
+                }
+            }
+            applied
+        });
+
+        run_child_sync_cycles(&Some(engine), &messenger, &shutdown);
+        drop(messenger);
+        let applied = responder.join().unwrap();
+
+        assert_eq!(
+            applied.len(),
+            2,
+            "precondition: both children must have actually been synced this tick: {applied:?}"
+        );
+
+        let invocations = std::fs::read_to_string(&counter_path).unwrap_or_default();
+        let count = invocations.lines().count();
+        assert_eq!(
+            count, 1,
+            "lgs status --json must be fetched exactly once per tick regardless of child count, \
+             got {count} invocation(s): {invocations:?}"
+        );
+    }
+
+    // --- Review: the recurring "reconstruct the whole SyncState from a
+    // spawn-time snapshot" defect (Task 12 for daemon_ownership, Task 19 for
+    // cloud_root). `persist_watermarks` is the structural fix: it is the
+    // only place `watermarks` is written, and the only field it ever
+    // changes — so a write to any OTHER field, from anywhere, at any time,
+    // must survive it.
+
+    /// The exact scenario the review named: the lgs first-run flow runs on
+    /// the UI thread and persists `cloud_root` (and flips
+    /// `daemon_ownership.installed_by_app`) into `sync_state.yaml` while the
+    /// AWS-transport sync thread is already running with a stale,
+    /// spawn-time snapshot that has neither. The thread's own periodic save
+    /// must not erase what the UI thread just wrote.
+    #[test]
+    fn a_ui_thread_write_to_a_non_watermark_field_survives_a_subsequent_watermark_save() {
+        let dir = TempDir::new().unwrap();
+        let path = sync_persistence::sync_state_path(dir.path());
+
+        // The thread's own spawn-time snapshot: sync was enabled with a
+        // remote_url, but lgs had not been set up yet.
+        let fallback = SyncState {
+            watermarks: HashMap::new(),
+            enabled: true,
+            remote_url: Some("https://example.com/sync".to_string()),
+            daemon_ownership: DaemonOwnership::default(),
+            cloud_root: None,
+        };
+        fallback.save(&path).unwrap();
+
+        // The UI thread completes lgs first run *after* this thread's
+        // snapshot was taken, and persists the result directly to the same
+        // file — exactly what `AllowanceTrackerApp::start_lgs_first_run`
+        // does.
+        let mut after_first_run = SyncState::load(&path).unwrap();
+        after_first_run.cloud_root = Some(PathBuf::from("/fake/cloud/root"));
+        after_first_run.daemon_ownership.installed_by_app = true;
+        after_first_run.save(&path).unwrap();
+
+        // The sync thread's next periodic save runs, carrying only its own
+        // watermark update.
+        let mut watermarks = HashMap::new();
+        watermarks.insert("child1".to_string(), 7u64);
+        persist_watermarks(&path, watermarks.clone(), &fallback).unwrap();
+
+        let after_persist = SyncState::load(&path).unwrap();
+        assert_eq!(
+            after_persist.cloud_root,
+            Some(PathBuf::from("/fake/cloud/root")),
+            "the UI thread's cloud_root write must survive the loop's own save"
+        );
+        assert!(
+            after_persist.daemon_ownership.installed_by_app,
+            "the UI thread's daemon_ownership write must survive the loop's own save"
+        );
+        assert_eq!(after_persist.watermarks, watermarks, "the loop's own watermark update must still land");
+    }
+
+    /// The other half: when `sync_state.yaml` cannot be read at all (never
+    /// written yet, or deleted out from under this thread), the fallback
+    /// supplies the non-watermark fields — this thread's own last-known
+    /// state, never blanket defaults that would silently disable sync.
+    #[test]
+    fn persist_watermarks_falls_back_to_the_threads_own_snapshot_when_the_file_is_missing() {
+        let dir = TempDir::new().unwrap();
+        let path = sync_persistence::sync_state_path(dir.path());
+        assert!(!path.exists(), "precondition: nothing written yet");
+
+        let fallback = SyncState {
+            watermarks: HashMap::new(),
+            enabled: true,
+            remote_url: Some("https://example.com/sync".to_string()),
+            daemon_ownership: DaemonOwnership { installed_by_app: true },
+            cloud_root: Some(PathBuf::from("/fake/root")),
+        };
+
+        let mut watermarks = HashMap::new();
+        watermarks.insert("child1".to_string(), 3u64);
+        persist_watermarks(&path, watermarks.clone(), &fallback).unwrap();
+
+        let saved = SyncState::load(&path).unwrap();
+        assert!(saved.enabled);
+        assert_eq!(saved.remote_url, Some("https://example.com/sync".to_string()));
+        assert!(saved.daemon_ownership.installed_by_app);
+        assert_eq!(saved.cloud_root, Some(PathBuf::from("/fake/root")));
+        assert_eq!(saved.watermarks, watermarks);
+    }
+
+    // --- Review Important-5: a leftover retry-queue event must survive a
+    // drain against `NullRemoteStorage`, not be silently discarded.
+
+    /// Directly exercises `push_event` — the function BOTH the retry-queue
+    /// drain (`sync_loop` step 1) and the new-event drain (step 2 and the
+    /// sleep loop) call — against `NullRemoteStorage`. If this returned
+    /// `Ok(())`, the retry-queue drain would read a leftover, undelivered
+    /// AWS event as "pushed" and remove it from the queue forever; a leaf
+    /// `Err` is what keeps it in `remaining_retries` (see `sync_loop`'s
+    /// step 1) instead.
+    #[test]
+    fn a_delete_event_against_the_null_remote_is_reported_as_failed_not_silently_dropped() {
+        let remote: Arc<dyn RemoteStorage> = Arc::new(crate::backend::storage::NullRemoteStorage);
+        let (message_tx, _message_rx) = mpsc::channel();
+        let messenger = UiMessenger::new(message_tx, noop_wake());
+
+        let event = SyncEvent::new(
+            EntityType::Transaction,
+            "tx1".to_string(),
+            "child1".to_string(),
+            SyncAction::Deleted,
+            SyncSource::Local,
+        );
+
+        let result = push_event(&remote, &event, &messenger);
+        assert!(
+            result.is_err(),
+            "a write against the null remote must fail, not silently succeed — a leftover \
+             retry-queue event depends on this to stay queued rather than being discarded"
+        );
     }
 }

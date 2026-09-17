@@ -104,8 +104,10 @@ impl AllowanceTrackerApp {
                     debug!("DEBUG: list_transactions_domain returned {} transactions", result.transactions.len());
                     
                     if let Some(latest_transaction) = result.transactions.first() {
-                        self.core.current_balance = latest_transaction.balance;
-                        log::debug!("Updated balance from latest transaction {}: ${:.2}", 
+                        // UI-display boundary: current_balance is an f64 used
+                        // directly by egui widgets.
+                        self.core.current_balance = latest_transaction.balance.cents() as f64 / 100.0;
+                        log::debug!("Updated balance from latest transaction {}: ${:.2}",
                                   latest_transaction.id, self.core.current_balance);
                     } else {
                         // No transactions found - set balance to 0
