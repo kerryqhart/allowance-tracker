@@ -40,6 +40,25 @@ use crate::ui::state::{
 use shared::sync::EntityType;
 use shared::ChildId;
 
+/// Declared here rather than in `ui/mod.rs` as a top-level sibling: `apply_merge`
+/// and `apply_fast_forward` below are private methods (module-private, no
+/// `pub(crate)`), and Rust's default visibility is scoped to the defining
+/// module AND ITS DESCENDANTS — not "anywhere in the same crate." A
+/// `test_support` registered as a sibling of `app_coordinator` under `ui`
+/// cannot see them, full stop; that is a hard compiler error
+/// (`E0624: method ... is private`), not a style preference. Nesting the
+/// module here makes it a descendant of `app_coordinator`, so it can call
+/// the real private methods without widening their visibility at all — the
+/// alternative (bumping them to `pub(crate)`, as Task 8 did for
+/// `merge_diverged` / `working_tree_dirty`) is exactly the production-code
+/// change this task was told not to make. The file still lives at the
+/// specified path, `src/ui/test_support.rs`; only its module path differs
+/// from the brief's sketch (`ui::app_coordinator::test_support`, not
+/// `ui::test_support`).
+#[cfg(test)]
+#[path = "test_support.rs"]
+pub mod test_support;
+
 /// Guard for the AWS-wire chokepoint in `read_entity_for_sync`: that path
 /// serializes the RAW domain `Transaction` directly (it never goes through
 /// `mappers::transaction_to_dto`, so it gets none of that function's

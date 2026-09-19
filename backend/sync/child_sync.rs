@@ -1362,6 +1362,13 @@ ex-3-a,keiko,2026-01-03T00:00:00+00:00,Book,-3.00,7.00,expense\n";
     /// this drives `merge_diverged` directly against a plain, un-cloned
     /// repo with no `lgs` remote at all — no fetch, no daemon, nothing but
     /// three already-resolved commits.
+    ///
+    /// Task 10 fix: `theirs` used to be byte-identical to `base` (`TX_A`),
+    /// so this test proved only that `merge_diverged` is callable — no real
+    /// divergence was ever exercised (`merge` would resolve straight to
+    /// `ours` verbatim). `theirs` now uses `TX_THEIRS`, which adds its own
+    /// row (`ex-3-a`) that exists on neither `base` nor `ours`, so a
+    /// genuine three-way union must happen for this to pass.
     #[test]
     fn merge_diverged_computes_the_same_result_without_a_remote() {
         let dir = tempfile::tempdir().unwrap();
@@ -1381,14 +1388,22 @@ ex-3-a,keiko,2026-01-03T00:00:00+00:00,Book,-3.00,7.00,expense\n";
             &repo,
             "theirs",
             &[&base_commit],
-            &[(TRANSACTIONS_FILE, TX_A)],
+            &[(TRANSACTIONS_FILE, TX_THEIRS)],
             1_700_000_500,
         );
 
         let outcome = merge_diverged(&repo, ours, theirs, Some(base)).unwrap();
         match outcome {
-            CycleOutcome::Merged { parents, .. } => {
+            CycleOutcome::Merged { parents, rows, .. } => {
                 assert_eq!(parents, (ours.to_string(), theirs.to_string()));
+                let ids: std::collections::HashSet<&str> =
+                    rows.iter().map(|r| r.id.as_str()).collect();
+                assert_eq!(
+                    ids,
+                    std::collections::HashSet::from(["in-1-a", "ex-2-a", "ex-3-a"]),
+                    "a genuine divergence must union both sides' unique rows with the shared \
+                     base row, not just echo one side"
+                );
             }
             other => panic!("expected Merged, got {other:?}"),
         }
