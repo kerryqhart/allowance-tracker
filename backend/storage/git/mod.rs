@@ -359,10 +359,11 @@ impl GitManager {
     /// user's *write*: the data is already on disk.
     ///
     /// `#[must_use]` so that discarding this is a deliberate act. The
-    /// dirty-tree guard (`resolve_dirty_tree`) is what actually recovers a
-    /// file left uncommitted by a failure here — it stages every tracked
-    /// path on the next sync cycle, which is why propagating this error was
-    /// considered and rejected as redundant.
+    /// dirty-tree guard (`resolve_dirty_tree`, in
+    /// `egui-frontend/src/ui/app_coordinator.rs`) is what actually recovers
+    /// a file left uncommitted by a failure here — it stages every tracked
+    /// path via `index.update_all` on the next sync cycle, which is why
+    /// propagating this error was considered and rejected as redundant.
     #[must_use = "a commit failure leaves the file uncommitted until the next sync cycle's guard picks it up"]
     pub fn commit_file_change<P: AsRef<Path>>(
         &self,
