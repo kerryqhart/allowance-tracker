@@ -57,9 +57,7 @@ impl SyncState {
                 std::fs::create_dir_all(parent)?;
             }
         }
-        let temp = path.with_extension("yaml.tmp");
-        std::fs::write(&temp, contents)?;
-        std::fs::rename(&temp, path)?;
+        crate::backend::storage::atomic::write(path, contents)?;
         Ok(())
     }
 }
@@ -92,9 +90,7 @@ impl RetryQueue {
                 std::fs::create_dir_all(parent)?;
             }
         }
-        let temp = path.with_extension("yaml.tmp");
-        std::fs::write(&temp, contents)?;
-        std::fs::rename(&temp, path)?;
+        crate::backend::storage::atomic::write(path, contents)?;
         Ok(())
     }
 }

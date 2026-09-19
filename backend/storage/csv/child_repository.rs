@@ -140,9 +140,7 @@ impl ChildRepository {
         let yaml_content = serde_yaml::to_string(&yaml_child)?;
 
         // Atomic write using temp file
-        let temp_path = yaml_path.with_extension("tmp");
-        fs::write(&temp_path, yaml_content)?;
-        fs::rename(&temp_path, &yaml_path)?;
+        crate::backend::storage::atomic::write(&yaml_path, yaml_content)?;
 
         info!("Saved child {} to directory: {}", child.name, child_dir.display());
 

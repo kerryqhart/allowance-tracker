@@ -95,9 +95,7 @@ impl AllowanceRepository {
         let yaml_content = serde_yaml::to_string(&yaml_model)?;
 
         // Use atomic write pattern: write to temp file, then rename
-        let temp_path = yaml_path.with_extension("tmp");
-        std::fs::write(&temp_path, yaml_content)?;
-        std::fs::rename(&temp_path, &yaml_path)?;
+        crate::backend::storage::atomic::write(&yaml_path, yaml_content)?;
 
         debug!("Saved allowance config to {:?}", yaml_path);
 

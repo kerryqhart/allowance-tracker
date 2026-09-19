@@ -141,9 +141,7 @@ impl GlobalConfigRepository {
         let yaml_content = serde_yaml::to_string(config)?;
         
         // Use atomic write pattern: write to temp file, then rename
-        let temp_path = config_path.with_extension("tmp");
-        fs::write(&temp_path, yaml_content)?;
-        fs::rename(&temp_path, &config_path)?;
+        crate::backend::storage::atomic::write(&config_path, yaml_content)?;
         
         debug!("Saved global config to {:?}", config_path);
         Ok(())
