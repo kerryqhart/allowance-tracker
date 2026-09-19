@@ -451,37 +451,7 @@ impl ChildSyncEngine {
             }
             Cycle::Diverged => {
                 let auth_oid = auth_oid.expect("Cycle::Diverged implies classify saw Some(auth)");
-
-                // Read all three sides as blobs and resolve provenance here,
-                // so the merge itself never walks history.
-                let base = base_oid.map(|o| read_rows(&repo, o)).transpose()?;
-                let ours = Sided {
-                    rows: read_rows(&repo, ours_oid)?,
-                    provenance: provenance(&repo, ours_oid)?,
-                };
-                let theirs = Sided {
-                    rows: read_rows(&repo, auth_oid)?,
-                    provenance: provenance(&repo, auth_oid)?,
-                };
-
-                let diverged = goals_diverged(&repo, ours_oid, auth_oid)?;
-                if diverged {
-                    log::warn!(
-                        "goals.csv diverged between the local tip ({ours_oid}) and the \
-                         authoritative peer tip ({auth_oid}); allowance_core::merge does not \
-                         model goals, so this cycle's transactions merge proceeds but goals.csv \
-                         is left exactly as it is locally. Any goal edits made on the other \
-                         machine are NOT reflected here and must be reconciled by hand."
-                    );
-                }
-
-                let outcome = merge(base.as_deref(), &ours, &theirs);
-                Ok(CycleOutcome::Merged {
-                    rows: outcome.rows,
-                    parents: (ours_oid.to_string(), auth_oid.to_string()),
-                    decisions: outcome.decisions,
-                    goals_diverged: diverged,
-                })
+                merge_diverged(&repo, ours_oid, auth_oid, base_oid)
             }
         }
     }
@@ -971,6 +941,49 @@ pub fn push_with_retry(repo: &Repository, branch: &str, max: u8) -> Result<()> {
     push_with_retry_inner(max, || push_lgs(repo, branch))
 }
 
+/// Compute the merge for a diverged cycle. Extracted from `cycle_against`'s
+/// `Cycle::Diverged` arm so the same code can be driven in tests without a
+/// remote or a daemon — the sync loop's decisions must be testable by
+/// construction, not only through a live fetch.
+///
+/// Reads all three sides as blobs and resolves provenance here, so the merge
+/// itself never walks history.
+pub(crate) fn merge_diverged(
+    repo: &Repository,
+    ours_oid: Oid,
+    auth_oid: Oid,
+    base_oid: Option<Oid>,
+) -> Result<CycleOutcome> {
+    let base = base_oid.map(|o| read_rows(repo, o)).transpose()?;
+    let ours = Sided {
+        rows: read_rows(repo, ours_oid)?,
+        provenance: provenance(repo, ours_oid)?,
+    };
+    let theirs = Sided {
+        rows: read_rows(repo, auth_oid)?,
+        provenance: provenance(repo, auth_oid)?,
+    };
+
+    let diverged = goals_diverged(repo, ours_oid, auth_oid)?;
+    if diverged {
+        log::warn!(
+            "goals.csv diverged between the local tip ({ours_oid}) and the authoritative peer \
+             tip ({auth_oid}); allowance_core::merge does not model goals, so this cycle's \
+             transactions merge proceeds but goals.csv is left exactly as it is locally. Any \
+             goal edits made on the other machine are NOT reflected here and must be reconciled \
+             by hand."
+        );
+    }
+
+    let outcome = merge(base.as_deref(), &ours, &theirs);
+    Ok(CycleOutcome::Merged {
+        rows: outcome.rows,
+        parents: (ours_oid.to_string(), auth_oid.to_string()),
+        decisions: outcome.decisions,
+        goals_diverged: diverged,
+    })
+}
+
 /// Read `transactions.csv` as of `oid`, parsed. An absent file (a commit
 /// that predates the file, or an unrelated root) reads as no rows — the
 /// merge already treats a `None` base as "union both sides", and an empty
@@ -1367,6 +1380,44 @@ ex-3-a,keiko,2026-01-03T00:00:00+00:00,Book,-3.00,7.00,expense\n";
         match outcome {
             CycleOutcome::Merged { goals_diverged, .. } => {
                 assert!(!goals_diverged, "goals.csv is identical on both sides");
+            }
+            other => panic!("expected Merged, got {other:?}"),
+        }
+    }
+
+    /// The merge computation must be reachable without a remote, so tests
+    /// can drive the real classify->merge->apply loop rather than a
+    /// reimplementation of it. Unlike `cycle_against`'s own tests above,
+    /// this drives `merge_diverged` directly against a plain, un-cloned
+    /// repo with no `lgs` remote at all — no fetch, no daemon, nothing but
+    /// three already-resolved commits.
+    #[test]
+    fn merge_diverged_computes_the_same_result_without_a_remote() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = Repository::init(dir.path()).unwrap();
+
+        let base = commit_with_files(&repo, "base", &[], &[(TRANSACTIONS_FILE, TX_A)], 1_700_000_000);
+        let base_commit = repo.find_commit(base).unwrap();
+
+        let ours = commit_with_files(
+            &repo,
+            "ours",
+            &[&base_commit],
+            &[(TRANSACTIONS_FILE, TX_OURS)],
+            1_700_000_050,
+        );
+        let theirs = commit_with_files(
+            &repo,
+            "theirs",
+            &[&base_commit],
+            &[(TRANSACTIONS_FILE, TX_A)],
+            1_700_000_500,
+        );
+
+        let outcome = merge_diverged(&repo, ours, theirs, Some(base)).unwrap();
+        match outcome {
+            CycleOutcome::Merged { parents, .. } => {
+                assert_eq!(parents, (ours.to_string(), theirs.to_string()));
             }
             other => panic!("expected Merged, got {other:?}"),
         }
