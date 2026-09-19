@@ -34,7 +34,7 @@ use crate::backend::sync::child_sync::{
     clear_interrupted_merge_marker, current_branch, goals_diverged, push_with_retry, working_tree_dirty,
 };
 use crate::ui::state::{
-    FastForwardBlockedNotice, StaleHeadPollAction, SyncFailureNotice, STALE_HEAD_REFUSAL_LIMIT,
+    FastForwardBlockedNotice, NoticeSeverity, StaleHeadPollAction, SyncFailureNotice, STALE_HEAD_REFUSAL_LIMIT,
 };
 use shared::sync::EntityType;
 use shared::ChildId;
@@ -769,6 +769,10 @@ impl AllowanceTrackerApp {
                                   here, but will not sync until you run `lgs unarchive` for this \
                                   project."
                             .to_string(),
+                        // Blocking: this never resolves itself by retrying —
+                        // a human has to run `lgs unarchive` before this
+                        // child syncs again.
+                        severity: NoticeSeverity::Blocking,
                     });
                 }
             }
@@ -1361,6 +1365,8 @@ impl AllowanceTrackerApp {
         self.sync.record_sync_failure(SyncFailureNotice {
             child_id: child_id.to_string(),
             message: err.to_string(),
+            // Blocking: this child is not syncing until a human acts.
+            severity: NoticeSeverity::Blocking,
         });
     }
 
@@ -1640,6 +1646,11 @@ impl AllowanceTrackerApp {
             self.sync.record_sync_failure(SyncFailureNotice {
                 child_id: child_id.to_string(),
                 message,
+                // Blocking: a genuine checkout failure (I/O error, corrupt
+                // object, permissions problem), not the benign
+                // uncommitted-content case handled above — this child is
+                // not syncing until a human looks at it.
+                severity: NoticeSeverity::Blocking,
             });
             return ApplyFastForwardOutcome::Failed;
         }
