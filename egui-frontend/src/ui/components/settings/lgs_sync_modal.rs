@@ -27,6 +27,7 @@
 use eframe::egui;
 
 use crate::backend::domain::sync_persistence::{sync_state_path, SyncState};
+use crate::backend::storage::csv::ChildRegistry;
 use crate::backend::sync::{
     adopt_child, adoptable_children, ensure_daemon, ensure_lgs_binary, plan_lgs_migration, run_first_run,
     run_lgs_migration, AdoptableChild, ChildSyncEngine, DaemonOutcome, LgsClient, StageResult, SyncPaths,
@@ -34,6 +35,7 @@ use crate::backend::sync::{
 use crate::backend::Backend;
 use crate::ui::app_state::AllowanceTrackerApp;
 use crate::ui::components::settings::shared::SettingsModalStyle;
+use crate::ui::state::{NoticeSeverity, SyncFailureNotice};
 
 /// State for Settings → Sync with another Mac.
 #[derive(Debug, Default)]
@@ -161,7 +163,7 @@ impl AllowanceTrackerApp {
                                     );
                                 }
                                 render_check_sync_results(ui, &self.settings.lgs_sync_form.check_sync_results);
-                                render_sync_notices(ui, &self.sync);
+                                render_sync_notices(ui, &self.sync, &self.core.backend.csv_connection.registry());
 
                                 ui.add_space(8.0);
                                 ui.horizontal(|ui| {
@@ -533,6 +535,18 @@ impl AllowanceTrackerApp {
         }
     }
 
+    /// Open Settings → "Sync with another Mac…" — the one existing
+    /// mechanism for showing this modal (`show_lgs_sync_modal` +
+    /// `just_opened`, as `children_modal.rs`'s `Action::OpenLgsSync` already
+    /// does). A thin wrapper so a second caller — the child-picker badge —
+    /// does not need to know those two fields exist, and so a future
+    /// caller never invents a second way to open this modal.
+    pub fn open_sync_settings_modal(&mut self) {
+        self.settings.lgs_sync_form.clear();
+        self.settings.lgs_sync_form.just_opened = true;
+        self.settings.show_lgs_sync_modal = true;
+    }
+
     /// Resolve a live `LgsClient` + `SyncPaths` for the settings panel, or
     /// set an error message and return `None` when lgs has not been set up
     /// yet (should not happen given the callers all gate on
@@ -611,7 +625,14 @@ fn render_check_sync_results(ui: &mut egui::Ui, results: &[StageResult]) {
 /// loud" mechanism this branch built terminated in a struct field nobody
 /// rendered. This reads exactly what is already recorded — no new state, no
 /// new panel — and shows nothing when all three are empty.
-fn render_sync_notices(ui: &mut egui::Ui, sync: &crate::ui::state::SyncUiState) {
+///
+/// Task 14: `sync_failures` are rendered blocking-first
+/// (`notices_blocking_first`) and through [`render_sync_failure_notice`],
+/// which names the child instead of printing `child_id` raw. The
+/// `goals_diverged` and `fast_forward_blocked` loops are left exactly as
+/// they were — collapsing all three into one `SyncNotice` shape is a named
+/// follow-up, not this task.
+fn render_sync_notices(ui: &mut egui::Ui, sync: &crate::ui::state::SyncUiState, registry: &ChildRegistry) {
     if sync.sync_failures.is_empty() && sync.goals_diverged.is_empty() && sync.fast_forward_blocked.is_empty() {
         return;
     }
@@ -623,8 +644,8 @@ fn render_sync_notices(ui: &mut egui::Ui, sync: &crate::ui::state::SyncUiState) 
         .max_height(120.0)
         .auto_shrink([false, false])
         .show(ui, |ui| {
-            for notice in &sync.sync_failures {
-                render_sync_notice_line(ui, &notice.child_id, &notice.message);
+            for notice in sync.notices_blocking_first() {
+                render_sync_failure_notice(ui, registry, notice);
             }
             for notice in &sync.goals_diverged {
                 render_sync_notice_line(
@@ -648,6 +669,59 @@ fn render_sync_notices(ui: &mut egui::Ui, sync: &crate::ui::state::SyncUiState) 
                 );
             }
         });
+}
+
+/// Look up a registered child's display name — what a parent actually
+/// recognizes — rather than the internal id `SyncFailureNotice` carries.
+/// Thin wrapper over `RegistryEntry::label` (`child_registry.rs`); no
+/// second lookup mechanism, just this module's one place that needs it.
+fn registry_label_for(registry: &ChildRegistry, child_id: &str) -> Option<String> {
+    registry.entries().iter().find(|e| e.id.as_str() == child_id).map(|e| e.label.clone())
+}
+
+/// Look up a registered child's folder — what "Show the folder" opens.
+/// Thin wrapper over `RegistryEntry::path`, same rationale as
+/// [`registry_label_for`].
+fn registry_path_for(registry: &ChildRegistry, child_id: &str) -> Option<std::path::PathBuf> {
+    registry.entries().iter().find(|e| e.id.as_str() == child_id).map(|e| e.path.clone())
+}
+
+/// Render one `SyncFailureNotice`. The sentence is composed HERE, where the
+/// display name and folder path live — not inside the sync engine. Wording
+/// changes must never be edits to `app_coordinator.rs`; that is how "stage"
+/// and a git oid reached a parent's screen in the first place (see
+/// `DirtyTreeError`'s doc comment). `notice.message` is still shown as the
+/// detail line — it already carries the specific, per-cause explanation
+/// (archived project, checkout failure, dirty-tree error) that a fixed
+/// generic sentence would erase for two of the three notice sources — but
+/// it is now paired with a name-based, severity-aware headline instead of
+/// a raw `child_id`, and with a real remediation action.
+fn render_sync_failure_notice(ui: &mut egui::Ui, registry: &ChildRegistry, notice: &SyncFailureNotice) {
+    let name = registry_label_for(registry, &notice.child_id).unwrap_or_else(|| notice.child_id.clone());
+    let (headline, color) = match notice.severity {
+        NoticeSeverity::Blocking => {
+            (format!("{name}'s sync is paused."), egui::Color32::from_rgb(190, 60, 60))
+        }
+        NoticeSeverity::Informational => {
+            (format!("{name}: sync note"), egui::Color32::from_rgb(150, 130, 30))
+        }
+    };
+
+    ui.horizontal_wrapped(|ui| {
+        ui.label(egui::RichText::new(&headline).strong().color(color));
+    });
+    ui.add(
+        egui::Label::new(egui::RichText::new(&notice.message).color(egui::Color32::from_rgb(120, 120, 120)))
+            .wrap(),
+    );
+    // Without this the remediation instruction is "open Terminal and run
+    // git", which is not an instruction this product can give.
+    if ui.button("Show the folder").clicked() {
+        if let Some(path) = registry_path_for(registry, &notice.child_id) {
+            let _ = std::process::Command::new("open").arg(path).spawn();
+        }
+    }
+    ui.add_space(4.0);
 }
 
 fn render_sync_notice_line(ui: &mut egui::Ui, child_id: &str, detail: &str) {

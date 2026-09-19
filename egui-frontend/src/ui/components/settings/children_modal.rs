@@ -503,9 +503,7 @@ impl AllowanceTrackerApp {
             Action::OpenLgsSync => {
                 self.settings.show_children_modal = false;
                 self.settings.children_form.clear();
-                self.settings.lgs_sync_form.clear();
-                self.settings.lgs_sync_form.just_opened = true;
-                self.settings.show_lgs_sync_modal = true;
+                self.open_sync_settings_modal();
             }
             Action::Close => {
                 self.settings.show_children_modal = false;
