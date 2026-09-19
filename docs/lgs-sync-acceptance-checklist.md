@@ -320,6 +320,15 @@ on every click. This item exists to confirm that revision holds in
 practice, on a real daemon and a real remote, not just in the local-bare-
 repo integration tests that exercise the same code path in CI.
 
+### Power-loss durability of `atomic::write`
+
+**Not verifiable in CI, and deliberately not claimed.** `atomic::write`
+guarantees that no reader observes a partial file (from `rename(2)`). It does
+NOT guarantee the most recent write survives a power cut: `fsync(2)` on macOS
+does not flush the drive's volatile cache, and `F_FULLFSYNC` was rejected as
+too expensive per write. Killing the process with SIGKILL proves nothing
+either — the page cache outlives the process. Accepted unverified.
+
 ## What CI already covers
 
 Do **not** re-test these by hand — they have real, passing automated
