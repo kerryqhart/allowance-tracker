@@ -31,7 +31,7 @@ use crate::ui::components::styling::{setup_kid_friendly_style, draw_image_backgr
 use crate::backend::domain::{BalanceService, GoalsDivergedNotice, SyncCommand, SyncMessage, SyncStatus};
 use crate::backend::storage::GitManager;
 use crate::backend::sync::child_sync::{
-    current_branch, goals_diverged, push_with_retry, recover_if_dirty, working_tree_dirty, Recovered,
+    clear_interrupted_merge_marker, current_branch, goals_diverged, push_with_retry, working_tree_dirty,
 };
 use crate::backend::sync::paths::FILES_THIS_APP_OWNS;
 use crate::ui::state::{
@@ -955,42 +955,22 @@ impl AllowanceTrackerApp {
             }
         };
 
-        // Recover from a crash between a previous `apply_merge` writing
-        // `transactions.csv` and it creating the follow-up merge commit —
-        // see `recover_if_dirty`'s doc comment for why discarding (never
-        // salvaging) a dirty tree is safe here: the merge that produced it
-        // is a pure function of `(base, ours, theirs)`, and both `ours`
-        // (HEAD, untouched by a dirty working tree) and `theirs` (already
-        // in the object database) are still exactly what they were, so
-        // whatever runs next reproduces the same rows byte for byte. Doing
-        // this before the HEAD check below, not after: a dirty tree never
-        // moves HEAD, so it cannot change that check's answer, and starting
-        // from a clean tree keeps everything that follows (the write, the
-        // stage-and-commit) operating on known-good state.
-        match recover_if_dirty(&repo) {
-            Ok(Recovered::Clean) => {}
-            Ok(Recovered::DiscardedAndReMerged) => {
-                log::warn!(
-                    "Child {child_id}'s working tree was dirty before applying this merge \
-                     (likely a crash between a previous merge's file write and its commit); \
-                     discarded the dirty state — recover_if_dirty's own doc comment explains why \
-                     recomputing the SAME merge deterministically from (base, ours, theirs) \
-                     loses nothing that THAT merge attempt produced. This says nothing about \
-                     protecting any MCP-authored row that might independently be sitting in this \
-                     dirty tree: that protection is the dirty-tree guard below (unconditional, \
-                     not marker-gated), not this recovery step."
-                );
-            }
-            Err(e) => {
-                log::error!(
-                    "Cannot check/recover child {child_id}'s working tree before applying a \
-                     merge: {e}"
-                );
-                self.sync.status = SyncStatus::Error(format!(
-                    "Sync failed for {child_id}: could not verify its working tree was clean"
-                ));
-                return ApplyMergeOutcome::Failed;
-            }
+        // A marker means a PREVIOUS merge for this child was interrupted. It
+        // is a breadcrumb only — the dirty-tree guard below owns all content
+        // handling, including for this case. See
+        // `clear_interrupted_merge_marker`'s doc comment for why resetting
+        // here destroyed MCP-authored rows.
+        match clear_interrupted_merge_marker(&repo) {
+            Ok(true) => log::warn!(
+                "A previous merge for child {child_id} was interrupted; its marker has been \
+                 cleared. Any uncommitted content is left exactly as it is — the dirty-tree \
+                 guard below commits it."
+            ),
+            Ok(false) => {}
+            Err(e) => log::warn!(
+                "Could not clear child {child_id}'s interrupted-merge marker (continuing — the \
+                 marker is diagnostic only): {e}"
+            ),
         }
 
         let (ours_str, theirs_str) = parents;
@@ -1087,10 +1067,10 @@ impl AllowanceTrackerApp {
         // already handles on the fast-forward path — this is the merge
         // path's equivalent protection, which had none.
         //
-        // `recover_if_dirty` above does NOT catch this: it only fires when
-        // `MERGE_IN_PROGRESS_MARKER` says a PREVIOUS `apply_merge` crashed
-        // mid-write, and correctly leaves an ordinary dirty tree (this
-        // case) alone.
+        // `clear_interrupted_merge_marker` above does not catch this: it only
+        // ever clears a stale marker file — it never inspects or touches
+        // working-tree content, so an ordinary dirty tree (this case) is
+        // untouched by it either way.
         //
         // Rather than write over it, commit the dirty tree first — as an
         // ordinary local commit, staging only the files this app owns —
@@ -1151,12 +1131,13 @@ impl AllowanceTrackerApp {
             ),
         }
 
-        // Write the crash-recovery marker BEFORE the first working-tree byte
-        // changes below — its presence is what lets a future `apply_merge`
-        // call (via `recover_if_dirty`, above) tell "we crashed mid-merge"
-        // apart from the AWS transport's ordinary uncommitted writes. Not
-        // fatal if this fails: see `write_merge_marker`'s doc comment for
-        // why losing it only costs the fast recovery path, not correctness.
+        // Write the interrupted-merge marker BEFORE the first working-tree
+        // byte changes below — its presence is what lets a future
+        // `apply_merge` call (via `clear_interrupted_merge_marker`, above)
+        // know a merge here began and did not finish. It is diagnostic only
+        // now: nothing branches on it. Not fatal if this fails: see
+        // `write_merge_marker`'s doc comment for why losing it only costs
+        // that breadcrumb, not correctness.
         if let Err(e) = crate::backend::sync::child_sync::write_merge_marker(&repo, ours_str, theirs_str) {
             log::warn!(
                 "Could not write the crash-recovery marker for child {child_id} before applying \
@@ -1208,15 +1189,17 @@ impl AllowanceTrackerApp {
             }
         };
 
-        // The merge commit exists now — the crash window the marker guards
-        // is over. Clear it so a future `recover_if_dirty` never mistakes
-        // some LATER, unrelated dirty state (e.g. the AWS transport's
-        // ordinary uncommitted writes) for a crash that already happened.
+        // The merge commit exists now, so this marker no longer describes an
+        // interruption. Clear it so a future `clear_interrupted_merge_marker`
+        // call doesn't log a false-positive warning about an interruption
+        // that never happened — that function never touches content either
+        // way, so leaving this marker stale is a diagnostic annoyance, not a
+        // correctness risk.
         if let Err(e) = crate::backend::sync::child_sync::clear_merge_marker(&repo) {
             log::warn!(
-                "Could not clear the crash-recovery marker for child {child_id} after applying \
-                 this merge (harmless — the next apply's recover_if_dirty will clean it up if \
-                 nothing is actually dirty): {e}"
+                "Could not clear the interrupted-merge marker for child {child_id} after \
+                 applying this merge (harmless — the next apply's \
+                 `clear_interrupted_merge_marker` call will clear it): {e}"
             );
         }
 
@@ -1386,16 +1369,17 @@ impl AllowanceTrackerApp {
     /// tracked comes along for free, so there is no separate goals-scope
     /// concern here.
     ///
-    /// No crash-recovery marker is needed for THIS function's own crash
+    /// No interrupted-merge marker is needed for THIS function's own crash
     /// window (unlike `apply_merge`'s): `checkout_tree` below is called
     /// with the target tree, not derived from HEAD, so a crash mid-checkout
     /// leaves HEAD still at the OLD commit (the ref move happens after,
     /// only once checkout succeeds) — the next cycle re-classifies as the
     /// same fast-forward and safely re-runs `checkout_tree` toward the same
-    /// target, which only ever writes what is still missing. `recover_if_dirty`
-    /// is still called first here purely to clean up a DIFFERENT crash's
-    /// leftover marker+dirty state (an unrelated `apply_merge` that crashed
-    /// earlier), not this function's own.
+    /// target, which only ever writes what is still missing.
+    /// `clear_interrupted_merge_marker` is still called first here purely to
+    /// clear a DIFFERENT crash's leftover marker (an unrelated `apply_merge`
+    /// that crashed earlier) — it never touches working-tree content, so it
+    /// is not a crash-recovery step for this function's own content either.
     ///
     /// Safety-checked twice before anything is written:
     /// - HEAD must still make `to` a genuine fast-forward — an ordinary
@@ -1408,9 +1392,8 @@ impl AllowanceTrackerApp {
     ///   `transactions.csv` without committing (see `apply_remote_entity`'s
     ///   doc comment). A dirty tree here is this app's normal steady state,
     ///   not a crash (see `child_sync::MERGE_IN_PROGRESS_MARKER`'s doc
-    ///   comment for the same point made about `recover_if_dirty`), so a
-    ///   force-checkout that clobbered it would be a data-loss bug, not a
-    ///   convenience.
+    ///   comment), so a force-checkout that clobbered it would be a
+    ///   data-loss bug, not a convenience.
     ///
     /// # Review Important-1: refusing forever would livelock this design's
     ///   own steady state
@@ -1449,29 +1432,22 @@ impl AllowanceTrackerApp {
             }
         };
 
-        // Clean up any leftover marker+dirty state from a DIFFERENT,
-        // earlier crashed `apply_merge` before doing anything else here —
-        // see this function's doc comment for why fast-forward itself needs
-        // no marker of its own.
-        match recover_if_dirty(&repo) {
-            Ok(Recovered::Clean) => {}
-            Ok(Recovered::DiscardedAndReMerged) => {
-                log::warn!(
-                    "Child {child_id}'s working tree was dirty before applying this \
-                     fast-forward (a crash-recovery marker from an earlier merge apply was \
-                     present); discarded the dirty state before checking out {to}."
-                );
-            }
-            Err(e) => {
-                log::error!(
-                    "Cannot check/recover child {child_id}'s working tree before applying a \
-                     fast-forward: {e}"
-                );
-                self.sync.status = SyncStatus::Error(format!(
-                    "Sync failed for {child_id}: could not verify its working tree was clean"
-                ));
-                return ApplyFastForwardOutcome::Failed;
-            }
+        // A marker means a PREVIOUS merge for this child was interrupted. It
+        // is a breadcrumb only — the dirty-tree guard below owns all content
+        // handling, including for this case. See
+        // `clear_interrupted_merge_marker`'s doc comment for why resetting
+        // here destroyed MCP-authored rows.
+        match clear_interrupted_merge_marker(&repo) {
+            Ok(true) => log::warn!(
+                "A previous merge for child {child_id} was interrupted; its marker has been \
+                 cleared. Any uncommitted content is left exactly as it is before checking out \
+                 {to}."
+            ),
+            Ok(false) => {}
+            Err(e) => log::warn!(
+                "Could not clear child {child_id}'s interrupted-merge marker (continuing — the \
+                 marker is diagnostic only): {e}"
+            ),
         }
 
         let to_oid = match git2::Oid::from_str(to) {
@@ -2400,10 +2376,10 @@ mod apply_merge_tests {
     /// CRITICAL-1 regression: Task 16 made the AWS apply path
     /// (`upsert_transaction_no_commit`, reached here via
     /// `apply_remote_entity`) deliberately non-committing, so an ordinary
-    /// dirty `transactions.csv` with NO crash-recovery marker present is
-    /// this design's STEADY STATE, not a crash. `recover_if_dirty` (marker-
-    /// gated) correctly leaves it alone — but the merge write used to then
-    /// bulldoze it unconditionally anyway, silently erasing any MCP-
+    /// dirty `transactions.csv` with NO interrupted-merge marker present is
+    /// this design's STEADY STATE, not a crash. `clear_interrupted_merge_marker`
+    /// never even looks at the tree in this no-marker case — but the merge
+    /// write used to then bulldoze it unconditionally anyway, silently erasing any MCP-
     /// authored row written since the tips this merge was computed
     /// against. Once the AWS watermark advances past that row it can never
     /// be re-fetched, so that used to be permanent, silent data loss.
