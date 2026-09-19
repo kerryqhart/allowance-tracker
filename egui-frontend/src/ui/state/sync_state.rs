@@ -99,7 +99,13 @@ pub struct SyncFailureNotice {
 
 /// UI state for sync operations
 pub struct SyncUiState {
-    /// Current sync status
+    /// Current sync status.
+    ///
+    /// **Currently read by no UI component.** Written in ~30 places in
+    /// `app_coordinator.rs` and rendered nowhere — a status write alone does
+    /// NOT tell the user anything. Anything the user must see goes through
+    /// `sync_failures` with `NoticeSeverity::Blocking`, which the
+    /// child-picker badge (`header.rs`) surfaces.
     pub status: SyncStatus,
 
     /// List of detected conflicts awaiting resolution
