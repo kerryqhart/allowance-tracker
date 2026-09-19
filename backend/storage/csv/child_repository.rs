@@ -104,11 +104,16 @@ impl ChildRepository {
 
         // Git commit the child.yaml change
         let action_description = format!("Updated child profile: {}", child.name);
-        let _ = self.git_manager.commit_file_change(
+        if let Err(e) = self.git_manager.commit_file_change(
             child_dir,
             "child.yaml",
             &action_description
-        );
+        ) {
+            // Deliberately non-fatal: the data is already on disk, and the
+            // sync guard commits any tracked file left dirty on its next
+            // cycle. Logged rather than discarded so this is visible.
+            warn!("git commit for child.yaml did not complete: {e}");
+        }
 
         Ok(())
     }

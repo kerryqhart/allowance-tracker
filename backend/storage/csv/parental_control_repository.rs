@@ -36,7 +36,7 @@ use anyhow::Result;
 
 
 use csv::Writer;
-use log::{info, debug};
+use log::{info, debug, warn};
 use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
 use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
@@ -192,11 +192,16 @@ impl ParentalControlRepository {
         let action_description = format!("Added parental control attempt (success: {})", record.success);
         
         // This is non-blocking - git errors won't fail the parental control operation
-        let _ = self.git_manager.commit_file_change(
+        if let Err(e) = self.git_manager.commit_file_change(
             dir,
             "parental_control_attempts.csv",
             &action_description
-        );
+        ) {
+            // Deliberately non-fatal: the data is already on disk, and the
+            // sync guard commits any tracked file left dirty on its next
+            // cycle. Logged rather than discarded so this is visible.
+            warn!("git commit for parental_control_attempts.csv did not complete: {e}");
+        }
 
         Ok(())
     }

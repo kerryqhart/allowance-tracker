@@ -101,11 +101,16 @@ impl AllowanceRepository {
 
         // Git commit the allowance config change
         let action_description = format!("Updated allowance config (${:.2}/week, active: {})", config.amount, config.is_active);
-        let _ = self.git_manager.commit_file_change(
+        if let Err(e) = self.git_manager.commit_file_change(
             child_dir,
             "allowance_config.yaml",
             &action_description
-        );
+        ) {
+            // Deliberately non-fatal: the data is already on disk, and the
+            // sync guard commits any tracked file left dirty on its next
+            // cycle. Logged rather than discarded so this is visible.
+            warn!("git commit for allowance_config.yaml did not complete: {e}");
+        }
 
         Ok(())
     }

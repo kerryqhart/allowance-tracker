@@ -96,11 +96,17 @@ impl GoalRepository {
         // Git commit the goals file change
         if let Some(parent_dir) = file_path.parent() {
             let action_description = format!("Updated goals for child directory: {}", child_id);
-            let _ = self.git_manager.commit_file_change(
+            if let Err(e) = self.git_manager.commit_file_change(
                 parent_dir,
                 "goals.csv",
                 &action_description
-            );
+            ) {
+                // Deliberately non-fatal: the data is already on disk, and
+                // the sync guard commits any tracked file left dirty on its
+                // next cycle. Logged rather than discarded so this is
+                // visible.
+                warn!("git commit for goals.csv did not complete: {e}");
+            }
         }
 
         Ok(())

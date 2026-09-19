@@ -198,11 +198,16 @@ impl TransactionRepository {
         // Git commit the transaction file change
         let child_dir = self.connection.child_dir(child_id)?;
         let action_description = format!("Updated transactions (total: {})", transactions.len());
-        let _ = self.git_manager.commit_file_change(
+        if let Err(e) = self.git_manager.commit_file_change(
             &child_dir,
             "transactions.csv",
             &action_description
-        );
+        ) {
+            // Deliberately non-fatal: the data is already on disk, and the
+            // sync guard commits any tracked file left dirty on its next
+            // cycle. Logged rather than discarded so this is visible.
+            warn!("git commit for transactions.csv did not complete: {e}");
+        }
 
         Ok(())
     }
