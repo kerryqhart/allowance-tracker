@@ -160,6 +160,27 @@ pub enum DirtyTreeError {
 /// reset gone nothing else validates, so committing unparseable bytes would
 /// push them to the peer and break `read_rows` on BOTH machines — turning a
 /// one-machine corruption into a two-machine outage.
+///
+/// # Why a successful parse is not sufficient on its own
+///
+/// `parse_transactions` runs `csv::Reader` with headers ON, so it consumes
+/// the file's FIRST LINE as a header and never validates it. A file
+/// truncated to a single junk line — `"garbage-from-a-crash"` — therefore
+/// parses as a header with zero data rows and returns `Ok`. Committing that
+/// is the exact outage this gate exists to prevent, in its worst form: the
+/// peer fetches it, its own `read_rows` also reads one header and zero rows,
+/// and the ledger reads as EMPTY on both machines. Nothing errors anywhere;
+/// the data is simply gone from both screens.
+///
+/// So a parse yielding zero rows is checked further: the first line must be
+/// the canonical header (`allowance_core::codec::HEADER`), which is the only
+/// thing `render_transactions` ever writes there. A genuinely empty ledger
+/// is header-only and passes; junk, and a zero-byte file, do not.
+///
+/// The check is deliberately scoped to the zero-row case, per review. A file
+/// with a junk first line AND well-formed data rows still passes, and that
+/// is a knowingly-accepted residual: every row survives it, identically on
+/// both machines, so it is not the silent-empty-ledger class of fault.
 fn resolve_dirty_tree(
     repo: &git2::Repository,
     message: &str,
@@ -175,8 +196,18 @@ fn resolve_dirty_tree(
     if tx_path.exists() {
         let text = std::fs::read_to_string(&tx_path)
             .map_err(|e| DirtyTreeError::Commit(anyhow::Error::from(e)))?;
-        if allowance_core::codec::parse_transactions(&text).is_err() {
-            return Err(DirtyTreeError::Unparseable { file: "transactions.csv" });
+        match allowance_core::codec::parse_transactions(&text) {
+            Err(_) => return Err(DirtyTreeError::Unparseable { file: "transactions.csv" }),
+            Ok(parsed) if parsed.rows.is_empty() => {
+                // `str::lines` strips a trailing `\r`, so this holds for
+                // CRLF files too; a zero-byte file yields `None` and fails
+                // the comparison, which is the intended fail-closed answer.
+                let first_line = text.lines().next().unwrap_or_default();
+                if first_line != allowance_core::codec::HEADER.join(",") {
+                    return Err(DirtyTreeError::Unparseable { file: "transactions.csv" });
+                }
+            }
+            Ok(_) => {}
         }
     }
 
@@ -1305,12 +1336,27 @@ impl AllowanceTrackerApp {
     /// Replaces eight copies of "format a message, set status, record a
     /// notice, return Failed" across the two dirty-tree functions.
     ///
-    /// `{err:#}` in the log walks the `#[source]` chain (that is why
+    /// The log line walks the `#[source]` chain by hand — that is why
     /// `DirtyTreeError` keeps `git2::Error` / `anyhow::Error` as sources
-    /// rather than flattening them into a string); `{err}` alone is the one
-    /// line recorded as the notice.
+    /// rather than flattening them into a string, and the cause detail is
+    /// the whole point of keeping them. It is written out explicitly because
+    /// `{err:#}` does NOT do it: `thiserror`'s generated `Display` ignores
+    /// the alternate flag, so `{err:#}` is byte-identical to `{err}` and
+    /// every underlying libgit2 / io message is silently dropped. (That is
+    /// `anyhow::Error`'s behaviour, not `std::error::Error`'s, and this is
+    /// not an `anyhow::Error`.)
+    ///
+    /// `err.to_string()` alone — no chain — is what the notice records: the
+    /// chain is developer detail for the log, not for a parent's screen.
     fn fail_sync(&mut self, child_id: &str, err: &DirtyTreeError) {
-        log::error!("Sync failed for child {child_id}: {err:#}");
+        let mut chain = err.to_string();
+        let mut source = std::error::Error::source(err);
+        while let Some(cause) = source {
+            chain.push_str(": ");
+            chain.push_str(&cause.to_string());
+            source = cause.source();
+        }
+        log::error!("Sync failed for child {child_id}: {chain}");
         self.sync.status = SyncStatus::Error(format!("Sync failed for {child_id}: {err}"));
         self.sync.record_sync_failure(SyncFailureNotice {
             child_id: child_id.to_string(),
@@ -2485,6 +2531,144 @@ mod apply_merge_tests {
         );
     }
 
+    /// Review Critical: the parse gate's own motivating example used to slip
+    /// straight through it.
+    ///
+    /// `parse_transactions` runs `csv::Reader` with headers ON, so it
+    /// consumes the first line as a header and never validates it. A file
+    /// truncated to one junk line therefore parses as `Ok` with zero rows,
+    /// and the guard used to commit and push it. The peer then fetches it
+    /// and its own `read_rows` does the identical thing — one header, zero
+    /// rows — so the ledger reads as EMPTY on both machines with nothing
+    /// erroring anywhere. That is the two-machine outage the gate exists to
+    /// prevent, in its worst form: silent, total, and symmetric.
+    ///
+    /// `resolve_dirty_tree` now requires a zero-row file's first line to be
+    /// the canonical `codec::HEADER`, which is the only thing
+    /// `render_transactions` ever writes. A genuinely empty ledger is
+    /// header-only and still commits (asserted below, so the check cannot
+    /// be "fixed" by refusing every empty file).
+    #[test]
+    fn a_transactions_csv_truncated_to_a_single_junk_line_is_refused_not_pushed() {
+        let (mut app, child_id, _temp) = app_with_git_backed_child();
+        let child_dir = app
+            .backend()
+            .csv_connection
+            .child_dir(&shared::ChildId::from(child_id.as_str()))
+            .unwrap();
+        let repo = Repository::open(&child_dir).unwrap();
+        let ours_oid = repo.head().unwrap().peel_to_commit().unwrap().id();
+        let ours_commit = repo.find_commit(ours_oid).unwrap();
+        let theirs_oid = commit_with_files(
+            &repo,
+            "their edit",
+            &[&ours_commit],
+            &[("transactions.csv", "id,child_id,date,description,amount,balance,type\n")],
+            1_700_000_500,
+        );
+
+        // The brief's own example of corruption, verbatim. It parses `Ok`.
+        let junk = "garbage-from-a-crash";
+        assert!(
+            allowance_core::codec::parse_transactions(junk).is_ok(),
+            "precondition: the codec really does accept this as a header with zero rows — \
+             that is the whole reason a successful parse cannot be the gate's only check"
+        );
+        std::fs::write(child_dir.join("transactions.csv"), junk).unwrap();
+
+        let outcome = app.apply_merge(
+            &child_id,
+            vec![],
+            &(ours_oid.to_string(), theirs_oid.to_string()),
+            &[],
+        );
+        assert_eq!(
+            outcome,
+            ApplyMergeOutcome::Failed,
+            "a file that reads as an empty ledger must never be committed and pushed"
+        );
+
+        let repo = Repository::open(&child_dir).unwrap();
+        assert_eq!(
+            repo.head().unwrap().peel_to_commit().unwrap().id(),
+            ours_oid,
+            "HEAD must not have moved — nothing was committed"
+        );
+        assert_eq!(
+            std::fs::read_to_string(child_dir.join("transactions.csv")).unwrap(),
+            junk,
+            "the corrupt file must be left exactly as found, for a human to look at"
+        );
+        assert!(
+            app.sync.sync_failures.iter().any(|n| n.child_id == child_id),
+            "the refusal must be surfaced durably, not merely logged"
+        );
+    }
+
+    /// The other half of the check above: a header-only `transactions.csv`
+    /// is a legitimately EMPTY ledger (every row deleted), not corruption,
+    /// and must still commit. Without this, "refuse zero-row files" would be
+    /// an equally wrong over-correction — it would stall any child whose
+    /// history was legitimately cleared.
+    #[test]
+    fn a_header_only_transactions_csv_is_a_legitimately_empty_ledger_and_still_commits() {
+        let (mut app, child_id, _temp) = app_with_git_backed_child();
+        let child_dir = app
+            .backend()
+            .csv_connection
+            .child_dir(&shared::ChildId::from(child_id.as_str()))
+            .unwrap();
+        let repo = Repository::open(&child_dir).unwrap();
+        let ours_oid = repo.head().unwrap().peel_to_commit().unwrap().id();
+        let ours_commit = repo.find_commit(ours_oid).unwrap();
+        let theirs_oid = commit_with_files(
+            &repo,
+            "their edit",
+            &[&ours_commit],
+            &[("transactions.csv", "id,child_id,date,description,amount,balance,type\n")],
+            1_700_000_500,
+        );
+
+        // Exactly what `render_transactions(&[])` produces — the canonical
+        // representation of "no transactions", asserted rather than typed
+        // out, so a codec change cannot silently invalidate this test.
+        let empty_ledger = allowance_core::codec::render_transactions(&[]);
+        assert_eq!(
+            empty_ledger.lines().next().unwrap(),
+            allowance_core::codec::HEADER.join(","),
+            "precondition: the canonical empty ledger is exactly the canonical header"
+        );
+        std::fs::write(child_dir.join("transactions.csv"), &empty_ledger).unwrap();
+
+        app.sync.status = SyncStatus::Idle;
+        let outcome = app.apply_merge(
+            &child_id,
+            vec![],
+            &(ours_oid.to_string(), theirs_oid.to_string()),
+            &[],
+        );
+        assert_eq!(
+            outcome,
+            ApplyMergeOutcome::DirtyTreeCommitted,
+            "an empty ledger is valid data and must be committed, not refused"
+        );
+
+        let repo = Repository::open(&child_dir).unwrap();
+        let new_head = repo.head().unwrap().peel_to_commit().unwrap();
+        assert_ne!(new_head.id(), ours_oid, "HEAD must have advanced");
+        let entry = new_head.tree().unwrap().get_path(std::path::Path::new("transactions.csv")).unwrap();
+        let blob = repo.find_blob(entry.id()).unwrap();
+        assert_eq!(
+            std::str::from_utf8(blob.content()).unwrap(),
+            empty_ledger,
+            "the committed tree must hold the empty ledger byte for byte"
+        );
+        assert!(
+            app.sync.sync_failures.iter().all(|n| n.child_id != child_id),
+            "committing an empty ledger is not a failure and must raise no notice"
+        );
+    }
+
     /// CRITICAL-1 regression: Task 16 made the AWS apply path
     /// (`upsert_transaction_no_commit`, reached here via
     /// `apply_remote_entity`) deliberately non-committing, so an ordinary
@@ -2902,6 +3086,21 @@ mod apply_merge_tests {
 mod apply_fast_forward_tests {
     use super::{ApplyFastForwardOutcome, SyncStatus};
     use crate::backend::domain::commands::child::{CreateChildCommand, SetActiveChildCommand};
+    /// Stand-in for "content the AWS transport wrote to `transactions.csv`
+    /// and deliberately did not commit" — the ordinary steady state these
+    /// tests exercise staging and exclusion against.
+    ///
+    /// Review fix: these tests used to use a single junk line
+    /// (`"uncommitted-aws-row"`) as this stand-in, which was fine when the
+    /// guard only staged files, and is not now that it parse-validates them.
+    /// Junk of exactly that shape is what `resolve_dirty_tree`'s
+    /// zero-row/header check is there to REFUSE (see its doc comment), so
+    /// using it here would have quietly turned these into tests of the
+    /// refusal path instead of the staging path they are named for. They
+    /// test staging and exclusion, not parsing, so they get well-formed
+    /// content — the gate is not weakened to accommodate them.
+    const UNCOMMITTED_AWS_ROW: &str = "id,child_id,date,description,amount,balance,type\n\
+         in-aws-1,test-kid,2026-03-01T09:00:00+00:00,Uncommitted AWS row,4.00,14.00,income\n";
     use crate::backend::domain::commands::transactions::CreateTransactionCommand;
     use crate::backend::domain::SyncCommand;
     use crate::backend::Backend;
@@ -3112,7 +3311,7 @@ mod apply_fast_forward_tests {
         // Simulate the AWS transport's ordinary uncommitted write:
         // transactions.csv modified on disk, HEAD untouched, no
         // crash-recovery marker (this is not a crash).
-        std::fs::write(child_dir.join("transactions.csv"), "uncommitted-aws-row-in-progress").unwrap();
+        std::fs::write(child_dir.join("transactions.csv"), UNCOMMITTED_AWS_ROW).unwrap();
 
         let outcome = app.apply_fast_forward(&child_id, &ahead_oid.to_string());
         assert_eq!(outcome, ApplyFastForwardOutcome::CommittedLocalChangesToUnblock);
@@ -3131,7 +3330,7 @@ mod apply_fast_forward_tests {
         );
         assert_eq!(
             std::fs::read_to_string(child_dir.join("transactions.csv")).unwrap(),
-            "uncommitted-aws-row-in-progress",
+            UNCOMMITTED_AWS_ROW,
             "the uncommitted local content must land in the commit byte for byte"
         );
     }
@@ -3173,7 +3372,7 @@ mod apply_fast_forward_tests {
 
         // The legitimate uncommitted AWS write that actually blocks the
         // fast-forward...
-        std::fs::write(child_dir.join("transactions.csv"), "uncommitted-aws-row").unwrap();
+        std::fs::write(child_dir.join("transactions.csv"), UNCOMMITTED_AWS_ROW).unwrap();
         // ...alongside a stray file this app never wrote and does not own.
         std::fs::write(child_dir.join(".DS_Store"), b"not this app's business").unwrap();
 
@@ -3197,7 +3396,7 @@ mod apply_fast_forward_tests {
         // The legitimate content still landed correctly.
         let entry = tree.get_path(std::path::Path::new("transactions.csv")).unwrap();
         let blob = repo_final.find_blob(entry.id()).unwrap();
-        assert_eq!(blob.content(), b"uncommitted-aws-row");
+        assert_eq!(blob.content(), UNCOMMITTED_AWS_ROW.as_bytes());
     }
 
     /// Review round 4, Minor-3 + Important-2, combined: a checkout conflict
@@ -3308,7 +3507,7 @@ mod apply_fast_forward_tests {
             )],
             1_700_000_500,
         );
-        std::fs::write(child_dir.join("transactions.csv"), "uncommitted-aws-row").unwrap();
+        std::fs::write(child_dir.join("transactions.csv"), UNCOMMITTED_AWS_ROW).unwrap();
 
         let (cmd_tx, cmd_rx) = std::sync::mpsc::channel::<SyncCommand>();
         app.sync_command_tx = Some(cmd_tx);
