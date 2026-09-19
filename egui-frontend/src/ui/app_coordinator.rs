@@ -2693,32 +2693,53 @@ mod apply_merge_tests {
     /// deletes a file the peer commit never touches at all — and THAT is
     /// exactly what currently defeats it. See the `#[ignore]` reason below.
     ///
-    /// # Currently ignored — a genuine gap found while writing this task,
-    ///   not a test bug
+    /// # Currently ignored — a real gap, but NOT defect 1, and NOT
+    ///   introduced by this branch
     ///
-    /// Because `with_peer_commit` here only touches `transactions.csv`, and
-    /// nothing else advances local HEAD, `classify` sees this as a pure
+    /// Review correction: this is not a liveness/stall failure. Because
+    /// `with_peer_commit` here only touches `transactions.csv`, and nothing
+    /// else advances local HEAD, `classify` sees this as a pure
     /// `Cycle::FastForward` (merge_base == our own HEAD), never `Diverged`.
-    /// `apply_fast_forward` has NO unconditional `working_tree_dirty` check —
-    /// unlike `apply_merge` (see its call to `working_tree_dirty` a few
-    /// hundred lines up, in the same file), it only discovers a dirty tree
-    /// REACTIVELY, when `checkout_tree` raises `GIT_ECONFLICT` because the
-    /// SAME path is dirty locally AND touched by the incoming tree. Since
-    /// the peer commit never touches `goals.csv`, checkout never conflicts,
-    /// the fast-forward succeeds silently, HEAD advances, and the deleted
-    /// `goals.csv` is left dirty forever with no notice — observed directly:
-    /// `head_advanced=true, tree_clean=false, notice_present=false`, the
-    /// exact shape of defect 1, through a route Task 9/11's fix never
-    /// touched. `resolve_dirty_tree`'s own doc comment frames itself as
-    /// backing "a merge OR fast-forward," so this looks like a real,
-    /// currently-open residual gap, not a fixture mistake — reported to the
-    /// task controller rather than worked around here (scope: test code
-    /// only). Re-enable once `apply_fast_forward` gets an unconditional
-    /// dirty-tree check analogous to `apply_merge`'s.
+    /// The fast-forward SUCCEEDS: peer data is ingested, HEAD advances, the
+    /// cycle reaches a terminal state, and sync stays healthy. What is lost
+    /// is the OUTBOUND direction — `apply_fast_forward` has no unconditional
+    /// `working_tree_dirty` check (unlike `apply_merge`; see its call a few
+    /// hundred lines up in this same file), only a REACTIVE one that fires
+    /// when `checkout_tree` raises `GIT_ECONFLICT` because the SAME path is
+    /// dirty locally AND touched by the incoming tree. Since the peer commit
+    /// never touches `goals.csv`, checkout never conflicts, and the deleted
+    /// `goals.csv` is never staged, committed, or pushed — the two machines
+    /// silently disagree about it. Observed directly: `head_advanced=true,
+    /// tree_clean=false, notice_present=false`.
+    ///
+    /// This self-heals the moment either side breaks the pure-fast-forward
+    /// pattern: any local write on this machine creates a real divergence,
+    /// which routes through `apply_merge`'s unconditional check and resolves
+    /// it; any later peer commit that happens to touch `goals.csv` also
+    /// forces the checkout conflict that triggers the reactive path. It
+    /// persists indefinitely only on a machine that is receive-only for as
+    /// long as the peer never touches this specific file — silent
+    /// non-propagation of a local change, not a stall. Severity: Important,
+    /// not Critical.
+    ///
+    /// Also pre-existing, not a regression on this branch: on the
+    /// pre-branch code, `apply_fast_forward` called the marker-gated
+    /// `recover_if_dirty`, which with no marker present returned `Clean`
+    /// without inspecting the tree at all — the same observable behaviour.
+    /// Recorded as a named follow-up in the design spec's "Scope
+    /// boundaries" section (`docs/superpowers/specs/2026-09-18-dirty-tree-resolution-design.md`)
+    /// rather than fixed here — out of this task's scope (test code only).
+    /// Re-enable once `apply_fast_forward` gets an unconditional
+    /// `working_tree_dirty` check analogous to `apply_merge`'s.
     #[test]
-    #[ignore = "reveals a live gap: apply_fast_forward only discovers a dirty \
-                tree via a checkout conflict on the SAME path the peer \
-                changed, never proactively — see this test's doc comment"]
+    #[ignore = "reveals a real, pre-existing gap (NOT defect 1, NOT a regression \
+                on this branch): apply_fast_forward only discovers a dirty tree \
+                via a checkout conflict on the SAME path the peer also changed, \
+                never proactively. On a receive-only machine, a local deletion \
+                unrelated to whatever the peer's commit touches is silently \
+                never staged, committed, or pushed — the fast-forward itself \
+                still succeeds and sync stays healthy. See this test's doc \
+                comment; tracked in the design spec's Named follow-ups."]
     fn a_deleted_tracked_file_does_not_stall_sync() {
         let (mut app, child_id, _temp, peer) = ChildRepoFixture::new()
             .with_goal()
@@ -2804,8 +2825,10 @@ mod apply_merge_tests {
     /// `Cycle::FastForward`, and — per the finding documented on the
     /// `#[ignore]`d tests below — `apply_fast_forward` never proactively
     /// checks `working_tree_dirty`, so a dirty `parental_control_attempts.csv`
-    /// the peer commit never touches would be silently left behind forever,
-    /// same as those. Forcing a genuine divergence here routes this through
+    /// the peer commit never touches would be silently never staged,
+    /// committed, or pushed — the fast-forward would still succeed and sync
+    /// would stay healthy, same as those two. Forcing a genuine divergence
+    /// here routes this through
     /// `apply_merge`, which DOES check unconditionally, and is what actually
     /// lets this test exercise (and pass on) the tracked-but-unowned-file
     /// staging fix this task is meant to pin.
@@ -2840,33 +2863,57 @@ mod apply_merge_tests {
     /// whole point of pinning it as a directly reachable route, not a
     /// mechanism demo.
     ///
-    /// # Currently ignored — a genuine gap found while writing this task,
-    ///   not a test bug
+    /// # Currently ignored — a real gap, but NOT defect 1, and NOT
+    ///   introduced by this branch
     ///
-    /// Same root cause as `a_deleted_tracked_file_does_not_stall_sync`
-    /// above: `delete_allowance_config` never commits (it is a bare
+    /// Review correction: this is not a liveness/stall failure. Same root
+    /// cause as `a_deleted_tracked_file_does_not_stall_sync` above:
+    /// `delete_allowance_config` never commits (it is a bare
     /// `std::fs::remove_file`, no `commit_file_change` call at all), and
     /// this fixture's peer commit only touches `transactions.csv`, so
-    /// `classify` sees a pure `Cycle::FastForward`. `apply_fast_forward`
-    /// only discovers a dirty tree REACTIVELY via a checkout conflict on a
-    /// path the incoming tree also touches, and never touches
-    /// `allowance_config.yaml` here, so the checkout never conflicts, the
-    /// fast-forward succeeds silently, and the deleted config is left dirty
-    /// forever with no notice — observed directly: `head_advanced=true,
-    /// tree_clean=false, notice_present=false`. This is the single most
-    /// concerning finding from this task: route 3 was flagged in panel
-    /// review as directly user-triggerable with no crash required, and it
-    /// is confirmed here to still be an open stall route whenever the local
-    /// machine is a pure fast-forward behind the peer at the time. Reported
-    /// to the task controller rather than worked around in test code (scope:
-    /// test code only). Re-enable once `apply_fast_forward` gets an
-    /// unconditional dirty-tree check analogous to `apply_merge`'s.
+    /// `classify` sees a pure `Cycle::FastForward`. The fast-forward
+    /// SUCCEEDS — peer data is ingested, HEAD advances, the cycle reaches a
+    /// terminal state, sync stays healthy. What is lost is the OUTBOUND
+    /// direction: `apply_fast_forward` only discovers a dirty tree
+    /// REACTIVELY via a checkout conflict on a path the incoming tree also
+    /// touches, and never touches `allowance_config.yaml` here, so the
+    /// checkout never conflicts and the deleted config is never staged,
+    /// committed, or pushed — the two machines silently disagree about it.
+    /// Observed directly: `head_advanced=true, tree_clean=false,
+    /// notice_present=false`.
+    ///
+    /// This self-heals the moment either side breaks the pure-fast-forward
+    /// pattern (any local write here creates a real divergence that
+    /// `apply_merge`'s unconditional check resolves; any later peer commit
+    /// touching `allowance_config.yaml` forces the reactive checkout-conflict
+    /// path instead). It persists indefinitely only on a machine that is
+    /// receive-only for as long as the peer never touches this file — silent
+    /// non-propagation of a local change, not a stall. Severity: Important,
+    /// not Critical. This is still the most notable of the two: route 3 was
+    /// flagged in panel review as directly user-triggerable with no crash
+    /// required, and is confirmed here to still silently drop the deletion
+    /// on a receive-only machine.
+    ///
+    /// Also pre-existing, not a regression on this branch — see the
+    /// parallel note on `a_deleted_tracked_file_does_not_stall_sync` above
+    /// (pre-branch `apply_fast_forward` called the marker-gated
+    /// `recover_if_dirty`, which returned `Clean` with no marker present,
+    /// without inspecting the tree). Recorded as a named follow-up in the
+    /// design spec's "Scope boundaries" section
+    /// (`docs/superpowers/specs/2026-09-18-dirty-tree-resolution-design.md`)
+    /// rather than fixed here — out of this task's scope (test code only).
+    /// Re-enable once `apply_fast_forward` gets an unconditional
+    /// `working_tree_dirty` check analogous to `apply_merge`'s.
     #[test]
-    #[ignore = "reveals a live gap: apply_fast_forward only discovers a dirty \
-                tree via a checkout conflict on the SAME path the peer \
-                changed, never proactively — see this test's doc comment. \
-                This is the most concerning of the three: route 3 is a \
-                directly user-triggerable, no-crash-required stall."]
+    #[ignore = "reveals a real, pre-existing gap (NOT defect 1, NOT a regression \
+                on this branch): apply_fast_forward only discovers a dirty tree \
+                via a checkout conflict on the SAME path the peer also changed, \
+                never proactively. On a receive-only machine, deleting the \
+                allowance config is silently never staged, committed, or \
+                pushed — the fast-forward itself still succeeds and sync stays \
+                healthy. Route 3 is directly user-triggerable with no crash \
+                required, per panel review. See this test's doc comment; \
+                tracked in the design spec's Named follow-ups."]
     fn deleting_the_allowance_config_does_not_stall_sync() {
         let (mut app, child_id, _temp, peer) = ChildRepoFixture::new()
             .with_allowance_config()
@@ -2924,12 +2971,25 @@ mod apply_merge_tests {
     /// exactly what this task's own brief warns about. This helper closes
     /// that hole by additionally requiring a genuinely clean tree AND no
     /// failure notice for this child.
+    ///
+    /// Review Important: a stricter helper must be STRICTLY STRONGER than
+    /// the weaker one it replaces, not merely different. `assert_resolved_or_explained`
+    /// treats "HEAD advanced" as load-bearing (see its own doc comment: the
+    /// weaker "tree is clean or a notice exists" form "holds vacuously if
+    /// the guard commits something unrelated and leaves the real problem
+    /// for the next cycle") — this helper carries that same check forward
+    /// rather than silently dropping it. It was harmless to omit today only
+    /// because "tree clean" already implies progress happened in every
+    /// scenario this helper is actually used for; that is not a reason for
+    /// the helper itself to be weaker than its sibling on paper.
     fn assert_resolves_cleanly(app: &mut AllowanceTrackerApp, child_id: &str, peer: git2::Oid) {
         let child_dir = app
             .backend()
             .csv_connection
             .child_dir(&shared::ChildId::from(child_id))
             .unwrap();
+        let head_before =
+            Repository::open(&child_dir).unwrap().head().unwrap().peel_to_commit().unwrap().id();
 
         match run_cycles_until_terminal(app, child_id, peer, 5) {
             Ok(_) => {}
@@ -2940,6 +3000,12 @@ mod apply_merge_tests {
         }
 
         let repo = Repository::open(&child_dir).unwrap();
+        let head_now = repo.head().unwrap().peel_to_commit().unwrap().id();
+        assert_ne!(
+            head_now, head_before,
+            "HEAD must actually advance — a no-op cycle that leaves the dirty content \
+             uncommitted but coincidentally reports a clean tree is not a resolution"
+        );
         assert!(
             !crate::backend::sync::child_sync::working_tree_dirty(&repo).unwrap(),
             "the tree must actually become clean — a refusal explained via a failure notice is \
@@ -2951,7 +3017,9 @@ mod apply_merge_tests {
         );
     }
 
-    /// Every combination of file state the guard can meet. Deterministic and
+    /// Every combination of file state the guard can meet ON THE MERGE
+    /// PATH — see the name and the "Review correction" section below for
+    /// why that scope qualifier is load-bearing. Deterministic and
     /// exhaustive: four owned files plus a tracked-unowned representative
     /// (`parental_control_attempts.csv` — real EXEMPT filename, not a
     /// production-reachable route; see the correction on
@@ -2961,7 +3029,15 @@ mod apply_merge_tests {
     /// enumerable, and a shrinker would hand back a misleadingly minimal
     /// case instead of the full table.
     ///
-    /// # Deviation from the brief: every case forces a genuine divergence
+    /// Only three states, not the spec's four: `Created` (a new, untracked
+    /// file) is not reachable through this guard at all.
+    /// `working_tree_dirty` sets `include_untracked(false)`, so a brand-new
+    /// untracked file never makes the tree "dirty" in the sense this guard
+    /// checks — there is nothing to stage or resolve, by design, not an
+    /// oversight in this table.
+    ///
+    /// # Deviation from the brief: every case forces a genuine divergence,
+    ///   so this table covers the MERGE path only
     ///
     /// After each fixture builds, an unrelated local commit is grafted on
     /// directly (via `commit_with_files`, bypassing any domain service so it
@@ -2974,16 +3050,36 @@ mod apply_merge_tests {
     /// `apply_fast_forward` has no unconditional dirty-tree check, only a
     /// reactive one that fires solely when the peer's commit touches the
     /// SAME path. 8 of these 15 cases (every file but `transactions.csv`, in
-    /// its `Modified`/`Deleted` states) would silently fail that way — not
-    /// because the guard (`resolve_dirty_tree`, invoked from
+    /// its `Modified`/`Deleted` states) would silently fail to propagate
+    /// that way — not because the guard (`resolve_dirty_tree`, invoked from
     /// `apply_merge`'s unconditional `working_tree_dirty` check) is broken,
     /// but because the fast-forward path never reaches it. Forcing
     /// divergence here routes every case through the path that DOES call
     /// the guard unconditionally, so this table exhaustively proves what
-    /// Tasks 9-11 actually built, while the separate `#[ignore]`d tests
-    /// above carry the residual fast-forward gap on their own.
+    /// Tasks 9-11 actually built on the merge path — but, precisely because
+    /// every case is forced onto that path, it can NEVER catch a regression
+    /// on the fast-forward path. That gap is carried by the two
+    /// `#[ignore]`d tests above (and the design spec's Named follow-ups)
+    /// instead. Renamed (review Important-2) from
+    /// `..._resolves_or_explains_...` to `..._resolves_..._on_the_merge_path`
+    /// so the name cannot be read as covering more than it does — it also
+    /// now agrees with the body, which asserts the strict
+    /// `assert_resolves_cleanly`, not the "or explains" invariant.
+    ///
+    /// # A silently-elevated invariant, made explicit
+    ///
+    /// This table asserts as a SUCCESS case committing and pushing an
+    /// unparseable `child.yaml` / `goals.csv` / `allowance_config.yaml`
+    /// (`State::Modified` writes `"modified: true\n"` into each, which is
+    /// not valid YAML for the first two and not meaningful CSV for
+    /// `goals.csv`). That is correct, specified behaviour, not a gap this
+    /// table is failing to catch: per the design spec §3, only
+    /// `transactions.csv` is parse-validated by `resolve_dirty_tree` — the
+    /// other owned files are staged and committed as opaque bytes. Calling
+    /// that out here so a future reader does not mistake "this table
+    /// accepts it" for "nobody thought about it."
     #[test]
-    fn the_guard_resolves_or_explains_every_dirty_tree_shape() {
+    fn the_guard_resolves_every_dirty_tree_shape_on_the_merge_path() {
         #[derive(Debug, Clone, Copy)]
         enum State {
             Unchanged,
@@ -3014,7 +3110,7 @@ mod apply_merge_tests {
                 // vanished `child.yaml` is explicitly a delete-and-recreate
                 // flow, not a sync concern), not a gap in the dirty-tree
                 // guard, so it is excluded rather than folded into the
-                // "resolves or explains" assertion the other 14 cells share.
+                // strict "resolves cleanly" assertion the other 14 cells share.
                 if *file == "child.yaml" && matches!(state, State::Deleted) {
                     continue;
                 }
