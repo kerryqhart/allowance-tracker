@@ -9,9 +9,11 @@ and "Check sync".
 **Design:** `docs/superpowers/specs/2026-08-29-lgs-desktop-sync-design.md`.
 
 These are the checks CI genuinely cannot perform. Everything else — the
-merge, the codec, the cloud-path guard, migration, two-machine convergence,
-check-sync stage sequencing — is already exercised by the test suite; see
-"What CI already covers" below before re-testing any of it by hand.
+merge, the codec, the cloud-path guard, migration, check-sync stage
+sequencing — is already exercised by the test suite; see "What CI already
+covers" below before re-testing any of it by hand. **Two-machine
+convergence is the exception** — see the correction in that section below
+before assuming it is covered.
 
 Mirrors the structure and discipline of
 `local-git-sync/docs/bootstrap-install-acceptance-checklist.md`, including
@@ -320,15 +322,6 @@ on every click. This item exists to confirm that revision holds in
 practice, on a real daemon and a real remote, not just in the local-bare-
 repo integration tests that exercise the same code path in CI.
 
-### Power-loss durability of `atomic::write`
-
-**Not verifiable in CI, and deliberately not claimed.** `atomic::write`
-guarantees that no reader observes a partial file (from `rename(2)`). It does
-NOT guarantee the most recent write survives a power cut: `fsync(2)` on macOS
-does not flush the drive's volatile cache, and `F_FULLFSYNC` was rejected as
-too expensive per write. Killing the process with SIGKILL proves nothing
-either — the page cache outlives the process. Accepted unverified.
-
 ## What CI already covers
 
 Do **not** re-test these by hand — they have real, passing automated
@@ -340,12 +333,6 @@ adding confidence:
   byte-stable round-trip, and post-merge balance validity — all via
   property-based tests over synthetic rows and provenance, plus a
   timezone-determinism test.
-- **The two-machine convergence harness**
-  (`egui-frontend/tests/two_machine_sync.rs`): two real, isolated `lgs`
-  daemons under two separate `HOME`s on one shared temp cloud root,
-  confirming genuine divergence and correct convergence through the real
-  `lgs sync`/`restore` CLI surface — offline from the real daemon and real
-  user data.
 - **The codec round-trip**: parsing and rendering transactions is proven
   byte-stable and timezone-independent by the same property test file.
 - **The cloud-path guard table** (`backend/sync/paths.rs` and its tests):
@@ -359,6 +346,39 @@ adding confidence:
   behavior, and its cleanup-on-every-failure-path behavior are all proven
   against a fake `lgs` script and a local bare repo — everything except
   what a *real* daemon and a *real* remote do, which is item 8 above.
+
+**Two-machine convergence is NOT covered — correction (2026-09-19):**
+`two_machine_sync` (`egui-frontend/tests/two_machine_sync.rs:103`) and
+`codec_real_data` (`egui-frontend/tests/codec_real_data.rs:18`) are both
+`#[ignore]`d, and `.github/workflows/ci.yml` runs plain
+`cargo test --workspace` — no `--ignored`, no `LGS_BINARY` — so **neither
+has ever run in CI.** Do not treat the two-machine path as covered. Even
+when run by hand, that harness commits `ledger.txt` through raw
+`GitManager` calls — it never drives `ChildSyncEngine` or `apply_merge`, so
+no automated test anywhere converges two app instances over real financial
+data through the real code. That is the structural reason both dirty-tree
+defects shipped.
+
+Adding a CI job that installs `lgs` and runs
+`cargo test --workspace -- --ignored` is tracked as follow-up 2 in the
+dirty-tree resolution spec. An ignored test that never runs is
+documentation, not coverage.
+
+## Known unverifiable limitations
+
+Unlike "The checks" above, these cannot be turned into a hand-test run at
+all — there is no procedure that would confirm or refute them, so they are
+recorded as accepted risk rather than given `- [ ]` steps and a "PASS looks
+like" criterion.
+
+### Power-loss durability of `atomic::write`
+
+**Not verifiable in CI, and deliberately not claimed.** `atomic::write`
+guarantees that no reader observes a partial file (from `rename(2)`). It does
+NOT guarantee the most recent write survives a power cut: `fsync(2)` on macOS
+does not flush the drive's volatile cache, and `F_FULLFSYNC` was rejected as
+too expensive per write. Killing the process with SIGKILL proves nothing
+either — the page cache outlives the process. Accepted unverified.
 
 ## Run history
 
