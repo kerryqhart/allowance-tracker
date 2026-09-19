@@ -642,6 +642,15 @@ mod ownership_contract {
     /// then assert every tracked file that appeared is either owned or
     /// explicitly exempt. Without this, the next file this app learns to
     /// write silently walks into the stall class defect 1 came from.
+    ///
+    /// This is deliberately two-directional. The negative half (no
+    /// unaccounted file appeared) is not enough on its own: every write path
+    /// this helper drives treats a `commit_file_change` failure as
+    /// non-fatal (`if let Err(e) = ... { warn!(...) }`), so a silently
+    /// failed commit would simply leave its file missing from HEAD — the
+    /// negative assertion would still pass, having proven nothing. The
+    /// positive half closes that hole by requiring every file this helper is
+    /// expected to produce to actually be there.
     #[test]
     fn every_file_this_app_writes_is_owned_or_explicitly_exempt() {
         let (backend, child_id, _temp) = backend_with_child_exercising_every_write_path();
@@ -653,13 +662,17 @@ mod ownership_contract {
         let repo = git2::Repository::open(&child_dir).unwrap();
         let head_tree = repo.head().unwrap().peel_to_commit().unwrap().tree().unwrap();
 
+        let mut found = std::collections::HashSet::new();
         let mut unaccounted = Vec::new();
         head_tree
             .walk(git2::TreeWalkMode::PreOrder, |_, entry| {
                 if let Some(name) = entry.name() {
-                    let known = FILES_THIS_APP_OWNS.contains(&name) || EXEMPT.contains(&name);
-                    if !known && entry.kind() == Some(git2::ObjectType::Blob) {
-                        unaccounted.push(name.to_string());
+                    if entry.kind() == Some(git2::ObjectType::Blob) {
+                        found.insert(name.to_string());
+                        let known = FILES_THIS_APP_OWNS.contains(&name) || EXEMPT.contains(&name);
+                        if !known {
+                            unaccounted.push(name.to_string());
+                        }
                     }
                 }
                 git2::TreeWalkResult::Ok
@@ -672,5 +685,24 @@ mod ownership_contract {
              Add each to the owned list (if a merge commit should carry it) or to EXEMPT with a \
              reason — leaving it unaccounted for is how defect 1 happened."
         );
+
+        // Positive half: everything the helper is expected to produce must
+        // actually be present. `.allowance_redirect` is excluded — it is a
+        // migration artifact this helper never writes, not a file any of the
+        // six write paths above produces.
+        let expected_files: Vec<&str> = FILES_THIS_APP_OWNS
+            .iter()
+            .copied()
+            .chain(EXEMPT.iter().copied().filter(|f| *f != ".allowance_redirect"))
+            .collect();
+        for expected in expected_files {
+            assert!(
+                found.contains(expected),
+                "expected file {expected:?} did not appear in the child's HEAD tree. This most \
+                 likely means its git commit failed silently (commit_file_change's failure is \
+                 non-fatal by design) rather than that the file is genuinely unowned — check the \
+                 relevant repository's commit_file_change call before touching this list."
+            );
+        }
     }
 }
