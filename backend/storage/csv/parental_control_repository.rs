@@ -219,12 +219,19 @@ impl ParentalControlRepository {
             // A torn trailing line from an interrupted append must cost that
             // record and nothing else, not the whole file.
             let Ok(record) = result else { continue };
+            // A torn write can also land mid-field with the full field
+            // count intact (e.g. `success` truncated to "tr"). The count
+            // guard above doesn't catch that, so the content parses below
+            // must skip rather than propagate too — otherwise a single
+            // corrupt-but-complete record still kills the whole read.
             if record.len() >= 4 {
+                let Ok(id) = record[0].parse::<i64>() else { continue };
+                let Ok(success) = record[3].parse::<bool>() else { continue };
                 let attempt = DomainParentalControlAttempt {
-                    id: record[0].parse::<i64>()?,
+                    id,
                     attempted_value: record[1].to_string(),
                     timestamp: record[2].to_string(),
-                    success: record[3].parse::<bool>()?,
+                    success,
                 };
                 attempts.push(attempt);
             }
@@ -424,7 +431,7 @@ mod tests {
     #[test]
     fn test_get_attempts_for_nonexistent_child() {
         let (repo, _child_repo, _temp_dir, _child) = setup_test_repo_with_child();
-
+        
         // Try to get attempts for non-existent child
         let attempts = repo.get_parental_control_attempts("child::nonexistent", None).unwrap();
         assert!(attempts.is_empty());
@@ -456,4 +463,38 @@ mod tests {
         let after = repo.get_parental_control_attempts(&child.id, None).unwrap();
         assert_eq!(after.len(), 3, "a torn line must not block future appends");
     }
-} 
+
+    /// A crash can also land mid-field with the field *count* intact — e.g.
+    /// `success` truncated from "true" to "tr" partway through the write.
+    /// The field-count guard doesn't catch this shape at all, since the
+    /// record has all four fields; only the content is corrupt. That must
+    /// still cost only the trailing record, not the whole read or future
+    /// appends.
+    #[test]
+    fn a_content_corrupted_trailing_line_costs_only_that_record() {
+        let (repo, _child_repo, _temp_dir, child) = setup_test_repo_with_child();
+        repo.record_parental_control_attempt(&child.id, "1234", false).unwrap();
+        repo.record_parental_control_attempt(&child.id, "5678", false).unwrap();
+
+        let dir = repo.attempts_dir(&child.id).unwrap();
+        let path = dir.join("parental_control_attempts.csv");
+
+        // Simulate a crash partway through writing the last field: a full
+        // 4-field record whose `success` value is truncated mid-word.
+        let mut text = std::fs::read_to_string(&path).unwrap();
+        text.push_str("3,9999,2024-01-01T00:00:00Z,tr");
+        std::fs::write(&path, text).unwrap();
+
+        let attempts = repo.get_parental_control_attempts(&child.id, None).unwrap();
+        assert_eq!(attempts.len(), 2, "every prior record must still be readable");
+
+        // And the log must still be appendable afterwards.
+        repo.record_parental_control_attempt(&child.id, "0000", true).unwrap();
+        let after = repo.get_parental_control_attempts(&child.id, None).unwrap();
+        assert_eq!(
+            after.len(),
+            3,
+            "a content-corrupted line must not block future appends"
+        );
+    }
+}
