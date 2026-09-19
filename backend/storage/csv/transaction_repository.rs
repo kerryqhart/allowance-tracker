@@ -185,7 +185,7 @@ impl TransactionRepository {
         let rows: Vec<TxRow> = transactions.iter().map(domain_to_row).collect();
         let text = allowance_core::codec::render_transactions(&rows);
 
-        std::fs::write(&file_path, text)
+        crate::backend::storage::atomic::write(&file_path, text)
             .with_context(|| format!("writing {}", file_path.display()))?;
 
         Ok(())

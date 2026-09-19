@@ -1165,7 +1165,7 @@ impl AllowanceTrackerApp {
         }
 
         let csv = allowance_core::codec::render_transactions(&rows);
-        if let Err(e) = std::fs::write(child_dir.join("transactions.csv"), csv) {
+        if let Err(e) = crate::backend::storage::atomic::write(child_dir.join("transactions.csv"), csv) {
             log::error!("Failed to write merged transactions.csv for child {child_id}: {e}");
             self.sync.status =
                 SyncStatus::Error(format!("Sync failed for {child_id}: could not write merged transactions"));

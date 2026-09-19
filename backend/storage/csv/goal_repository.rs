@@ -4,7 +4,6 @@ use anyhow::Result;
 use log::warn;
 use serde::{Deserialize, Serialize};
 use std::fs::{self};
-use std::io::BufWriter;
 use shared::ChildId;
 use super::connection::CsvConnection;
 
@@ -125,13 +124,13 @@ impl GoalRepository {
         // would be manufacturing a folder for a child whose data is elsewhere.
         let file_path = self.connection.goals_path(&ChildId::from(child_id))?;
 
-        let file = fs::File::create(&file_path)?;
-        let mut wtr = csv::Writer::from_writer(BufWriter::new(file));
+        let mut wtr = csv::Writer::from_writer(Vec::new());
         for goal in goals {
             let record = GoalRecord::from(goal.clone());
             wtr.serialize(record)?;
         }
-        wtr.flush()?;
+        let bytes = wtr.into_inner()?;
+        crate::backend::storage::atomic::write(&file_path, &bytes)?;
 
         Ok(file_path)
     }
@@ -253,5 +252,70 @@ impl GoalRepository {
     pub fn has_active_goal(&self, child_id: &str) -> Result<bool> {
         let goals = self.read_goals(child_id)?;
         Ok(goals.iter().any(|g| g.state == DomainGoalState::Active))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backend::domain::commands::child::{CreateChildCommand, SetActiveChildCommand};
+    use crate::backend::Backend;
+
+    /// One child, with its folder registered and present — the state
+    /// `write_goals_internal` assumes via `goals_path` (see its doc comment:
+    /// "the child's folder is present"). Built through the same
+    /// `Backend::with_data_dir` → `create_child` → `set_active_child`
+    /// sequence `app_with_git_backed_child` uses in
+    /// `egui-frontend/src/ui/app_coordinator.rs`, rather than constructing a
+    /// `GoalRepository` directly against a bare `CsvConnection` — that would
+    /// skip the registry state this write path depends on.
+    fn repo_with_child() -> (GoalRepository, String, tempfile::TempDir) {
+        let temp = tempfile::TempDir::new().expect("temp dir");
+        let backend = Backend::with_data_dir(temp.path().to_path_buf(), None).expect("backend");
+        let child = backend
+            .child_service
+            .create_child(CreateChildCommand {
+                name: "Test Kid".to_string(),
+                birthdate: "2015-01-01".to_string(),
+            })
+            .expect("create child")
+            .child;
+        backend
+            .child_service
+            .set_active_child(SetActiveChildCommand { child_id: child.id.clone() })
+            .expect("set active child");
+
+        let repo = GoalRepository::new((*backend.csv_connection).clone());
+        (repo, child.id, temp)
+    }
+
+    fn sample_goal(child_id: &str, id: &str) -> DomainGoal {
+        DomainGoal {
+            id: id.to_string(),
+            child_id: child_id.to_string(),
+            description: "Save for a bike".to_string(),
+            target_amount: 100.0,
+            state: DomainGoalState::Active,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        }
+    }
+
+    #[test]
+    fn write_goals_internal_produces_the_same_bytes_as_a_streaming_writer() {
+        let (repo, child_id, _temp) = repo_with_child();
+        let goals = vec![sample_goal(&child_id, "g-1"), sample_goal(&child_id, "g-2")];
+
+        let path = repo.write_goals_internal(&child_id, &goals).unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+
+        let mut expected = csv::Writer::from_writer(Vec::new());
+        for goal in &goals {
+            expected.serialize(GoalRecord::from(goal.clone())).unwrap();
+        }
+        expected.flush().unwrap();
+        let expected = String::from_utf8(expected.into_inner().unwrap()).unwrap();
+
+        assert_eq!(written, expected, "switching to a buffered render must not change a byte");
     }
 }
