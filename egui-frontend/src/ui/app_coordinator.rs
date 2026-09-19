@@ -2189,11 +2189,12 @@ mod sync_guard_tests {
 /// `child_sync` tests observe.
 #[cfg(test)]
 mod apply_merge_tests {
-    use super::test_support::{run_cycles_until_terminal, ChildRepoFixture};
+    use super::test_support::{assert_resolved_or_explained, run_cycles_until_terminal, ChildRepoFixture};
     use super::{ApplyMergeOutcome, SyncStatus};
     use crate::backend::domain::commands::child::{CreateChildCommand, SetActiveChildCommand};
     use crate::backend::domain::commands::transactions::CreateTransactionCommand;
     use crate::backend::domain::SyncCommand;
+    use crate::backend::storage::GitManager;
     use crate::backend::Backend;
     use crate::ui::app_state::AllowanceTrackerApp;
     use allowance_core::money::Money;
@@ -2493,12 +2494,9 @@ mod apply_merge_tests {
         // not RFC3339. `parse_transactions` refuses rather than guessing
         // (see `codec.rs`'s module doc — a fallback would make
         // read-modify-write non-idempotent and re-merge forever).
-        std::fs::write(
-            child_dir.join("transactions.csv"),
-            "id,child_id,date,description,amount,balance,type\n\
-             in-torn-1,kid,NOT-A-DATE,Torn,1.00,1.00,income\n",
-        )
-        .unwrap();
+        let torn = "id,child_id,date,description,amount,balance,type\n\
+             in-torn-1,kid,NOT-A-DATE,Torn,1.00,1.00,income\n";
+        std::fs::write(child_dir.join("transactions.csv"), torn).unwrap();
 
         let outcome = app.apply_merge(
             &child_id,
@@ -2528,6 +2526,14 @@ mod apply_merge_tests {
             notice.message.contains("transactions.csv"),
             "the notice must name the file that could not be read: {}",
             notice.message
+        );
+        // Task 12 addition: refused, not repaired, not discarded — the file
+        // on disk must be left exactly as found, byte for byte, for a human
+        // to look at.
+        assert_eq!(
+            std::fs::read(child_dir.join("transactions.csv")).unwrap(),
+            torn.as_bytes(),
+            "the corrupt file must be left exactly as found"
         );
     }
 
@@ -2667,6 +2673,418 @@ mod apply_merge_tests {
             app.sync.sync_failures.iter().all(|n| n.child_id != child_id),
             "committing an empty ledger is not a failure and must raise no notice"
         );
+    }
+
+    /// Task 12 coverage: every stall route, driven through
+    /// `run_cycles_until_terminal` rather than a single `apply_merge` call —
+    /// defect 1 was a LIVENESS failure that only shows itself across
+    /// cycles, and every merge-path test before this task's own was
+    /// single-shot.
+    ///
+    /// Defect 1, route 2: a deleted tracked file. `index.add_path` cannot
+    /// stage a deletion, and the old staging loop skipped files that do not
+    /// exist — so `git status` said dirty, staging produced nothing, and the
+    /// merge refused on every future cycle forever.
+    ///
+    /// Deliberately uses `goals.csv` rather than `transactions.csv` — the
+    /// file Task 11's `an_uncommitted_deletion_is_committed_rather_than_stalling_the_merge_forever`
+    /// already deletes above, in a single `apply_merge` call. That existing
+    /// test is not duplicated here: this one drives the real cycle loop and
+    /// deletes a file the peer commit never touches at all — and THAT is
+    /// exactly what currently defeats it. See the `#[ignore]` reason below.
+    ///
+    /// # Currently ignored — a genuine gap found while writing this task,
+    ///   not a test bug
+    ///
+    /// Because `with_peer_commit` here only touches `transactions.csv`, and
+    /// nothing else advances local HEAD, `classify` sees this as a pure
+    /// `Cycle::FastForward` (merge_base == our own HEAD), never `Diverged`.
+    /// `apply_fast_forward` has NO unconditional `working_tree_dirty` check —
+    /// unlike `apply_merge` (see its call to `working_tree_dirty` a few
+    /// hundred lines up, in the same file), it only discovers a dirty tree
+    /// REACTIVELY, when `checkout_tree` raises `GIT_ECONFLICT` because the
+    /// SAME path is dirty locally AND touched by the incoming tree. Since
+    /// the peer commit never touches `goals.csv`, checkout never conflicts,
+    /// the fast-forward succeeds silently, HEAD advances, and the deleted
+    /// `goals.csv` is left dirty forever with no notice — observed directly:
+    /// `head_advanced=true, tree_clean=false, notice_present=false`, the
+    /// exact shape of defect 1, through a route Task 9/11's fix never
+    /// touched. `resolve_dirty_tree`'s own doc comment frames itself as
+    /// backing "a merge OR fast-forward," so this looks like a real,
+    /// currently-open residual gap, not a fixture mistake — reported to the
+    /// task controller rather than worked around here (scope: test code
+    /// only). Re-enable once `apply_fast_forward` gets an unconditional
+    /// dirty-tree check analogous to `apply_merge`'s.
+    #[test]
+    #[ignore = "reveals a live gap: apply_fast_forward only discovers a dirty \
+                tree via a checkout conflict on the SAME path the peer \
+                changed, never proactively — see this test's doc comment"]
+    fn a_deleted_tracked_file_does_not_stall_sync() {
+        let (mut app, child_id, _temp, peer) = ChildRepoFixture::new()
+            .with_goal()
+            .with_peer_commit(&[(
+                "transactions.csv",
+                "id,child_id,date,description,amount,balance,type\n",
+            )])
+            .with_deleted("goals.csv")
+            .build();
+        assert_progress(&mut app, &child_id, peer.unwrap());
+    }
+
+    /// A tracked file this app does not manage via any allowlist. Under the
+    /// tracked-path staging (`index.update_all(["*"], ..)`) this RESOLVES
+    /// rather than failing — it is already in pushed history, so committing
+    /// its modification is not the hazard `FILES_THIS_APP_OWNS` guards
+    /// against.
+    ///
+    /// This test is the general case (an arbitrary tracked file this app
+    /// happens to know nothing about). The next test below,
+    /// `a_dirty_tracked_but_unowned_parental_control_log_resolves_rather_than_stalling`,
+    /// is the SAME shape against a specific, real filename
+    /// (`parental_control_attempts.csv`) that this codebase's own
+    /// `ownership_contract` test names as tracked-but-exempt — kept as a
+    /// separate case because it anchors to a file this app actually
+    /// produces, not an arbitrary stand-in.
+    #[test]
+    fn a_dirty_tracked_unowned_file_resolves_rather_than_stalling() {
+        let (mut app, child_id, _temp, peer) = ChildRepoFixture::new()
+            .with_peer_commit(&[(
+                "transactions.csv",
+                "id,child_id,date,description,amount,balance,type\n",
+            )])
+            .build();
+        let child_dir = app
+            .backend()
+            .csv_connection
+            .child_dir(&shared::ChildId::from(child_id.as_str()))
+            .unwrap();
+
+        // TRACKED, not untracked — `working_tree_dirty` sets
+        // include_untracked(false), so an untracked file would never enter
+        // the guard and this test would pass for the wrong reason.
+        std::fs::write(child_dir.join("notes.txt"), "committed once").unwrap();
+        let gm = GitManager::new();
+        gm.add_file(&child_dir, "notes.txt").unwrap();
+        gm.commit(&child_dir, "track notes.txt").unwrap();
+        std::fs::write(child_dir.join("notes.txt"), "now modified").unwrap();
+
+        let repo = Repository::open(&child_dir).unwrap();
+        assert!(
+            crate::backend::sync::child_sync::working_tree_dirty(&repo).unwrap(),
+            "precondition: the guard must actually be reached — a fixture that stops \
+             reproducing this condition must fail loudly, not pass vacuously"
+        );
+
+        assert_resolves_cleanly(&mut app, &child_id, peer.unwrap());
+    }
+
+    /// Defect 1, route 1 — CORRECTED LABEL (see Task 12's brief correction).
+    /// `parental_control_attempts.csv` is NOT a reachable production stall
+    /// route: `ParentalControlService` passes the literal `"global"` at all
+    /// three of its call sites, and `attempts_dir` maps `"global"` to the
+    /// BASE data directory, not any child's directory — so in production
+    /// this file never lands inside a child's git repo at all, and can never
+    /// go dirty there.
+    ///
+    /// What IS real: `ParentalControlRepository::record_parental_control_attempt`
+    /// called directly with a real child id (exactly what `ownership_contract`'s
+    /// completeness test in `backend/sync/paths.rs` does, and what
+    /// `ChildRepoFixture::with_parental_control_log` now does too) commits
+    /// this file into a child's repo as tracked-but-unowned — `EXEMPT`, not
+    /// `FILES_THIS_APP_OWNS`. This test pins that the guard resolves that
+    /// specific, real filename the same way it resolves any other
+    /// tracked-but-unowned file, without claiming any production code path
+    /// reaches it today.
+    ///
+    /// Deviation from the brief: an independent local transaction is added
+    /// after the fixture builds, exactly as
+    /// `a_dirty_tracked_unowned_file_resolves_rather_than_stalling` above
+    /// does for `notes.txt`. Without it, `with_peer_commit` here (touching
+    /// only `transactions.csv`) makes this fixture a pure
+    /// `Cycle::FastForward`, and — per the finding documented on the
+    /// `#[ignore]`d tests below — `apply_fast_forward` never proactively
+    /// checks `working_tree_dirty`, so a dirty `parental_control_attempts.csv`
+    /// the peer commit never touches would be silently left behind forever,
+    /// same as those. Forcing a genuine divergence here routes this through
+    /// `apply_merge`, which DOES check unconditionally, and is what actually
+    /// lets this test exercise (and pass on) the tracked-but-unowned-file
+    /// staging fix this task is meant to pin.
+    #[test]
+    fn a_dirty_tracked_but_unowned_parental_control_log_resolves_rather_than_stalling() {
+        let (mut app, child_id, _temp, peer) = ChildRepoFixture::new()
+            .with_parental_control_log()
+            .with_peer_commit(&[(
+                "transactions.csv",
+                "id,child_id,date,description,amount,balance,type\n",
+            )])
+            .with_dirty("parental_control_attempts.csv", "1,1234,false\n2,5678,false\n")
+            .build();
+
+        app.backend()
+            .transaction_service
+            .create_transaction(CreateTransactionCommand {
+                description: "Toy".to_string(),
+                amount: -2.0,
+                date: None,
+            })
+            .expect("create local transaction to force a genuine divergence");
+
+        assert_resolves_cleanly(&mut app, &child_id, peer.unwrap());
+    }
+
+    /// Defect 1, route 3: `delete_allowance_config` removes a tracked owned
+    /// file with no commit — user-triggerable, no crash and no swallowed
+    /// error required. Found in panel review. Unlike the parental-control
+    /// test above, this one is deliberately left as the LITERAL,
+    /// unconditioned scenario (no forced extra local commit) — that is the
+    /// whole point of pinning it as a directly reachable route, not a
+    /// mechanism demo.
+    ///
+    /// # Currently ignored — a genuine gap found while writing this task,
+    ///   not a test bug
+    ///
+    /// Same root cause as `a_deleted_tracked_file_does_not_stall_sync`
+    /// above: `delete_allowance_config` never commits (it is a bare
+    /// `std::fs::remove_file`, no `commit_file_change` call at all), and
+    /// this fixture's peer commit only touches `transactions.csv`, so
+    /// `classify` sees a pure `Cycle::FastForward`. `apply_fast_forward`
+    /// only discovers a dirty tree REACTIVELY via a checkout conflict on a
+    /// path the incoming tree also touches, and never touches
+    /// `allowance_config.yaml` here, so the checkout never conflicts, the
+    /// fast-forward succeeds silently, and the deleted config is left dirty
+    /// forever with no notice — observed directly: `head_advanced=true,
+    /// tree_clean=false, notice_present=false`. This is the single most
+    /// concerning finding from this task: route 3 was flagged in panel
+    /// review as directly user-triggerable with no crash required, and it
+    /// is confirmed here to still be an open stall route whenever the local
+    /// machine is a pure fast-forward behind the peer at the time. Reported
+    /// to the task controller rather than worked around in test code (scope:
+    /// test code only). Re-enable once `apply_fast_forward` gets an
+    /// unconditional dirty-tree check analogous to `apply_merge`'s.
+    #[test]
+    #[ignore = "reveals a live gap: apply_fast_forward only discovers a dirty \
+                tree via a checkout conflict on the SAME path the peer \
+                changed, never proactively — see this test's doc comment. \
+                This is the most concerning of the three: route 3 is a \
+                directly user-triggerable, no-crash-required stall."]
+    fn deleting_the_allowance_config_does_not_stall_sync() {
+        let (mut app, child_id, _temp, peer) = ChildRepoFixture::new()
+            .with_allowance_config()
+            .with_peer_commit(&[(
+                "transactions.csv",
+                "id,child_id,date,description,amount,balance,type\n",
+            )])
+            .build();
+        app.backend()
+            .allowance_service
+            .delete_allowance_config(&child_id)
+            .expect("delete allowance config");
+        assert_progress(&mut app, &child_id, peer.unwrap());
+    }
+
+    fn assert_progress(app: &mut AllowanceTrackerApp, child_id: &str, peer: git2::Oid) {
+        let child_dir = app
+            .backend()
+            .csv_connection
+            .child_dir(&shared::ChildId::from(child_id))
+            .unwrap();
+        let head_before =
+            Repository::open(&child_dir).unwrap().head().unwrap().peel_to_commit().unwrap().id();
+
+        match run_cycles_until_terminal(app, child_id, peer, 5) {
+            Ok(_) => {}
+            Err(trace) => panic!(
+                "sync never reached a terminal state in 5 cycles — this is the stall. Trace:\n{}",
+                trace.join("\n")
+            ),
+        }
+
+        let repo = Repository::open(&child_dir).unwrap();
+        assert_resolved_or_explained(app, &repo, child_id, head_before);
+    }
+
+    /// Stronger than `assert_progress`. `assert_resolved_or_explained`
+    /// (which backs `assert_progress`) deliberately treats "refused and
+    /// explained via a failure notice" as an equally acceptable outcome to
+    /// "actually resolved" — correct for the stall-route tests above, where
+    /// either is fine as long as the child does not silently stop syncing.
+    /// It is NOT correct for a test claiming a tracked-but-unowned file
+    /// "resolves rather than stalling": that claim is falsified by a clean
+    /// refusal-with-notice just as much as by a silent stall, and
+    /// `assert_progress` alone cannot tell the two apart.
+    ///
+    /// This was not a hypothetical concern — Task 12 Step 4 caught it
+    /// directly: BOTH `a_dirty_tracked_unowned_file_resolves_rather_than_stalling`
+    /// and `a_dirty_tracked_but_unowned_parental_control_log_resolves_rather_than_stalling`
+    /// still reported `Ok` under `assert_progress` against the OLD
+    /// owned-allowlist staging, because the old code correctly refuses to
+    /// stage a file outside `FILES_THIS_APP_OWNS`, that refusal is reported
+    /// as an ordinary `ApplyMergeOutcome::Failed` -> a sync-failure notice,
+    /// and a notice satisfies "explained" — passing for the wrong reason,
+    /// exactly what this task's own brief warns about. This helper closes
+    /// that hole by additionally requiring a genuinely clean tree AND no
+    /// failure notice for this child.
+    fn assert_resolves_cleanly(app: &mut AllowanceTrackerApp, child_id: &str, peer: git2::Oid) {
+        let child_dir = app
+            .backend()
+            .csv_connection
+            .child_dir(&shared::ChildId::from(child_id))
+            .unwrap();
+
+        match run_cycles_until_terminal(app, child_id, peer, 5) {
+            Ok(_) => {}
+            Err(trace) => panic!(
+                "sync never reached a terminal state in 5 cycles — this is the stall. Trace:\n{}",
+                trace.join("\n")
+            ),
+        }
+
+        let repo = Repository::open(&child_dir).unwrap();
+        assert!(
+            !crate::backend::sync::child_sync::working_tree_dirty(&repo).unwrap(),
+            "the tree must actually become clean — a refusal explained via a failure notice is \
+             not what \"resolves rather than stalling\" claims"
+        );
+        assert!(
+            app.sync.sync_failures.iter().all(|n| n.child_id != child_id),
+            "this must resolve outright, not be refused and reported as a failure"
+        );
+    }
+
+    /// Every combination of file state the guard can meet. Deterministic and
+    /// exhaustive: four owned files plus a tracked-unowned representative
+    /// (`parental_control_attempts.csv` — real EXEMPT filename, not a
+    /// production-reachable route; see the correction on
+    /// `a_dirty_tracked_but_unowned_parental_control_log_resolves_rather_than_stalling`
+    /// above), each unchanged / modified / deleted. A proptest/shrinker was
+    /// deliberately not used: this state space is small and fully
+    /// enumerable, and a shrinker would hand back a misleadingly minimal
+    /// case instead of the full table.
+    ///
+    /// # Deviation from the brief: every case forces a genuine divergence
+    ///
+    /// After each fixture builds, an unrelated local commit is grafted on
+    /// directly (via `commit_with_files`, bypassing any domain service so it
+    /// cannot disturb whichever file/state is under test) to move local HEAD
+    /// to a sibling of the peer tip. Without this, `with_peer_commit` here
+    /// only touches `transactions.csv`, so every OTHER file's dirty/deleted
+    /// state would make this a pure `Cycle::FastForward` — and, per the
+    /// finding documented on `a_deleted_tracked_file_does_not_stall_sync`
+    /// and `deleting_the_allowance_config_does_not_stall_sync` above,
+    /// `apply_fast_forward` has no unconditional dirty-tree check, only a
+    /// reactive one that fires solely when the peer's commit touches the
+    /// SAME path. 8 of these 15 cases (every file but `transactions.csv`, in
+    /// its `Modified`/`Deleted` states) would silently fail that way — not
+    /// because the guard (`resolve_dirty_tree`, invoked from
+    /// `apply_merge`'s unconditional `working_tree_dirty` check) is broken,
+    /// but because the fast-forward path never reaches it. Forcing
+    /// divergence here routes every case through the path that DOES call
+    /// the guard unconditionally, so this table exhaustively proves what
+    /// Tasks 9-11 actually built, while the separate `#[ignore]`d tests
+    /// above carry the residual fast-forward gap on their own.
+    #[test]
+    fn the_guard_resolves_or_explains_every_dirty_tree_shape() {
+        #[derive(Debug, Clone, Copy)]
+        enum State {
+            Unchanged,
+            Modified,
+            Deleted,
+        }
+
+        const FILES: &[&str] = &[
+            "transactions.csv",
+            "goals.csv",
+            "child.yaml",
+            "allowance_config.yaml",
+            "parental_control_attempts.csv",
+        ];
+
+        for file in FILES {
+            for state in [State::Unchanged, State::Modified, State::Deleted] {
+                // `child.yaml` deleted is excluded, not skipped quietly: per
+                // `ChildRepository::delete_child`'s doc comment,
+                // `child_dir()` DELIBERATELY refuses to resolve once
+                // `child.yaml` is missing — "a folder that has lost its
+                // child.yaml is precisely the damaged state a user reaches
+                // for delete to clean up." That is not this guard's job:
+                // `run_cycles_until_terminal` itself calls `child_dir()` on
+                // every cycle and would panic on `.unwrap()` before ever
+                // reaching `classify`, confirmed by actually running this
+                // case. This is a real, by-design boundary (self-healing a
+                // vanished `child.yaml` is explicitly a delete-and-recreate
+                // flow, not a sync concern), not a gap in the dirty-tree
+                // guard, so it is excluded rather than folded into the
+                // "resolves or explains" assertion the other 14 cells share.
+                if *file == "child.yaml" && matches!(state, State::Deleted) {
+                    continue;
+                }
+
+                let mut fixture = ChildRepoFixture::new()
+                    .with_goal()
+                    .with_allowance_config()
+                    .with_parental_control_log()
+                    .with_peer_commit(&[(
+                        "transactions.csv",
+                        "id,child_id,date,description,amount,balance,type\n",
+                    )]);
+                fixture = match state {
+                    State::Unchanged => fixture,
+                    // Content that still parses — the unparseable case has
+                    // its own test with its own expected outcome.
+                    State::Modified if *file == "transactions.csv" => fixture.with_dirty(
+                        file,
+                        "id,child_id,date,description,amount,balance,type\n",
+                    ),
+                    State::Modified => fixture.with_dirty(file, "modified: true\n"),
+                    State::Deleted => fixture.with_deleted(file),
+                };
+
+                let (mut app, child_id, _temp, peer) = fixture.build();
+                let child_dir = app
+                    .backend()
+                    .csv_connection
+                    .child_dir(&shared::ChildId::from(child_id.as_str()))
+                    .unwrap();
+
+                // Force a genuine divergence unrelated to `file` — see this
+                // test's doc comment for why.
+                let repo = Repository::open(&child_dir).unwrap();
+                let ours_oid = repo.head().unwrap().peel_to_commit().unwrap().id();
+                let ours_commit = repo.find_commit(ours_oid).unwrap();
+                let diverged_oid = commit_with_files(
+                    &repo,
+                    "local unrelated change",
+                    &[&ours_commit],
+                    &[("local_marker.txt", "x")],
+                    1_700_000_600,
+                );
+                let branch = super::current_branch(&repo).unwrap();
+                repo.reference(
+                    &format!("refs/heads/{branch}"),
+                    diverged_oid,
+                    true,
+                    "force divergence for cross-product test",
+                )
+                .unwrap();
+
+                // Deliberately the STRICT check (`assert_resolves_cleanly`),
+                // not the weaker `assert_resolved_or_explained` the named
+                // stall-route tests use. A "refused and explained via a
+                // failure notice" outcome would satisfy the weak invariant
+                // for every file/state combination here too (confirmed by
+                // Task 12 Step 4: with the OLD owned-allowlist staging
+                // restored, a deleted owned file or a dirty
+                // `parental_control_attempts.csv` is refused as
+                // `ApplyMergeOutcome::Failed` with a notice — "explained,"
+                // but not what a table named "resolves" should accept as
+                // success). The strict check is what actually distinguishes
+                // the tracked-path staging fix from the old allowlist, and
+                // it is achievable for every one of these 14 cases because
+                // the forced divergence above always routes through
+                // `apply_merge`'s unconditional `working_tree_dirty` check.
+                assert_resolves_cleanly(&mut app, &child_id, peer.unwrap());
+            }
+        }
     }
 
     /// CRITICAL-1 regression: Task 16 made the AWS apply path

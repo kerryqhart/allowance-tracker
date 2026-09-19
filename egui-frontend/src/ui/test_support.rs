@@ -12,8 +12,12 @@
 //! `merge_diverged` / `working_tree_dirty` (`pub(crate)` in
 //! `backend::sync::child_sync`) without widening any production visibility.
 
+use crate::backend::domain::commands::allowance::UpdateAllowanceConfigCommand;
 use crate::backend::domain::commands::child::{CreateChildCommand, SetActiveChildCommand};
+use crate::backend::domain::commands::goal::CreateGoalCommand;
 use crate::backend::domain::commands::transactions::CreateTransactionCommand;
+use crate::backend::storage::csv::ParentalControlRepository;
+use crate::backend::storage::traits::ParentalControlStorage;
 use crate::backend::Backend;
 use crate::ui::app_state::AllowanceTrackerApp;
 use git2::Repository;
@@ -23,11 +27,62 @@ pub struct ChildRepoFixture {
     dirty: Vec<(String, String)>,
     deleted: Vec<String>,
     marker: bool,
+    with_goal: bool,
+    with_allowance_config: bool,
+    with_parental_control_log: bool,
 }
 
 impl ChildRepoFixture {
     pub fn new() -> Self {
-        Self { peer_files: None, dirty: Vec::new(), deleted: Vec::new(), marker: false }
+        Self {
+            peer_files: None,
+            dirty: Vec::new(),
+            deleted: Vec::new(),
+            marker: false,
+            with_goal: false,
+            with_allowance_config: false,
+            with_parental_control_log: false,
+        }
+    }
+
+    /// Create a real goal via `GoalService` before HEAD/the peer tip are
+    /// captured, so `goals.csv` is genuinely tracked in HEAD (and carried
+    /// into the peer's tree, same as `child.yaml`/`transactions.csv`
+    /// already are). Without this, `.with_dirty("goals.csv", ..)` would
+    /// write a brand-new UNTRACKED file (never staged, so
+    /// `working_tree_dirty` — which ignores untracked paths — would never
+    /// even see it) and `.with_deleted("goals.csv")` would silently no-op
+    /// (the file would not exist yet to delete). Neither would exercise the
+    /// guard at all — passing vacuously, the exact failure mode
+    /// `a_dirty_tracked_unowned_file_resolves_rather_than_stalling` already
+    /// warns against for its own fixture.
+    pub fn with_goal(mut self) -> Self {
+        self.with_goal = true;
+        self
+    }
+
+    /// Create a real allowance config via `AllowanceService` before HEAD is
+    /// captured, for the same reason as [`Self::with_goal`]: so
+    /// `allowance_config.yaml` is a genuinely tracked file, not one that
+    /// `.with_dirty`/`.with_deleted` would silently fail to exercise.
+    pub fn with_allowance_config(mut self) -> Self {
+        self.with_allowance_config = true;
+        self
+    }
+
+    /// Record a real parental-control attempt directly through
+    /// `ParentalControlRepository` (bypassing `ParentalControlService`,
+    /// which always writes under the literal `"global"` pseudo-id and so
+    /// never lands this file in a real child's directory in production —
+    /// see `backend::domain::parental_control_service`). This mirrors
+    /// exactly how `ownership_contract`'s completeness test
+    /// (`backend/sync/paths.rs`) exercises the same per-child write path,
+    /// and is the only way to get `parental_control_attempts.csv` tracked
+    /// in a child's repo at all. Same reasoning as [`Self::with_goal`] for
+    /// why this must happen before HEAD/the peer tip are captured.
+    pub fn with_parental_control_log(mut self) -> Self {
+        self.with_parental_control_log = true;
+        self
     }
 
     /// Plant a commit in the object database reachable from no ref —
@@ -86,6 +141,42 @@ impl ChildRepoFixture {
                 date: None,
             })
             .expect("create transaction");
+
+        // These three run BEFORE `head`/the peer tip are captured below, so
+        // whichever of `goals.csv` / `allowance_config.yaml` /
+        // `parental_control_attempts.csv` this fixture opts into are
+        // genuinely tracked in HEAD (and carried unchanged into the peer's
+        // tree) — see each builder method's doc comment for why that
+        // ordering matters.
+        if self.with_goal {
+            backend
+                .goal_service
+                .create_goal(CreateGoalCommand {
+                    child_id: None,
+                    description: "Save for a bike".to_string(),
+                    target_amount: 50.0,
+                })
+                .expect("create goal");
+        }
+        if self.with_allowance_config {
+            backend
+                .allowance_service
+                .update_allowance_config(UpdateAllowanceConfigCommand {
+                    child_id: None,
+                    amount: 5.0,
+                    day_of_week: 5,
+                    is_active: true,
+                    use_age_based_amount: false,
+                })
+                .expect("update allowance config");
+        }
+        if self.with_parental_control_log {
+            let parental_control_repository =
+                ParentalControlRepository::new((*backend.csv_connection).clone());
+            parental_control_repository
+                .record_parental_control_attempt(&child.id, "wrong guess", false)
+                .expect("record parental control attempt");
+        }
 
         let child_dir = backend
             .csv_connection
