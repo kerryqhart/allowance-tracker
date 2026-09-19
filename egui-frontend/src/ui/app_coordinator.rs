@@ -2202,6 +2202,19 @@ mod apply_merge_tests {
     /// never moves any ref, exactly mirroring what `ChildSyncEngine::cycle`
     /// would have fetched into `refs/remotes/lgs-auth/main` without this
     /// test needing a real remote at all.
+    ///
+    /// Task 10 review fix: seeds the tree builder from the first parent's
+    /// tree (when there is one) rather than an empty tree, so files this
+    /// helper's callers don't mention (`child.yaml`, `goals.csv`,
+    /// `allowance_config.yaml`) carry over unchanged instead of vanishing
+    /// from the resulting commit's tree. Seeding from an empty tree made
+    /// `a_fast_forward_checks_out_the_new_tree_onto_disk` (in
+    /// `apply_fast_forward_tests`, which really does check this tree out
+    /// onto disk) delete `child.yaml` from the child's directory, and made
+    /// `goals_diverged` report spuriously true for every merge test here
+    /// that never intended to exercise a goals divergence at all — see the
+    /// same fix in `ChildRepoFixture::build` (`test_support.rs`), which
+    /// this task's own fast-forward smoke test caught first.
     fn commit_with_files(
         repo: &Repository,
         message: &str,
@@ -2211,7 +2224,8 @@ mod apply_merge_tests {
     ) -> git2::Oid {
         let sig =
             git2::Signature::new("Test", "test@example.com", &git2::Time::new(timestamp, 0)).unwrap();
-        let mut builder = repo.treebuilder(None).unwrap();
+        let base_tree = parents.first().map(|c| c.tree().unwrap());
+        let mut builder = repo.treebuilder(base_tree.as_ref()).unwrap();
         for (name, content) in files {
             let blob_id = repo.blob(content.as_bytes()).unwrap();
             builder.insert(*name, blob_id, 0o100644).unwrap();
@@ -2819,6 +2833,15 @@ mod apply_fast_forward_tests {
     /// tree or index touched) — plants a "peer's" further commit without
     /// ever checking it out, exactly mirroring what `fetch_lgs` would have
     /// landed at `refs/remotes/lgs-auth/main` in production.
+    ///
+    /// Task 10 review fix: this tree IS checked out for real by
+    /// `apply_fast_forward` in these tests, so seeding the builder from an
+    /// empty tree (dropping `child.yaml`/`goals.csv`/`allowance_config.yaml`
+    /// from the peer commit) meant `a_fast_forward_checks_out_the_new_tree_onto_disk`
+    /// was deleting `child.yaml` from the child's directory on every run and
+    /// passing anyway, because nothing downstream re-resolves `child_dir`.
+    /// Seeding from the first parent's tree instead carries those files over
+    /// unchanged, matching what a real peer commit looks like.
     fn commit_with_files(
         repo: &Repository,
         message: &str,
@@ -2828,7 +2851,8 @@ mod apply_fast_forward_tests {
     ) -> git2::Oid {
         let sig =
             git2::Signature::new("Test", "test@example.com", &git2::Time::new(timestamp, 0)).unwrap();
-        let mut builder = repo.treebuilder(None).unwrap();
+        let base_tree = parents.first().map(|c| c.tree().unwrap());
+        let mut builder = repo.treebuilder(base_tree.as_ref()).unwrap();
         for (name, content) in files {
             let blob_id = repo.blob(content.as_bytes()).unwrap();
             builder.insert(*name, blob_id, 0o100644).unwrap();

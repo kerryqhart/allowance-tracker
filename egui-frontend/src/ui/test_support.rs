@@ -240,7 +240,17 @@ pub fn run_cycles_until_terminal(
         return Ok(Terminal::FailedWithNotice);
     }
 
-    // Did the loop at least converge?
+    // Did the loop at least converge? Task 10 review fix: this used to pass
+    // `None` as the base, so `classify` could only report `UpToDate` when
+    // `head == peer_tip` exactly. After a real merge HEAD is a NEW two-parent
+    // commit, never byte-equal to `peer_tip`, so `Terminal::Applied` was
+    // effectively unreachable on the merge path — a run that only converged
+    // on this final cycle was misreported as `Err(trace)`, a false failure
+    // that (with Task 12's tight cycle bounds) would look exactly like the
+    // stall this driver exists to detect. Computing the real merge base
+    // (as every iteration above already does) fixes it: once `peer_tip` is
+    // an ancestor of `head`, `classify` correctly reports `Ahead`, which
+    // this function treats the same as `UpToDate` — nothing left to apply.
     let child_dir = app
         .backend()
         .csv_connection
@@ -248,7 +258,13 @@ pub fn run_cycles_until_terminal(
         .unwrap();
     let repo = Repository::open(&child_dir).unwrap();
     let head = repo.head().unwrap().peel_to_commit().unwrap().id();
-    if classify(Some(&head.to_string()), Some(&peer_tip.to_string()), None) == Cycle::UpToDate {
+    let base = repo.merge_base(head, peer_tip).ok();
+    let final_cycle = classify(
+        Some(&head.to_string()),
+        Some(&peer_tip.to_string()),
+        base.map(|b| b.to_string()).as_deref(),
+    );
+    if matches!(final_cycle, Cycle::UpToDate | Cycle::Ahead) {
         return Ok(Terminal::Applied);
     }
 
