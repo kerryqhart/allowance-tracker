@@ -1631,7 +1631,18 @@ impl AllowanceTrackerApp {
                 );
                 return self.commit_dirty_tree_to_unblock_fast_forward(child_id, &repo, to);
             }
-            let message = format!("could not check out synced data ({e})");
+            // Review (Task 14 follow-up): NOT `format!(..., {e})` — `e` is a
+            // raw `git2::Error`, and this string is what `SyncFailureNotice`
+            // shows verbatim on a parent's screen (`lgs_sync_modal.rs`).
+            // Same reasoning as `DirtyTreeError`'s doc comment: prose
+            // produced down here is how libgit2 vocabulary reaches the UI.
+            // The `log::error!` right below already carries `{e}` (plus the
+            // child id and target oid) for diagnosis, so nothing is lost by
+            // keeping it out of the user-facing message.
+            let message = "This child's data could not be updated from the other Mac. Check \
+                           that this Mac can write to its folder (permissions, or a full \
+                           disk), then try again — nothing has been lost."
+                .to_string();
             log::error!("Fast-forward checkout failed for child {child_id} to {to}: {e}");
             // Review round 4, Important-2: `self.sync.status` here is
             // WRITE-AND-FORGET — `run_child_sync_cycles` always sends
