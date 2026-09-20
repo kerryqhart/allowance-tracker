@@ -569,6 +569,28 @@ Deliberately deferred, recorded so they are visible rather than dropped:
    The two-machine harness drives `GitManager` directly and never reaches
    `ChildSyncEngine` or `apply_merge`. This is the structural reason both defects
    shipped.
+7. **`apply_fast_forward` has no proactive `working_tree_dirty` check.**
+   Unlike `apply_merge`, which checks unconditionally before doing anything
+   else, `apply_fast_forward` only discovers a dirty tree REACTIVELY — when
+   `checkout_tree` raises `GIT_ECONFLICT` because the peer's incoming commit
+   happens to touch the same path that is dirty locally. When it doesn't (the
+   peer's commit is a pure fast-forward touching some other file), the
+   checkout succeeds, HEAD advances, the cycle terminates normally, and sync
+   stays healthy — but the local dirty/deleted file is never staged,
+   committed, or pushed. A receive-only machine therefore never propagates
+   that local change to the peer, silently, for as long as it stays a pure
+   fast-forward behind. This is NOT defect 1 (no liveness failure — the
+   machine keeps ingesting peer data and terminating cycles normally) and is
+   pre-existing rather than introduced by this branch (the pre-branch
+   marker-gated `recover_if_dirty` returned `Clean` with no marker present,
+   without inspecting the tree, for the same observable behaviour).
+   Severity: Important. Found and reproduced in Task 12
+   (`egui-frontend/src/ui/app_coordinator.rs`, `apply_merge_tests`), which
+   added `a_deleted_tracked_file_does_not_stall_sync` and
+   `deleting_the_allowance_config_does_not_stall_sync` as `#[ignore]`d
+   regression tests carrying the full repro and analysis — re-enable both
+   once `apply_fast_forward` gets an unconditional `working_tree_dirty`
+   check analogous to `apply_merge`'s.
 
 ## Files touched
 

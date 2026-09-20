@@ -27,13 +27,16 @@
 use eframe::egui;
 
 use crate::backend::domain::sync_persistence::{sync_state_path, SyncState};
+use crate::backend::storage::csv::ChildRegistry;
 use crate::backend::sync::{
     adopt_child, adoptable_children, ensure_daemon, ensure_lgs_binary, plan_lgs_migration, run_first_run,
     run_lgs_migration, AdoptableChild, ChildSyncEngine, DaemonOutcome, LgsClient, StageResult, SyncPaths,
 };
 use crate::backend::Backend;
+use crate::ui::app_coordinator::DirtyTreeError;
 use crate::ui::app_state::AllowanceTrackerApp;
 use crate::ui::components::settings::shared::SettingsModalStyle;
+use crate::ui::state::{NoticeSeverity, SyncFailureNotice};
 
 /// State for Settings → Sync with another Mac.
 #[derive(Debug, Default)]
@@ -161,7 +164,7 @@ impl AllowanceTrackerApp {
                                     );
                                 }
                                 render_check_sync_results(ui, &self.settings.lgs_sync_form.check_sync_results);
-                                render_sync_notices(ui, &self.sync);
+                                render_sync_notices(ui, &self.sync, &self.core.backend.csv_connection.registry());
 
                                 ui.add_space(8.0);
                                 ui.horizontal(|ui| {
@@ -533,6 +536,18 @@ impl AllowanceTrackerApp {
         }
     }
 
+    /// Open Settings → "Sync with another Mac…" — the one existing
+    /// mechanism for showing this modal (`show_lgs_sync_modal` +
+    /// `just_opened`, as `children_modal.rs`'s `Action::OpenLgsSync` already
+    /// does). A thin wrapper so a second caller — the child-picker badge —
+    /// does not need to know those two fields exist, and so a future
+    /// caller never invents a second way to open this modal.
+    pub fn open_sync_settings_modal(&mut self) {
+        self.settings.lgs_sync_form.clear();
+        self.settings.lgs_sync_form.just_opened = true;
+        self.settings.show_lgs_sync_modal = true;
+    }
+
     /// Resolve a live `LgsClient` + `SyncPaths` for the settings panel, or
     /// set an error message and return `None` when lgs has not been set up
     /// yet (should not happen given the callers all gate on
@@ -611,7 +626,14 @@ fn render_check_sync_results(ui: &mut egui::Ui, results: &[StageResult]) {
 /// loud" mechanism this branch built terminated in a struct field nobody
 /// rendered. This reads exactly what is already recorded — no new state, no
 /// new panel — and shows nothing when all three are empty.
-fn render_sync_notices(ui: &mut egui::Ui, sync: &crate::ui::state::SyncUiState) {
+///
+/// Task 14: `sync_failures` are rendered blocking-first
+/// (`notices_blocking_first`) and through [`render_sync_failure_notice`],
+/// which names the child instead of printing `child_id` raw. The
+/// `goals_diverged` and `fast_forward_blocked` loops are left exactly as
+/// they were — collapsing all three into one `SyncNotice` shape is a named
+/// follow-up, not this task.
+fn render_sync_notices(ui: &mut egui::Ui, sync: &crate::ui::state::SyncUiState, registry: &ChildRegistry) {
     if sync.sync_failures.is_empty() && sync.goals_diverged.is_empty() && sync.fast_forward_blocked.is_empty() {
         return;
     }
@@ -623,8 +645,8 @@ fn render_sync_notices(ui: &mut egui::Ui, sync: &crate::ui::state::SyncUiState) 
         .max_height(120.0)
         .auto_shrink([false, false])
         .show(ui, |ui| {
-            for notice in &sync.sync_failures {
-                render_sync_notice_line(ui, &notice.child_id, &notice.message);
+            for notice in sync.notices_blocking_first() {
+                render_sync_failure_notice(ui, registry, notice);
             }
             for notice in &sync.goals_diverged {
                 render_sync_notice_line(
@@ -650,6 +672,164 @@ fn render_sync_notices(ui: &mut egui::Ui, sync: &crate::ui::state::SyncUiState) 
         });
 }
 
+/// The user-facing sentence for a [`DirtyTreeError`], composed HERE rather
+/// than by the sync engine.
+///
+/// `DirtyTreeError`'s own `Display` is for logs and the error chain (its doc
+/// comment says so, and the spec §4 says the user-facing sentence "is
+/// composed by the UI"). `fail_sync` used to record `err.to_string()` as the
+/// notice detail, and `render_sync_failure_notice` below renders that detail
+/// verbatim — so a parent could read *"the working tree reported changes but
+/// nothing tracked was modified"* on their own screen. This function is the
+/// boundary that stops it: one plain-language sentence per variant, with no
+/// "working tree", "stage", "index", "tracked", and no oids. A parent should
+/// learn what happened to their child's data and what to do about it, not
+/// what libgit2 calls it.
+///
+/// Wording changes therefore live in this file, next to the renderer. That
+/// is the whole point — an edit to `app_coordinator.rs` is how git
+/// vocabulary reached the screen in the first place.
+///
+/// No child name here: the headline already reads "<Name>'s sync is paused",
+/// and the two other notice sources (`ArchivedProjectSkipped`, a genuine
+/// fast-forward checkout failure) both phrase their detail line name-free
+/// for the same reason.
+pub(crate) fn dirty_tree_notice_message(err: &DirtyTreeError) -> String {
+    match err {
+        DirtyTreeError::Stage(_) | DirtyTreeError::Commit(_) => {
+            "This Mac could not save this child's latest changes into its own records, so \
+             there is nothing to send to your other Mac yet. Check that this child's folder \
+             is still where it should be and that this Mac can write to it — the disk may be \
+             full, or the folder may have been moved or locked."
+                .to_string()
+        }
+        DirtyTreeError::Unparseable { .. } => {
+            "This child's transaction file looks damaged, so it was not sent to your other \
+             Mac. It has been left exactly as it was found, untouched, for you to look at or \
+             restore from a backup."
+                .to_string()
+        }
+        DirtyTreeError::WouldEmptyLedger { head_rows, .. } => {
+            format!(
+                "This child's transaction file on this Mac has come up empty, but this Mac's \
+                 own records still hold {head_rows} transaction(s). Rather than pass that \
+                 along and empty the list on both Macs, syncing stopped for this child. If \
+                 you meant to clear this child's history, do it in the app; otherwise restore \
+                 the file from a backup."
+            )
+        }
+        DirtyTreeError::NothingToCommit => {
+            "Something unexpected happened while syncing this child, so syncing stopped \
+             instead of guessing. Nothing was changed or deleted."
+                .to_string()
+        }
+    }
+}
+
+/// The blast radius of a blocking sync failure, in a parent's terms.
+///
+/// The spec's "What the user sees" promises this paragraph and it was never
+/// built (final review, Important-2): a parent could see "Amélie's sync is
+/// paused", a cause, and a folder button, with no answer at all to the two
+/// questions they will actually have — *have I lost money?* and *what do I
+/// press?*
+///
+/// Every clause is a fact the code guarantees, not reassurance:
+/// - local writes never go through the sync path, so the app keeps working
+///   and transactions keep saving here;
+/// - the guard refuses rather than deletes, so nothing is lost;
+/// - only THIS Mac is stopped — the other has nothing wrong with it and so
+///   shows nothing, which is otherwise deeply confusing when a parent walks
+///   over to check;
+/// - `clear_sync_failure` runs on `Applied` (`app_coordinator.rs`), so
+///   recovery is automatic on the next cycle. There is no retry button, and
+///   saying so is kinder than letting someone hunt for one.
+fn blast_radius_sentence(name: &str) -> String {
+    format!(
+        "Nothing is lost. The app keeps working and {name}'s transactions still save on this \
+         Mac. Until this is sorted out, this Mac and your other Mac won't agree about {name} — \
+         your other Mac won't show an error, because nothing is wrong over there. Once the file \
+         is sorted out, syncing catches up by itself on the next check; there's no button to \
+         press."
+    )
+}
+
+/// Look up a registered child's display name — what a parent actually
+/// recognizes — rather than the internal id `SyncFailureNotice` carries.
+/// Thin wrapper over `RegistryEntry::label` (`child_registry.rs`); no
+/// second lookup mechanism, just this module's one place that needs it.
+fn registry_label_for(registry: &ChildRegistry, child_id: &str) -> Option<String> {
+    registry.entries().iter().find(|e| e.id.as_str() == child_id).map(|e| e.label.clone())
+}
+
+/// Look up a registered child's folder — what "Show the folder" opens.
+/// Thin wrapper over `RegistryEntry::path`, same rationale as
+/// [`registry_label_for`].
+fn registry_path_for(registry: &ChildRegistry, child_id: &str) -> Option<std::path::PathBuf> {
+    registry.entries().iter().find(|e| e.id.as_str() == child_id).map(|e| e.path.clone())
+}
+
+/// Render one `SyncFailureNotice`. The sentence is composed HERE, where the
+/// display name and folder path live — not inside the sync engine. Wording
+/// changes must never be edits to `app_coordinator.rs`; that is how "stage"
+/// and a git oid reached a parent's screen in the first place (see
+/// `DirtyTreeError`'s doc comment). `notice.message` is still shown as the
+/// detail line — it already carries the specific, per-cause explanation
+/// (archived project, checkout failure, dirty-tree error) that a fixed
+/// generic sentence would erase for two of the three notice sources — but
+/// it is now paired with a name-based, severity-aware headline instead of
+/// a raw `child_id`, and with a real remediation action.
+fn render_sync_failure_notice(ui: &mut egui::Ui, registry: &ChildRegistry, notice: &SyncFailureNotice) {
+    let name = registry_label_for(registry, &notice.child_id).unwrap_or_else(|| notice.child_id.clone());
+    let (headline, color) = match notice.severity {
+        NoticeSeverity::Blocking => {
+            (format!("{name}'s sync is paused."), egui::Color32::from_rgb(190, 60, 60))
+        }
+        NoticeSeverity::Informational => {
+            (format!("{name}: sync note"), egui::Color32::from_rgb(150, 130, 30))
+        }
+    };
+
+    ui.horizontal_wrapped(|ui| {
+        ui.label(egui::RichText::new(&headline).strong().color(color));
+    });
+    ui.add(
+        egui::Label::new(egui::RichText::new(&notice.message).color(egui::Color32::from_rgb(120, 120, 120)))
+            .wrap(),
+    );
+    // The blast radius, promised by the spec's "What the user sees" and
+    // never actually built until the final review caught it. Rendered only
+    // for `Blocking`, because it is the answer to "my child's sync has
+    // STOPPED — how bad is this?"; an informational notice has not stopped
+    // anything and the same paragraph would read as alarming padding.
+    //
+    // Everything here is a fact the code already guarantees, not
+    // reassurance: local writes never go through the sync path, the guard
+    // refuses rather than deletes, only THIS Mac is in a stopped state (the
+    // other one has nothing wrong with it and so shows nothing), and
+    // `clear_sync_failure` runs on `Applied` — which is precisely why there
+    // is no retry button to hunt for.
+    if notice.severity == NoticeSeverity::Blocking {
+        ui.add(
+            egui::Label::new(
+                egui::RichText::new(blast_radius_sentence(&name))
+                    .italics()
+                    .color(egui::Color32::from_rgb(120, 120, 120)),
+            )
+            .wrap(),
+        );
+        ui.add_space(2.0);
+    }
+    // Without this the remediation instruction is "open Terminal and run
+    // git", which is not an instruction this product can give.
+    if ui.button("Show the folder").clicked() {
+        if let Some(path) = registry_path_for(registry, &notice.child_id) {
+            let _ = std::process::Command::new("open").arg(path).spawn();
+        }
+    }
+    ui.add_space(4.0);
+}
+
 fn render_sync_notice_line(ui: &mut egui::Ui, child_id: &str, detail: &str) {
     ui.horizontal_wrapped(|ui| {
         ui.label(egui::RichText::new(child_id).strong().color(egui::Color32::from_rgb(190, 60, 60)));
@@ -671,6 +851,145 @@ fn render_first_run_pitch(ui: &mut egui::Ui) {
         )
         .wrap(),
     );
+}
+
+/// Final review, Important-1 and Important-2: what a PARENT reads.
+///
+/// These assert on strings, which is usually a brittle thing to do — but
+/// the whole finding was that the string a parent reads was the wrong
+/// string, produced in the wrong place. The properties pinned here are the
+/// ones that made it a finding: no git vocabulary, one distinct sentence per
+/// variant, and the blast-radius facts the spec promised actually present.
+#[cfg(test)]
+mod user_facing_wording_tests {
+    use super::{blast_radius_sentence, dirty_tree_notice_message, DirtyTreeError};
+
+    /// Every variant, so a variant added later cannot quietly inherit
+    /// someone else's sentence (or, worse, fall back to `Display`).
+    fn every_variant() -> Vec<DirtyTreeError> {
+        vec![
+            DirtyTreeError::Stage(git2::Error::from_str("libgit2 says something")),
+            DirtyTreeError::Commit(anyhow::anyhow!("anyhow says something")),
+            DirtyTreeError::Unparseable { file: "transactions.csv" },
+            DirtyTreeError::WouldEmptyLedger { file: "transactions.csv", head_rows: 42 },
+            DirtyTreeError::NothingToCommit,
+        ]
+    }
+
+    /// The literal regression: `fail_sync` recorded `err.to_string()`, and
+    /// the modal renders the notice detail verbatim, so a parent could read
+    /// "the working tree reported changes but nothing tracked was modified".
+    #[test]
+    fn no_variant_puts_git_vocabulary_on_a_parents_screen() {
+        for err in every_variant() {
+            let message = dirty_tree_notice_message(&err);
+            for jargon in [
+                "working tree", "stage", "staged", "index", "tracked", "oid", "commit", "git",
+                "repository", "libgit2", "csv",
+            ] {
+                assert!(
+                    !message.to_lowercase().contains(jargon),
+                    "{err:?} puts {jargon:?} on a parent's screen: {message}"
+                );
+            }
+            assert_ne!(
+                message,
+                err.to_string(),
+                "the notice must be the UI's sentence, never Display's: {err:?}"
+            );
+        }
+    }
+
+    /// Five variants, five sentences. A copy-pasted arm would make two
+    /// different failures indistinguishable to the person who has to fix one.
+    #[test]
+    fn each_variant_gets_its_own_sentence() {
+        let messages: Vec<String> = every_variant().iter().map(dirty_tree_notice_message).collect();
+        // `Stage` and `Commit` deliberately share one sentence: both mean
+        // "this Mac could not write", and the remedy is identical. That is
+        // one intentional pair, not an accident, so four distinct sentences
+        // out of five variants is the expected count.
+        let mut distinct = messages.clone();
+        distinct.sort();
+        distinct.dedup();
+        assert_eq!(distinct.len(), 4, "expected four distinct sentences, got: {messages:#?}");
+        assert_eq!(
+            dirty_tree_notice_message(&DirtyTreeError::Stage(git2::Error::from_str("x"))),
+            dirty_tree_notice_message(&DirtyTreeError::Commit(anyhow::anyhow!("x"))),
+            "Stage and Commit are the one deliberate pair"
+        );
+    }
+
+    /// The spec (§2) says the should-never-happen variant is worded to the
+    /// user as "something unexpected happened", not as an operating condition.
+    #[test]
+    fn the_should_never_happen_variant_says_something_unexpected_happened() {
+        let message = dirty_tree_notice_message(&DirtyTreeError::NothingToCommit);
+        assert!(
+            message.to_lowercase().contains("something unexpected happened"),
+            "the should-never-happen variant must say so plainly: {message}"
+        );
+    }
+
+    /// The emptied-ledger refusal has to tell the parent what to do, because
+    /// the one legitimate way to reach it (clearing the history through MCP)
+    /// has a completely different remedy from the damaged-file way.
+    #[test]
+    fn the_emptied_ledger_refusal_says_why_and_what_to_do() {
+        let message = dirty_tree_notice_message(&DirtyTreeError::WouldEmptyLedger {
+            file: "transactions.csv",
+            head_rows: 7,
+        });
+        assert!(message.contains('7'), "it must say how many are at stake: {message}");
+        assert!(
+            message.to_lowercase().contains("both macs"),
+            "it must name the blast radius it is preventing: {message}"
+        );
+        assert!(
+            message.to_lowercase().contains("restore"),
+            "it must give the parent a next step: {message}"
+        );
+    }
+
+    /// Important-2: the four things the spec's "What the user sees"
+    /// promises the notice tells the user, each checked separately so a
+    /// future trim cannot quietly drop one.
+    #[test]
+    fn the_blocking_notice_states_the_blast_radius() {
+        let sentence = blast_radius_sentence("Amélie");
+        let lower = sentence.to_lowercase();
+
+        assert!(lower.contains("nothing is lost"), "nothing is lost: {sentence}");
+        assert!(
+            lower.contains("keeps working") && lower.contains("still save"),
+            "the app keeps working and transactions still save: {sentence}"
+        );
+        assert!(
+            lower.contains("won't agree") && lower.contains("other mac"),
+            "the two Macs stop agreeing until it is resolved: {sentence}"
+        );
+        assert!(
+            lower.contains("nothing is wrong over there"),
+            "the other Mac shows no error because nothing is wrong there: {sentence}"
+        );
+        assert!(
+            lower.contains("catches up by itself") && lower.contains("no button to press"),
+            "recovery is automatic and there is no retry button: {sentence}"
+        );
+        assert!(
+            sentence.contains("Amélie"),
+            "it must name the child a parent recognizes: {sentence}"
+        );
+    }
+
+    /// Same rule as the cause sentences: this is a parent's screen too.
+    #[test]
+    fn the_blast_radius_sentence_carries_no_git_vocabulary() {
+        let lower = blast_radius_sentence("Amélie").to_lowercase();
+        for jargon in ["working tree", "stage", "index", "tracked", "oid", "commit", "git", "merge"] {
+            assert!(!lower.contains(jargon), "{jargon:?} must not appear: {lower}");
+        }
+    }
 }
 
 /// CRITICAL-3 regression: `plan_lgs_migration`/`run_lgs_migration` (Task 18)

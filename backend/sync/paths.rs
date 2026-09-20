@@ -4,26 +4,31 @@ use std::path::{Path, PathBuf};
 
 /// Filenames this app owns inside a child's per-child git repo.
 ///
-/// The single source of truth for "what does this app write into a child's
-/// directory" — shared by
-/// `AllowanceTrackerApp::commit_dirty_tree_to_unblock_fast_forward`
-/// (`egui-frontend/src/ui/app_coordinator.rs`), which stages only these into
-/// its unblock commit rather than `add_all(["*"])` (which would pick up
-/// whatever untracked strays happen to be sitting in the child's data
-/// directory — `.DS_Store`, editor swap files, anything macOS or an editor
-/// drops there — and commit them into this child's synced history
-/// permanently once pushed), and by `backend::sync::migration_lgs`'s commit
-/// step, for the same reason. This project has already been misled by
-/// duplicate definitions of lists like this drifting apart; keep it to one.
+/// # Two tiers, deliberately
 ///
-/// `parental_control_attempts.csv` is also owned by this system and lives in
-/// the same per-child directory, but is deliberately NOT included here: it
-/// is durably committed on its own, directly, by
-/// `ParentalControlRepository`'s own call to `GitManager::commit_file_change`
-/// — it does not need (and, now that `commit_merge` and
-/// `commit_file_change`'s staging fallback both also stage only this list,
-/// no longer gets) a later merge commit sweeping it in as a side effect.
-/// Migration handles it separately/not at all yet, for its own reasons.
+/// This narrow list governs what **`commit_merge` and migration** stage. It
+/// exists to stop `add_all(["*"])` sweeping untracked strays — `.DS_Store`,
+/// editor swap files, anything macOS or an editor drops in a child's data
+/// directory — into a commit that gets pushed into that child's synced
+/// history permanently. The danger was always the `*`, never `add_all`.
+///
+/// The **dirty-tree guard is deliberately NOT governed by this list.** It
+/// stages every *tracked* path via `index.update_all`, because a file
+/// already tracked in HEAD is already in the pushed history — committing its
+/// modification is not the hazard this list guards against, and refusing to
+/// commit it is what stalled a child's sync permanently and silently
+/// (see `2026-09-18-dirty-tree-resolution-design.md`, defect 1).
+///
+/// `parental_control_attempts.csv` is owned by this system and lives in the
+/// same directory, but is deliberately NOT in this list: it is committed
+/// directly by `ParentalControlRepository`, and the dirty-tree guard reaches
+/// it as a tracked path, so it does not need a merge commit sweeping it in
+/// as a side effect.
+///
+/// This project has already been misled by duplicate definitions of lists
+/// like this drifting apart; keep it to one. `ownership_contract`'s test
+/// below enforces that every file this app writes is either in this list or
+/// explicitly exempt.
 pub(crate) const FILES_THIS_APP_OWNS: &[&str] =
     &["transactions.csv", "goals.csv", "child.yaml", "allowance_config.yaml"];
 
@@ -537,5 +542,167 @@ mod tests {
         let missing = PathBuf::from("/this/does/not/exist/anywhere");
         let result = SyncPaths::for_production_with_home(PathBuf::from("/fake/data"), None, missing);
         assert!(result.is_err(), "a home that cannot be canonicalized must fail closed, not guess");
+    }
+}
+
+#[cfg(test)]
+mod ownership_contract {
+    use super::FILES_THIS_APP_OWNS;
+
+    /// Files that legitimately live in a child directory and are NOT staged
+    /// by `commit_merge`. Every entry needs a reason.
+    const EXEMPT: &[&str] = &[
+        // Committed directly by ParentalControlRepository, and reached by the
+        // dirty-tree guard as a tracked path. Deliberately not swept into a
+        // merge commit as a side effect.
+        "parental_control_attempts.csv",
+        // A pointer to a relocated child folder; local to this machine and
+        // never synced. See migration.rs:250.
+        ".allowance_redirect",
+    ];
+
+    /// Build a `Backend` over a fresh temp data directory and drive every
+    /// repository write path this app has against one child, through the
+    /// real domain services — never a direct file write — so the tracked
+    /// files that land in the child's git repo are exactly what production
+    /// would produce. Modeled on `app_with_git_backed_child`
+    /// (`egui-frontend/src/ui/app_coordinator.rs`).
+    fn backend_with_child_exercising_every_write_path()
+    -> (crate::backend::Backend, String, tempfile::TempDir) {
+        use crate::backend::domain::commands::allowance::UpdateAllowanceConfigCommand;
+        use crate::backend::domain::commands::child::{CreateChildCommand, SetActiveChildCommand};
+        use crate::backend::domain::commands::goal::CreateGoalCommand;
+        use crate::backend::domain::commands::transactions::CreateTransactionCommand;
+        use crate::backend::storage::csv::ParentalControlRepository;
+        use crate::backend::storage::traits::ParentalControlStorage;
+        use crate::backend::Backend;
+
+        let temp = tempfile::TempDir::new().expect("temp dir");
+        let backend = Backend::with_data_dir(temp.path().to_path_buf(), None).expect("backend");
+
+        let child = backend
+            .child_service
+            .create_child(CreateChildCommand {
+                name: "Test Kid".to_string(),
+                birthdate: "2015-01-01".to_string(),
+            })
+            .expect("create child")
+            .child;
+        let child_id = child.id;
+
+        backend
+            .child_service
+            .set_active_child(SetActiveChildCommand { child_id: child_id.clone() })
+            .expect("set active child");
+
+        backend
+            .transaction_service
+            .create_transaction(CreateTransactionCommand {
+                description: "Allowance".to_string(),
+                amount: 10.0,
+                date: None,
+            })
+            .expect("create transaction");
+
+        backend
+            .goal_service
+            .create_goal(CreateGoalCommand {
+                child_id: None,
+                description: "Save for a bike".to_string(),
+                target_amount: 50.0,
+            })
+            .expect("create goal");
+
+        backend
+            .allowance_service
+            .update_allowance_config(UpdateAllowanceConfigCommand {
+                child_id: None,
+                amount: 5.0,
+                day_of_week: 5,
+                is_active: true,
+                use_age_based_amount: false,
+            })
+            .expect("update allowance config");
+
+        // `ParentalControlService::validate_answer` always records under the
+        // pseudo-id "global" (the base directory), never a specific child —
+        // so exercising the real per-child write path this list must account
+        // for means calling the repository directly with this child's id,
+        // exactly as its own unit tests do.
+        let parental_control_repository =
+            ParentalControlRepository::new((*backend.csv_connection).clone());
+        parental_control_repository
+            .record_parental_control_attempt(&child_id, "wrong guess", false)
+            .expect("record parental control attempt");
+
+        (backend, child_id, temp)
+    }
+
+    /// Exercise every repository write path against a fresh child directory,
+    /// then assert every tracked file that appeared is either owned or
+    /// explicitly exempt. Without this, the next file this app learns to
+    /// write silently walks into the stall class defect 1 came from.
+    ///
+    /// This is deliberately two-directional. The negative half (no
+    /// unaccounted file appeared) is not enough on its own: every write path
+    /// this helper drives treats a `commit_file_change` failure as
+    /// non-fatal (`if let Err(e) = ... { warn!(...) }`), so a silently
+    /// failed commit would simply leave its file missing from HEAD — the
+    /// negative assertion would still pass, having proven nothing. The
+    /// positive half closes that hole by requiring every file this helper is
+    /// expected to produce to actually be there.
+    #[test]
+    fn every_file_this_app_writes_is_owned_or_explicitly_exempt() {
+        let (backend, child_id, _temp) = backend_with_child_exercising_every_write_path();
+        let child_dir = backend
+            .csv_connection
+            .child_dir(&shared::ChildId::from(child_id.as_str()))
+            .unwrap();
+
+        let repo = git2::Repository::open(&child_dir).unwrap();
+        let head_tree = repo.head().unwrap().peel_to_commit().unwrap().tree().unwrap();
+
+        let mut found = std::collections::HashSet::new();
+        let mut unaccounted = Vec::new();
+        head_tree
+            .walk(git2::TreeWalkMode::PreOrder, |_, entry| {
+                if let Some(name) = entry.name() {
+                    if entry.kind() == Some(git2::ObjectType::Blob) {
+                        found.insert(name.to_string());
+                        let known = FILES_THIS_APP_OWNS.contains(&name) || EXEMPT.contains(&name);
+                        if !known {
+                            unaccounted.push(name.to_string());
+                        }
+                    }
+                }
+                git2::TreeWalkResult::Ok
+            })
+            .unwrap();
+
+        assert!(
+            unaccounted.is_empty(),
+            "these tracked files are neither in FILES_THIS_APP_OWNS nor EXEMPT: {unaccounted:?}. \
+             Add each to the owned list (if a merge commit should carry it) or to EXEMPT with a \
+             reason — leaving it unaccounted for is how defect 1 happened."
+        );
+
+        // Positive half: everything the helper is expected to produce must
+        // actually be present. `.allowance_redirect` is excluded — it is a
+        // migration artifact this helper never writes, not a file any of the
+        // six write paths above produces.
+        let expected_files: Vec<&str> = FILES_THIS_APP_OWNS
+            .iter()
+            .copied()
+            .chain(EXEMPT.iter().copied().filter(|f| *f != ".allowance_redirect"))
+            .collect();
+        for expected in expected_files {
+            assert!(
+                found.contains(expected),
+                "expected file {expected:?} did not appear in the child's HEAD tree. This most \
+                 likely means its git commit failed silently (commit_file_change's failure is \
+                 non-fatal by design) rather than that the file is genuinely unowned — check the \
+                 relevant repository's commit_file_change call before touching this list."
+            );
+        }
     }
 }

@@ -58,6 +58,30 @@ impl AllowanceTrackerApp {
                             
                             // Add spacing between settings and child selector
                             ui.add_space(15.0);
+
+                            // The child picker is where the affected child
+                            // may be the SELECTED one, showing a balance the
+                            // other Mac does not share — the moment the user
+                            // is most likely to be misled. A notice that
+                            // only lives in a settings modal does not reach
+                            // them here. See the doc comment on
+                            // `SyncUiState::status` for why `sync.status`
+                            // itself cannot be used to drive this.
+                            if self.sync.has_blocking_notice() {
+                                let badge = ui.add(
+                                    egui::Label::new(
+                                        egui::RichText::new("⚠ Sync paused")
+                                            .color(egui::Color32::from_rgb(200, 80, 40)),
+                                    )
+                                    .sense(egui::Sense::click()),
+                                );
+                                if badge.clicked() {
+                                    self.open_sync_settings_modal();
+                                }
+                                badge.on_hover_text("One or more children are not syncing. Click for details.");
+                                ui.add_space(15.0);
+                            }
+
                             // FIXED: Use backend as source of truth for header display
                             let current_child_from_backend = self.get_current_child_from_backend();
                             

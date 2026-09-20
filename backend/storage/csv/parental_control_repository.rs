@@ -35,11 +35,11 @@
 use anyhow::Result;
 
 
-use csv::{Reader, Writer};
-use log::{info, debug};
+use csv::Writer;
+use log::{info, debug, warn};
 use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
-use std::io::{BufReader, BufWriter};
+use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 use shared::ChildId;
@@ -106,12 +106,19 @@ impl ParentalControlRepository {
         
         let file = File::open(&csv_path)?;
         let reader = BufReader::new(file);
-        let mut csv_reader = Reader::from_reader(reader);
-        
+        let mut csv_reader = csv::ReaderBuilder::new().flexible(true).from_reader(reader);
+
         let mut max_id = 0i64;
         for result in csv_reader.records() {
-            let record = result?;
-            if record.len() >= 1 {
+            // A torn trailing line from an interrupted append must cost that
+            // record and nothing else. Propagating here would make the log
+            // permanently unwritable, since every future append calls this.
+            let Ok(record) = result else { continue };
+            // A torn trailing line can still parse as a short, syntactically
+            // valid record under a flexible reader (e.g. "99,partial"). Only
+            // a full record's first field is trustworthy as an id — anything
+            // shorter is leftover from an interrupted append, not a real row.
+            if record.len() >= 4 {
                 if let Ok(id) = record[0].parse::<i64>() {
                     if id > max_id {
                         max_id = id;
@@ -119,10 +126,28 @@ impl ParentalControlRepository {
                 }
             }
         }
-        
+
         Ok(max_id + 1)
     }
     
+    /// Whether an existing, non-empty file's last byte is not a newline.
+    ///
+    /// An interrupted append leaves exactly this: a trailing line with no
+    /// terminator. Appending straight onto that would glue the next record
+    /// onto the torn bytes instead of starting a new line, corrupting the
+    /// new write too — so this is checked before every append.
+    fn file_missing_trailing_newline(path: &Path) -> Result<bool> {
+        let mut file = File::open(path)?;
+        let len = file.metadata()?.len();
+        if len == 0 {
+            return Ok(false);
+        }
+        file.seek(SeekFrom::End(-1))?;
+        let mut last_byte = [0u8; 1];
+        file.read_exact(&mut last_byte)?;
+        Ok(last_byte[0] != b'\n')
+    }
+
     /// Append a parental control attempt to an already-resolved directory.
     ///
     /// No `create_dir_all`: the directory came from `attempts_dir`, which
@@ -130,7 +155,14 @@ impl ParentalControlRepository {
     fn append_parental_control_attempt(&self, dir: &Path, record: &ParentalControlAttemptRecord) -> Result<()> {
         let csv_path = dir.join("parental_control_attempts.csv");
         let file_exists = csv_path.exists();
-        
+
+        // Restore the line boundary a torn trailing line left missing. This
+        // is still an append — one newline byte at EOF — never a rewrite.
+        if file_exists && Self::file_missing_trailing_newline(&csv_path)? {
+            let mut newline_fixup = OpenOptions::new().append(true).open(&csv_path)?;
+            newline_fixup.write_all(b"\n")?;
+        }
+
         // Open file in append mode
         let file = OpenOptions::new()
             .create(true)
@@ -160,11 +192,16 @@ impl ParentalControlRepository {
         let action_description = format!("Added parental control attempt (success: {})", record.success);
         
         // This is non-blocking - git errors won't fail the parental control operation
-        let _ = self.git_manager.commit_file_change(
+        if let Err(e) = self.git_manager.commit_file_change(
             dir,
             "parental_control_attempts.csv",
             &action_description
-        );
+        ) {
+            // Deliberately non-fatal: the data is already on disk, and the
+            // sync guard commits any tracked file left dirty on its next
+            // cycle. Logged rather than discarded so this is visible.
+            warn!("git commit for parental_control_attempts.csv did not complete: {e}");
+        }
 
         Ok(())
     }
@@ -180,17 +217,26 @@ impl ParentalControlRepository {
 
         let file = File::open(&csv_path)?;
         let reader = BufReader::new(file);
-        let mut csv_reader = Reader::from_reader(reader);
-        
+        let mut csv_reader = csv::ReaderBuilder::new().flexible(true).from_reader(reader);
+
         let mut attempts = Vec::new();
         for result in csv_reader.records() {
-            let record = result?;
+            // A torn trailing line from an interrupted append must cost that
+            // record and nothing else, not the whole file.
+            let Ok(record) = result else { continue };
+            // A torn write can also land mid-field with the full field
+            // count intact (e.g. `success` truncated to "tr"). The count
+            // guard above doesn't catch that, so the content parses below
+            // must skip rather than propagate too — otherwise a single
+            // corrupt-but-complete record still kills the whole read.
             if record.len() >= 4 {
+                let Ok(id) = record[0].parse::<i64>() else { continue };
+                let Ok(success) = record[3].parse::<bool>() else { continue };
                 let attempt = DomainParentalControlAttempt {
-                    id: record[0].parse::<i64>()?,
+                    id,
                     attempted_value: record[1].to_string(),
                     timestamp: record[2].to_string(),
-                    success: record[3].parse::<bool>()?,
+                    success,
                 };
                 attempts.push(attempt);
             }
@@ -395,4 +441,65 @@ mod tests {
         let attempts = repo.get_parental_control_attempts("child::nonexistent", None).unwrap();
         assert!(attempts.is_empty());
     }
-} 
+
+    /// An interrupted append leaves a partial trailing line. That must cost
+    /// the trailing record and nothing else — not the whole log, and not the
+    /// ability to append ever again.
+    #[test]
+    fn a_truncated_trailing_line_costs_only_that_record() {
+        let (repo, _child_repo, _temp_dir, child) = setup_test_repo_with_child();
+        repo.record_parental_control_attempt(&child.id, "1234", false).unwrap();
+        repo.record_parental_control_attempt(&child.id, "5678", false).unwrap();
+
+        let dir = repo.attempts_dir(&child.id).unwrap();
+        let path = dir.join("parental_control_attempts.csv");
+
+        // Simulate the interrupted append: a trailing line with too few fields.
+        let mut text = std::fs::read_to_string(&path).unwrap();
+        text.push_str("99,partial");
+        std::fs::write(&path, text).unwrap();
+
+        let attempts = repo.get_parental_control_attempts(&child.id, None).unwrap();
+        assert_eq!(attempts.len(), 2, "every prior record must still be readable");
+
+        // And the log must still be appendable — `get_next_id` is the path
+        // that would otherwise be permanently blocked.
+        repo.record_parental_control_attempt(&child.id, "0000", true).unwrap();
+        let after = repo.get_parental_control_attempts(&child.id, None).unwrap();
+        assert_eq!(after.len(), 3, "a torn line must not block future appends");
+    }
+
+    /// A crash can also land mid-field with the field *count* intact — e.g.
+    /// `success` truncated from "true" to "tr" partway through the write.
+    /// The field-count guard doesn't catch this shape at all, since the
+    /// record has all four fields; only the content is corrupt. That must
+    /// still cost only the trailing record, not the whole read or future
+    /// appends.
+    #[test]
+    fn a_content_corrupted_trailing_line_costs_only_that_record() {
+        let (repo, _child_repo, _temp_dir, child) = setup_test_repo_with_child();
+        repo.record_parental_control_attempt(&child.id, "1234", false).unwrap();
+        repo.record_parental_control_attempt(&child.id, "5678", false).unwrap();
+
+        let dir = repo.attempts_dir(&child.id).unwrap();
+        let path = dir.join("parental_control_attempts.csv");
+
+        // Simulate a crash partway through writing the last field: a full
+        // 4-field record whose `success` value is truncated mid-word.
+        let mut text = std::fs::read_to_string(&path).unwrap();
+        text.push_str("3,9999,2024-01-01T00:00:00Z,tr");
+        std::fs::write(&path, text).unwrap();
+
+        let attempts = repo.get_parental_control_attempts(&child.id, None).unwrap();
+        assert_eq!(attempts.len(), 2, "every prior record must still be readable");
+
+        // And the log must still be appendable afterwards.
+        repo.record_parental_control_attempt(&child.id, "0000", true).unwrap();
+        let after = repo.get_parental_control_attempts(&child.id, None).unwrap();
+        assert_eq!(
+            after.len(),
+            3,
+            "a content-corrupted line must not block future appends"
+        );
+    }
+}

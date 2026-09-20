@@ -451,37 +451,7 @@ impl ChildSyncEngine {
             }
             Cycle::Diverged => {
                 let auth_oid = auth_oid.expect("Cycle::Diverged implies classify saw Some(auth)");
-
-                // Read all three sides as blobs and resolve provenance here,
-                // so the merge itself never walks history.
-                let base = base_oid.map(|o| read_rows(&repo, o)).transpose()?;
-                let ours = Sided {
-                    rows: read_rows(&repo, ours_oid)?,
-                    provenance: provenance(&repo, ours_oid)?,
-                };
-                let theirs = Sided {
-                    rows: read_rows(&repo, auth_oid)?,
-                    provenance: provenance(&repo, auth_oid)?,
-                };
-
-                let diverged = goals_diverged(&repo, ours_oid, auth_oid)?;
-                if diverged {
-                    log::warn!(
-                        "goals.csv diverged between the local tip ({ours_oid}) and the \
-                         authoritative peer tip ({auth_oid}); allowance_core::merge does not \
-                         model goals, so this cycle's transactions merge proceeds but goals.csv \
-                         is left exactly as it is locally. Any goal edits made on the other \
-                         machine are NOT reflected here and must be reconciled by hand."
-                    );
-                }
-
-                let outcome = merge(base.as_deref(), &ours, &theirs);
-                Ok(CycleOutcome::Merged {
-                    rows: outcome.rows,
-                    parents: (ours_oid.to_string(), auth_oid.to_string()),
-                    decisions: outcome.decisions,
-                    goals_diverged: diverged,
-                })
+                merge_diverged(&repo, ours_oid, auth_oid, base_oid)
             }
         }
     }
@@ -802,51 +772,58 @@ pub(crate) fn current_branch(repo: &Repository) -> Result<String> {
         .ok_or_else(|| anyhow::anyhow!("HEAD is not a valid UTF-8 branch name"))
 }
 
-/// Name of the crash-recovery marker file. Lives under the repo's `.git`
+/// Name of the interrupted-merge marker file. Lives under the repo's `.git`
 /// directory (`repo.path()`), never in the working tree — it must never
-/// show up as an untracked file in `git status`, and it must survive
-/// exactly the crash window it exists to detect (a `git reset --hard` of
-/// the *working tree* does not touch `.git` itself). Content is the two
-/// parent oids `apply_merge` computed its merge against
-/// (`"{ours}\n{theirs}\n"`), for diagnostics; only its presence or absence
-/// is load-bearing.
+/// show up as an untracked file in `git status`. Content is the two parent
+/// oids `apply_merge` computed its merge against (`"{ours}\n{theirs}\n"`),
+/// for diagnostics; only its presence or absence is load-bearing.
 ///
-/// # Why a marker, not mere dirtiness, is the trigger
+/// # Diagnostic breadcrumb, not an authorization to discard
 ///
-/// An earlier version of [`recover_if_dirty`] discarded on ANY dirty
-/// tracked-file state. That is wrong: this design's own AWS-coexistence
+/// An earlier version of this module treated the marker's presence as
+/// license to hard-reset the working tree: "a merge was in progress and
+/// never finished" was read as "safe to discard whatever is on disk now."
+/// That was wrong on two counts. First, this design's own AWS-coexistence
 /// path deliberately writes `transactions.csv` WITHOUT committing
 /// (`app_coordinator.rs`'s `apply_remote_entity` -> `upsert_transaction_from_sync`,
 /// so that one MCP-server write does not fabricate an independent git
-/// commit on every machine — see that function's doc comment). A dirty
-/// working tree is therefore a NORMAL STEADY STATE for this app, not a
-/// crash signature, and hard-resetting on sight would silently destroy
-/// legitimate, not-yet-committed remote rows the AWS transport just wrote —
-/// a data-loss bug strictly worse than the crash this function exists to
-/// recover from. The marker makes the trigger explicit instead of inferred:
-/// only "a merge was in progress and never finished" (this file present)
-/// means "safe to discard," never "something happened to modify a file."
+/// commit on every machine — see that function's doc comment), so a dirty
+/// working tree is a NORMAL STEADY STATE here, not a crash signature.
+/// Second, and fatal to the reset on its own: the marker proves only that a
+/// merge BEGAN and did not finish. It does not prove the tree's *current*
+/// contents came from that merge. After a crash the app restarts, and the
+/// AWS transport's non-committing write path can land fresh MCP-authored
+/// rows in the same `transactions.csv` before the next merge runs.
+/// Resetting on the marker's say-so discarded those rows too — and the AWS
+/// watermark had already advanced past them, so they could never be
+/// re-fetched. That was permanent, silent loss of a child's real
+/// transaction data.
+///
+/// The marker no longer drives any content decision. See
+/// [`clear_interrupted_merge_marker`] for what replaced the reset, and
+/// [`working_tree_dirty`]'s doc comment for what actually owns the working
+/// tree's content now.
 pub const MERGE_IN_PROGRESS_MARKER: &str = "lgs-merge-in-progress";
 
-/// Write the crash-recovery marker recording `(ours, theirs)`. Callers
+/// Write the interrupted-merge marker recording `(ours, theirs)`. Callers
 /// (`apply_merge` in `app_coordinator.rs`) must call this BEFORE the first
 /// working-tree byte changes, so the marker's presence unambiguously means
 /// "a merge write started and never reached its commit."
 ///
-/// Not fatal if this fails (logged by the caller, not by this function):
-/// losing the marker only means a subsequent crash's dirty tree will be
-/// left alone rather than auto-recovered — the ordinary "next successful
-/// apply_merge overwrites transactions.csv anyway" path still heals it, just
-/// without the explicit fast-path.
+/// Not fatal if this fails (logged by the caller, not by this function): the
+/// marker is a diagnostic breadcrumb, not something any content decision
+/// depends on, so losing it costs nothing but that breadcrumb — a future
+/// [`clear_interrupted_merge_marker`] call simply has nothing to report.
 pub fn write_merge_marker(repo: &Repository, ours: &str, theirs: &str) -> Result<()> {
     let path = repo.path().join(MERGE_IN_PROGRESS_MARKER);
     std::fs::write(&path, format!("{ours}\n{theirs}\n"))
         .with_context(|| format!("writing crash-recovery marker at {}", path.display()))
 }
 
-/// Remove the crash-recovery marker after a merge commit has been created
-/// successfully (or after [`recover_if_dirty`] has already discarded the
-/// dirty state it described). Never an error when no marker exists.
+/// Remove the interrupted-merge marker after a merge commit has been
+/// created successfully, or after [`clear_interrupted_merge_marker`] has
+/// cleared a stale one left over from an earlier interruption. Never an
+/// error when no marker exists.
 pub fn clear_merge_marker(repo: &Repository) -> Result<()> {
     let path = repo.path().join(MERGE_IN_PROGRESS_MARKER);
     match std::fs::remove_file(&path) {
@@ -860,79 +837,41 @@ fn merge_marker_present(repo: &Repository) -> bool {
     repo.path().join(MERGE_IN_PROGRESS_MARKER).exists()
 }
 
-/// Outcome of [`recover_if_dirty`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Recovered {
-    /// No recovery action was taken — either the tree was already clean, or
-    /// it was dirty but with no [`MERGE_IN_PROGRESS_MARKER`] present, which
-    /// means this is an ordinary dirty state (see that constant's doc
-    /// comment for why that is normal here), not a crash to recover from.
-    /// Left exactly as it was found.
-    Clean,
-    /// The marker was present, so the dirty tree it described was a crash
-    /// mid-merge: hard-reset back to HEAD and the marker removed. The
-    /// caller must treat this exactly like starting fresh: re-fetch,
-    /// re-classify, and (if still diverged) re-merge and re-apply.
-    DiscardedAndReMerged,
-}
-
-/// Recover a child repo from a crash between `apply_merge` writing
-/// `transactions.csv` and it creating the follow-up merge commit
-/// (`app_coordinator.rs`) — but ONLY when [`MERGE_IN_PROGRESS_MARKER`] says
-/// that is actually what happened. Call this before writing anything, so a
-/// leftover half-written file from a previous crash can never be mistaken
-/// for legitimate content or committed alongside a new merge's tree.
+/// Clear a stale interrupted-merge marker, reporting whether one was there.
 ///
-/// # Why discarding — never salvaging — the dirty state is safe (once the
-/// marker confirms it really is a crash)
+/// # This used to hard-reset the working tree. It must never do that again.
 ///
-/// The instinct on finding unexpected uncommitted content is to inspect and
-/// try to recover it. Do not do that here. `allowance_core::merge` is a
-/// pure, deterministic function of `(base, ours, theirs)`: `ours` is still
-/// exactly `HEAD` (a dirty working tree never moves `HEAD`), and `theirs`
-/// is still sitting in the object database whether or not this attempt to
-/// apply it survives. So re-running the *same* cycle from those two inputs
-/// reproduces byte-for-byte the same rows the crashed attempt was in the
-/// middle of writing — there is nothing recoverable on disk that a clean
-/// re-run cannot recompute exactly. What IS on disk after an unclean
-/// shutdown, by contrast, could be a torn write (a partial `fs::write`), or
-/// — if the crash landed mid-stage — an index that disagrees with either
-/// the old committed content or the new merged content. Treating that as
-/// salvageable risks committing exactly the kind of corrupted or
-/// half-applied row this whole design exists to prevent. Discard it and let
-/// the deterministic merge regenerate it; do not replace this function with
-/// an attempt to inspect or keep any part of the dirty state.
+/// [`MERGE_IN_PROGRESS_MARKER`] proves a merge **began and did not finish**.
+/// It does NOT prove the working tree's current contents came from that
+/// merge. After a crash the app restarts and the AWS transport's
+/// non-committing path (`upsert_transaction_no_commit`) can write fresh
+/// MCP-authored rows into the same `transactions.csv` before the next
+/// `apply_merge` runs. Resetting on the marker's say-so destroyed those
+/// rows — and the AWS watermark had already advanced past them, so they
+/// could never be re-fetched.
 ///
-/// This must never fire on dirtiness alone — see [`MERGE_IN_PROGRESS_MARKER`]'s
-/// doc comment for the data-loss bug that caused.
-pub fn recover_if_dirty(repo: &Repository) -> Result<Recovered> {
+/// The marker is now a diagnostic breadcrumb, not an authorization to
+/// discard. Content handling belongs to the dirty-tree guard
+/// (`commit_dirty_tree_before_merge` / `commit_dirty_tree_to_unblock_fast_forward`
+/// in `app_coordinator.rs`), which commits what is on disk — the same path
+/// an ordinary MCP write takes, which is what stops an interrupted merge
+/// from being a special case.
+///
+/// # Convergence after an interrupted merge
+///
+/// The guard commits the partially merged content as an ordinary
+/// *single-parent* commit, so `theirs` never becomes an ancestor through
+/// that commit. This still converges: `theirs` is in the object database,
+/// the next cycle re-classifies against it and recomputes the merge, and
+/// `allowance_core::merge` de-duplicates rows that are `intrinsic_eq` on
+/// both sides, so rows already committed are not doubled. The same row set
+/// is reached by a different commit topology.
+pub fn clear_interrupted_merge_marker(repo: &Repository) -> Result<bool> {
     if !merge_marker_present(repo) {
-        return Ok(Recovered::Clean);
+        return Ok(false);
     }
-
-    let mut opts = git2::StatusOptions::new();
-    opts.include_untracked(false);
-    if repo
-        .statuses(Some(&mut opts))
-        .context("checking child repo status before applying a merge")?
-        .is_empty()
-    {
-        // The marker survived (e.g. a crash landed after the commit but
-        // before the marker was cleared) but there is nothing left to
-        // discard — just clean up the now-stale marker.
-        clear_merge_marker(repo)?;
-        return Ok(Recovered::Clean);
-    }
-
-    let head = repo
-        .head()
-        .context("resolving HEAD to recover a dirty working tree")?
-        .peel_to_commit()
-        .context("peeling HEAD to a commit to recover a dirty working tree")?;
-    repo.reset(head.as_object(), git2::ResetType::Hard, None)
-        .context("hard-resetting a dirty working tree back to HEAD")?;
     clear_merge_marker(repo)?;
-    Ok(Recovered::DiscardedAndReMerged)
+    Ok(true)
 }
 
 /// Attempt `attempt` up to `max` times, returning at the first success.
@@ -971,6 +910,49 @@ pub fn push_with_retry(repo: &Repository, branch: &str, max: u8) -> Result<()> {
     push_with_retry_inner(max, || push_lgs(repo, branch))
 }
 
+/// Compute the merge for a diverged cycle. Extracted from `cycle_against`'s
+/// `Cycle::Diverged` arm so the same code can be driven in tests without a
+/// remote or a daemon — the sync loop's decisions must be testable by
+/// construction, not only through a live fetch.
+///
+/// Reads all three sides as blobs and resolves provenance here, so the merge
+/// itself never walks history.
+pub(crate) fn merge_diverged(
+    repo: &Repository,
+    ours_oid: Oid,
+    auth_oid: Oid,
+    base_oid: Option<Oid>,
+) -> Result<CycleOutcome> {
+    let base = base_oid.map(|o| read_rows(repo, o)).transpose()?;
+    let ours = Sided {
+        rows: read_rows(repo, ours_oid)?,
+        provenance: provenance(repo, ours_oid)?,
+    };
+    let theirs = Sided {
+        rows: read_rows(repo, auth_oid)?,
+        provenance: provenance(repo, auth_oid)?,
+    };
+
+    let diverged = goals_diverged(repo, ours_oid, auth_oid)?;
+    if diverged {
+        log::warn!(
+            "goals.csv diverged between the local tip ({ours_oid}) and the authoritative peer \
+             tip ({auth_oid}); allowance_core::merge does not model goals, so this cycle's \
+             transactions merge proceeds but goals.csv is left exactly as it is locally. Any \
+             goal edits made on the other machine are NOT reflected here and must be reconciled \
+             by hand."
+        );
+    }
+
+    let outcome = merge(base.as_deref(), &ours, &theirs);
+    Ok(CycleOutcome::Merged {
+        rows: outcome.rows,
+        parents: (ours_oid.to_string(), auth_oid.to_string()),
+        decisions: outcome.decisions,
+        goals_diverged: diverged,
+    })
+}
+
 /// Read `transactions.csv` as of `oid`, parsed. An absent file (a commit
 /// that predates the file, or an unrelated root) reads as no rows — the
 /// merge already treats a `None` base as "union both sides", and an empty
@@ -1003,9 +985,8 @@ pub(crate) fn goals_diverged(repo: &Repository, ours: Oid, theirs: Oid) -> Resul
 /// `true` when the working tree has any uncommitted change to a file
 /// already tracked in HEAD's tree. `StatusOptions::include_untracked(false)`
 /// deliberately excludes untracked files (`.DS_Store`, editor swap files,
-/// anything this app does not track) from counting as "dirty" — matching
-/// [`recover_if_dirty`]'s own status check — because those are never what
-/// this guard exists to catch.
+/// anything this app does not track) from counting as "dirty" — those are
+/// never what this guard exists to catch.
 ///
 /// This is what `apply_merge` (`app_coordinator.rs`) uses to detect the AWS
 /// transport's non-committing apply path (`upsert_transaction_no_commit`,
@@ -1013,7 +994,10 @@ pub(crate) fn goals_diverged(repo: &Repository, ours: Oid, theirs: Oid) -> Resul
 /// the tips a merge was computed against — that dirty tree is this design's
 /// normal steady state, not a crash, and must be committed rather than
 /// silently overwritten by the merged CSV. See `apply_merge`'s doc comment
-/// for the full hazard this guards against.
+/// for the full hazard this guards against. [`clear_interrupted_merge_marker`]
+/// does not perform any status check of its own — it only ever inspects the
+/// marker file — so this is now the sync path's one and only source of
+/// truth for "is the working tree dirty."
 pub(crate) fn working_tree_dirty(repo: &Repository) -> Result<bool> {
     let mut opts = git2::StatusOptions::new();
     opts.include_untracked(false);
@@ -1372,6 +1356,59 @@ ex-3-a,keiko,2026-01-03T00:00:00+00:00,Book,-3.00,7.00,expense\n";
         }
     }
 
+    /// The merge computation must be reachable without a remote, so tests
+    /// can drive the real classify->merge->apply loop rather than a
+    /// reimplementation of it. Unlike `cycle_against`'s own tests above,
+    /// this drives `merge_diverged` directly against a plain, un-cloned
+    /// repo with no `lgs` remote at all — no fetch, no daemon, nothing but
+    /// three already-resolved commits.
+    ///
+    /// Task 10 fix: `theirs` used to be byte-identical to `base` (`TX_A`),
+    /// so this test proved only that `merge_diverged` is callable — no real
+    /// divergence was ever exercised (`merge` would resolve straight to
+    /// `ours` verbatim). `theirs` now uses `TX_THEIRS`, which adds its own
+    /// row (`ex-3-a`) that exists on neither `base` nor `ours`, so a
+    /// genuine three-way union must happen for this to pass.
+    #[test]
+    fn merge_diverged_computes_the_same_result_without_a_remote() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = Repository::init(dir.path()).unwrap();
+
+        let base = commit_with_files(&repo, "base", &[], &[(TRANSACTIONS_FILE, TX_A)], 1_700_000_000);
+        let base_commit = repo.find_commit(base).unwrap();
+
+        let ours = commit_with_files(
+            &repo,
+            "ours",
+            &[&base_commit],
+            &[(TRANSACTIONS_FILE, TX_OURS)],
+            1_700_000_050,
+        );
+        let theirs = commit_with_files(
+            &repo,
+            "theirs",
+            &[&base_commit],
+            &[(TRANSACTIONS_FILE, TX_THEIRS)],
+            1_700_000_500,
+        );
+
+        let outcome = merge_diverged(&repo, ours, theirs, Some(base)).unwrap();
+        match outcome {
+            CycleOutcome::Merged { parents, rows, .. } => {
+                assert_eq!(parents, (ours.to_string(), theirs.to_string()));
+                let ids: std::collections::HashSet<&str> =
+                    rows.iter().map(|r| r.id.as_str()).collect();
+                assert_eq!(
+                    ids,
+                    std::collections::HashSet::from(["in-1-a", "ex-2-a", "ex-3-a"]),
+                    "a genuine divergence must union both sides' unique rows with the shared \
+                     base row, not just echo one side"
+                );
+            }
+            other => panic!("expected Merged, got {other:?}"),
+        }
+    }
+
     #[test]
     fn provenance_is_resolved_per_side_and_is_never_a_shared_placeholder() {
         let (bare_dir, base_oid, work_dir) = setup_base();
@@ -1406,7 +1443,7 @@ ex-3-a,keiko,2026-01-03T00:00:00+00:00,Book,-3.00,7.00,expense\n";
         assert_eq!(theirs_prov.committer_epoch, 1_700_000_999);
     }
 
-    // --- recover_if_dirty and push_with_retry ------------------------------
+    // --- clear_interrupted_merge_marker and push_with_retry ----------------
 
     /// A standalone repo (no remote) with one committed `transactions.csv`.
     fn repo_with_commit() -> (Repository, tempfile::TempDir) {
@@ -1419,81 +1456,63 @@ ex-3-a,keiko,2026-01-03T00:00:00+00:00,Book,-3.00,7.00,expense\n";
         (repo, dir)
     }
 
-    #[test]
-    fn a_clean_tree_is_reported_clean_and_left_untouched() {
-        let (repo, _dir) = repo_with_commit();
-        assert_eq!(recover_if_dirty(&repo).unwrap(), Recovered::Clean);
-        let text = std::fs::read_to_string(repo.workdir().unwrap().join(TRANSACTIONS_FILE)).unwrap();
-        assert_eq!(text, TX_A, "a clean tree must not be touched");
+    /// Stage everything currently in the working tree and create a root
+    /// commit. Only ever called with an empty `parents` list in this file's
+    /// tests — kept as a parameter (rather than hardcoding "no parents") so
+    /// a future test extending this helper documents its intent rather than
+    /// silently assuming it.
+    fn commit_all(repo: &Repository, message: &str, parents: &[&git2::Commit]) {
+        assert!(parents.is_empty(), "commit_all here only ever creates a root commit");
+        let workdir = repo.workdir().unwrap();
+        let gm = GitManager::with_clock(|| 1_700_000_000);
+        gm.add_all(workdir).unwrap();
+        gm.commit(workdir, message).unwrap();
     }
 
-    /// Task 17 Important-3 regression: a dirty working tree is a NORMAL
-    /// STEADY STATE for this app (the AWS transport writes
-    /// `transactions.csv` without committing — see
-    /// `MERGE_IN_PROGRESS_MARKER`'s doc comment), not necessarily a crash.
-    /// Without the marker, `recover_if_dirty` must leave it alone — an
-    /// earlier version that discarded on dirtiness alone would have hard-
-    /// reset away legitimate, not-yet-committed remote rows here.
+    /// The marker proves a merge BEGAN and did not finish. It does not prove
+    /// the tree's current contents came from that merge — the AWS transport's
+    /// non-committing path can write MCP-authored rows into the same file
+    /// after the crash and before the next cycle. Discarding on the marker's
+    /// say-so destroyed those rows, and the watermark had already advanced
+    /// past them (defect 2).
     #[test]
-    fn a_dirty_tree_with_no_marker_is_left_untouched() {
-        let (repo, _dir) = repo_with_commit();
-        std::fs::write(repo.workdir().unwrap().join(TRANSACTIONS_FILE), "uncommitted AWS row").unwrap();
-        assert!(!merge_marker_present(&repo), "precondition: no marker written");
-        assert_eq!(recover_if_dirty(&repo).unwrap(), Recovered::Clean);
-        let text = std::fs::read_to_string(repo.workdir().unwrap().join(TRANSACTIONS_FILE)).unwrap();
+    fn a_dirty_tree_with_the_marker_present_is_preserved_and_the_marker_cleared() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = Repository::init(dir.path()).unwrap();
+        std::fs::write(dir.path().join(TRANSACTIONS_FILE), TX_A).unwrap();
+        commit_all(&repo, "base", &[]);
+
+        write_merge_marker(&repo, "ours-oid", "theirs-oid").unwrap();
+        std::fs::write(repo.workdir().unwrap().join(TRANSACTIONS_FILE), "an MCP row written after the crash").unwrap();
+
+        let had_marker = clear_interrupted_merge_marker(&repo).unwrap();
+
+        assert!(had_marker, "the marker was present and must be reported");
         assert_eq!(
-            text, "uncommitted AWS row",
-            "an ordinary dirty tree with no crash marker must never be touched"
+            std::fs::read_to_string(dir.path().join(TRANSACTIONS_FILE)).unwrap(),
+            "an MCP row written after the crash",
+            "the dirty content must be PRESERVED — the dirty-tree guard commits it, and \
+             discarding it here is the data loss this change exists to remove"
+        );
+        assert!(
+            !repo.path().join(MERGE_IN_PROGRESS_MARKER).exists(),
+            "the stale marker must be cleared"
         );
     }
 
-    /// Crash between writing merged CSVs and the merge commit, WITH the
-    /// crash-recovery marker present (as `apply_merge` writes it before
-    /// touching the working tree). Re-running is safe precisely because the
-    /// merge is deterministic — see `recover_if_dirty`'s doc comment for why
-    /// discarding (never salvaging) the dirty content is the correct move
-    /// once the marker confirms this really is a crash.
     #[test]
-    fn a_dirty_tree_with_the_marker_present_is_discarded_and_the_marker_cleared() {
-        let (repo, _dir) = repo_with_commit();
-        write_merge_marker(&repo, "ours-oid", "theirs-oid").unwrap();
-        std::fs::write(repo.workdir().unwrap().join(TRANSACTIONS_FILE), "garbage").unwrap();
+    fn no_marker_reports_false_and_touches_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = Repository::init(dir.path()).unwrap();
+        std::fs::write(dir.path().join(TRANSACTIONS_FILE), TX_A).unwrap();
+        commit_all(&repo, "base", &[]);
+        std::fs::write(dir.path().join(TRANSACTIONS_FILE), "uncommitted AWS row").unwrap();
 
-        let recovered = recover_if_dirty(&repo).unwrap();
-        assert_eq!(recovered, Recovered::DiscardedAndReMerged);
-
-        let text = std::fs::read_to_string(repo.workdir().unwrap().join(TRANSACTIONS_FILE)).unwrap();
-        assert_ne!(text, "garbage");
-        assert_eq!(text, TX_A, "must be reset to exactly the last committed content");
-        assert!(!merge_marker_present(&repo), "the marker must be cleared once recovery ran");
-    }
-
-    /// The marker can outlive its crash window (e.g. the crash landed right
-    /// after the commit but before `clear_merge_marker` ran) with nothing
-    /// left dirty to discard. `recover_if_dirty` must still clean up the
-    /// stale marker rather than leaving it to wrongly trigger a discard on
-    /// some LATER, unrelated dirty state.
-    #[test]
-    fn a_stale_marker_with_nothing_dirty_is_cleaned_up_without_a_discard() {
-        let (repo, _dir) = repo_with_commit();
-        write_merge_marker(&repo, "ours-oid", "theirs-oid").unwrap();
-
-        assert_eq!(recover_if_dirty(&repo).unwrap(), Recovered::Clean);
-        assert!(!merge_marker_present(&repo), "a stale marker must still be cleared");
-        let text = std::fs::read_to_string(repo.workdir().unwrap().join(TRANSACTIONS_FILE)).unwrap();
-        assert_eq!(text, TX_A, "nothing was dirty, so nothing should have changed");
-    }
-
-    /// An untracked file (never committed, so never part of HEAD) does not
-    /// count as "dirty" here even with the marker present —
-    /// `StatusOptions::include_untracked(false)` deliberately excludes it.
-    #[test]
-    fn an_untracked_file_alone_is_not_treated_as_dirty() {
-        let (repo, dir) = repo_with_commit();
-        write_merge_marker(&repo, "ours-oid", "theirs-oid").unwrap();
-        std::fs::write(dir.path().join("some_other_file.txt"), "not part of any commit").unwrap();
-        assert_eq!(recover_if_dirty(&repo).unwrap(), Recovered::Clean);
-        assert!(dir.path().join("some_other_file.txt").exists(), "untracked files are left alone");
+        assert!(!clear_interrupted_merge_marker(&repo).unwrap());
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join(TRANSACTIONS_FILE)).unwrap(),
+            "uncommitted AWS row"
+        );
     }
 
     #[test]

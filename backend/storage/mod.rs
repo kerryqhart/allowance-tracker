@@ -39,6 +39,7 @@
 //! - **Testability**: Mock implementations for unit testing
 
 pub mod traits;
+pub mod atomic;
 pub mod csv;
 pub mod git;
 pub mod remote;

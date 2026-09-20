@@ -64,6 +64,17 @@ pub struct FastForwardBlockedNotice {
     pub to: String,
 }
 
+/// How much the user needs to care. `FastForwardBlockedNotice` and a stalled
+/// child currently render identically in red; a parent seeing two red lines
+/// against the same child has no way to tell which is the emergency.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum NoticeSeverity {
+    /// Something happened and was handled. No action needed.
+    Informational,
+    /// This child is not syncing until a human acts.
+    Blocking,
+}
+
 /// A sync failure serious enough that the user needs to find out about it,
 /// which must not be silently erased by the next unrelated `SyncStatus`
 /// write. Review round 4, Important-2: a genuine (non-conflict) checkout
@@ -80,11 +91,21 @@ pub struct SyncFailureNotice {
     pub child_id: String,
     /// Human-readable description of what failed and why.
     pub message: String,
+    /// No `Default` on this type, and no default here either — every
+    /// construction site names its severity explicitly, so it is always a
+    /// decision rather than an accident.
+    pub severity: NoticeSeverity,
 }
 
 /// UI state for sync operations
 pub struct SyncUiState {
-    /// Current sync status
+    /// Current sync status.
+    ///
+    /// **Currently read by no UI component.** Written in ~30 places in
+    /// `app_coordinator.rs` and rendered nowhere — a status write alone does
+    /// NOT tell the user anything. Anything the user must see goes through
+    /// `sync_failures` with `NoticeSeverity::Blocking`, which the
+    /// child-picker badge (`header.rs`) surfaces.
     pub status: SyncStatus,
 
     /// List of detected conflicts awaiting resolution
@@ -208,6 +229,19 @@ impl SyncUiState {
     /// (merge or fast-forward) for that child succeeds.
     pub fn clear_sync_failure(&mut self, child_id: &str) {
         self.sync_failures.retain(|n| n.child_id != child_id);
+    }
+
+    /// Blocking first, so the one that matters is never the one scrolled out
+    /// of a 120px box.
+    pub fn notices_blocking_first(&self) -> Vec<&SyncFailureNotice> {
+        let mut all: Vec<&SyncFailureNotice> = self.sync_failures.iter().collect();
+        all.sort_by(|a, b| b.severity.cmp(&a.severity));
+        all
+    }
+
+    /// Drives the child-picker badge.
+    pub fn has_blocking_notice(&self) -> bool {
+        self.sync_failures.iter().any(|n| n.severity == NoticeSeverity::Blocking)
     }
 
     /// Record one stale-head merge refusal for `child_id` at `now` and
@@ -442,5 +476,39 @@ mod stale_head_debounce_tests {
             "after forget_child, the next refusal for the same id must send again, not stay \
              suppressed by state that should have been cleared"
         );
+    }
+}
+
+#[cfg(test)]
+mod notice_severity_tests {
+    use super::*;
+
+    #[test]
+    fn blocking_notices_sort_ahead_of_informational_ones() {
+        let mut state = SyncUiState::new();
+        state.record_sync_failure(SyncFailureNotice {
+            child_id: "child-a".to_string(),
+            message: "informational".to_string(),
+            severity: NoticeSeverity::Informational,
+        });
+        state.record_sync_failure(SyncFailureNotice {
+            child_id: "child-b".to_string(),
+            message: "blocking".to_string(),
+            severity: NoticeSeverity::Blocking,
+        });
+
+        let ordered = state.notices_blocking_first();
+        assert_eq!(ordered[0].child_id, "child-b", "a blocking notice must never be scrolled below an informational one");
+    }
+
+    #[test]
+    fn a_child_with_no_blocking_notice_is_not_badged() {
+        let mut state = SyncUiState::new();
+        state.record_sync_failure(SyncFailureNotice {
+            child_id: "child-a".to_string(),
+            message: "informational".to_string(),
+            severity: NoticeSeverity::Informational,
+        });
+        assert!(!state.has_blocking_notice());
     }
 }

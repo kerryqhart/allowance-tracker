@@ -47,7 +47,10 @@ use crate::backend::sync::paths::FILES_THIS_APP_OWNS;
 /// `commit_file_change` staging-failure fallback so both stay in sync with
 /// the single source of truth instead of drifting the way duplicate lists
 /// already have once in this project.
-fn stage_owned_files(repo: &Repository, repo_path: &Path) -> Result<()> {
+fn stage_owned_files(repo: &Repository) -> Result<()> {
+    let repo_path = repo
+        .workdir()
+        .ok_or_else(|| anyhow::anyhow!("staging owned files requires a working directory"))?;
     let mut index = repo.index()?;
     for name in FILES_THIS_APP_OWNS {
         if !repo_path.join(name).exists() {
@@ -312,7 +315,7 @@ impl GitManager {
         // most-travelled pushed commit in the whole sync design, and
         // `add_all` here would sweep `.DS_Store` and editor temp files into
         // a child's synced history permanently.
-        stage_owned_files(&repo, repo_path)?;
+        stage_owned_files(&repo)?;
         let mut index = repo.index()?;
         let tree_id = index.write_tree()?;
         let tree = repo.find_tree(tree_id)?;
@@ -350,6 +353,18 @@ impl GitManager {
     }
 
     /// Commit file changes with staging (convenience method)
+    ///
+    /// Returns `Ok(())` even when the commit itself failed — the failure is
+    /// logged, not propagated, because a failed *commit* must not fail the
+    /// user's *write*: the data is already on disk.
+    ///
+    /// `#[must_use]` so that discarding this is a deliberate act. The
+    /// dirty-tree guard (`resolve_dirty_tree`, in
+    /// `egui-frontend/src/ui/app_coordinator.rs`) is what actually recovers
+    /// a file left uncommitted by a failure here — it stages every tracked
+    /// path via `index.update_all` on the next sync cycle, which is why
+    /// propagating this error was considered and rejected as redundant.
+    #[must_use = "a commit failure leaves the file uncommitted until the next sync cycle's guard picks it up"]
     pub fn commit_file_change<P: AsRef<Path>>(
         &self,
         repo_path: P,
@@ -373,7 +388,7 @@ impl GitManager {
                 filename, e
             );
             let repo = Repository::open(repo_path)?;
-            stage_owned_files(&repo, repo_path)?;
+            stage_owned_files(&repo)?;
         }
 
         // Create commit message
@@ -407,43 +422,6 @@ impl GitManager {
         Repository::open(repo_path).is_ok()
     }
 
-    // ========== SYNCHRONOUS VERSIONS FOR EGUI FRONTEND ==========
-    // These are aliases since git2 is already synchronous
-
-    /// Initialize a git repository in the specified directory (synchronous)
-    pub fn init_repo_sync<P: AsRef<Path>>(&self, repo_path: P) -> Result<()> {
-        self.init_repo(repo_path)
-    }
-
-    /// Ensure a git repository exists at the specified path (synchronous)
-    pub fn ensure_repo_exists_sync<P: AsRef<Path>>(&self, repo_path: P) -> Result<()> {
-        self.ensure_repo_exists(repo_path)
-    }
-
-    /// Stage all changes in the repository (synchronous)
-    pub fn add_all_sync<P: AsRef<Path>>(&self, repo_path: P) -> Result<()> {
-        self.add_all(repo_path)
-    }
-
-    /// Create a commit with the staged changes (synchronous)
-    pub fn commit_sync<P: AsRef<Path>>(&self, repo_path: P, message: &str) -> Result<String> {
-        self.commit(repo_path, message)
-    }
-
-    /// Check if repository has uncommitted changes (synchronous)
-    pub fn has_uncommitted_changes_sync<P: AsRef<Path>>(&self, repo_path: P) -> Result<bool> {
-        self.has_uncommitted_changes(repo_path)
-    }
-
-    /// Commit file changes with staging (synchronous version)
-    pub fn commit_file_change_sync<P: AsRef<Path>>(
-        &self,
-        repo_path: P,
-        filename: &str,
-        action_description: &str
-    ) -> Result<()> {
-        self.commit_file_change(repo_path, filename, action_description)
-    }
 }
 
 impl Default for GitManager {

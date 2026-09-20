@@ -82,9 +82,7 @@ impl ChildRegistry {
             fs::create_dir_all(base_dir)?;
         }
 
-        let temp = path.with_extension("yaml.tmp");
-        fs::write(&temp, text)?;
-        fs::rename(&temp, &path)?;
+        crate::backend::storage::atomic::write(&path, text)?;
         Ok(())
     }
 

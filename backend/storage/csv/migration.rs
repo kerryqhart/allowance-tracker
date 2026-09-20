@@ -429,9 +429,7 @@ fn migrate_global_config(base_dir: &Path, registry: &ChildRegistry) -> Result<()
     );
 
     let rendered = serde_yaml::to_string(&serde_yaml::Value::Mapping(out))?;
-    let temp = path.with_extension("yaml.tmp");
-    fs::write(&temp, rendered)?;
-    fs::rename(&temp, &path)?;
+    crate::backend::storage::atomic::write(&path, rendered)?;
     Ok(())
 }
 
