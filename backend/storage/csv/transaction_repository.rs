@@ -204,8 +204,15 @@ impl TransactionRepository {
             &action_description
         ) {
             // Deliberately non-fatal: the data is already on disk, and the
-            // sync guard commits any tracked file left dirty on its next
-            // cycle. Logged rather than discarded so this is visible.
+            // sync guard commits a tracked file left dirty on its next
+            // cycle — with one exception, which this file is the cause of.
+            // If a failure here leaves transactions.csv holding no rows
+            // while HEAD still holds some, the guard REFUSES the whole
+            // cycle (`DirtyTreeError::WouldEmptyLedger`) rather than commit
+            // and push an emptied ledger, because `allowance_core::merge`
+            // reads "present in base, absent in ours" as a deletion and
+            // would erase every row on both machines. The user gets a
+            // blocking notice instead. See `resolve_dirty_tree`.
             warn!("git commit for transactions.csv did not complete: {e}");
         }
 

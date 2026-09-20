@@ -102,9 +102,11 @@ impl GoalRepository {
                 &action_description
             ) {
                 // Deliberately non-fatal: the data is already on disk, and
-                // the sync guard commits any tracked file left dirty on its
-                // next cycle. Logged rather than discarded so this is
-                // visible.
+                // the sync guard commits a tracked file left dirty on its
+                // next cycle — unless that cycle is refused outright, which
+                // happens only when transactions.csv is found emptied (see
+                // `DirtyTreeError::WouldEmptyLedger`). Logged rather than
+                // discarded so this is visible.
                 warn!("git commit for goals.csv did not complete: {e}");
             }
         }
