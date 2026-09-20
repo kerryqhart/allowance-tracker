@@ -130,12 +130,40 @@ pub enum DirtyTreeError {
     Commit(#[source] anyhow::Error),
     #[error("{file} could not be read as transaction data")]
     Unparseable { file: &'static str },
+    /// The on-disk `transactions.csv` holds NO rows — it is absent, or
+    /// truncated to exactly the canonical header — while HEAD still records
+    /// rows. See `resolve_dirty_tree`'s "Why an emptied ledger is refused"
+    /// section for why this is refused rather than committed.
+    #[error("{file} holds no rows but HEAD still records {head_rows}; refusing to commit an emptied ledger")]
+    WouldEmptyLedger { file: &'static str, head_rows: usize },
     /// Should never happen: `working_tree_dirty` ignores untracked files and
     /// `update_all` stages every tracked change, so any tree that reaches the
     /// guard has something to stage. Kept as an honest "something unexpected
     /// happened" rather than deleted.
     #[error("the working tree reported changes but nothing tracked was modified")]
     NothingToCommit,
+}
+
+/// How many transaction rows HEAD records, or `None` when that genuinely
+/// cannot be determined: an unborn branch, no `transactions.csv` at HEAD, a
+/// blob that is not UTF-8, or one the codec refuses.
+///
+/// `None` deliberately never blocks a commit. This helper exists solely to
+/// answer "is there a good ledger here that an empty working-tree file would
+/// wipe out?", and a HEAD that cannot be read is not evidence of one — if
+/// anything, committing a well-formed empty ledger over an unreadable HEAD
+/// is an improvement. Fail-closed belongs on the DISK side of the check
+/// (above), where the bytes about to be pushed live.
+///
+/// Reads HEAD's blob directly rather than reaching for `child_sync`'s
+/// private `read_blob_at`: six lines of `git2` here, against no change at
+/// all to the merge module.
+fn head_transaction_row_count(repo: &git2::Repository) -> Option<usize> {
+    let commit = repo.head().ok()?.peel_to_commit().ok()?;
+    let entry = commit.tree().ok()?.get_path(std::path::Path::new("transactions.csv")).ok()?;
+    let blob = repo.find_blob(entry.id()).ok()?;
+    let text = std::str::from_utf8(blob.content()).ok()?;
+    allowance_core::codec::parse_transactions(text).ok().map(|parsed| parsed.rows.len())
 }
 
 /// Commit a dirty working tree so a merge or fast-forward can proceed —
@@ -181,6 +209,46 @@ pub enum DirtyTreeError {
 /// with a junk first line AND well-formed data rows still passes, and that
 /// is a knowingly-accepted residual: every row survives it, identically on
 /// both machines, so it is not the silent-empty-ledger class of fault.
+///
+/// # Why an emptied ledger is refused (final-review Critical)
+///
+/// A successful parse is still not enough, because the two shapes that
+/// actually empty a child's ledger both parse cleanly:
+///
+/// 1. **`transactions.csv` absent.** Nothing above validates a file that is
+///    not there, and `update_all` stages the DELETION, which is then
+///    committed and pushed.
+/// 2. **`transactions.csv` truncated to exactly the canonical header.** It
+///    passes the zero-row check above by construction — the header is
+///    precisely what that check requires.
+///
+/// Both are the likely outcome of a prefix-truncated write, not the
+/// unlikely one: `fs::write` interrupted part-way leaves either a
+/// header-only file (slips through) or a header plus a partial row (already
+/// caught above).
+///
+/// Either way, `read_rows` (`backend/sync/child_sync.rs`) reads an absent
+/// file as zero rows, and `allowance_core::merge` reads "present in base,
+/// absent from ours" as `Decision::Deleted` (`allowance-core/src/merge.rs`).
+/// So the NEXT merge deletes every row on BOTH machines — exactly the
+/// two-machine outage this gate exists to prevent (spec §3).
+///
+/// So HEAD's own `transactions.csv` is read: if HEAD records rows and the
+/// on-disk state holds none, the guard REFUSES rather than committing.
+///
+/// ## Why refusing does not reintroduce defect 1
+///
+/// This does not put the liveness defect back. The app's own delete path
+/// COMMITS its deletion, so a legitimate removal of every transaction never
+/// reaches the guard in this state at all. The only path that can empty the
+/// ledger without committing is the AWS non-committing apply path — and if
+/// a parent genuinely deleted every transaction through MCP, refusing shows
+/// them a blocking notice they can act on. That satisfies the invariant's
+/// "resolved **or** explained" arm: a visible, recoverable refusal beats
+/// silently erasing a child's ledger on both machines, which is neither.
+///
+/// **Do not "fix" this refusal away.** Turning it back into a commit is
+/// precisely how defect 2 shipped.
 fn resolve_dirty_tree(
     repo: &git2::Repository,
     message: &str,
@@ -193,7 +261,10 @@ fn resolve_dirty_tree(
         .to_path_buf();
 
     let tx_path = workdir.join("transactions.csv");
-    if tx_path.exists() {
+    // An absent file is not a separate shape from a header-only one: both
+    // read back as zero rows (`read_rows` maps a missing blob to an empty
+    // Vec), so both are collapsed to `0` here and judged by the same rule.
+    let rows_on_disk = if tx_path.exists() {
         let text = std::fs::read_to_string(&tx_path)
             .map_err(|e| DirtyTreeError::Commit(anyhow::Error::from(e)))?;
         match allowance_core::codec::parse_transactions(&text) {
@@ -206,8 +277,22 @@ fn resolve_dirty_tree(
                 if first_line != allowance_core::codec::HEADER.join(",") {
                     return Err(DirtyTreeError::Unparseable { file: "transactions.csv" });
                 }
+                0
             }
-            Ok(_) => {}
+            Ok(parsed) => parsed.rows.len(),
+        }
+    } else {
+        0
+    };
+
+    if rows_on_disk == 0 {
+        if let Some(head_rows) = head_transaction_row_count(repo) {
+            if head_rows > 0 {
+                return Err(DirtyTreeError::WouldEmptyLedger {
+                    file: "transactions.csv",
+                    head_rows,
+                });
+            }
         }
     }
 
@@ -1350,8 +1435,14 @@ impl AllowanceTrackerApp {
     /// `anyhow::Error`'s behaviour, not `std::error::Error`'s, and this is
     /// not an `anyhow::Error`.)
     ///
-    /// `err.to_string()` alone — no chain — is what the notice records: the
-    /// chain is developer detail for the log, not for a parent's screen.
+    /// The notice records a sentence composed by the UI
+    /// (`lgs_sync_modal::dirty_tree_notice_message`), NOT `err.to_string()`.
+    /// Final-review Important-1: this function used to record the `Display`
+    /// text, and the modal renders the notice's detail line verbatim — so a
+    /// parent could read "the working tree reported changes but nothing
+    /// tracked was modified" on their own screen. `Display` is unchanged and
+    /// still carries the developer wording into the log line above, together
+    /// with the whole `#[source]` chain.
     fn fail_sync(&mut self, child_id: &str, err: &DirtyTreeError) {
         let mut chain = err.to_string();
         let mut source = std::error::Error::source(err);
@@ -1361,10 +1452,13 @@ impl AllowanceTrackerApp {
             source = cause.source();
         }
         log::error!("Sync failed for child {child_id}: {chain}");
+        let message = crate::ui::components::settings::lgs_sync_modal::dirty_tree_notice_message(err);
+        // `sync.status` is read by no UI component (see `SyncUiState::status`),
+        // so it keeps the developer wording for whoever eventually reads it.
         self.sync.status = SyncStatus::Error(format!("Sync failed for {child_id}: {err}"));
         self.sync.record_sync_failure(SyncFailureNotice {
             child_id: child_id.to_string(),
-            message: err.to_string(),
+            message,
             // Blocking: this child is not syncing until a human acts.
             severity: NoticeSeverity::Blocking,
         });
@@ -2428,15 +2522,57 @@ mod apply_merge_tests {
     /// divergence and refused identically — until the re-poll was suppressed
     /// and that child silently stopped syncing. `update_all` stages
     /// deletions, which is exactly why it replaced the allowlist here.
+    ///
+    /// # Final review, Critical: split by which file was deleted
+    ///
+    /// This test used to delete `transactions.csv` and assert the deletion
+    /// was COMMITTED — the same pattern that let defect 2 ship. An
+    /// uncommitted deletion of the LEDGER is no longer committed: it is
+    /// refused, because `read_rows` reads an absent file as zero rows and
+    /// `allowance_core::merge` reads "in base, absent from ours" as a
+    /// deliberate delete, so committing it empties the ledger on BOTH
+    /// machines (see `resolve_dirty_tree`'s "Why an emptied ledger is
+    /// refused"). That case now lives in
+    /// `a_deleted_transactions_csv_is_refused_rather_than_committing_an_emptied_ledger`
+    /// below.
+    ///
+    /// Defect 1's own regression still needs a deleted-tracked-file case,
+    /// though — the stall was never about `transactions.csv` specifically,
+    /// it was about `add_file` being unable to stage ANY deletion. So this
+    /// test keeps the identical shape against a NON-ledger owned file
+    /// (`goals.csv`), where committing the deletion is both safe and
+    /// required. The two cases are genuinely different and both are kept.
     #[test]
-    fn an_uncommitted_deletion_is_committed_rather_than_stalling_the_merge_forever() {
+    fn an_uncommitted_deletion_of_a_non_ledger_file_is_committed_rather_than_stalling_the_merge_forever() {
         let (mut app, child_id, _temp) = app_with_git_backed_child();
+        // A real goal, so `goals.csv` is genuinely TRACKED in HEAD. Without
+        // it `.remove_file` below would be a no-op on a file that never
+        // existed and this test would pass vacuously.
+        app.backend()
+            .goal_service
+            .create_goal(crate::backend::domain::commands::goal::CreateGoalCommand {
+                child_id: None,
+                description: "Save for a bike".to_string(),
+                target_amount: 50.0,
+            })
+            .expect("create goal");
         let child_dir = app
             .backend()
             .csv_connection
             .child_dir(&shared::ChildId::from(child_id.as_str()))
             .unwrap();
         let repo = Repository::open(&child_dir).unwrap();
+        assert!(
+            repo.head()
+                .unwrap()
+                .peel_to_commit()
+                .unwrap()
+                .tree()
+                .unwrap()
+                .get_path(std::path::Path::new("goals.csv"))
+                .is_ok(),
+            "precondition: goals.csv must be tracked in HEAD, or the deletion below is a no-op"
+        );
         let ours_oid = repo.head().unwrap().peel_to_commit().unwrap().id();
         let ours_commit = repo.find_commit(ours_oid).unwrap();
         let theirs_oid = commit_with_files(
@@ -2448,7 +2584,7 @@ mod apply_merge_tests {
         );
 
         // Deliberately NOT staged — the state `add_file` cannot represent.
-        std::fs::remove_file(child_dir.join("transactions.csv")).unwrap();
+        std::fs::remove_file(child_dir.join("goals.csv")).unwrap();
         app.sync.status = SyncStatus::Idle;
 
         let outcome = app.apply_merge(
@@ -2473,13 +2609,78 @@ mod apply_merge_tests {
         assert_ne!(new_head.id(), ours_oid, "the deletion must have been committed, advancing HEAD");
         assert_eq!(new_head.parent_count(), 1, "an ordinary local commit, not a merge commit");
         assert!(
-            new_head.tree().unwrap().get_path(std::path::Path::new("transactions.csv")).is_err(),
+            new_head.tree().unwrap().get_path(std::path::Path::new("goals.csv")).is_err(),
             "the commit's tree must record the deletion"
         );
         assert_eq!(
             app.sync.status,
             SyncStatus::Idle,
             "a dirty-tree refusal that resolved is not a failure and must not be reported as one"
+        );
+    }
+
+    /// Final review, Critical — shape 1 of the two that empty a ledger.
+    ///
+    /// An absent `transactions.csv` used to skip the parse gate entirely
+    /// (`if tx_path.exists()`), so `update_all` staged the deletion, it was
+    /// committed, and `push_with_retry` sent it to the peer. `read_rows`
+    /// then reads an absent file as ZERO ROWS on both machines, and
+    /// `allowance_core::merge` reads "present in base, absent from ours" as
+    /// `Decision::Deleted` — so the next merge deletes every row on both
+    /// Macs, silently. That is the two-machine outage spec §3 says this gate
+    /// exists to prevent, and it was reachable.
+    ///
+    /// The guard now refuses: HEAD is left alone, the file is left as found,
+    /// and a blocking notice says so. See
+    /// `an_uncommitted_deletion_of_a_non_ledger_file_is_committed_rather_than_stalling_the_merge_forever`
+    /// above for why refusing here does not put defect 1 back.
+    #[test]
+    fn a_deleted_transactions_csv_is_refused_rather_than_committing_an_emptied_ledger() {
+        let (mut app, child_id, _temp) = app_with_git_backed_child();
+        let child_dir = app
+            .backend()
+            .csv_connection
+            .child_dir(&shared::ChildId::from(child_id.as_str()))
+            .unwrap();
+        let repo = Repository::open(&child_dir).unwrap();
+        let ours_oid = repo.head().unwrap().peel_to_commit().unwrap().id();
+        let ours_commit = repo.find_commit(ours_oid).unwrap();
+        let theirs_oid = commit_with_files(
+            &repo,
+            "their edit",
+            &[&ours_commit],
+            &[("transactions.csv", "id,child_id,date,description,amount,balance,type\n")],
+            1_700_000_500,
+        );
+
+        std::fs::remove_file(child_dir.join("transactions.csv")).unwrap();
+
+        let outcome = app.apply_merge(
+            &child_id,
+            vec![],
+            &(ours_oid.to_string(), theirs_oid.to_string()),
+            &[],
+        );
+        assert_eq!(
+            outcome,
+            ApplyMergeOutcome::Failed,
+            "an absent ledger must never be committed and pushed as a deletion of every row"
+        );
+
+        let repo = Repository::open(&child_dir).unwrap();
+        assert_eq!(
+            repo.head().unwrap().peel_to_commit().unwrap().id(),
+            ours_oid,
+            "HEAD must not have moved — nothing was committed"
+        );
+        assert!(
+            !child_dir.join("transactions.csv").exists(),
+            "refused, not repaired: the guard must not write the file back either"
+        );
+        assert!(
+            app.sync.sync_failures.iter().any(|n| n.child_id == child_id),
+            "the refusal must be surfaced durably, not merely logged — a silent refusal here \
+             is defect 1 all over again"
         );
     }
 
@@ -2544,11 +2745,24 @@ mod apply_merge_tests {
             .iter()
             .find(|n| n.child_id == child_id)
             .expect("a refusal must be surfaced durably, not merely logged");
+        // Final review, Important-1: the notice detail is now the sentence
+        // the UI composes (`lgs_sync_modal::dirty_tree_notice_message`), not
+        // `DirtyTreeError`'s `Display`. It names the file in the parent's
+        // vocabulary — "transaction file" — and, crucially, in NOBODY's git
+        // vocabulary. Asserted here as well as in the modal's own tests
+        // because this is the path that actually puts the string on screen.
         assert!(
-            notice.message.contains("transactions.csv"),
-            "the notice must name the file that could not be read: {}",
+            notice.message.contains("transaction file"),
+            "the notice must tell the parent which of their child's data could not be read: {}",
             notice.message
         );
+        for jargon in ["working tree", "stage", "index", "tracked", "oid", "git"] {
+            assert!(
+                !notice.message.to_lowercase().contains(jargon),
+                "a parent's screen must not carry the word {jargon:?}: {}",
+                notice.message
+            );
+        }
         // Task 12 addition: refused, not repaired, not discarded — the file
         // on disk must be left exactly as found, byte for byte, for a human
         // to look at.
@@ -2633,13 +2847,28 @@ mod apply_merge_tests {
         );
     }
 
-    /// The other half of the check above: a header-only `transactions.csv`
-    /// is a legitimately EMPTY ledger (every row deleted), not corruption,
-    /// and must still commit. Without this, "refuse zero-row files" would be
-    /// an equally wrong over-correction — it would stall any child whose
-    /// history was legitimately cleared.
+    /// Final review, Critical — shape 2 of the two that empty a ledger, and
+    /// the LIKELIER of the two.
+    ///
+    /// A `transactions.csv` truncated to exactly the canonical header passed
+    /// the zero-row check above by construction: that check demands the
+    /// first line BE the canonical header. So the gate as first written
+    /// caught the unlikely truncation (header plus a partial row) and missed
+    /// the likely one (a prefix-truncated `fs::write` that stopped right
+    /// after the header). It then committed and pushed an empty ledger, and
+    /// the next merge deleted every row on both machines — see
+    /// `a_deleted_transactions_csv_is_refused_rather_than_committing_an_emptied_ledger`
+    /// for the `read_rows` / `merge` mechanism, which is identical.
+    ///
+    /// This test is the direct replacement for the old
+    /// `a_header_only_transactions_csv_is_a_legitimately_empty_ledger_and_still_commits`,
+    /// which asserted the opposite in exactly this state. The "don't
+    /// over-correct" half of that test is preserved below in
+    /// `a_header_only_transactions_csv_still_commits_when_head_holds_no_rows_either`
+    /// — the refusal is conditioned on HEAD still holding rows, not on the
+    /// file being empty.
     #[test]
-    fn a_header_only_transactions_csv_is_a_legitimately_empty_ledger_and_still_commits() {
+    fn a_header_only_transactions_csv_is_refused_when_head_still_has_rows() {
         let (mut app, child_id, _temp) = app_with_git_backed_child();
         let child_dir = app
             .backend()
@@ -2657,16 +2886,114 @@ mod apply_merge_tests {
             1_700_000_500,
         );
 
+        // The precondition that makes this the dangerous case, asserted
+        // rather than assumed: HEAD really does still hold rows.
+        assert_eq!(
+            super::head_transaction_row_count(&repo),
+            Some(1),
+            "precondition: HEAD must still record a row, or there is nothing to lose"
+        );
+
         // Exactly what `render_transactions(&[])` produces — the canonical
         // representation of "no transactions", asserted rather than typed
-        // out, so a codec change cannot silently invalidate this test.
+        // out, so a codec change cannot silently invalidate this test. It
+        // is also exactly what a truncated write leaves behind.
         let empty_ledger = allowance_core::codec::render_transactions(&[]);
         assert_eq!(
             empty_ledger.lines().next().unwrap(),
             allowance_core::codec::HEADER.join(","),
             "precondition: the canonical empty ledger is exactly the canonical header"
         );
+        assert!(
+            allowance_core::codec::parse_transactions(&empty_ledger).unwrap().rows.is_empty(),
+            "precondition: this shape parses Ok with zero rows — which is why a successful \
+             parse plus a canonical first line cannot be the gate's only check"
+        );
         std::fs::write(child_dir.join("transactions.csv"), &empty_ledger).unwrap();
+
+        let outcome = app.apply_merge(
+            &child_id,
+            vec![],
+            &(ours_oid.to_string(), theirs_oid.to_string()),
+            &[],
+        );
+        assert_eq!(
+            outcome,
+            ApplyMergeOutcome::Failed,
+            "an emptied ledger must never be committed and pushed while HEAD still holds rows"
+        );
+
+        let repo = Repository::open(&child_dir).unwrap();
+        assert_eq!(
+            repo.head().unwrap().peel_to_commit().unwrap().id(),
+            ours_oid,
+            "HEAD must not have moved — nothing was committed"
+        );
+        assert_eq!(
+            std::fs::read_to_string(child_dir.join("transactions.csv")).unwrap(),
+            empty_ledger,
+            "refused, not repaired: the file must be left exactly as found"
+        );
+        assert!(
+            app.sync.sync_failures.iter().any(|n| n.child_id == child_id),
+            "the refusal must be surfaced durably, not merely logged"
+        );
+    }
+
+    /// The anti-over-correction arm, carried over from the old
+    /// `a_header_only_transactions_csv_is_a_legitimately_empty_ledger_and_still_commits`.
+    ///
+    /// "Refuse zero-row files" would be as wrong as committing them: it
+    /// would stall every child whose ledger is legitimately empty, which is
+    /// defect 1 again by another route. The refusal is therefore conditioned
+    /// on HEAD STILL HOLDING ROWS — nothing is being lost when HEAD is empty
+    /// too, so the guard commits normally.
+    ///
+    /// HEAD is emptied here by committing the empty ledger outright (rather
+    /// than through the app), because the app's own delete path already
+    /// commits — which is exactly why a legitimate clear-out never reaches
+    /// the guard in the refused state at all. The tree is then made dirty
+    /// through a different tracked file, so the guard really is entered.
+    #[test]
+    fn a_header_only_transactions_csv_still_commits_when_head_holds_no_rows_either() {
+        let (mut app, child_id, _temp) = app_with_git_backed_child();
+        let child_dir = app
+            .backend()
+            .csv_connection
+            .child_dir(&shared::ChildId::from(child_id.as_str()))
+            .unwrap();
+
+        // Move HEAD to a commit whose transactions.csv is the canonical
+        // empty ledger, and put the same bytes on disk.
+        let empty_ledger = allowance_core::codec::render_transactions(&[]);
+        std::fs::write(child_dir.join("transactions.csv"), &empty_ledger).unwrap();
+        let gm = GitManager::new();
+        gm.add_file(&child_dir, "transactions.csv").unwrap();
+        gm.commit(&child_dir, "clear the ledger").unwrap();
+
+        let repo = Repository::open(&child_dir).unwrap();
+        let ours_oid = repo.head().unwrap().peel_to_commit().unwrap().id();
+        assert_eq!(
+            super::head_transaction_row_count(&repo),
+            Some(0),
+            "precondition: HEAD must hold an empty ledger, or this tests the wrong thing"
+        );
+        let ours_commit = repo.find_commit(ours_oid).unwrap();
+        let theirs_oid = commit_with_files(
+            &repo,
+            "their edit",
+            &[&ours_commit],
+            &[("transactions.csv", "id,child_id,date,description,amount,balance,type\n")],
+            1_700_000_500,
+        );
+
+        // Dirty a DIFFERENT tracked file, so the guard is genuinely entered
+        // with an empty (but legitimate) ledger sitting next to it.
+        std::fs::write(child_dir.join("child.yaml"), "tampered: true\n").unwrap();
+        assert!(
+            crate::backend::sync::child_sync::working_tree_dirty(&repo).unwrap(),
+            "precondition: the guard must actually be reached"
+        );
 
         app.sync.status = SyncStatus::Idle;
         let outcome = app.apply_merge(
@@ -2678,22 +3005,18 @@ mod apply_merge_tests {
         assert_eq!(
             outcome,
             ApplyMergeOutcome::DirtyTreeCommitted,
-            "an empty ledger is valid data and must be committed, not refused"
+            "an empty ledger that loses nothing is valid data and must be committed, not refused"
         );
 
         let repo = Repository::open(&child_dir).unwrap();
-        let new_head = repo.head().unwrap().peel_to_commit().unwrap();
-        assert_ne!(new_head.id(), ours_oid, "HEAD must have advanced");
-        let entry = new_head.tree().unwrap().get_path(std::path::Path::new("transactions.csv")).unwrap();
-        let blob = repo.find_blob(entry.id()).unwrap();
-        assert_eq!(
-            std::str::from_utf8(blob.content()).unwrap(),
-            empty_ledger,
-            "the committed tree must hold the empty ledger byte for byte"
+        assert_ne!(
+            repo.head().unwrap().peel_to_commit().unwrap().id(),
+            ours_oid,
+            "HEAD must have advanced"
         );
         assert!(
             app.sync.sync_failures.iter().all(|n| n.child_id != child_id),
-            "committing an empty ledger is not a failure and must raise no notice"
+            "committing an already-empty ledger is not a failure and must raise no notice"
         );
     }
 
@@ -3039,6 +3362,45 @@ mod apply_merge_tests {
         );
     }
 
+    /// The third possible outcome, and the deliberate opposite of
+    /// [`assert_resolves_cleanly`]: the guard REFUSED, said so durably, and
+    /// left HEAD exactly where it was.
+    ///
+    /// Only correct where committing would destroy data — today that is
+    /// solely an emptied `transactions.csv` (absent, or header-only while
+    /// HEAD still holds rows). Everywhere else a refusal is the stall
+    /// defect 1 was, which is why this helper is opt-in per cell rather than
+    /// a fallback the table can drift into.
+    fn assert_refused_with_notice(app: &mut AllowanceTrackerApp, child_id: &str, peer: git2::Oid) {
+        let child_dir = app
+            .backend()
+            .csv_connection
+            .child_dir(&shared::ChildId::from(child_id))
+            .unwrap();
+        let head_before =
+            Repository::open(&child_dir).unwrap().head().unwrap().peel_to_commit().unwrap().id();
+
+        match run_cycles_until_terminal(app, child_id, peer, 5) {
+            Ok(_) => {}
+            Err(trace) => panic!(
+                "sync never reached a terminal state in 5 cycles — a refusal must be terminal, \
+                 not a loop. Trace:\n{}",
+                trace.join("\n")
+            ),
+        }
+
+        let repo = Repository::open(&child_dir).unwrap();
+        assert_eq!(
+            repo.head().unwrap().peel_to_commit().unwrap().id(),
+            head_before,
+            "a refusal must commit nothing — HEAD must not move"
+        );
+        assert!(
+            app.sync.sync_failures.iter().any(|n| n.child_id == child_id),
+            "a refusal must be explained durably, never silent — silence here is defect 1"
+        );
+    }
+
     /// Every combination of file state the guard can meet ON THE MERGE
     /// PATH — see the name and the "Review correction" section below for
     /// why that scope qualifier is load-bearing. Deterministic and
@@ -3100,6 +3462,18 @@ mod apply_merge_tests {
     /// other owned files are staged and committed as opaque bytes. Calling
     /// that out here so a future reader does not mistake "this table
     /// accepts it" for "nobody thought about it."
+    ///
+    /// # One cell is a refusal, not a clean resolution
+    ///
+    /// `transactions.csv` / `Deleted` asserts `assert_refused_with_notice`
+    /// instead: committing an absent ledger stages a deletion of every row,
+    /// and the peer's next merge then deletes the same rows there too
+    /// (final review, Critical — see `resolve_dirty_tree`'s "Why an emptied
+    /// ledger is refused"). The `Modified` cell for the same file changed
+    /// too: it used to write the bare canonical header, which is now
+    /// refused for exactly the same reason, so it writes a valid NON-EMPTY
+    /// ledger and stays the "an ordinary modification commits" case it was
+    /// always meant to be. 13 cells resolve cleanly; 1 refuses and explains.
     #[test]
     fn the_guard_resolves_every_dirty_tree_shape_on_the_merge_path() {
         #[derive(Debug, Clone, Copy)]
@@ -3147,11 +3521,19 @@ mod apply_merge_tests {
                     )]);
                 fixture = match state {
                     State::Unchanged => fixture,
-                    // Content that still parses — the unparseable case has
-                    // its own test with its own expected outcome.
+                    // Content that still parses AND still holds rows — the
+                    // unparseable and emptied-ledger cases each have their
+                    // own test with their own expected outcome. This cell
+                    // used to write the bare canonical header, which the
+                    // final review's Critical fix now (correctly) refuses:
+                    // that made the cell a duplicate of
+                    // `a_header_only_transactions_csv_is_refused_when_head_still_has_rows`
+                    // rather than the "an ordinary modification commits"
+                    // case the table is here to assert.
                     State::Modified if *file == "transactions.csv" => fixture.with_dirty(
                         file,
-                        "id,child_id,date,description,amount,balance,type\n",
+                        "id,child_id,date,description,amount,balance,type\n\
+                         in-table-1,kid,2026-01-01T00:00:00+00:00,Table,1.00,1.00,income\n",
                     ),
                     State::Modified => fixture.with_dirty(file, "modified: true\n"),
                     State::Deleted => fixture.with_deleted(file),
@@ -3184,6 +3566,19 @@ mod apply_merge_tests {
                     "force divergence for cross-product test",
                 )
                 .unwrap();
+
+                // The one cell that must NOT resolve cleanly. A deleted
+                // `transactions.csv` reads back as zero rows, and
+                // `allowance_core::merge` reads "in base, absent from ours"
+                // as a deliberate delete — so committing it would empty the
+                // ledger on BOTH machines. The guard refuses and explains;
+                // that is the correct outcome here, and the strict helper
+                // below would (rightly) reject it. See
+                // `a_deleted_transactions_csv_is_refused_rather_than_committing_an_emptied_ledger`.
+                if *file == "transactions.csv" && matches!(state, State::Deleted) {
+                    assert_refused_with_notice(&mut app, &child_id, peer.unwrap());
+                    continue;
+                }
 
                 // Deliberately the STRICT check (`assert_resolves_cleanly`),
                 // not the weaker `assert_resolved_or_explained` the named
